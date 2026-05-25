@@ -67,6 +67,7 @@ python3 scripts/check_release_hygiene.py
 python3 scripts/check_runtime_duplication.py
 python3 scripts/check_tool_contract.py
 bash -n integrations/*/install.sh integrations/*/uninstall.sh integrations/_shared/*.sh
+pwsh -NoProfile -Command "Get-ChildItem integrations -Recurse -Include *.ps1 | ForEach-Object { [scriptblock]::Create((Get-Content -Raw $_.FullName)) | Out-Null }"
 python3 link.py demo /tmp/link-mcp-smoke --force
 PYTHONPATH=mcp_package python3 scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki
 git diff --check</code></pre>

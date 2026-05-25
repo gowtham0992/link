@@ -14,6 +14,15 @@ INSTALLERS = [
     ROOT / "integrations/kiro/install.sh",
     ROOT / "integrations/vscode/install.sh",
 ]
+POWERSHELL_INSTALLERS = [
+    ROOT / "integrations/antigravity/install.ps1",
+    ROOT / "integrations/claude-code/install.ps1",
+    ROOT / "integrations/codex/install.ps1",
+    ROOT / "integrations/copilot/install.ps1",
+    ROOT / "integrations/cursor/install.ps1",
+    ROOT / "integrations/kiro/install.ps1",
+    ROOT / "integrations/vscode/install.ps1",
+]
 
 
 class InstallerTests(unittest.TestCase):
@@ -41,12 +50,29 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('TARGET_DIR="$(pwd)"', scaffold)
         self.assertNotIn('TARGET_DIR="."', scaffold)
 
+    def test_powershell_scaffold_uses_venv_and_short_link_command(self):
+        scaffold = (ROOT / "integrations/_shared/scaffold.ps1").read_text(encoding="utf-8")
+
+        self.assertNotIn("--break-system-packages", scaffold)
+        self.assertIn(".link-mcp-venv", scaffold)
+        self.assertIn(".link-mcp-python", scaffold)
+        self.assertIn("link.cmd", scaffold)
+        self.assertIn("Link command wrapper", scaffold)
+        self.assertIn("Get-Command py", scaffold)
+        self.assertIn("-m venv", scaffold)
+
     def test_installers_read_resolved_mcp_python_marker(self):
         for installer in INSTALLERS:
             with self.subTest(installer=installer.name):
                 text = installer.read_text(encoding="utf-8")
                 self.assertIn("MCP_PYTHON", text)
                 self.assertIn(".link-mcp-python", text)
+
+        for installer in POWERSHELL_INSTALLERS:
+            with self.subTest(installer=installer.name):
+                text = installer.read_text(encoding="utf-8")
+                self.assertIn("Link-ReadMcpPython", text)
+                self.assertIn("scaffold.ps1", text)
 
     def test_installers_print_mode_specific_next_steps(self):
         instructions = (ROOT / "integrations/_shared/instructions.sh").read_text(encoding="utf-8")
@@ -69,6 +95,37 @@ class InstallerTests(unittest.TestCase):
                 text = installer.read_text(encoding="utf-8")
                 self.assertIn('. "$SCRIPT_DIR/../_shared/instructions.sh"', text)
                 self.assertIn('link_print_next_steps "$MODE"', text)
+
+        instructions_ps1 = (ROOT / "integrations/_shared/instructions.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Link-PrintNextSteps", instructions_ps1)
+        self.assertIn("py link.py next", instructions_ps1)
+        self.assertIn("Try in your agent:", instructions_ps1)
+        self.assertIn("is Link ready?", instructions_ps1)
+
+        for installer in POWERSHELL_INSTALLERS:
+            with self.subTest(installer=installer.name):
+                text = installer.read_text(encoding="utf-8")
+                self.assertIn("instructions.ps1", text)
+                self.assertIn("Link-PrintNextSteps", text)
+
+    def test_windows_installers_are_documented(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        integrations = (ROOT / "integrations/README.md").read_text(encoding="utf-8")
+        getting_started = (ROOT / "docs/getting-started.html").read_text(encoding="utf-8")
+        mcp = (ROOT / "docs/mcp.html").read_text(encoding="utf-8")
+
+        for name in ["codex", "kiro", "claude-code", "cursor", "copilot", "vscode", "antigravity"]:
+            self.assertIn(f".\\integrations\\{name}\\install.ps1", readme)
+            self.assertIn(f".\\integrations\\{name}\\install.ps1", integrations)
+            self.assertIn(f".\\integrations\\{name}\\install.ps1", getting_started)
+            self.assertIn(f".\\integrations\\{name}\\install.ps1", mcp)
+
+    def test_ci_checks_powershell_installer_syntax(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Check PowerShell syntax", workflow)
+        self.assertIn("[scriptblock]::Create", workflow)
+        self.assertIn("*.ps1", workflow)
 
     def test_codex_and_kiro_update_existing_mcp_registration(self):
         codex = (ROOT / "integrations/codex/install.sh").read_text(encoding="utf-8")

@@ -72,6 +72,14 @@ bash integrations/copilot/install.sh
 bash integrations/vscode/install.sh
 bash integrations/antigravity/install.sh</code></pre>
         <p>Use <code>--project</code> from a repo when memory should be project-scoped.</p>
+        <p>On Windows PowerShell, use <code>.\integrations\AGENT\install.ps1</code> instead:</p>
+        <pre><code>.\integrations\codex\install.ps1
+.\integrations\kiro\install.ps1
+.\integrations\claude-code\install.ps1
+.\integrations\cursor\install.ps1
+.\integrations\copilot\install.ps1
+.\integrations\vscode\install.ps1
+.\integrations\antigravity\install.ps1</code></pre>
 
         <h2 id="mcp-only">MCP Only</h2>
         <pre><code>python3 -m pip install --upgrade link-mcp
@@ -93,8 +101,8 @@ python3 -m link_mcp --version</code></pre>
         <pre><code>{
   "mcpServers": {
     "link": {
-      "command": "/Users/YOU/.link-mcp-venv/bin/python",
-      "args": ["-m", "link_mcp", "--wiki", "/Users/YOU/link/wiki"]
+      "command": "C:\\Users\\YOU\\.link-mcp-venv\\Scripts\\python.exe",
+      "args": ["-m", "link_mcp", "--wiki", "C:\\Users\\YOU\\link\\wiki"]
     }
   }
 }</code></pre>

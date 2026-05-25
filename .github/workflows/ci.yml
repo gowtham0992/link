@@ -115,6 +115,13 @@ jobs:
       - name: Check shell syntax
         run: bash -n integrations/*/install.sh integrations/*/uninstall.sh integrations/_shared/*.sh
 
+      - name: Check PowerShell syntax
+        shell: pwsh
+        run: |
+          Get-ChildItem integrations -Recurse -Include *.ps1 | ForEach-Object {
+            [scriptblock]::Create((Get-Content -Raw $_.FullName)) | Out-Null
+          }
+
   release-hygiene:
     runs-on: ubuntu-latest
     steps:

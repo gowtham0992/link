@@ -97,7 +97,14 @@ bash integrations/copilot/install.sh
 bash integrations/vscode/install.sh
 bash integrations/antigravity/install.sh</code></pre>
         <p>Use <code>--project</code> for a repo-local Link install. Project-scoped memory then stays separate from other project memory while still allowing broad user memory to be recalled.</p>
-        <p>The shell installers target macOS/Linux-style agent config paths. On Windows, run Link from source and use the MCP-only setup in the MCP guide until a Windows-specific installer exists.</p>
+        <p>On Windows PowerShell, use the matching <code>install.ps1</code> script:</p>
+        <pre><code>.\integrations\codex\install.ps1
+.\integrations\kiro\install.ps1
+.\integrations\claude-code\install.ps1
+.\integrations\cursor\install.ps1
+.\integrations\copilot\install.ps1
+.\integrations\vscode\install.ps1
+.\integrations\antigravity\install.ps1</code></pre>
 
         <h2 id="source">3. Add One Source</h2>
         <p>Open the local viewer and use <strong>ingest -> Add Raw Source</strong>, or write a first note directly:</p>

@@ -207,9 +207,17 @@ Installers create or update `~/link`, install or upgrade `link-mcp`, write
 lightweight agent instructions, and preserve existing wiki data on reinstall.
 Use `--project` when a repo needs separate project memory.
 
-The shell installers are intended for macOS/Linux-style agent config paths.
-On Windows, use the source commands above plus the MCP-only config below until
-your agent has a Windows-specific installer.
+On Windows, use the matching PowerShell installer:
+
+```powershell
+.\integrations\codex\install.ps1
+.\integrations\kiro\install.ps1
+.\integrations\claude-code\install.ps1
+.\integrations\cursor\install.ps1
+.\integrations\copilot\install.ps1
+.\integrations\vscode\install.ps1
+.\integrations\antigravity\install.ps1
+```
 
 Then ask your agent:
 
