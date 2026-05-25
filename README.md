@@ -137,6 +137,11 @@ health signals without touching your real Link wiki.
 Pick the surface that matches how you work. They all read and write the same
 local Markdown wiki.
 
+These surfaces are independent. `link serve` / `serve.py` is only the local web
+viewer. CLI commands and MCP tools read the same `wiki/` files directly, so
+Claude, Codex, Kiro, Cursor, or another MCP client can use Link even when the
+web viewer is not running.
+
 <table>
   <tr>
     <td width="33%">

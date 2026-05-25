@@ -65,6 +65,7 @@ link next</code></pre>
         <pre><code>link verify-mcp
 python3 -m pip index versions link-mcp</code></pre>
         <p>Restart the MCP client after changing its config. If your installer printed a venv Python path, use that exact path in the MCP config.</p>
+        <p>You do not need <code>link serve</code> or <code>serve.py</code> running for MCP. The web viewer is separate from the MCP server.</p>
 
         <h2 id="ingest">Ingest Is Blocked</h2>
         <pre><code>link ingest-status</code></pre>

@@ -61,6 +61,10 @@
           <figcaption>The wiki is the storage layer. Reviewed memory and MCP context are the product surface agents use.</figcaption>
         </figure>
         <div class="callout">
+          <strong>One wiki, three independent surfaces</strong>
+          The web UI, CLI, and MCP server are separate ways to use the same local files. Closing the viewer does not stop CLI commands or MCP recall.
+        </div>
+        <div class="callout">
           <strong>Public repo versus local memory</strong>
           Link deliberately keeps generated <code>raw/</code>, <code>wiki/</code>, and <code>link-demo/</code> content out of git. The tracked root wiki is scaffolding; <code>python3 link.py demo</code> creates the product-story demo wiki.
         </div>

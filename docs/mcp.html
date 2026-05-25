@@ -57,6 +57,10 @@
           <img src="assets/link-mcp-agent-chat.gif" alt="Animated Link MCP agent walkthrough">
           <figcaption>Agents use natural prompts, then call Link tools for readiness, briefs, query packets, and reviewed memory writes.</figcaption>
         </figure>
+        <div class="callout">
+          <strong>MCP does not need <code>serve.py</code></strong>
+          The local web viewer is only for humans. MCP clients start <code>python -m link_mcp --wiki ...</code> over stdio and read the same Markdown wiki directly.
+        </div>
 
         <h2 id="installers">Agent Installers</h2>
         <p>Use the installer for the agent you use most. Installers create or update <code>~/link</code>, install <code>link-mcp</code>, write short agent instructions, and preserve existing wiki data.</p>

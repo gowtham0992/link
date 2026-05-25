@@ -75,6 +75,10 @@ py link.py serve link-demo</code></pre>
           <strong>Judge the generated demo</strong>
           The repo's root <code>wiki/</code> is only a scaffold for local development and personal testing. Generated content in <code>wiki/</code>, <code>raw/</code>, and <code>link-demo/</code> is ignored by git so private memory is not published by accident.
         </div>
+        <div class="callout">
+          <strong>Viewer is optional</strong>
+          <code>link serve</code> is only for browsing Link in a local web UI. CLI commands and MCP-enabled agents work without it because they read the same local <code>wiki/</code> files directly.
+        </div>
         <p>The demo includes one pending memory intentionally, so the review inbox and explain-memory workflow are visible. Run <code>link review-memory prefer-local-personal-memory link-demo</code> if you want memory audit to be fully clear.</p>
         <p>Open <code>http://127.0.0.1:3000</code>, then inspect <code>/brief</code>, <code>/memory</code>, <code>/ingest</code>, <code>/graph</code>, and <code>/health</code>. Open <strong>more</strong> for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts <code>localhost</code> too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups.</p>
         <pre><code>link query "why does Link help agents?" link-demo --budget small
