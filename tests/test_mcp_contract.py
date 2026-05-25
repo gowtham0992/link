@@ -147,6 +147,17 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["warnings"], [])
         self.assertEqual(payload["next_actions"][0]["tool"], "query_link")
 
+    def test_mcp_cache_throttles_repeated_mtime_scans(self):
+        self.server._clear_cache()
+        self.server.CACHE_MTIME_CHECK_INTERVAL_SECONDS = 60.0
+        self.server._build_cache()
+
+        with patch.object(self.server, "_wiki_mtime", wraps=self.server._wiki_mtime) as mtime:
+            self.server._build_cache()
+            self.server._build_cache()
+
+        self.assertEqual(mtime.call_count, 0)
+
     def test_link_status_contract_reports_cache_warnings(self):
         locked = self.target / "wiki/concepts/locked-page.md"
         locked.write_text("---\ntype: concept\ntitle: Locked\n---\n\n# Locked\n", encoding="utf-8")

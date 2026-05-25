@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from link_core.version import LINK_VERSION
@@ -104,6 +105,8 @@ mcp = FastMCP(
 # ── In-memory indexes (built on first use, invalidated by mtime) ──────
 _cache: dict = {}
 _cache_mtime: float = 0.0
+_cache_checked_at: float = 0.0
+CACHE_MTIME_CHECK_INTERVAL_SECONDS = 0.5
 MAX_TEXT_INPUT = 200
 MAX_CAPTURE_INPUT = 12000
 
@@ -243,15 +246,25 @@ def _wiki_mtime() -> float:
 
 
 def _clear_cache() -> None:
-    global _cache, _cache_mtime
+    global _cache, _cache_mtime, _cache_checked_at
     _core_close_wiki_cache(_cache)
     _cache = {}
     _cache_mtime = 0.0
+    _cache_checked_at = 0.0
 
 
 def _build_cache() -> dict:
-    global _cache, _cache_mtime
+    global _cache, _cache_mtime, _cache_checked_at
+    now = time.monotonic()
+    if (
+        _cache
+        and CACHE_MTIME_CHECK_INTERVAL_SECONDS > 0
+        and now - _cache_checked_at < CACHE_MTIME_CHECK_INTERVAL_SECONDS
+    ):
+        return _cache
+
     mtime = _wiki_mtime()
+    _cache_checked_at = now
     if _cache and mtime == _cache_mtime:
         return _cache
 
