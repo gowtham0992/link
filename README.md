@@ -1,37 +1,52 @@
 <p align="center">
-  <img src="logo.svg" alt="Link" width="112">
+  <img src="logo.svg" alt="Link" width="128">
 </p>
 
-# Link
+<h1 align="center">Link</h1>
 
-**Local, source-backed memory for LLM agents.**
+<h2 align="center">Local memory for AI agents.</h2>
 
-Link gives Codex, Claude, Cursor, Kiro, VS Code, Copilot, and other MCP clients
-the same durable memory about you and your work. It stays on your machine as
-plain Markdown, with sources, backlinks, graph context, review state, and an
-audit trail you can inspect.
+<p align="center">
+  Link gives Codex, Claude, Cursor, Kiro, VS Code, Copilot, Antigravity, and
+  other MCP clients the same source-backed memory, stored locally as Markdown.
+</p>
 
-It follows Andrej Karpathy's
-[LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
-keep knowledge outside the chat window, make claims inspectable, and let context
-compound over time.
+<p align="center">
+  <a href="https://gowtham0992.github.io/link/">Website</a> ·
+  <a href="https://gowtham0992.github.io/link/getting-started.html">Quick start</a> ·
+  <a href="https://gowtham0992.github.io/link/mcp.html">MCP setup</a> ·
+  <a href="https://gowtham0992.github.io/link/cli.html">CLI</a> ·
+  <a href="https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink">MCP Registry</a> ·
+  <a href="https://pypi.org/project/link-mcp/">PyPI</a> ·
+  <a href="https://github.com/gowtham0992/homebrew-link">Homebrew</a>
+</p>
 
-[![GitHub](https://img.shields.io/github/stars/gowtham0992/link?style=flat)](https://github.com/gowtham0992/link)
-[![CI](https://github.com/gowtham0992/link/actions/workflows/ci.yml/badge.svg)](https://github.com/gowtham0992/link/actions/workflows/ci.yml)
-[![MCP Registry](https://img.shields.io/badge/MCP_Registry-io.github.gowtham0992%2Flink-blue)](https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink)
-[![PyPI](https://img.shields.io/pypi/v/link-mcp)](https://pypi.org/project/link-mcp/)
+<p align="center">
+  <a href="https://github.com/gowtham0992/link"><img src="https://img.shields.io/github/stars/gowtham0992/link?style=flat" alt="GitHub stars"></a>
+  <a href="https://github.com/gowtham0992/link/actions/workflows/ci.yml"><img src="https://github.com/gowtham0992/link/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink"><img src="https://img.shields.io/badge/MCP_Registry-io.github.gowtham0992%2Flink-blue" alt="MCP Registry"></a>
+  <a href="https://pypi.org/project/link-mcp/"><img src="https://img.shields.io/pypi/v/link-mcp" alt="PyPI"></a>
+</p>
 
-[Product site](https://gowtham0992.github.io/link/) ·
-[First 10 minutes](https://gowtham0992.github.io/link/getting-started.html) ·
-[Why Link?](https://gowtham0992.github.io/link/why-link.html) ·
-[Web UI](https://gowtham0992.github.io/link/ui.html) ·
-[MCP setup](https://gowtham0992.github.io/link/mcp.html) ·
-[CLI](https://gowtham0992.github.io/link/cli.html) ·
-[Obsidian](https://gowtham0992.github.io/link/obsidian.html) ·
-[Security](SECURITY.md) ·
-[Changelog](CHANGELOG.md)
+## What Is Link?
 
-## Why It Exists
+Link is an open-source memory layer for local AI agents. Raw sources become an
+inspectable Markdown wiki. Explicit "remember this" requests become reviewable
+memories. Agents retrieve compact, source-backed context through MCP without
+dumping the whole wiki into a chat window.
+
+The wiki is the storage layer. The product is durable memory that stays on your
+machine, remains readable in plain files, and can be shared across multiple
+agents instead of locked inside one vendor profile.
+
+## How It Works
+
+Link gives agents four simple moves:
+
+1. **Capture** notes, transcripts, docs, screenshots, and project context in `raw/`.
+2. **Structure** source-backed pages under `wiki/`.
+3. **Remember** explicit preferences, decisions, facts, and project context as reviewable memory.
+4. **Retrieve** compact query packets through CLI, MCP, or the local web viewer.
 
 Most agent sessions start from zero. You re-explain preferences, repo decisions,
 project constraints, and why something matters. Link turns that repeated context
@@ -43,6 +58,11 @@ into local memory agents can query.
 | Notes are private or messy. | Keep raw sources local, then turn them into source-backed Markdown. |
 | Context windows are expensive. | Return compact query packets with provenance and follow-up actions. |
 | Memory needs trust. | Every page and memory can be inspected, reviewed, archived, or forgotten. |
+
+Link follows Andrej Karpathy's
+[LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
+keep knowledge outside the chat window, make claims inspectable, and let context
+compound over time.
 
 ## Quick Start
 
@@ -236,9 +256,9 @@ Obsidian users can open `~/link/wiki` directly as a vault. See the
 [Obsidian guide](https://gowtham0992.github.io/link/obsidian.html) for the safe
 edit and validation loop.
 
-## How Link Works
+## Storage Model
 
-Link separates source-backed knowledge from durable agent memory:
+Under the hood, Link separates source-backed knowledge from durable agent memory:
 
 1. Drop raw notes, transcripts, articles, and project context into `raw/`.
 2. Agents compile those sources into inspectable pages under `wiki/`.
