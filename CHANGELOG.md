@@ -6,6 +6,18 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- Added `link try` as a one-command demo proof loop that creates the demo, checks readiness, runs query/brief examples, and prints first agent prompts.
+- Added `python -m link_mcp --version` so MCP package installs can be verified before a wiki exists.
+- Added an Obsidian guide for opening Link's Markdown wiki as a vault and rebuilding indexes after manual edits.
+
+### Changed
+
+- Broadened Windows CI from a small portability subset to most non-installer/non-server tests.
+- Clarified that the Homebrew formula lives in the separate `gowtham0992/homebrew-link` tap.
+- Tightened security reporting guidance to prefer private maintainer contact before public GitHub issues.
+
 ## [1.3.0] - 2026-05-22
 
 ### Added

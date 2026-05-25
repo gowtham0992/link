@@ -33,6 +33,13 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     demo.add_argument("target", nargs="?", default=default_demo_dir)
     demo.add_argument("--force", action="store_true", help="replace an existing Link demo directory")
 
+    try_cmd = sub.add_parser("try", help="create the demo and print the shortest proof loop")
+    try_cmd.add_argument("target", nargs="?", default=default_demo_dir)
+    try_cmd.add_argument("--force", action="store_true", help="replace an existing Link demo directory")
+    try_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof loop")
+    try_cmd.add_argument("--port", type=int, default=3000)
+    try_cmd.add_argument("--json", action="store_true", help="print machine-readable try data")
+
     welcome_cmd = sub.add_parser("welcome", help="print the shortest first-use path for Link")
     welcome_cmd.add_argument("target", nargs="?", default=".")
     welcome_cmd.add_argument("--project", default=None, help="project slug for project-scoped prompt examples")
@@ -258,6 +265,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["serve"](Path(args.target), port=args.port)
     if command == "demo":
         return handlers["demo"](Path(args.target), force=args.force)
+    if command == "try":
+        return handlers["try"](
+            Path(args.target),
+            force=args.force,
+            serve=args.serve,
+            port=args.port,
+            json_output=args.json,
+        )
     if command == "welcome":
         return handlers["welcome"](Path(args.target), project=args.project, json_output=args.json)
     if command in {"prompts", "next"}:

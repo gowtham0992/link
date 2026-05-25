@@ -29,10 +29,17 @@ import json
 import sys
 from pathlib import Path
 
+from link_core.version import LINK_VERSION
+
 # ── Resolve wiki directory ────────────────────────────────────────────
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--wiki", default=None)
+parser.add_argument("--version", action="store_true")
 args, _ = parser.parse_known_args()
+
+if args.version:
+    print(f"link-mcp {LINK_VERSION}")
+    sys.exit(0)
 
 if args.wiki:
     WIKI_DIR = Path(args.wiki).expanduser().resolve()
@@ -167,7 +174,6 @@ from link_core.prompts import (
 from link_core.validation import (
     validate_wiki as _core_validate_wiki,
 )
-from link_core.version import LINK_VERSION
 from link_core.status import (
     link_status as _core_link_status,
 )

@@ -213,6 +213,27 @@ class McpContractTests(unittest.TestCase):
         finally:
             sys.argv = previous_argv
 
+    def test_version_flag_does_not_require_wiki_or_mcp_sdk(self):
+        previous_argv = sys.argv[:]
+        missing = Path(tempfile.mkdtemp(prefix="link-mcp-version-")) / "missing" / "wiki"
+        module_name = f"link_mcp_server_version_{id(missing)}"
+        try:
+            sys.argv = ["link_mcp.server", "--wiki", str(missing), "--version"]
+            spec = importlib.util.spec_from_file_location(module_name, ROOT / "mcp_package/link_mcp/server.py")
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            out = StringIO()
+            err = StringIO()
+            with redirect_stdout(out), redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                spec.loader.exec_module(module)
+
+            self.assertEqual(cm.exception.code, 0)
+            self.assertIn("link-mcp", out.getvalue())
+            self.assertEqual(err.getvalue(), "")
+        finally:
+            sys.modules.pop(module_name, None)
+            sys.argv = previous_argv
+
     def test_migrate_wiki_contract(self):
         (self.target / "wiki/_link_schema.json").unlink()
 

@@ -30,6 +30,18 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.budget, "small")
         self.assertTrue(args.json)
 
+    def test_try_command_options(self):
+        parser = build_cli_parser(default_demo_dir="custom-demo")
+
+        args = parser.parse_args(["try", "--force", "--serve", "--port", "3456", "--json"])
+
+        self.assertEqual(args.command, "try")
+        self.assertEqual(args.target, "custom-demo")
+        self.assertTrue(args.force)
+        self.assertTrue(args.serve)
+        self.assertEqual(args.port, 3456)
+        self.assertTrue(args.json)
+
     def test_operations_limit_and_json_options(self):
         parser = build_cli_parser()
 
@@ -104,6 +116,24 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][1], "agent memory")
         self.assertEqual(calls[0][2]["budget"], "small")
         self.assertTrue(calls[0][2]["json_output"])
+
+    def test_dispatch_routes_try_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args(["try", "/tmp/link-demo", "--force", "--serve", "--port", "3456", "--json"])
+        calls = []
+
+        def try_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 5
+
+        code = dispatch_cli_command(args, {"try": try_handler})
+
+        self.assertEqual(code, 5)
+        self.assertEqual(calls[0][0], Path("/tmp/link-demo"))
+        self.assertTrue(calls[0][1]["force"])
+        self.assertTrue(calls[0][1]["serve"])
+        self.assertEqual(calls[0][1]["port"], 3456)
+        self.assertTrue(calls[0][1]["json_output"])
 
     def test_dispatch_routes_operations_arguments(self):
         parser = build_cli_parser()

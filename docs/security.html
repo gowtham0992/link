@@ -49,6 +49,7 @@
         <a href="#http">HTTP boundary</a>
         <a href="#backups">Backups</a>
         <a href="#share">Before sharing</a>
+        <a href="#reporting">Reporting</a>
       </aside>
       <article class="doc-content">
         <h2 id="privacy">Privacy Model</h2>
@@ -89,7 +90,9 @@ python3 link.py validate
 python3 scripts/check_release_hygiene.py
 git diff --check</code></pre>
         <p>Use <code>git push</code>, <code>git archive</code>, or clean build artifacts for public sharing. Do not zip a whole working directory; ignored local files, <code>.git/</code>, caches, raw sources, and build outputs can be included by accident.</p>
-        <p>See <a href="https://github.com/gowtham0992/link/blob/main/SECURITY.md">SECURITY.md</a> for vulnerability reporting.</p>
+        <h2 id="reporting">Reporting Security Issues</h2>
+        <p>Use a private maintainer contact channel first. Do not post secrets, private wiki content, raw source files, or exploitable details in public GitHub issues. If a public issue is the only available path, keep it high level and ask for a private follow-up channel.</p>
+        <p>See <a href="https://github.com/gowtham0992/link/blob/main/SECURITY.md">SECURITY.md</a> for the current reporting policy.</p>
       </article>
     </div>
   </main>

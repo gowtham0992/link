@@ -27,6 +27,7 @@ compound over time.
 [Web UI](https://gowtham0992.github.io/link/ui.html) ·
 [MCP setup](https://gowtham0992.github.io/link/mcp.html) ·
 [CLI](https://gowtham0992.github.io/link/cli.html) ·
+[Obsidian](https://gowtham0992.github.io/link/obsidian.html) ·
 [Security](SECURITY.md) ·
 [Changelog](CHANGELOG.md)
 
@@ -52,8 +53,7 @@ macOS with Homebrew:
 
 ```bash
 brew install gowtham0992/link/link
-link demo
-link next link-demo
+link try
 link serve link-demo
 ```
 
@@ -76,6 +76,13 @@ python3 link.py demo
 python3 link.py next link-demo
 python3 link.py serve link-demo
 ```
+
+Use `link try` for the shortest Homebrew proof loop. It creates the demo,
+checks readiness, runs a compact query/brief proof, and prints the agent prompts
+and viewer command. From source, use `python3 link.py try`.
+
+The Homebrew formula is maintained in the public
+[`gowtham0992/homebrew-link`](https://github.com/gowtham0992/homebrew-link) tap.
 
 Open:
 
@@ -200,6 +207,7 @@ what does Link remember about local personal memory?
 
 ```bash
 python3 -m pip install --upgrade link-mcp
+python3 -m link_mcp --version
 ```
 
 ```json
@@ -223,6 +231,10 @@ python3 -m venv ~/.link-mcp-venv
 
 Full setup: [MCP guide](https://gowtham0992.github.io/link/mcp.html).
 </details>
+
+Obsidian users can open `~/link/wiki` directly as a vault. See the
+[Obsidian guide](https://gowtham0992.github.io/link/obsidian.html) for the safe
+edit and validation loop.
 
 ## How Link Works
 

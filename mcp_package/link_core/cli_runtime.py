@@ -96,3 +96,48 @@ def render_demo_text(
         "  http://127.0.0.1:3000",
         "  http://127.0.0.1:3000/graph",
     ])
+
+
+def render_try_text(
+    *,
+    target: object,
+    ready: bool,
+    page_count: object,
+    memory_count: object,
+    search_backend: object,
+    query_summary: str,
+    brief_summary: str,
+    serve_command: str,
+    next_command: str,
+    health_command: str,
+    query_command: str,
+    brief_command: str,
+    benchmark_command: str,
+    url: str,
+) -> tuple[int, str]:
+    status_text = "ready" if ready else "needs attention"
+    return 0 if ready else 1, "\n".join([
+        f"Link try: {target}",
+        "",
+        f"Demo: {status_text} · {page_count} pages · {memory_count} memories · {search_backend}",
+        f"Query proof: {query_summary}",
+        f"Brief proof: {brief_summary}",
+        "",
+        "Open the local viewer:",
+        f"  {serve_command}",
+        f"  {url}",
+        "",
+        "Ask an agent:",
+        "  is Link ready?",
+        "  brief me from Link before we continue",
+        "  what does Link remember about local personal memory?",
+        "",
+        "Run the value loop:",
+        f"  {query_command}",
+        f"  {brief_command}",
+        f"  {benchmark_command}",
+        f"  {health_command}",
+        "",
+        "More first-run prompts:",
+        f"  {next_command}",
+    ])

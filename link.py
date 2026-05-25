@@ -5,6 +5,7 @@ Usage:
   python link.py init [target]
   python link.py serve [target]
   python link.py demo [target]
+  python link.py try [target]
   python link.py welcome [target]
   python link.py prompts [target]
   python link.py status [target]
@@ -222,6 +223,7 @@ from link_core.cli_runtime import (
     render_demo_text as _core_render_demo_text,
     render_init_text as _core_render_init_text,
     render_starter_prompts_text as _core_render_starter_prompts_text,
+    render_try_text as _core_render_try_text,
     render_welcome_text as _core_render_welcome_text,
 )
 from link_core.prompts import (
@@ -1662,6 +1664,89 @@ def create_demo(target: Path, force: bool = False) -> int:
     return code
 
 
+def _try_summary_from_query(payload: dict[str, object]) -> str:
+    wiki = payload.get("wiki") if isinstance(payload.get("wiki"), dict) else {}
+    memory = payload.get("memory") if isinstance(payload.get("memory"), dict) else {}
+    primary = wiki.get("primary") or "no primary page"
+    memory_items = memory.get("items") if isinstance(memory.get("items"), list) else []
+    page_count = len(payload.get("context_packet") or []) if isinstance(payload.get("context_packet"), list) else 0
+    return f"{primary} · {len(memory_items)} memories · {page_count} context items"
+
+
+def _try_summary_from_brief(payload: dict[str, object]) -> str:
+    memories = payload.get("relevant_memories") if isinstance(payload.get("relevant_memories"), list) else []
+    review = payload.get("review") if isinstance(payload.get("review"), dict) else {}
+    review_count = review.get("count", 0)
+    return f"{len(memories)} relevant memories · {review_count} review items"
+
+
+def try_link(
+    target: Path,
+    *,
+    force: bool = False,
+    serve: bool = False,
+    port: int = 3000,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    created = False
+    if force or not (target / "wiki").exists():
+        try:
+            _core_create_demo_workspace(target, source_root=ROOT, force=force)
+        except _CoreDemoError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        created = True
+
+    wiki_dir = _resolve_wiki_dir(target)
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    query_payload = _query_link(wiki_dir, "why does Link help agents?", budget="small")
+    brief_payload = _memory_brief(wiki_dir, "working on agent memory", limit=6)
+    payload = {
+        "target": str(target),
+        "created": created,
+        "ready": bool(status_payload.get("ready")),
+        "status": status_payload,
+        "query": query_payload,
+        "brief": brief_payload,
+        "commands": {
+            "serve": _display_command(["link", "serve", str(target), "--port", str(port)]),
+            "next": _display_command(["link", "next", str(target)]),
+            "health": _display_command(["link", "health", str(target)]),
+            "query": _display_command(["link", "query", "why does Link help agents?", str(target), "--budget", "small"]),
+            "brief": _display_command(["link", "brief", "working on agent memory", str(target)]),
+            "benchmark": _display_command(["link", "benchmark", "agent memory", str(target)]),
+        },
+        "url": f"http://127.0.0.1:{port}",
+    }
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        if serve:
+            return serve_wiki(target, port=port)
+        return 0 if payload["ready"] else 1
+
+    code, text = _core_render_try_text(
+        target=target,
+        ready=payload["ready"],
+        page_count=status_payload.get("page_count", 0),
+        memory_count=status_payload.get("memory_count", 0),
+        search_backend=status_payload.get("search_backend", "unknown"),
+        query_summary=_try_summary_from_query(query_payload),
+        brief_summary=_try_summary_from_brief(brief_payload),
+        serve_command=payload["commands"]["serve"],
+        next_command=payload["commands"]["next"],
+        health_command=payload["commands"]["health"],
+        query_command=payload["commands"]["query"],
+        brief_command=payload["commands"]["brief"],
+        benchmark_command=payload["commands"]["benchmark"],
+        url=payload["url"],
+    )
+    print(text)
+    if serve:
+        return serve_wiki(target, port=port)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR)
     args = parser.parse_args(argv)
@@ -1670,6 +1755,7 @@ def main(argv: list[str] | None = None) -> int:
             "init": init_wiki,
             "serve": serve_wiki,
             "demo": create_demo,
+            "try": try_link,
             "welcome": welcome,
             "prompts": starter_prompts,
             "status": status,

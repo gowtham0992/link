@@ -81,8 +81,11 @@ jobs:
       - name: Install MCP package for verification
         run: python -m pip install ./mcp_package
 
-      - name: Run portability tests
-        run: python -m unittest tests.test_mcp_verify_core tests.test_web_http_core tests.test_release_hygiene tests.test_cli_parser_core tests.test_cli_runtime_core
+      - name: Install test runner
+        run: python -m pip install "pytest>=8,<10"
+
+      - name: Run broad Windows tests
+        run: python -m pytest tests -q --ignore=tests/test_installers.py --ignore=tests/test_serve.py --ignore=tests/test_large_wiki_smoke.py
 
       - name: Demo value-loop smoke test
         shell: pwsh

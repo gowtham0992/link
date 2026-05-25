@@ -58,6 +58,7 @@
           <figcaption>Status, query, brief, and benchmark are the core terminal loop.</figcaption>
         </figure>
         <p>The CLI is independent of the web viewer. Use <code>link query</code>, <code>link brief</code>, <code>link health</code>, and maintenance commands even when <code>link serve</code> is not running.</p>
+        <p>Use <code>link try</code> when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command.</p>
 
         <h2 id="daily">Daily Loop</h2>
         <pre><code>link serve
@@ -109,6 +110,7 @@ link verify-mcp</code></pre>
 link version
 link init [dir]
 link serve [dir] [--port 3000]
+link try [dir] [--force] [--serve] [--port 3000]
 link welcome [dir] [--project slug]
 link prompts [dir] [--project slug]
 link next [dir] [--project slug]

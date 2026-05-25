@@ -4,6 +4,7 @@ from mcp_package.link_core.cli_runtime import (
     render_demo_text,
     render_init_text,
     render_starter_prompts_text,
+    render_try_text,
     render_welcome_text,
 )
 
@@ -77,6 +78,31 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Try the value loop:", text)
         self.assertIn("/tmp/link-demo/START_HERE.md", text)
         self.assertIn("http://127.0.0.1:3000/graph", text)
+
+    def test_render_try_text(self):
+        code, text = render_try_text(
+            target="/tmp/link-demo",
+            ready=True,
+            page_count=13,
+            memory_count=1,
+            search_backend="sqlite-fts",
+            query_summary="agent-memory · 1 memories · 3 context items",
+            brief_summary="1 relevant memories · 1 review items",
+            serve_command="link serve /tmp/link-demo",
+            next_command="link next /tmp/link-demo",
+            health_command="link health /tmp/link-demo",
+            query_command="link query 'why does Link help agents?' /tmp/link-demo --budget small",
+            brief_command="link brief 'working on agent memory' /tmp/link-demo",
+            benchmark_command="link benchmark 'agent memory' /tmp/link-demo",
+            url="http://127.0.0.1:3000",
+        )
+
+        self.assertEqual(code, 0)
+        self.assertIn("Link try: /tmp/link-demo", text)
+        self.assertIn("Demo: ready", text)
+        self.assertIn("Query proof:", text)
+        self.assertIn("Ask an agent:", text)
+        self.assertIn("link next /tmp/link-demo", text)
 
 
 if __name__ == "__main__":

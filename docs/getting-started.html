@@ -56,9 +56,9 @@
         <p>The demo is the fastest proof of value. It already has raw sources, wiki pages, memories, backlinks, and graph data.</p>
         <p>macOS with Homebrew:</p>
 <pre><code>brew install gowtham0992/link/link
-link demo
-link next link-demo
+link try
 link serve link-demo</code></pre>
+        <p>The Homebrew formula is maintained in the public <a href="https://github.com/gowtham0992/homebrew-link">gowtham0992/homebrew-link</a> tap.</p>
         <p>Or from source:</p>
         <pre><code>git clone https://github.com/gowtham0992/link.git
 cd link
@@ -71,6 +71,7 @@ cd link
 py link.py demo
 py link.py next link-demo
 py link.py serve link-demo</code></pre>
+        <p>Use <code>link try</code> for the shortest Homebrew proof loop. It creates the demo, checks readiness, runs a compact query and brief, and prints the viewer command plus the first agent prompts. From source, use <code>python3 link.py try</code> or <code>py link.py try</code>.</p>
         <div class="callout">
           <strong>Judge the generated demo</strong>
           The repo's root <code>wiki/</code> is only a scaffold for local development and personal testing. Generated content in <code>wiki/</code>, <code>raw/</code>, and <code>link-demo/</code> is ignored by git so private memory is not published by accident.
