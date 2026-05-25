@@ -723,6 +723,17 @@ class ServeTests(unittest.TestCase):
         self.assertFalse(serve._is_allowed_static_file(unsupported))
         self.assertFalse(serve._is_allowed_static_file(denied))
 
+    def test_logo_serves_from_configured_link_root(self):
+        wiki = self.make_wiki()
+        (wiki.parent / "logo.svg").write_text("<svg></svg>", encoding="utf-8")
+        reset_wiki(wiki)
+
+        status, body, headers = run_handler_raw("GET", "/logo.svg")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"<svg></svg>")
+        self.assertEqual(headers["Content-Type"], "image/svg+xml")
+
     def test_static_file_resolve_handles_malformed_paths(self):
         self.assertIsNone(serve._safe_resolve(Path("bad\0path")))
 

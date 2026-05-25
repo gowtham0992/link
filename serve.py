@@ -785,12 +785,25 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 def _is_allowed_static_file(path: Path) -> bool:
     root = Path(__file__).parent.resolve()
+    link_root = WIKI_DIR.parent.resolve()
     return _core_is_allowed_static_file(
         path,
         RAW_DIR,
-        (root / "logo.svg", root / "logo.png"),
+        (
+            link_root / "logo.svg",
+            link_root / "logo.png",
+            root / "logo.svg",
+            root / "logo.png",
+        ),
         RAW_STATIC_TYPES,
     )
+
+
+def _brand_file(name: str) -> Path:
+    link_asset = WIKI_DIR.parent / name
+    if link_asset.exists():
+        return link_asset
+    return Path(__file__).parent / name
 
 
 def _resolve_raw_static_path(url_fragment: str) -> tuple[Path | None, str | None]:
@@ -1503,9 +1516,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
         if path == "/logo.svg":
-            self._file(Path(__file__).parent / "logo.svg", "image/svg+xml")
+            self._file(_brand_file("logo.svg"), "image/svg+xml")
         elif path == "/logo.png":
-            self._file(Path(__file__).parent / "logo.png", "image/png")
+            self._file(_brand_file("logo.png"), "image/png")
         elif path.startswith("/raw/"):
             raw_path, content_type = _resolve_raw_static_path(path[5:])
             if raw_path and content_type:
