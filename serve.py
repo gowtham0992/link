@@ -564,6 +564,7 @@ def _remember_memory_from_web(payload: dict[str, object]) -> dict[str, object]:
         _utc_timestamp(),
         project=_clean_text_input(payload.get("project"), max_len=80) or None,
         review_after=_clean_text_input(payload.get("review_after"), max_len=40) or None,
+        expires_at=_clean_text_input(payload.get("expires_at"), max_len=40) or None,
         records=_memory_records(),
         allow_duplicate=False,
         allow_conflict=False,

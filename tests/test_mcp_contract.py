@@ -792,12 +792,18 @@ class McpContractTests(unittest.TestCase):
             scope="project",
             tags="git, release",
             source="unit test",
+            review_after="2026-08-01",
+            expires_at="2026-12-01",
         ))
         recall = json.loads(self.server.recall_memory("release branches"))
+        memory_text = (self.target / "wiki/memories/prefer-release-branches.md").read_text(encoding="utf-8")
 
         self.assertTrue(payload["created"])
         self.assertEqual(payload["name"], "prefer-release-branches")
+        self.assertEqual(payload["review_after"], "2026-08-01")
+        self.assertEqual(payload["expires_at"], "2026-12-01")
         self.assertTrue((self.target / "wiki/memories/prefer-release-branches.md").exists())
+        self.assertIn('expires_at: "2026-12-01"', memory_text)
         self.assertEqual(recall["memories"][0]["name"], "prefer-release-branches")
 
     def test_remember_memory_blocks_strong_duplicate(self):

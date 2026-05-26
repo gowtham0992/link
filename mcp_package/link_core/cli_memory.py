@@ -98,6 +98,8 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
         lines.append(f"Project: {result['project']}")
     if result.get("review_after"):
         lines.append(f"Review after: {result['review_after']}")
+    if result.get("expires_at"):
+        lines.append(f"Expires at: {result['expires_at']}")
     lines.extend([
         "",
         "Next:",

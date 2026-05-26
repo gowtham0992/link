@@ -175,6 +175,16 @@ def validate_wiki(wiki_dir: Path, *, strict: bool = False) -> dict[str, Any]:
                 except ValueError:
                     findings.append(_finding("error", "invalid_review_after", rel, "review_after must be a valid calendar date."))
 
+        expires_at = str(meta.get("expires_at") or "").strip().strip('"')
+        if expected_type == "memory" and expires_at:
+            if not DATE_RE.match(expires_at):
+                findings.append(_finding("error", "invalid_expires_at", rel, "expires_at must use YYYY-MM-DD."))
+            else:
+                try:
+                    date.fromisoformat(expires_at)
+                except ValueError:
+                    findings.append(_finding("error", "invalid_expires_at", rel, "expires_at must be a valid calendar date."))
+
         if not SUMMARY_RE.search(body):
             findings.append(_finding("warning", "missing_summary", rel, "Page should include a TLDR or Query summary."))
 

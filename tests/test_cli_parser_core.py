@@ -200,11 +200,14 @@ class CliParserCoreTests(unittest.TestCase):
             "user",
             "--review-after",
             "2026-06-01",
+            "--expires-at",
+            "2026-07-01",
         ])
 
         self.assertEqual(args.memory_type, "preference")
         self.assertEqual(args.scope, "user")
         self.assertEqual(args.review_after, "2026-06-01")
+        self.assertEqual(args.expires_at, "2026-07-01")
         with self.assertRaises(SystemExit):
             parser.parse_args(["remember", "bad", "--type", "unsupported"])
 

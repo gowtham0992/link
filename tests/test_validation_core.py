@@ -124,6 +124,33 @@ class ValidationCoreTests(unittest.TestCase):
         self.assertFalse(payload["passed"])
         self.assertIn("invalid_review_after", {finding["code"] for finding in payload["findings"]})
 
+    def test_validate_wiki_rejects_invalid_memory_expires_at(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "memories/bad-expiry-date.md",
+            "---\n"
+            "type: memory\n"
+            "title: Bad Expiry Date\n"
+            "memory_type: preference\n"
+            "scope: user\n"
+            "status: active\n"
+            "source: unit test\n"
+            "review_status: reviewed\n"
+            "expires_at: someday\n"
+            "---\n\n"
+            "# Bad Expiry Date\n\n"
+            "> **TLDR:** A memory with a bad expiry date.\n\n"
+            "## Memory\n\nExpire later.\n\n"
+            "## Source\n\nunit test\n",
+        )
+        (wiki / "_backlinks.json").write_text(json.dumps(build_backlinks(wiki, body_only=False)), encoding="utf-8")
+
+        payload = validate_wiki(wiki)
+
+        self.assertFalse(payload["passed"])
+        self.assertIn("invalid_expires_at", {finding["code"] for finding in payload["findings"]})
+
     def test_validate_wiki_reports_unreadable_pages(self):
         wiki = self.make_wiki()
         write_page(

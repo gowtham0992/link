@@ -195,20 +195,37 @@ def slim_memory(record: Mapping[str, object]) -> dict[str, object]:
 
 
 def is_active_memory(record: Mapping[str, object]) -> bool:
-    return str(record.get("status") or "active").lower() not in {"archived", "stale"}
+    return str(record.get("status") or "active").lower() not in {"archived", "stale"} and not memory_expired(record)
 
 
-def _parse_review_date(value: object) -> date | None:
+def _parse_date_field(value: object, field: str) -> date | None:
     text = str(value or "").strip().strip('"')
     if not text:
         return None
     if not DATE_RE.match(text):
-        raise ValueError("review_after must use YYYY-MM-DD")
+        raise ValueError(f"{field} must use YYYY-MM-DD")
     return date.fromisoformat(text)
+
+
+def _parse_review_date(value: object) -> date | None:
+    return _parse_date_field(value, "review_after")
+
+
+def _parse_expires_date(value: object) -> date | None:
+    return _parse_date_field(value, "expires_at")
 
 
 def _today(today: str | None = None) -> date:
     return _parse_review_date(today) if today else date.today()
+
+
+def memory_expired(record: Mapping[str, object], today: str | None = None) -> bool:
+    """Return true when a memory has passed its optional expiry date."""
+    try:
+        expires = _parse_expires_date(record.get("expires_at"))
+    except ValueError:
+        return False
+    return expires is not None and expires <= _today(today)
 
 
 def memory_visible_for_project(record: Mapping[str, object], project: str | None = None) -> bool:
@@ -264,6 +281,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "review_status": meta.get("review_status") or "pending",
         "reviewed_at": meta.get("reviewed_at", ""),
         "review_after": meta.get("review_after", ""),
+        "expires_at": meta.get("expires_at", ""),
         "review_note": meta.get("review_note", ""),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
@@ -336,6 +354,26 @@ def memory_review_issues(
                     "severity": "medium",
                     "message": f"Memory review is due after {review_after}.",
                     "suggested_action": f"Confirm it is still accurate, then run {review_command}.",
+                })
+
+    expires_at = str(record.get("expires_at") or "").strip()
+    if expires_at:
+        try:
+            expires = _parse_expires_date(expires_at)
+        except ValueError as exc:
+            issues.append({
+                "code": "invalid_expires_at",
+                "severity": "high",
+                "message": str(exc),
+                "suggested_action": "Use a YYYY-MM-DD date or remove expires_at.",
+            })
+        else:
+            if status == "active" and expires is not None and expires <= _today(today):
+                issues.append({
+                    "code": "expired",
+                    "severity": "high",
+                    "message": f"Memory expired at {expires_at} and is excluded from default recall.",
+                    "suggested_action": "Update it with a new expiry date, archive it, or delete it after confirmation.",
                 })
 
     if status == "stale":
@@ -466,7 +504,15 @@ def memory_action_hints(
         ))
         return actions
 
-    if issue_codes & {"invalid_review_status", "invalid_review_after", "invalid_memory_type", "invalid_scope", "missing_source", "missing_date_captured"}:
+    if issue_codes & {
+        "invalid_review_status",
+        "invalid_review_after",
+        "invalid_expires_at",
+        "invalid_memory_type",
+        "invalid_scope",
+        "missing_source",
+        "missing_date_captured",
+    }:
         add(_memory_action(
             kind="edit_metadata",
             label="Edit metadata",
@@ -486,14 +532,15 @@ def memory_action_hints(
             arguments={"identifier": name, "memory": "new detail"},
             priority="high",
         ))
-    if "stale_status" in issue_codes:
+    if issue_codes & {"stale_status", "expired"}:
+        reason = "expired" if "expired" in issue_codes else "stale"
         add(_memory_action(
             kind="archive",
             label="Archive",
-            description="Archive this stale memory so default recall ignores it.",
-            command=_shell_words("python3", "link.py", "archive-memory", name, command_target, "--reason", "stale"),
+            description="Archive this memory so default recall ignores it.",
+            command=_shell_words("python3", "link.py", "archive-memory", name, command_target, "--reason", reason),
             tool="archive_memory",
-            arguments={"identifier": name, "reason": "stale"},
+            arguments={"identifier": name, "reason": reason},
             priority="high",
         ))
     if issue_codes & {"pending_review", "review_due"} and not any(
@@ -604,7 +651,10 @@ def recall_state(
     high_issues = [issue for issue in issues if str(issue.get("severity") or "") == "high"]
     if not default_enabled:
         state = "disabled"
-        reason = f"Memory status is {record.get('status')}; default recall excludes archived and stale memories."
+        if memory_expired(record):
+            reason = f"Memory expired at {record.get('expires_at')}; default recall excludes expired memories."
+        else:
+            reason = f"Memory status is {record.get('status')}; default recall excludes archived and stale memories."
     elif high_issues:
         state = "unsafe"
         reason = "Memory is active but has high-severity quality issues."
@@ -683,6 +733,7 @@ def memory_explanation(
             "archived_at": record.get("archived_at", ""),
             "archive_reason": record.get("archive_reason", ""),
             "restored_at": record.get("restored_at", ""),
+            "expires_at": record.get("expires_at", ""),
         },
         "graph": graph,
         "log_entries": memory_log_entries(wiki_dir, record),
@@ -1121,6 +1172,7 @@ def write_memory_page(
     timestamp: str,
     project: str | None = None,
     review_after: str | None = None,
+    expires_at: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
@@ -1139,6 +1191,9 @@ def write_memory_page(
     clean_review_after = str(review_after or "").strip()
     if clean_review_after:
         _parse_review_date(clean_review_after)
+    clean_expires_at = str(expires_at or "").strip()
+    if clean_expires_at:
+        _parse_expires_date(clean_expires_at)
     clean_project = normalize_project(project) if scope == "project" else ""
     memory_title_value = memory_title(clean_text, title)
     summary = clean_text.splitlines()[0].strip()
@@ -1195,6 +1250,7 @@ def write_memory_page(
             tag_values.append(slug_tag)
     project_line = f'project: "{frontmatter_string(clean_project)}"\n' if clean_project else ""
     review_after_line = f'review_after: "{frontmatter_string(clean_review_after)}"\n' if clean_review_after else ""
+    expires_at_line = f'expires_at: "{frontmatter_string(clean_expires_at)}"\n' if clean_expires_at else ""
 
     page = f"""---
 type: memory
@@ -1205,7 +1261,7 @@ scope: {scope}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
-{review_after_line}reviewed_at: ""
+{review_after_line}{expires_at_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1256,6 +1312,7 @@ tags: {yaml_list(tag_values)}
         "scope": scope,
         "project": clean_project,
         "review_after": clean_review_after,
+        "expires_at": clean_expires_at,
         "backlinks_rebuilt": bool(backlinks_rebuilt),
         "duplicate_override": bool(duplicate_candidates and allow_duplicate),
         "duplicate_candidates": duplicate_candidates,

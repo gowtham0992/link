@@ -148,6 +148,8 @@ def render_memory_card(
         meta_parts.append(f'captured {record["date_captured"]}')
     if record.get("review_after"):
         meta_parts.append(f'review after {record["review_after"]}')
+    if record.get("expires_at"):
+        meta_parts.append(f'expires {record["expires_at"]}')
     meta = " · ".join(part for part in meta_parts if part)
     issues_html = ""
     if include_issues and record.get("issues"):

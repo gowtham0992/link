@@ -1580,6 +1580,8 @@ class ServeTests(unittest.TestCase):
             "memory_type": "preference",
             "scope": "user",
             "source": "web proposal",
+            "review_after": "2026-08-01",
+            "expires_at": "2026-12-01",
         }
 
         denied_status, denied_payload = post_json("/api/remember-memory", payload, local_action=False)
@@ -1601,6 +1603,9 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(created["saved"])
         self.assertTrue(created["created"])
         self.assertEqual(created["path"], f"wiki/memories/{created['name']}.md")
+        self.assertEqual(created["review_after"], "2026-08-01")
+        self.assertEqual(created["expires_at"], "2026-12-01")
+        self.assertIn('expires_at: "2026-12-01"', page_text)
         self.assertEqual(duplicate_status, 409)
         self.assertFalse(duplicate["saved"])
         self.assertTrue(duplicate["duplicate"])

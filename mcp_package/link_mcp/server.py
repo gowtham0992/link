@@ -743,7 +743,7 @@ def _write_mcp_memory_page(
     text: str, title: str = "", memory_type: str = "note",
     scope: str = "user", tags: str = "", source: str = "mcp",
     allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
-    review_after: str = "",
+    review_after: str = "", expires_at: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -754,6 +754,7 @@ def _write_mcp_memory_page(
         memory_type=memory_type, scope=scope,
         tags=_clean_text_input(tags, max_len=500), source=_clean_text_input(source, max_len=500),
         review_after=_clean_text_input(review_after, max_len=40) or None,
+        expires_at=_clean_text_input(expires_at, max_len=40) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -1173,6 +1174,7 @@ def remember_memory(
     allow_conflict: bool = False,
     project: str = "",
     review_after: str = "",
+    expires_at: str = "",
 ) -> str:
     """Save a local agent memory as a Markdown page.
 
@@ -1185,6 +1187,7 @@ def remember_memory(
     project: optional project key for project-scoped memories.
     tags: optional comma-separated tags.
     review_after: optional YYYY-MM-DD date when this memory should be checked again.
+    expires_at: optional YYYY-MM-DD date when this memory should leave default recall.
     """
     try:
         result = _write_mcp_memory_page(
@@ -1198,6 +1201,7 @@ def remember_memory(
             allow_conflict=allow_conflict,
             project=project,
             review_after=review_after,
+            expires_at=expires_at,
         )
     except ValueError as exc:
         return json.dumps({"created": False, "error": str(exc)})

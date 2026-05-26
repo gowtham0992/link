@@ -26,12 +26,14 @@ class CliMemoryCoreTests(unittest.TestCase):
             "scope": "project",
             "project": "link",
             "review_after": "2026-08-01",
+            "expires_at": "2026-12-01",
         })
 
         self.assertEqual(code, 0)
         self.assertIn("Memory saved", text)
         self.assertIn("Project: link", text)
         self.assertIn("Review after: 2026-08-01", text)
+        self.assertIn("Expires at: 2026-12-01", text)
         self.assertIn("python3 link.py recall", text)
         self.assertIn("Prefer release branches", text)
 

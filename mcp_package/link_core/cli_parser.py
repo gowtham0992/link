@@ -118,6 +118,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     remember_cmd.add_argument("--source", default="manual", help="where this memory came from")
     remember_cmd.add_argument("--project", default=None, help="project key for project-scoped memories")
     remember_cmd.add_argument("--review-after", default=None, help="YYYY-MM-DD date when this memory should be checked again")
+    remember_cmd.add_argument("--expires-at", default=None, help="YYYY-MM-DD date when this memory should leave default recall")
     remember_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
     remember_cmd.add_argument("--allow-conflict", action="store_true", help="create a memory even if it may conflict with an active memory")
     remember_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
@@ -358,6 +359,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             source=args.source,
             project=args.project,
             review_after=args.review_after,
+            expires_at=args.expires_at,
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
             json_output=args.json,
