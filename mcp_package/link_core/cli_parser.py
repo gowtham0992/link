@@ -71,6 +71,14 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     backup_cmd.add_argument("--list", action="store_true", dest="list_only", help="list recent backups instead of creating one")
     backup_cmd.add_argument("--json", action="store_true", help="print machine-readable backup status")
 
+    restore_backup_cmd = sub.add_parser("restore-backup", help="preview or restore a local Link backup archive")
+    restore_backup_cmd.add_argument("backup", help="backup filename from .link-backups/ or path to a .tar.gz archive")
+    restore_backup_cmd.add_argument("target", nargs="?", default=".")
+    restore_backup_cmd.add_argument("--include-raw", action="store_true", help="also restore raw/ if the archive contains it")
+    restore_backup_cmd.add_argument("--confirm", action="store_true", help="required to replace local files")
+    restore_backup_cmd.add_argument("--no-safety-backup", action="store_true", help="skip creating a pre-restore safety backup")
+    restore_backup_cmd.add_argument("--json", action="store_true", help="print machine-readable restore status")
+
     compliance_cmd = sub.add_parser("compliance-export", help="export a redacted audit packet for security or team review")
     compliance_cmd.add_argument("target", nargs="?", default=".")
     compliance_cmd.add_argument("--output", default=None, help="write JSON to this file instead of stdout")
@@ -356,6 +364,15 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             label=args.label,
             include_raw=args.include_raw,
             list_only=args.list_only,
+            json_output=args.json,
+        )
+    if command == "restore-backup":
+        return handlers["restore-backup"](
+            Path(args.target),
+            args.backup,
+            include_raw=args.include_raw,
+            confirm=args.confirm,
+            safety_backup=not args.no_safety_backup,
             json_output=args.json,
         )
     if command == "compliance-export":

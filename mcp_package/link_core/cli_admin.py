@@ -51,7 +51,7 @@ def render_migrate_text(payload: Mapping[str, object], *, wiki_dir: object) -> t
         lines.append("Result: current")
         return 0, "\n".join(lines)
     lines.append(f"Result: failed ({payload['error']})")
-    return 1, "\n".join(lines)
+    return 0, "\n".join(lines)
 
 
 def render_status_text(payload: Mapping[str, object], *, wiki_dir: object, version: str) -> tuple[int, str]:
@@ -144,6 +144,32 @@ def render_backup_created_text(payload: Mapping[str, object], *, include_raw: bo
         lines.append("Note: raw/ was excluded by default because it may contain sensitive source material.")
     if payload["pruned"]:
         lines.append("Pruned old backups: " + ", ".join(str(item) for item in payload["pruned"]))
+    return 0, "\n".join(lines)
+
+
+def render_backup_restore_text(payload: Mapping[str, object], *, target: object = ".") -> tuple[int, str]:
+    roots = ", ".join(str(item) for item in payload.get("restore_roots", [])) or "none"
+    skipped = ", ".join(str(item) for item in payload.get("skipped_roots", []))
+    lines = [
+        f"Link backup restore: {payload.get('name')}",
+        f"Archive: {payload.get('backup')}",
+        f"Will restore: {roots}",
+        f"Files: {payload.get('file_count', 0)}",
+    ]
+    if skipped:
+        lines.append(f"Skipped: {skipped} ({payload.get('skipped_file_count', 0)} files)")
+    if payload.get("restored"):
+        safety = payload.get("safety_backup")
+        if isinstance(safety, Mapping):
+            lines.append(f"Safety backup: {safety.get('path')}")
+        lines.append("Result: restored")
+        return 0, "\n".join(lines)
+    lines.extend([
+        "Result: preview only",
+        "",
+        "Next:",
+        f"  {_link_command(str(target), 'restore-backup', str(payload.get('name') or payload.get('backup')), '--confirm')}",
+    ])
     return 0, "\n".join(lines)
 
 

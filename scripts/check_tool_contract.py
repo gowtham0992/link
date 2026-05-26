@@ -45,6 +45,7 @@ EXPECTED_CLI_COMMANDS = {
     "recall",
     "redact-capture",
     "remember",
+    "restore-backup",
     "restore-memory",
     "review-memory",
     "serve",

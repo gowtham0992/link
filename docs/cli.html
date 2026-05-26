@@ -171,6 +171,8 @@ link rebuild-index
 link rebuild-backlinks
 link verify-mcp [--json]
 link connect &lt;agent&gt; [dir] [--write] [--config path] [--python python]
+link backup [--list] [--include-raw]
+link restore-backup &lt;backup.tar.gz&gt; [--include-raw] --confirm
 python3 link.py demo
 python3 link.py query-link "task" [dir]</code></pre>
         <p><code>query-link</code> is kept as an internal/backward-compatible alias. Prefer <code>link query</code> in user-facing docs.</p>

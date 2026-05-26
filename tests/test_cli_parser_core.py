@@ -198,6 +198,27 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.limit, 25)
         self.assertTrue(args.json)
 
+    def test_restore_backup_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "restore-backup",
+            "backup.tar.gz",
+            "/tmp/link",
+            "--include-raw",
+            "--confirm",
+            "--no-safety-backup",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "restore-backup")
+        self.assertEqual(args.backup, "backup.tar.gz")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertTrue(args.include_raw)
+        self.assertTrue(args.confirm)
+        self.assertTrue(args.no_safety_backup)
+        self.assertTrue(args.json)
+
     def test_team_sync_command_options(self):
         parser = build_cli_parser()
 

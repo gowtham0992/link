@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import re
+import shutil
 import tarfile
+import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -14,6 +16,10 @@ DEFAULT_BACKUP_LIMIT = 20
 
 class BackupError(RuntimeError):
     """Raised when a backup archive cannot be completed safely."""
+
+
+class RestoreError(RuntimeError):
+    """Raised when a backup archive cannot be restored safely."""
 
 
 def _utc_timestamp() -> str:
@@ -165,4 +171,138 @@ def list_backups(link_root: Path, *, limit: int = 20) -> dict[str, Any]:
         "warning_count": len(warnings),
         "warnings": warnings,
         "backups": backups,
+    }
+
+
+def _resolve_backup_path(root: Path, backup: str | Path) -> Path:
+    value = Path(str(backup)).expanduser()
+    candidates = [value]
+    if not value.is_absolute():
+        candidates.append(root / BACKUP_DIR_NAME / value)
+    for candidate in candidates:
+        path = candidate.resolve()
+        if path.exists() and path.is_file():
+            return path
+    return candidates[-1].resolve()
+
+
+def _safe_member_path(name: str) -> PurePosixPath:
+    path = PurePosixPath(name)
+    if path.is_absolute() or ".." in path.parts:
+        raise RestoreError(f"backup contains unsafe path: {name}")
+    if not path.parts or path.parts[0] not in {"wiki", "raw"}:
+        raise RestoreError(f"backup contains unsupported path: {name}")
+    return path
+
+
+def inspect_backup(
+    link_root: Path,
+    backup: str | Path,
+    *,
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    """Inspect a backup archive and return the safe restore plan."""
+    root = link_root.expanduser().resolve()
+    backup_path = _resolve_backup_path(root, backup)
+    if not backup_path.exists() or not backup_path.is_file():
+        raise FileNotFoundError(f"backup archive not found: {backup_path}")
+
+    restore_roots: set[str] = set()
+    skipped_roots: set[str] = set()
+    file_count = 0
+    skipped_count = 0
+    with tarfile.open(backup_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            safe_path = _safe_member_path(member.name)
+            root_name = safe_path.parts[0]
+            if not (member.isfile() or member.isdir()):
+                raise RestoreError(f"backup contains unsupported member type: {member.name}")
+            if root_name == "raw" and not include_raw:
+                skipped_roots.add("raw")
+                if member.isfile():
+                    skipped_count += 1
+                continue
+            restore_roots.add(root_name)
+            if member.isfile():
+                file_count += 1
+    return {
+        "backup": str(backup_path),
+        "name": backup_path.name,
+        "include_raw": include_raw,
+        "restore_roots": sorted(restore_roots),
+        "skipped_roots": sorted(skipped_roots),
+        "file_count": file_count,
+        "skipped_file_count": skipped_count,
+    }
+
+
+def restore_backup(
+    link_root: Path,
+    backup: str | Path,
+    *,
+    include_raw: bool = False,
+    confirm: bool = False,
+    safety_backup: bool = True,
+) -> dict[str, Any]:
+    """Restore wiki/ and optionally raw/ from a local Link backup archive."""
+    root = link_root.expanduser().resolve()
+    plan = inspect_backup(root, backup, include_raw=include_raw)
+    if not confirm:
+        return {
+            "restored": False,
+            "confirmation_required": True,
+            **plan,
+            "message": "Restore preview only. Pass --confirm to replace local files.",
+        }
+    if not plan["restore_roots"]:
+        raise RestoreError("backup has no restorable files")
+
+    backup_path = Path(str(plan["backup"]))
+    safety: dict[str, Any] | None = None
+    if safety_backup and (root / "wiki").exists():
+        safety = create_backup(
+            root,
+            label="pre-restore",
+            include_raw=include_raw and (root / "raw").exists(),
+        )
+
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".link-restore-", dir=root) as tmp_name:
+        staging = Path(tmp_name)
+        with tarfile.open(backup_path, "r:gz") as tar:
+            for member in tar.getmembers():
+                safe_path = _safe_member_path(member.name)
+                root_name = safe_path.parts[0]
+                if root_name == "raw" and not include_raw:
+                    continue
+                if member.isdir():
+                    (staging / safe_path).mkdir(parents=True, exist_ok=True)
+                    continue
+                if not member.isfile():
+                    raise RestoreError(f"backup contains unsupported member type: {member.name}")
+                target_path = staging / safe_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                source = tar.extractfile(member)
+                if source is None:
+                    raise RestoreError(f"backup member could not be read: {member.name}")
+                with source, target_path.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+
+        for root_name in plan["restore_roots"]:
+            restored_root = staging / root_name
+            destination = root / root_name
+            if not restored_root.exists():
+                continue
+            if destination.exists():
+                if destination.is_dir():
+                    shutil.rmtree(destination)
+                else:
+                    destination.unlink()
+            shutil.move(str(restored_root), str(destination))
+
+    return {
+        "restored": True,
+        "confirmation_required": False,
+        **plan,
+        "safety_backup": safety,
     }

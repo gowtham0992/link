@@ -12,6 +12,7 @@ Usage:
   python link.py health [target]
   python link.py operations [target]
   python link.py backup [target]
+  python link.py restore-backup <backup-name-or-path> [target]
   python link.py compliance-export [target]
   python link.py team-sync [target]
   python link.py share <page-or-memory> [target]
@@ -132,8 +133,10 @@ from link_core.memory import (
 )
 from link_core.backup import (
     BackupError as _CoreBackupError,
+    RestoreError as _CoreRestoreError,
     create_backup as _core_create_backup,
     list_backups as _core_list_backups,
+    restore_backup as _core_restore_backup,
 )
 from link_core.audit_export import (
     build_compliance_export as _core_build_compliance_export,
@@ -180,6 +183,7 @@ from link_core.cli_parser import (
 from link_core.cli_admin import (
     render_backup_created_text as _core_render_backup_created_text,
     render_backup_list_text as _core_render_backup_list_text,
+    render_backup_restore_text as _core_render_backup_restore_text,
     render_migrate_text as _core_render_migrate_text,
     render_rebuild_backlinks_text as _core_render_rebuild_backlinks_text,
     render_rebuild_index_text as _core_render_rebuild_index_text,
@@ -798,6 +802,40 @@ def backup(
         return 0
 
     code, text = _core_render_backup_created_text(payload, include_raw=include_raw)
+    print(text)
+    return code
+
+
+def restore_backup(
+    target: Path,
+    backup: str,
+    *,
+    include_raw: bool = False,
+    confirm: bool = False,
+    safety_backup: bool = True,
+    json_output: bool = False,
+) -> int:
+    target = _resolve_link_root(target)
+    try:
+        payload = _core_restore_backup(
+            target,
+            backup,
+            include_raw=include_raw,
+            confirm=confirm,
+            safety_backup=safety_backup,
+        )
+    except (FileNotFoundError, _CoreBackupError, _CoreRestoreError) as exc:
+        if json_output:
+            print(json.dumps({"restored": False, "error": str(exc)}, indent=2))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0 if payload.get("restored") or payload.get("confirmation_required") else 1
+
+    code, text = _core_render_backup_restore_text(payload, target=target)
     print(text)
     return code
 
@@ -2017,6 +2055,7 @@ def main(argv: list[str] | None = None) -> int:
             "health": health,
             "operations": operations,
             "backup": backup,
+            "restore-backup": restore_backup,
             "compliance-export": compliance_export,
             "team-sync": team_sync,
             "share": share,

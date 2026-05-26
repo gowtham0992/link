@@ -14,6 +14,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added optional `expires_at` dates for durable memories so temporary context automatically leaves default recall after expiry.
 - Added `link import-obsidian <vault>` to copy Obsidian Markdown notes into `raw/obsidian/` with secret scanning before the normal ingest workflow.
 - Added `link compliance-export` for redacted readiness, validation, memory-review, operation, and log exports for team or security review.
+- Added `link restore-backup` to preview and confirm local backup restores with unsafe-tar checks, raw restore opt-in, and pre-restore safety backups.
 - Added `link team-sync` to print a safe Git sharing plan for reviewed team memory without pushing private raw sources automatically.
 - Added `link share <page-or-memory>` to print a local viewer permalink and agent prompt for a specific Link page.
 - Added `link snapshot` to export a static, read-only HTML snapshot for demos or reviews while excluding raw sources, captures, live state, and memory pages by default.

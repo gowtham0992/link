@@ -355,6 +355,11 @@ For day-to-day auditability, `link memory-log ~/link` shows what Link recently
 remembered, updated, reviewed, archived, restored, forgot, or accepted from raw
 captures.
 
+For recovery, `link backup ~/link` creates a local archive and `link
+restore-backup <archive> ~/link` previews what would be restored. Passing
+`--confirm` replaces local files after creating a safety backup when possible;
+`raw/` is still excluded unless `--include-raw` is explicit.
+
 For local proof of value, `link wins ~/link` shows reusable memories, reviewed
 memory, provenance, project continuity, freshness guardrails, and copyable
 prompts without tracking user behavior.
