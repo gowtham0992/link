@@ -120,6 +120,22 @@ class InstallerTests(unittest.TestCase):
             self.assertIn(f".\\integrations\\{name}\\install.ps1", getting_started)
             self.assertIn(f".\\integrations\\{name}\\install.ps1", mcp)
 
+    def test_integration_maintainer_checklist_is_documented(self):
+        integrations = (ROOT / "integrations/README.md").read_text(encoding="utf-8")
+        contributing = (ROOT / "docs/contributing.html").read_text(encoding="utf-8")
+
+        for expected in [
+            "Maintainer checklist",
+            "Preserve existing user instructions",
+            "CLI and MCP independent from the web viewer",
+            "PowerShell",
+            "tests/test_installers.py",
+        ]:
+            self.assertIn(expected, integrations)
+
+        self.assertIn("integrations/README.md", contributing)
+        self.assertIn("CLI/MCP independent from the web viewer", contributing)
+
     def test_ci_checks_powershell_installer_syntax(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 

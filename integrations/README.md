@@ -63,3 +63,62 @@ Each folder has an `uninstall.sh`. Same `--project` flag applies. PowerShell
 uninstall scripts are not needed yet because `install.ps1` only writes the same
 small instruction/config files listed above; remove those files or delete the
 `link` MCP entry from the relevant JSON config if you need to undo it manually.
+
+## Maintainer checklist
+
+Agent integrations are part of the product surface. Treat installer changes like
+runtime changes: they affect the first ten minutes, MCP readiness, and whether an
+agent knows how to use Link without wasting context.
+
+Before changing an installer:
+
+1. Keep the agent instruction small. It should point the agent to Link tools,
+   not paste the whole protocol into every prompt file.
+2. Preserve existing user instructions. Upsert Link blocks or config entries;
+   never rewrite the whole agent config file.
+3. Keep global and project mode behavior explicit. Global mode uses `~/link/`;
+   project mode uses the current directory.
+4. Keep CLI and MCP independent from the web viewer. `serve.py` is only for the
+   local UI. CLI commands and MCP tools must work without the server running.
+5. Reuse `.link-mcp-python` when possible. MCP clients should run the Python
+   environment that actually has `link-mcp` installed.
+6. Avoid outbound install scripts. Do not add `curl | sh`, telemetry, or hidden
+   network calls to integration scripts.
+7. Update both macOS/Linux and PowerShell installers together when an integration
+   behavior changes.
+8. Update README/docs examples when a new integration or command path is added.
+
+When adding a new integration:
+
+1. Create `integrations/<agent>/install.sh` and `uninstall.sh`.
+2. Create `integrations/<agent>/install.ps1`.
+3. Source the shared scaffold and next-step helpers instead of duplicating setup
+   logic:
+
+   ```bash
+   . "$SCRIPT_DIR/../_shared/scaffold.sh"
+   . "$SCRIPT_DIR/../_shared/instructions.sh"
+   ```
+
+   ```powershell
+   . "$PSScriptRoot\..\_shared\scaffold.ps1"
+   . "$PSScriptRoot\..\_shared\instructions.ps1"
+   ```
+
+4. Add the integration to this table, `README.md`, `docs/getting-started.html`,
+   and `docs/mcp.html`.
+5. Add or update tests in `tests/test_installers.py`.
+6. Run the installer checks before opening a PR:
+
+   ```bash
+   bash -n integrations/*/install.sh integrations/*/uninstall.sh integrations/_shared/*.sh
+   python3 -m pytest tests/test_installers.py -q
+   python3 scripts/check_release_hygiene.py
+   git diff --check
+   ```
+
+   On Windows or a machine with PowerShell:
+
+   ```powershell
+   pwsh -NoProfile -Command "Get-ChildItem integrations -Recurse -Include *.ps1 | ForEach-Object { [scriptblock]::Create((Get-Content -Raw $_.FullName)) | Out-Null }"
+   ```

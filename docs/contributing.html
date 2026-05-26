@@ -50,6 +50,7 @@
         <a href="#description">PR description</a>
         <a href="#structure">Project structure</a>
         <a href="#principles">Design principles</a>
+        <a href="#integrations">Installer integrations</a>
       </aside>
       <article class="doc-content">
         <h2 id="branches">Branches</h2>
@@ -107,6 +108,9 @@ git diff --check</code></pre>
           <li>The local web viewer has no runtime dependencies beyond Python stdlib.</li>
           <li>The wiki is plain Markdown, so it works with git, Obsidian, and normal editors.</li>
         </ul>
+
+        <h2 id="integrations">Installer Integrations</h2>
+        <p>Agent installers are part of Link's first-use product surface. If a change touches Codex, Claude Code, Kiro, Cursor, Copilot, VS Code, Antigravity, MCP config writing, or PowerShell support, follow the maintainer checklist in <code>integrations/README.md</code>. The key rule is simple: installers should preserve existing user instructions, keep CLI/MCP independent from the web viewer, and update macOS/Linux plus Windows paths together.</p>
       </article>
     </div>
   </main>
