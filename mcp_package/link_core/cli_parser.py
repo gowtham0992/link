@@ -78,6 +78,11 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     compliance_cmd.add_argument("--limit", type=int, default=100, help="maximum memories/log entries to include")
     compliance_cmd.add_argument("--json", action="store_true", help="print machine-readable export status after writing --output")
 
+    team_sync_cmd = sub.add_parser("team-sync", help="print a safe Git plan for sharing reviewed Link memory")
+    team_sync_cmd.add_argument("target", nargs="?", default=".")
+    team_sync_cmd.add_argument("--remote", default=None, help="optional Git remote URL to include in setup commands")
+    team_sync_cmd.add_argument("--json", action="store_true", help="print machine-readable team sync guidance")
+
     doctor_cmd = sub.add_parser("doctor", help="check a Link wiki for common health issues")
     doctor_cmd.add_argument("target", nargs="?", default=".")
     doctor_cmd.add_argument("--fix", action="store_true", help="repair safe structural and backlink issues")
@@ -323,6 +328,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             limit=args.limit,
             json_output=args.json,
         )
+    if command == "team-sync":
+        return handlers["team-sync"](Path(args.target), remote=args.remote, json_output=args.json)
     if command == "doctor":
         return handlers["doctor"](Path(args.target), fix=args.fix)
     if command == "migrate":

@@ -128,6 +128,22 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.limit, 25)
         self.assertTrue(args.json)
 
+    def test_team_sync_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "team-sync",
+            "/tmp/link",
+            "--remote",
+            "git@example.com:team/link-memory.git",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "team-sync")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.remote, "git@example.com:team/link-memory.git")
+        self.assertTrue(args.json)
+
     def test_version_command_routes_to_handler(self):
         parser = build_cli_parser()
 
@@ -136,6 +152,21 @@ class CliParserCoreTests(unittest.TestCase):
 
         self.assertEqual(args.command, "version")
         self.assertEqual(code, 42)
+
+    def test_dispatch_routes_team_sync_arguments(self):
+        parser = build_cli_parser()
+        calls = []
+
+        args = parser.parse_args(["team-sync", "/tmp/link", "--remote", "git@example.com:team/link.git", "--json"])
+        code = dispatch_cli_command(
+            args,
+            {"team-sync": lambda *args, **kwargs: calls.append((args, kwargs)) or 0},
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0][0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1]["remote"], "git@example.com:team/link.git")
+        self.assertTrue(calls[0][1]["json_output"])
 
     def test_welcome_project_and_json_options(self):
         parser = build_cli_parser()

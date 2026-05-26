@@ -21,6 +21,22 @@ DEMO_DIRECTORIES = (
 )
 RUNTIME_FILES = ("serve.py", "link.py", "LINK.md", ".linkignore")
 BRAND_FILES = ("logo.png", "logo.svg")
+WORKSPACE_GITIGNORE = """# Link private local source material
+raw/*
+!raw/.gitkeep
+
+# Link local runtime state
+.link-backups/
+.link-cache/
+.link-mcp-python
+
+# Local/editor noise
+.DS_Store
+*.swp
+*~
+__pycache__/
+*.pyc
+"""
 
 
 class DemoError(RuntimeError):
@@ -50,6 +66,9 @@ def copy_runtime_files(source_root: Path, target: Path) -> None:
         dst = target / name
         if src.exists() and src.resolve() != dst.resolve():
             shutil.copy2(src, dst)
+    gitignore = target / ".gitignore"
+    if not gitignore.exists():
+        atomic_write_text(gitignore, WORKSPACE_GITIGNORE)
 
 
 def create_demo_workspace(target: Path, *, source_root: Path, force: bool = False) -> dict[str, object]:

@@ -41,6 +41,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertTrue((target / "serve.py").exists())
         self.assertTrue((target / "link.py").exists())
         self.assertTrue((target / "LINK.md").exists())
+        self.assertIn("raw/*", (target / ".gitignore").read_text(encoding="utf-8"))
         self.assertTrue((target / "link_core/frontmatter.py").exists())
         self.assertTrue((target / "raw").is_dir())
         self.assertTrue((target / "wiki/index.md").exists())

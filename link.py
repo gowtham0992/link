@@ -13,6 +13,7 @@ Usage:
   python link.py operations [target]
   python link.py backup [target]
   python link.py compliance-export [target]
+  python link.py team-sync [target]
   python link.py doctor [target]
   python link.py migrate [target]
   python link.py validate [target]
@@ -133,6 +134,10 @@ from link_core.audit_export import (
     build_compliance_export as _core_build_compliance_export,
     render_compliance_export_text as _core_render_compliance_export_text,
     write_compliance_export as _core_write_compliance_export,
+)
+from link_core.team_sync import (
+    build_team_sync_payload as _core_build_team_sync_payload,
+    render_team_sync_text as _core_render_team_sync_text,
 )
 from link_core.benchmark import (
     build_benchmark_payload as _core_build_benchmark_payload,
@@ -780,6 +785,17 @@ def compliance_export(
         return code
     print(json.dumps(payload, indent=2))
     return 0
+
+
+def team_sync(target: Path, remote: str | None = None, json_output: bool = False) -> int:
+    target = target.expanduser().resolve()
+    payload = _core_build_team_sync_payload(target, remote=remote)
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    code, text = _core_render_team_sync_text(payload)
+    print(text)
+    return code
 
 
 def ingest_status(target: Path, json_output: bool = False) -> int:
@@ -1868,6 +1884,7 @@ def main(argv: list[str] | None = None) -> int:
             "operations": operations,
             "backup": backup,
             "compliance-export": compliance_export,
+            "team-sync": team_sync,
             "doctor": doctor,
             "migrate": migrate,
             "validate": validate,

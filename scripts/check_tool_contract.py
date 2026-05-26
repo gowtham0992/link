@@ -47,6 +47,7 @@ EXPECTED_CLI_COMMANDS = {
     "review-memory",
     "serve",
     "status",
+    "team-sync",
     "try",
     "update-memory",
     "validate",

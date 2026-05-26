@@ -329,6 +329,14 @@ writes a redacted JSON packet with readiness, validation, memory review status,
 operation markers, and recent audit log entries. Raw source contents and memory
 bodies are not included.
 
+For Git-backed team memory, `link team-sync ~/link` checks whether the workspace
+is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,
+and local MCP Python markers private by default.
+
+```bash
+link team-sync ~/link --remote git@example.com:team/link-memory.git
+```
+
 ## Agent Contract
 
 Agents should use Link in this order:

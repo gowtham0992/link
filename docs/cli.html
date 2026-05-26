@@ -96,6 +96,7 @@ link health
 link status --validate
 link memory-audit
 link compliance-export --output link-audit.json
+link team-sync ~/link
 link operations
 link benchmark "agent memory"
 link rebuild-index
@@ -103,6 +104,7 @@ link rebuild-backlinks
 link validate
 link verify-mcp</code></pre>
         <p>Use <code>link backup</code> before broad repair work. Use <code>link benchmark</code> when a wiki starts to feel slow. <code>link status --validate</code> and <code>link benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
+        <p>Use <code>link team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
         <p>Use <code>link connect &lt;agent&gt;</code> when an agent already has Link instructions but still needs MCP wiring. It previews the config before writing.</p>
         <pre><code>link connect codex ~/link
 link connect codex ~/link --write
@@ -125,6 +127,7 @@ link status [--validate]
 link operations [--limit 20]
 link backup [--label name] [--include-raw]
 link compliance-export [dir] [--output audit.json] [--project slug]
+link team-sync [dir] [--remote git-url]
 link ingest-status
 link import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
 link remember "text" [--project slug] [--review-after YYYY-MM-DD]
