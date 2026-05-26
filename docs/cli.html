@@ -108,7 +108,7 @@ link rebuild-backlinks
 link validate
 link verify-mcp</code></pre>
         <p>Use <code>link backup</code> before broad repair work. Use <code>link benchmark</code> when a wiki starts to feel slow. <code>link status --validate</code> and <code>link benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
-        <p>Use <code>link team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
+        <p>Use <code>link team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, checks whether review or user-scoped memories would make sharing unsafe, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
         <p>Use <code>link snapshot</code> when you need a static, read-only HTML export for a teammate, maintainer, security reviewer, or demo. It excludes <code>raw/</code>, captures, local operation state, and memory pages by default.</p>
         <p>Use <code>link connect &lt;agent&gt;</code> when an agent already has Link instructions but still needs MCP wiring. It previews the config before writing.</p>
         <pre><code>link connect codex ~/link

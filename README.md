@@ -347,7 +347,9 @@ prompts without tracking user behavior.
 
 For Git-backed team memory, `link team-sync ~/link` checks whether the workspace
 is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,
-and local MCP Python markers private by default.
+and local MCP Python markers private by default. It also blocks "ready" status
+when the memory inbox is not clear or active user-scoped memories would be
+included by a broad `git add wiki`.
 
 ```bash
 link team-sync ~/link --remote git@example.com:team/link-memory.git

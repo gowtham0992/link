@@ -89,7 +89,7 @@ link archive-memory memory-name ~/link --reason stale</code></pre>
         <pre><code>link team-sync ~/link --remote git@example.com:team/link-memory.git
 link compliance-export ~/link --output link-audit.json
 link backup ~/link</code></pre>
-        <p><code>link team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and prints paste-safe commands instead of pushing data for you.</p>
+        <p><code>link team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and whether active user-scoped memories would be swept into a broad <code>git add wiki</code>. It prints paste-safe commands instead of pushing data for you.</p>
 
         <h2 id="audit">Audit Packet</h2>
         <p><code>link compliance-export</code> creates a redacted JSON packet for review. It includes readiness, validation status, memory review counts, operation markers, recent audit log metadata, and safe next actions. Raw source contents and memory bodies are excluded.</p>
