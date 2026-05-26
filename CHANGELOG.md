@@ -11,6 +11,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `link try` as a one-command demo proof loop that creates the demo, checks readiness, runs query/brief examples, and prints first agent prompts.
 - Added `link connect <agent>` to preview or write MCP client config for Codex, Kiro, Claude Code, Cursor, Antigravity, VS Code, and Copilot.
 - Added optional `review_after` dates for durable memories so time-sensitive context can automatically return to the memory inbox for re-checking.
+- Added `link import-obsidian <vault>` to copy Obsidian Markdown notes into `raw/obsidian/` with secret scanning before the normal ingest workflow.
 - Added `python -m link_mcp --version` so MCP package installs can be verified before a wiki exists.
 - Added an Obsidian guide for opening Link's Markdown wiki as a vault and rebuilding indexes after manual edits.
 

@@ -239,6 +239,22 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn(str(target.resolve() / "link.py"), out.getvalue())
         self.assertIn(str(target.resolve()), out.getvalue())
 
+    def test_import_obsidian_copies_notes_to_raw(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-obsidian-cli-"))
+        target = tmp / "link"
+        vault = tmp / "vault"
+        (vault / "Architecture").mkdir(parents=True)
+        (vault / "Architecture" / "Memory.md").write_text("# Memory\n\nUse local files.\n", encoding="utf-8")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.import_obsidian(target, vault)
+
+        self.assertEqual(code, 0)
+        self.assertTrue((target / "raw/obsidian/vault/Architecture/Memory.md").exists())
+        self.assertIn("Obsidian import:", out.getvalue())
+        self.assertIn("Ask your agent: ingest raw/obsidian/vault into Link", out.getvalue())
+
     def test_demo_refuses_to_overwrite_non_demo_directory(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-demo-test-"))
         target = tmp / "not-demo"

@@ -44,11 +44,19 @@
     <div class="section-inner doc-grid">
       <aside class="toc">
         <strong>On this page</strong>
-        <a href="#open">Open the vault</a>
+        <a href="#import">Import a vault</a>
+        <a href="#open">Open the wiki</a>
         <a href="#edit">Edit safely</a>
         <a href="#sync">Keep indexes current</a>
       </aside>
       <article class="doc-content">
+        <h2 id="import">Import An Existing Obsidian Vault</h2>
+        <p>Use <code>link import-obsidian</code> when you already have project notes in Obsidian and want Link agents to ingest them as source-backed knowledge. Link copies Markdown notes into <code>raw/obsidian/&lt;vault&gt;/</code>, skips Obsidian plugin state, and blocks notes with secret-looking values before writing them.</p>
+        <pre><code>link init ~/link
+link import-obsidian ~/Documents/ObsidianVault ~/link
+link ingest-status ~/link</code></pre>
+        <p>The import does not silently create durable memories. It stages raw source notes, then the normal ingest and proposal workflow decides what becomes wiki knowledge or reviewed memory.</p>
+
         <h2 id="open">Open The Link Wiki</h2>
         <p>In Obsidian, choose <strong>Open folder as vault</strong> and select your Link wiki folder:</p>
         <pre><code>~/link/wiki</code></pre>

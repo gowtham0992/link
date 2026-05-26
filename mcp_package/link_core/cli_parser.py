@@ -88,6 +88,14 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     ingest_status_cmd.add_argument("target", nargs="?", default=".")
     ingest_status_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
+    obsidian_cmd = sub.add_parser("import-obsidian", help="copy Obsidian Markdown notes into raw/ for Link ingest")
+    obsidian_cmd.add_argument("vault", help="path to the Obsidian vault folder")
+    obsidian_cmd.add_argument("target", nargs="?", default=".")
+    obsidian_cmd.add_argument("--overwrite", action="store_true", help="replace previously imported raw notes")
+    obsidian_cmd.add_argument("--dry-run", action="store_true", help="show what would be imported without writing files")
+    obsidian_cmd.add_argument("--limit", type=int, default=None, help="maximum notes to scan/import")
+    obsidian_cmd.add_argument("--json", action="store_true", help="print machine-readable import status")
+
     remember_cmd = sub.add_parser("remember", help="save a local agent memory")
     remember_cmd.add_argument("text", help="memory text to save")
     remember_cmd.add_argument("target", nargs="?", default=".")
@@ -308,6 +316,15 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["validate"](Path(args.target), strict=args.strict, json_output=args.json)
     if command == "ingest-status":
         return handlers["ingest-status"](Path(args.target), json_output=args.json)
+    if command == "import-obsidian":
+        return handlers["import-obsidian"](
+            Path(args.target),
+            Path(args.vault),
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+            limit=args.limit,
+            json_output=args.json,
+        )
     if command == "remember":
         return handlers["remember"](
             Path(args.target),

@@ -84,6 +84,28 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.python, "/tmp/python")
         self.assertTrue(args.json)
 
+    def test_import_obsidian_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "import-obsidian",
+            "/tmp/vault",
+            "/tmp/link",
+            "--overwrite",
+            "--dry-run",
+            "--limit",
+            "12",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "import-obsidian")
+        self.assertEqual(args.vault, "/tmp/vault")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertTrue(args.overwrite)
+        self.assertTrue(args.dry_run)
+        self.assertEqual(args.limit, 12)
+        self.assertTrue(args.json)
+
     def test_version_command_routes_to_handler(self):
         parser = build_cli_parser()
 
@@ -226,6 +248,34 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertTrue(calls[0][2]["write"])
         self.assertEqual(calls[0][2]["config_path"], "/tmp/mcp.json")
         self.assertEqual(calls[0][2]["python_cmd"], "/tmp/python")
+        self.assertTrue(calls[0][2]["json_output"])
+
+    def test_dispatch_routes_import_obsidian_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "import-obsidian",
+            "/tmp/vault",
+            "/tmp/link",
+            "--overwrite",
+            "--dry-run",
+            "--limit",
+            "3",
+            "--json",
+        ])
+        calls = []
+
+        def import_obsidian_handler(target, vault, **kwargs):
+            calls.append((target, vault, kwargs))
+            return 5
+
+        code = dispatch_cli_command(args, {"import-obsidian": import_obsidian_handler})
+
+        self.assertEqual(code, 5)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], Path("/tmp/vault"))
+        self.assertTrue(calls[0][2]["overwrite"])
+        self.assertTrue(calls[0][2]["dry_run"])
+        self.assertEqual(calls[0][2]["limit"], 3)
         self.assertTrue(calls[0][2]["json_output"])
 
     def test_dispatch_routes_welcome_arguments(self):

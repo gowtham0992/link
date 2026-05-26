@@ -271,9 +271,16 @@ python3 -m venv ~/.link-mcp-venv
 Full setup: [MCP guide](https://gowtham0992.github.io/link/mcp.html).
 </details>
 
-Obsidian users can open `~/link/wiki` directly as a vault. See the
-[Obsidian guide](https://gowtham0992.github.io/link/obsidian.html) for the safe
-edit and validation loop.
+Obsidian users can import an existing vault into `raw/` for agent ingest, or
+open `~/link/wiki` directly as a vault for editing Link pages:
+
+```bash
+link init ~/link
+link import-obsidian ~/Documents/ObsidianVault ~/link
+```
+
+See the [Obsidian guide](https://gowtham0992.github.io/link/obsidian.html) for
+the import, edit, and validation loop.
 
 ## Storage Model
 

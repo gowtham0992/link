@@ -16,6 +16,7 @@ Usage:
   python link.py migrate [target]
   python link.py validate [target]
   python link.py ingest-status [target]
+  python link.py import-obsidian <vault> [target]
   python link.py remember "memory text" [target]
   python link.py propose-memories <file-or-text> [target]
   python link.py capture-inbox [target]
@@ -205,6 +206,10 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+)
+from link_core.obsidian import (
+    import_obsidian_vault as _core_import_obsidian_vault,
+    render_import_obsidian_text as _core_render_import_obsidian_text,
 )
 from link_core.operations import (
     operation_report as _core_operation_report,
@@ -753,6 +758,31 @@ def ingest_status(target: Path, json_output: bool = False) -> int:
 
     print(_core_render_ingest_status_text(str(target), status))
     return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
+
+
+def import_obsidian(
+    target: Path,
+    vault: Path,
+    overwrite: bool = False,
+    dry_run: bool = False,
+    limit: int | None = None,
+    json_output: bool = False,
+) -> int:
+    try:
+        payload = _core_import_obsidian_vault(
+            target,
+            vault,
+            overwrite=overwrite,
+            dry_run=dry_run,
+            limit=limit,
+        )
+    except ValueError as exc:
+        if json_output:
+            print(json.dumps({"status": "error", "error": str(exc)}, indent=2))
+        else:
+            print(f"Could not import Obsidian vault: {exc}", file=sys.stderr)
+        return 1
+    return _emit_json_or_text(payload, json_output, _core_render_import_obsidian_text)
 
 
 def rebuild_backlinks(target: Path) -> int:
@@ -1807,6 +1837,7 @@ def main(argv: list[str] | None = None) -> int:
             "migrate": migrate,
             "validate": validate,
             "ingest-status": ingest_status,
+            "import-obsidian": import_obsidian,
             "remember": remember,
             "propose-memories": propose_memories,
             "capture-session": capture_session,
