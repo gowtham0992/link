@@ -35,6 +35,7 @@ Usage:
   python link.py restore-memory <name-or-title> [target]
   python link.py forget-memory <name-or-title> [target] --confirm
   python link.py memory-inbox [target]
+  python link.py memory-log [target]
   python link.py review-memory <name-or-title> [target]
   python link.py explain-memory <name-or-title> [target]
   python link.py rebuild-index [target]
@@ -136,6 +137,9 @@ from link_core.audit_export import (
     render_compliance_export_text as _core_render_compliance_export_text,
     write_compliance_export as _core_write_compliance_export,
 )
+from link_core.memory_log import (
+    memory_log_payload as _core_memory_log_payload,
+)
 from link_core.team_sync import (
     build_team_sync_payload as _core_build_team_sync_payload,
     render_team_sync_text as _core_render_team_sync_text,
@@ -178,6 +182,7 @@ from link_core.cli_memory import (
     render_forget_memory_text as _core_render_forget_memory_text,
     render_memory_audit_text as _core_render_memory_audit_text,
     render_memory_inbox_text as _core_render_memory_inbox_text,
+    render_memory_log_text as _core_render_memory_log_text,
     render_memory_status_text as _core_render_memory_status_text,
     render_profile_text as _core_render_profile_text,
     render_propose_memories_text as _core_render_propose_memories_text,
@@ -1442,6 +1447,20 @@ def memory_inbox(
     )
 
 
+def memory_log(target: Path, limit: int = 50, include_captures: bool = True, json_output: bool = False) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    payload = _core_memory_log_payload(wiki_dir, limit=limit, include_captures=include_captures)
+    return _emit_json_or_text(
+        payload,
+        json_output,
+        lambda data: _core_render_memory_log_text(data, target=target),
+    )
+
+
 def review_memory(target: Path, identifier: str, note: str | None = None, json_output: bool = False) -> int:
     try:
         result = _mark_memory_reviewed(target, identifier, note=note)
@@ -1928,6 +1947,7 @@ def main(argv: list[str] | None = None) -> int:
             "restore-memory": restore_memory,
             "forget-memory": forget_memory,
             "memory-inbox": memory_inbox,
+            "memory-log": memory_log,
             "review-memory": review_memory,
             "explain-memory": explain_memory,
             "rebuild-index": rebuild_index,

@@ -10,6 +10,7 @@ from link_core.web_memory_pages import (  # noqa: E402
     render_captures_page,
     render_inbox_page,
     render_memory_explanation_page,
+    render_memory_log_page,
     render_memory_audit_page,
     render_memory_dashboard_page,
     render_profile_page,
@@ -180,6 +181,31 @@ def test_render_memory_audit_page_reports_risks():
     assert 'data-copy-text="review Link memory inbox for project alpha"' in html
     assert "needs_attention" in html
     assert "Review &lt;memory&gt;" in html
+
+
+def test_render_memory_log_page_shows_lifecycle_events():
+    payload = {
+        "count": 1,
+        "total_matching": 1,
+        "privacy_note": "Memory bodies are not included.",
+        "entries": [
+            {
+                "timestamp": "2026-05-25T00:00:00Z",
+                "operation": "remember",
+                "category": "memory",
+                "description": "Prefer local memory",
+                "summary": "Created memory: wiki/memories/prefer-local-memory.md",
+                "memory_paths": ["wiki/memories/prefer-local-memory.md"],
+                "details": ["Created: memories/prefer-local-memory.md"],
+            }
+        ],
+    }
+
+    html = render_memory_log_page(payload, layout=_layout)
+
+    assert "Memory Changelog" in html
+    assert "Prefer local memory" in html
+    assert "Memory bodies are not included" in html
 
 
 def test_render_captures_page_shows_redaction_and_read_warnings():

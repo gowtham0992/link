@@ -365,6 +365,29 @@ def render_inbox_page(
     return layout("Memory Review Inbox", body)
 
 
+def render_memory_log_page(log_payload: Mapping[str, object], *, layout: PageLayout) -> str:
+    entries = _dict_list(log_payload.get("entries"))
+    if entries:
+        rows = "".join(_render_memory_log_item(entry) for entry in entries)
+        content = f"<ul class='page-list memory-log-list'>{rows}</ul>"
+    else:
+        content = (
+            "<p>No memory lifecycle events yet.</p>"
+            '<p><a class="button-link" href="/propose">Create memory proposals</a></p>'
+        )
+    body = (
+        '<div class="breadcrumb"><a href="/">Link</a> / memory log</div>'
+        '<h1>Memory Changelog</h1>'
+        '<div class="memory-profile">'
+        '<p class="summary">A privacy-safe timeline of memory creates, updates, reviews, archives, restores, forgets, and capture accepts.</p>'
+        f'{render_stat_grid([(log_payload.get("count", 0), "shown"), (log_payload.get("total_matching", 0), "matching")])}'
+        f'<p>{html.escape(str(log_payload.get("privacy_note") or ""))}</p>'
+        f'{content}'
+        '</div>'
+    )
+    return layout("Memory Changelog", body)
+
+
 def render_memory_explanation_page(
     explanation: Mapping[str, object],
     *,
@@ -429,6 +452,30 @@ def render_memory_explanation_page(
         f'<h2>Memory Body</h2>{body_html}'
     )
     return layout(f"Explain: {title}", body)
+
+
+def _render_memory_log_item(entry: Mapping[str, object]) -> str:
+    paths = _list(entry.get("memory_paths"))
+    path_html = ""
+    if paths:
+        path_html = "<div class='memory-meta'>Memories: " + html.escape(", ".join(str(path) for path in paths)) + "</div>"
+    details = _list(entry.get("details"))
+    detail_html = ""
+    if details:
+        detail_html = "<ul class='memory-issues'>" + "".join(
+            f"<li>{html.escape(str(detail))}</li>"
+            for detail in details[:4]
+        ) + "</ul>"
+    return (
+        "<li>"
+        f"<strong>{html.escape(str(entry.get('operation') or 'event'))}</strong>"
+        f"<div class='memory-meta'>{html.escape(str(entry.get('timestamp') or ''))} · {html.escape(str(entry.get('category') or 'memory'))}</div>"
+        f"<p>{html.escape(str(entry.get('description') or ''))}</p>"
+        f"<small>{html.escape(str(entry.get('summary') or ''))}</small>"
+        f"{path_html}"
+        f"{detail_html}"
+        "</li>"
+    )
 
 
 def _render_inbox_item(item: Mapping[str, object], *, page_href: PageHref) -> str:

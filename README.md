@@ -320,6 +320,8 @@ creating a duplicate.
   expiry dates, provenance, and audit logging.
 - `explain_memory`: why a memory exists, what it links to, whether it is ready
   for recall, and what needs review.
+- `memory_log`: recent memory lifecycle changes from `wiki/log.md`, without
+  raw source or memory bodies.
 
 Use `review_after` for time-sensitive preferences or decisions. When that date
 arrives, the memory reappears in Link's review inbox so an agent can ask the
@@ -332,6 +334,10 @@ For team handoff or security review, `link compliance-export --output audit.json
 writes a redacted JSON packet with readiness, validation, memory review status,
 operation markers, and recent audit log entries. Raw source contents and memory
 bodies are not included.
+
+For day-to-day auditability, `link memory-log ~/link` shows what Link recently
+remembered, updated, reviewed, archived, restored, forgot, or accepted from raw
+captures.
 
 For Git-backed team memory, `link team-sync ~/link` checks whether the workspace
 is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,

@@ -1,56 +1,19 @@
 """Compliance-style audit exports for Link."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Mapping
 
 from .files import atomic_write_json
-from .log import utc_timestamp
+from .log import read_log_entries, utc_timestamp
 from .memory import memory_inbox, memory_profile, memory_records, slim_memory
 from .operations import pending_operations
 from .status import link_status
 
 
-LOG_HEADING_RE = re.compile(r"^## \[(?P<timestamp>[^\]]+)\] (?P<operation>[^|]+)\| (?P<description>.*)$")
-
-
 def log_entries(wiki_dir: Path, *, limit: int = 100) -> list[dict[str, object]]:
     """Return recent structured entries from ``wiki/log.md`` without raw content."""
-    log_path = wiki_dir / "log.md"
-    if not log_path.exists():
-        return []
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return []
-    entries: list[dict[str, object]] = []
-    current: dict[str, object] | None = None
-    for line in lines:
-        match = LOG_HEADING_RE.match(line.strip())
-        if match:
-            if current:
-                entries.append(current)
-            current = {
-                "timestamp": match.group("timestamp").strip(),
-                "operation": match.group("operation").strip(),
-                "description": match.group("description").strip(),
-                "details": [],
-            }
-            continue
-        if current is None:
-            continue
-        stripped = line.strip()
-        if stripped == "---":
-            entries.append(current)
-            current = None
-        elif stripped.startswith("- "):
-            details = current.setdefault("details", [])
-            if isinstance(details, list):
-                details.append(stripped[2:])
-    if current:
-        entries.append(current)
-    return entries[-max(1, min(limit, 500)):]
+    return read_log_entries(wiki_dir, limit=max(1, min(limit, 500)))
 
 
 def build_compliance_export(

@@ -258,6 +258,12 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     inbox_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     inbox_cmd.add_argument("--json", action="store_true", help="print machine-readable inbox")
 
+    memory_log_cmd = sub.add_parser("memory-log", help="show recent memory lifecycle events from wiki/log.md")
+    memory_log_cmd.add_argument("target", nargs="?", default=".")
+    memory_log_cmd.add_argument("--limit", type=int, default=50)
+    memory_log_cmd.add_argument("--no-captures", action="store_true", help="hide raw capture lifecycle events")
+    memory_log_cmd.add_argument("--json", action="store_true", help="print machine-readable memory log")
+
     review_cmd = sub.add_parser("review-memory", help="mark a memory as reviewed")
     review_cmd.add_argument("identifier", help="memory page name, title, or path")
     review_cmd.add_argument("target", nargs="?", default=".")
@@ -493,6 +499,13 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             limit=args.limit,
             include_archived=args.include_archived,
             project=args.project,
+            json_output=args.json,
+        )
+    if command == "memory-log":
+        return handlers["memory-log"](
+            Path(args.target),
+            limit=args.limit,
+            include_captures=not args.no_captures,
             json_output=args.json,
         )
     if command == "review-memory":

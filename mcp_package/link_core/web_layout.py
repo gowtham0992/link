@@ -111,6 +111,7 @@ def render_header_html() -> str:
         <a href="/inbox">inbox</a>
         <a href="/captures">captures</a>
         <a href="/profile">profile</a>
+        <a href="/memory-log">memory log</a>
         <a href="/page/log">log</a>
         <a href="/all">all pages</a>
       </div>

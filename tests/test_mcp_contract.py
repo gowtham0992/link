@@ -700,6 +700,20 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(reviewed["remaining_issue_count"], 0)
         self.assertEqual(clear["review_count"], 0)
 
+    def test_memory_log_contract(self):
+        created = json.loads(self.server.remember_memory(
+            "Memory log contract tests should be visible in the lifecycle log.",
+            title="Memory log contract",
+        ))
+        payload = json.loads(self.server.memory_log())
+
+        self.assertTrue(created["created"])
+        self.assertEqual(payload["schema"], "link-memory-log-v1")
+        self.assertGreaterEqual(payload["count"], 1)
+        self.assertEqual(payload["entries"][-1]["operation"], "remember")
+        self.assertIn("entries", payload)
+        self.assertIn("Memory bodies", payload["privacy_note"])
+
     def test_memory_inbox_project_filter_contract(self):
         self.server.review_memory("prefer-local-personal-memory")
         alpha = json.loads(self.server.remember_memory(

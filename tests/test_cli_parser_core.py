@@ -105,6 +105,17 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.host, "localhost")
         self.assertTrue(args.json)
 
+    def test_memory_log_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args(["memory-log", "/tmp/link", "--limit", "7", "--no-captures", "--json"])
+
+        self.assertEqual(args.command, "memory-log")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.limit, 7)
+        self.assertTrue(args.no_captures)
+        self.assertTrue(args.json)
+
     def test_import_obsidian_command_options(self):
         parser = build_cli_parser()
 

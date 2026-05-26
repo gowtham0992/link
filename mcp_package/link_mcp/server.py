@@ -162,6 +162,9 @@ from link_core.log import (
     append_log as _core_append_log,
     utc_timestamp as _core_utc_timestamp,
 )
+from link_core.memory_log import (
+    memory_log_payload as _core_memory_log_payload,
+)
 from link_core.operations import (
     operation_report as _core_operation_report,
 )
@@ -311,6 +314,14 @@ def _memory_inbox(limit: int = 20, include_archived: bool = False, project: str 
         review_command="review_memory",
         project=project,
         command_target=WIKI_DIR.parent,
+    )
+
+
+def _memory_log(limit: int = 50, include_captures: bool = True) -> dict[str, object]:
+    return _core_memory_log_payload(
+        WIKI_DIR,
+        limit=_parse_limit(limit, default=50),
+        include_captures=include_captures,
     )
 
 
@@ -1073,6 +1084,18 @@ def memory_inbox(limit: int = 20, include_archived: bool = False, project: str =
     """
     limit = _parse_limit(limit, default=20)
     return json.dumps(_memory_inbox(limit=limit, include_archived=include_archived, project=project), ensure_ascii=False)
+
+
+@mcp.tool()
+def memory_log(limit: int = 50, include_captures: bool = True) -> str:
+    """List recent memory lifecycle changes.
+
+    Use this when the user asks what Link remembered, updated, reviewed,
+    archived, restored, forgot, or accepted from captures recently. The result
+    is metadata from wiki/log.md and does not include raw source or memory
+    bodies.
+    """
+    return json.dumps(_memory_log(limit=limit, include_captures=include_captures), ensure_ascii=False)
 
 
 @mcp.tool()

@@ -331,6 +331,47 @@ def render_memory_inbox_text(
     return 0, "\n".join(lines)
 
 
+def render_memory_log_text(payload: Mapping[str, object], *, target: object) -> tuple[int, str]:
+    lines = [
+        f"Link memory log: {target}",
+        f"{payload.get('count', 0)} recent memory event(s)",
+        str(payload.get("privacy_note") or ""),
+        "",
+    ]
+    entries = payload.get("entries", [])
+    if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes)) or not entries:
+        lines.extend([
+            "No memory lifecycle events yet.",
+            "",
+            "Next:",
+            f"  {_shell_words('python3', 'link.py', 'remember', 'a useful preference or decision', target)}",
+        ])
+        return 0, "\n".join(lines)
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        lines.append(
+            f"- {entry.get('timestamp', '')} · {entry.get('operation', '')} · {entry.get('description', '')}"
+        )
+        summary = str(entry.get("summary") or "").strip()
+        if summary:
+            lines.append(f"  {summary}")
+        paths = entry.get("memory_paths", [])
+        if isinstance(paths, Sequence) and not isinstance(paths, (str, bytes)) and paths:
+            lines.append("  Memories: " + ", ".join(str(path) for path in paths))
+        details = entry.get("details", [])
+        if isinstance(details, Sequence) and not isinstance(details, (str, bytes)):
+            for detail in list(details)[:4]:
+                lines.append(f"  - {detail}")
+    actions = payload.get("next_actions", [])
+    if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)) and actions:
+        lines.extend(["", "Next actions:"])
+        for action in actions:
+            if isinstance(action, Mapping):
+                lines.append(f"- {action.get('label')}: {action.get('command')}")
+    return 0, "\n".join(lines)
+
+
 def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, str]:
     memory = explanation["memory"]
     recall_info = explanation["recall"]

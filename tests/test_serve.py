@@ -332,6 +332,7 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(payload["local_only"])
         self.assertEqual(payload["recommended"]["readiness"], "/api/health")
         self.assertIn("/api/query-link", payload["endpoints"]["read"])
+        self.assertIn("/api/memory-log", payload["endpoints"]["read"])
         self.assertIn("/api/remember-memory", payload["endpoints"]["write"])
         self.assertEqual(payload["write_header"]["X-Link-Local-Action"], "true")
 
@@ -357,7 +358,31 @@ class ServeTests(unittest.TestCase):
         self.assertIn(b"/prompts", body)
         self.assertIn(b"/propose", body)
         self.assertIn(b"/captures", body)
+        self.assertIn(b"/memory-log", body)
         self.assertIn(b"/all", body)
+
+    def test_memory_log_page_and_api_show_lifecycle_events(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "log.md",
+            "# Link Wiki Log\n\n"
+            "## [2026-05-25T00:00:00Z] remember | Prefer local memory\n\n"
+            "- Created: memories/prefer-local-memory.md\n"
+            "- Scope: user\n\n"
+            "---\n",
+        )
+
+        html = serve._render_memory_log()
+        status, payload = run_handler("GET", "/api/memory-log")
+        page_status, body, _ = run_handler_raw("GET", "/memory-log")
+
+        self.assertIn("Memory Changelog", html)
+        self.assertIn("Prefer local memory", html)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["entries"][0]["operation"], "remember")
+        self.assertEqual(page_status, 200)
+        self.assertIn(b"Memory Changelog", body)
 
     def test_head_status_sends_headers_without_body(self):
         self.make_wiki()
