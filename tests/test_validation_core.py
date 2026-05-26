@@ -97,6 +97,33 @@ class ValidationCoreTests(unittest.TestCase):
         self.assertIn("dead_wikilink", codes)
         self.assertIn("stale_backlinks", codes)
 
+    def test_validate_wiki_rejects_invalid_memory_review_after(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "memories/bad-review-date.md",
+            "---\n"
+            "type: memory\n"
+            "title: Bad Review Date\n"
+            "memory_type: preference\n"
+            "scope: user\n"
+            "status: active\n"
+            "source: unit test\n"
+            "review_status: reviewed\n"
+            "review_after: tomorrow\n"
+            "---\n\n"
+            "# Bad Review Date\n\n"
+            "> **TLDR:** A memory with a bad review date.\n\n"
+            "## Memory\n\nReview later.\n\n"
+            "## Source\n\nunit test\n",
+        )
+        (wiki / "_backlinks.json").write_text(json.dumps(build_backlinks(wiki, body_only=False)), encoding="utf-8")
+
+        payload = validate_wiki(wiki)
+
+        self.assertFalse(payload["passed"])
+        self.assertIn("invalid_review_after", {finding["code"] for finding in payload["findings"]})
+
     def test_validate_wiki_reports_unreadable_pages(self):
         wiki = self.make_wiki()
         write_page(

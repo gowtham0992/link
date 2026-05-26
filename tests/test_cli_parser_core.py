@@ -116,10 +116,20 @@ class CliParserCoreTests(unittest.TestCase):
     def test_memory_choices_are_enforced(self):
         parser = build_cli_parser()
 
-        args = parser.parse_args(["remember", "prefers concise answers", "--type", "preference", "--scope", "user"])
+        args = parser.parse_args([
+            "remember",
+            "prefers concise answers",
+            "--type",
+            "preference",
+            "--scope",
+            "user",
+            "--review-after",
+            "2026-06-01",
+        ])
 
         self.assertEqual(args.memory_type, "preference")
         self.assertEqual(args.scope, "user")
+        self.assertEqual(args.review_after, "2026-06-01")
         with self.assertRaises(SystemExit):
             parser.parse_args(["remember", "bad", "--type", "unsupported"])
 

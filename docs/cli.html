@@ -66,7 +66,7 @@ link welcome
 link next
 link health
 link ingest-status
-link remember "User prefers feature branches for Link work." --type preference --scope project --project link
+link remember "User prefers feature branches for Link work." --type preference --scope project --project link --review-after 2026-08-01
 link brief "working on Link release" --project link
 link query "what should I know before changing the MCP tools?" --budget small --project link
 link validate</code></pre>
@@ -124,7 +124,7 @@ link status [--validate]
 link operations [--limit 20]
 link backup [--label name] [--include-raw]
 link ingest-status
-link remember "text" [--project slug]
+link remember "text" [--project slug] [--review-after YYYY-MM-DD]
 link propose-memories &lt;file-or-text&gt; [--project slug]
 link capture-session &lt;file-or-text&gt; [--project slug]
 link capture-inbox [--project slug]

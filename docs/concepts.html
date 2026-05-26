@@ -84,11 +84,12 @@ query Link for the release process</code></pre>
         <p>Raw files do not silently personalize future agents. Ingest creates source-backed wiki knowledge. Explicit <code>remember</code> creates durable user or project memory.</p>
 
         <h2 id="memory">Memory Lifecycle</h2>
-        <p>A memory is a Markdown page with status, scope, source, review state, graph links, and local log entries. It can be proposed, remembered, reviewed, updated, archived, restored, explained, or forgotten.</p>
+        <p>A memory is a Markdown page with status, scope, source, review state, optional <code>review_after</code> date, graph links, and local log entries. It can be proposed, remembered, reviewed, updated, archived, restored, explained, or forgotten.</p>
         <div class="grid">
           <article class="feature"><h3>Propose</h3><p>Generate candidate memories from chat notes or raw captures without writing durable memory.</p></article>
           <article class="feature"><h3>Approve</h3><p>Save only the memories the user explicitly wants agents to carry forward.</p></article>
           <article class="feature"><h3>Explain</h3><p>Show why a memory exists, whether it is recall-ready, and what graph links support it.</p></article>
+          <article class="feature"><h3>Re-check</h3><p>Use <code>review_after</code> when a memory should come back to the inbox after a date instead of staying trusted forever.</p></article>
         </div>
 
         <h2 id="query">Smart Query Packets</h2>

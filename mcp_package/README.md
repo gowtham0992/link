@@ -105,7 +105,8 @@ Most agents should call:
 7. `validate_wiki(strict=true)` after ingest or large edits.
 
 Use `remember_memory` only when the user explicitly approves saving durable
-memory. Use `propose_memories` or `capture_session` for proposal-only review.
+memory. Add `review_after` for memories that should return to the review inbox
+after a date. Use `propose_memories` or `capture_session` for proposal-only review.
 For local CLI setup checks, `link verify-mcp --json` returns structured
 `issues` and `next_actions` that agents and scripts can consume without parsing
 terminal text.
@@ -143,7 +144,7 @@ In the local web proposal picker, unreadable raw files are surfaced as
 | `review_memory(identifier, note?)` | Mark a confirmed memory as reviewed. |
 | `explain_memory(identifier)` | Explain provenance, lifecycle, graph links, review issues, and recall readiness for one memory. |
 | `recall_memory(query, limit?, include_archived?, project?)` | Search durable local memories for preferences, decisions, and project context. |
-| `remember_memory(memory, title?, memory_type?, scope?, tags?, source?, allow_duplicate?, allow_conflict?, project?)` | Save an explicit user-approved local memory under `wiki/memories/`; strong duplicates and likely conflicts require explicit override. |
+| `remember_memory(memory, title?, memory_type?, scope?, tags?, source?, allow_duplicate?, allow_conflict?, project?, review_after?)` | Save an explicit user-approved local memory under `wiki/memories/`; strong duplicates and likely conflicts require explicit override. `review_after` accepts `YYYY-MM-DD` for scheduled re-checks. |
 | `propose_memories(text, source?, limit?, project?)` | Propose durable memories from chat/session notes without writing them. |
 | `capture_session(text, title?, source?, limit?, project?)` | Save long chat/session notes under `raw/memory-captures/` and return proposal-only memory candidates plus secret-looking content warnings. |
 | `capture_inbox(limit?, project?)` | Review saved raw captures with redacted snippets, secret-warning labels, and accept/redact/delete commands. |

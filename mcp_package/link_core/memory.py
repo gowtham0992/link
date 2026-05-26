@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import urllib.parse
 from collections.abc import Callable, Iterable, Mapping
+from datetime import date
 from pathlib import Path
 
 from .files import atomic_write_text
@@ -101,6 +102,7 @@ CONFLICT_GROUP_CONTEXT = {
 }
 MemoryLogWriter = Callable[[str, str, str, list[str]], None]
 BacklinkRebuilder = Callable[[], bool]
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def slugify(value: str, fallback: str = "memory") -> str:
@@ -196,6 +198,19 @@ def is_active_memory(record: Mapping[str, object]) -> bool:
     return str(record.get("status") or "active").lower() not in {"archived", "stale"}
 
 
+def _parse_review_date(value: object) -> date | None:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return None
+    if not DATE_RE.match(text):
+        raise ValueError("review_after must use YYYY-MM-DD")
+    return date.fromisoformat(text)
+
+
+def _today(today: str | None = None) -> date:
+    return _parse_review_date(today) if today else date.today()
+
+
 def memory_visible_for_project(record: Mapping[str, object], project: str | None = None) -> bool:
     project_name = normalize_project(project)
     if not project_name:
@@ -248,6 +263,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "source": meta.get("source", ""),
         "review_status": meta.get("review_status") or "pending",
         "reviewed_at": meta.get("reviewed_at", ""),
+        "review_after": meta.get("review_after", ""),
         "review_note": meta.get("review_note", ""),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
@@ -273,6 +289,7 @@ def memory_records(wiki_dir: Path, include_body: bool = True) -> list[dict[str, 
 def memory_review_issues(
     record: Mapping[str, object],
     review_command: str = "review-memory",
+    today: str | None = None,
 ) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     status = str(record.get("status") or "active").lower()
@@ -301,6 +318,25 @@ def memory_review_issues(
             "message": f"Unknown review_status: {review_status}.",
             "suggested_action": "Use pending, reviewed, or needs_update.",
         })
+    review_after = str(record.get("review_after") or "").strip()
+    if review_after:
+        try:
+            due = _parse_review_date(review_after)
+        except ValueError as exc:
+            issues.append({
+                "code": "invalid_review_after",
+                "severity": "high",
+                "message": str(exc),
+                "suggested_action": "Use a YYYY-MM-DD date or remove review_after.",
+            })
+        else:
+            if status == "active" and due is not None and due <= _today(today):
+                issues.append({
+                    "code": "review_due",
+                    "severity": "medium",
+                    "message": f"Memory review is due after {review_after}.",
+                    "suggested_action": f"Confirm it is still accurate, then run {review_command}.",
+                })
 
     if status == "stale":
         issues.append({
@@ -430,7 +466,7 @@ def memory_action_hints(
         ))
         return actions
 
-    if issue_codes & {"invalid_review_status", "invalid_memory_type", "invalid_scope", "missing_source", "missing_date_captured"}:
+    if issue_codes & {"invalid_review_status", "invalid_review_after", "invalid_memory_type", "invalid_scope", "missing_source", "missing_date_captured"}:
         add(_memory_action(
             kind="edit_metadata",
             label="Edit metadata",
@@ -460,7 +496,7 @@ def memory_action_hints(
             arguments={"identifier": name, "reason": "stale"},
             priority="high",
         ))
-    if "pending_review" in issue_codes and not any(
+    if issue_codes & {"pending_review", "review_due"} and not any(
         issue.get("severity") == "high" for issue in issue_list
     ):
         add(_memory_action(
@@ -1084,6 +1120,7 @@ def write_memory_page(
     source: str,
     timestamp: str,
     project: str | None = None,
+    review_after: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
@@ -1099,6 +1136,9 @@ def write_memory_page(
     if not clean_text:
         raise ValueError("memory text required")
     clean_source = source.strip() if source is not None else ""
+    clean_review_after = str(review_after or "").strip()
+    if clean_review_after:
+        _parse_review_date(clean_review_after)
     clean_project = normalize_project(project) if scope == "project" else ""
     memory_title_value = memory_title(clean_text, title)
     summary = clean_text.splitlines()[0].strip()
@@ -1154,6 +1194,7 @@ def write_memory_page(
         if slug_tag and slug_tag not in tag_values:
             tag_values.append(slug_tag)
     project_line = f'project: "{frontmatter_string(clean_project)}"\n' if clean_project else ""
+    review_after_line = f'review_after: "{frontmatter_string(clean_review_after)}"\n' if clean_review_after else ""
 
     page = f"""---
 type: memory
@@ -1164,6 +1205,7 @@ scope: {scope}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
+{review_after_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1213,6 +1255,7 @@ tags: {yaml_list(tag_values)}
         "memory_type": memory_type,
         "scope": scope,
         "project": clean_project,
+        "review_after": clean_review_after,
         "backlinks_rebuilt": bool(backlinks_rebuilt),
         "duplicate_override": bool(duplicate_candidates and allow_duplicate),
         "duplicate_candidates": duplicate_candidates,

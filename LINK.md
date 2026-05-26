@@ -178,6 +178,7 @@ update_count: 0
 source: "manual | conversation | mcp | raw/source.md"
 last_update_source: ""
 review_status: pending | reviewed | needs_update
+review_after: "optional YYYY-MM-DD date for scheduled re-check"
 tags: [memory, relevant-tag]
 ---
 

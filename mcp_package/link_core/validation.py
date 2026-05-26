@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ REQUIRED_SECTIONS = {
 }
 
 SUMMARY_RE = re.compile(r">\s*\*\*(?:TLDR|Query):\*\*", re.IGNORECASE)
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _finding(severity: str, code: str, path: str, message: str) -> dict[str, str]:
@@ -162,6 +164,16 @@ def validate_wiki(wiki_dir: Path, *, strict: bool = False) -> dict[str, Any]:
         for field in required_fields:
             if not str(meta.get(field) or "").strip():
                 findings.append(_finding("error", "missing_frontmatter_field", rel, f"Missing required frontmatter field: {field}"))
+
+        review_after = str(meta.get("review_after") or "").strip().strip('"')
+        if expected_type == "memory" and review_after:
+            if not DATE_RE.match(review_after):
+                findings.append(_finding("error", "invalid_review_after", rel, "review_after must use YYYY-MM-DD."))
+            else:
+                try:
+                    date.fromisoformat(review_after)
+                except ValueError:
+                    findings.append(_finding("error", "invalid_review_after", rel, "review_after must be a valid calendar date."))
 
         if not SUMMARY_RE.search(body):
             findings.append(_finding("warning", "missing_summary", rel, "Page should include a TLDR or Query summary."))

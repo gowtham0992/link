@@ -309,9 +309,13 @@ creating a duplicate.
 - `ingest_status`: exact next steps for raw files, including source safety,
   stale ingest detection, validation, and memory proposal guidance.
 - `remember_memory`: durable local memory with duplicate/conflict checks,
-  review state, provenance, and audit logging.
+  review state, optional `review_after` re-check dates, provenance, and audit logging.
 - `explain_memory`: why a memory exists, what it links to, whether it is ready
   for recall, and what needs review.
+
+Use `review_after` for time-sensitive preferences or decisions. When that date
+arrives, the memory reappears in Link's review inbox so an agent can ask the
+user to confirm, update, archive, or forget it instead of trusting stale context.
 
 ## Agent Contract
 

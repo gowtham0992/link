@@ -22,6 +22,7 @@ from link_core.memory import (  # noqa: E402
     memory_inbox,
     memory_log_entries,
     memory_profile,
+    memory_review_issues,
     memory_records,
     propose_memories_from_text,
     recall_memories,
@@ -110,6 +111,43 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(recalled[0]["review_issue_count"], 0)
         self.assertEqual(recalled[0]["highest_review_severity"], "none")
         self.assertNotIn("body", recalled[0])
+
+    def test_review_after_marks_memory_due(self):
+        record = {
+            "name": "review-me",
+            "memory_type": "preference",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-01T00:00:00Z",
+            "source": "unit test",
+            "review_status": "reviewed",
+            "review_after": "2026-05-20",
+            "tldr": "Review me later.",
+        }
+
+        issues = memory_review_issues(record, today="2026-05-25")
+        inbox = memory_inbox([record])
+
+        self.assertIn("review_due", [issue["code"] for issue in issues])
+        self.assertEqual(inbox["review_count"], 1)
+        self.assertEqual(inbox["items"][0]["primary_action"]["kind"], "review")
+
+    def test_review_after_rejects_invalid_dates(self):
+        record = {
+            "name": "bad-review-date",
+            "memory_type": "preference",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-01T00:00:00Z",
+            "source": "unit test",
+            "review_status": "reviewed",
+            "review_after": "tomorrow",
+            "tldr": "Invalid review date.",
+        }
+
+        issues = memory_review_issues(record)
+
+        self.assertIn("invalid_review_after", [issue["code"] for issue in issues])
 
     def test_memory_inbox_returns_action_plan(self):
         records = [
@@ -858,6 +896,7 @@ class MemoryCoreTests(unittest.TestCase):
             tags="git, release",
             source="unit test",
             timestamp="2026-05-05T06:00:00Z",
+            review_after="2026-08-01",
             records=[],
             log_writer=log_writer,
             rebuild_backlinks=lambda: rebuilds.append(True) or True,
@@ -872,7 +911,9 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(rebuilds, [True])
         self.assertIn('title: "Prefer release branches"', memory_text)
         self.assertIn("memory_type: preference", memory_text)
+        self.assertIn('review_after: "2026-08-01"', memory_text)
         self.assertIn("tags: [memory, preference, git, release]", memory_text)
+        self.assertEqual(created["review_after"], "2026-08-01")
         self.assertIn("## Source\n\nunit test", memory_text)
         self.assertIn("[[prefer-release-branches]]", index_text)
         self.assertEqual(logged[-1][1], "remember")
