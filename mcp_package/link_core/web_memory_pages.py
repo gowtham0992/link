@@ -509,12 +509,26 @@ def _render_memory_log_item(entry: Mapping[str, object]) -> str:
             f"<li>{html.escape(str(detail))}</li>"
             for detail in details[:4]
         ) + "</ul>"
+    changes = _dict_list(entry.get("changes"))
+    change_html = ""
+    if changes:
+        change_html = "<ul class='memory-issues'>" + "".join(
+            "<li>"
+            f"<strong>{html.escape(str(change.get('field') or 'field'))}</strong>: "
+            f"{html.escape(str(change.get('from') or 'unset'))} -> {html.escape(str(change.get('to') or 'unset'))}"
+            "</li>"
+            for change in changes[:4]
+        ) + "</ul>"
+    impact = str(entry.get("impact") or "")
+    impact_html = f'<p class="summary">{html.escape(impact)}</p>' if impact else ""
     return (
         "<li>"
         f"<strong>{html.escape(str(entry.get('operation') or 'event'))}</strong>"
         f"<div class='memory-meta'>{html.escape(str(entry.get('timestamp') or ''))} · {html.escape(str(entry.get('category') or 'memory'))}</div>"
         f"<p>{html.escape(str(entry.get('description') or ''))}</p>"
         f"<small>{html.escape(str(entry.get('summary') or ''))}</small>"
+        f"{impact_html}"
+        f"{change_html}"
         f"{path_html}"
         f"{detail_html}"
         "</li>"

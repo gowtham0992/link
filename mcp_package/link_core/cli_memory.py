@@ -375,6 +375,16 @@ def render_memory_log_text(payload: Mapping[str, object], *, target: object) -> 
         summary = str(entry.get("summary") or "").strip()
         if summary:
             lines.append(f"  {summary}")
+        impact = str(entry.get("impact") or "").strip()
+        if impact:
+            lines.append(f"  Impact: {impact}")
+        changes = entry.get("changes", [])
+        if isinstance(changes, Sequence) and not isinstance(changes, (str, bytes)):
+            for change in changes[:4]:
+                if isinstance(change, Mapping):
+                    lines.append(
+                        f"  Change: {change.get('field', '')} {change.get('from', '')} -> {change.get('to', '')}"
+                    )
         paths = entry.get("memory_paths", [])
         if isinstance(paths, Sequence) and not isinstance(paths, (str, bytes)) and paths:
             lines.append("  Memories: " + ", ".join(str(path) for path in paths))

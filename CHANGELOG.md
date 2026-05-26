@@ -20,6 +20,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added memory `visibility` metadata (`private`, `project`, or `team`) so team sharing can rely on explicit user intent instead of inferring privacy from scope alone.
 - Added `link set-memory-visibility` and MCP `set_memory_visibility` so existing memories can move between private, project, and team sharing intent after explicit user approval.
 - Added `link memory-log`, MCP `memory_log`, `/memory-log`, and `/api/memory-log` for recent memory lifecycle changes without exposing raw source or memory bodies.
+- Added privacy-safe memory-log change summaries so review, status, and visibility transitions are visible without exposing memory bodies.
 - Added `link wins`, MCP `memory_wins`, `/wins`, and `/api/wins` for local, non-telemetry proof signals about what Link memory is carrying.
 - Added a team security review docs page covering local deployment, data boundaries, memory approval gates, Git sharing, audit exports, and current limits.
 - Added a memory contract docs page that explains the stable MCP agent loop, tool groups, write rules, budget behavior, and sharing semantics.

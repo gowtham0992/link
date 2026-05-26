@@ -32,6 +32,7 @@ class MemoryLogCoreTests(unittest.TestCase):
         entry = payload["entries"][0]
         self.assertEqual(entry["operation"], "remember")
         self.assertEqual(entry["memory_paths"], ["wiki/memories/prefer-local-memory.md"])
+        self.assertEqual(entry["impact"], "New durable memory is pending review before default trust.")
         self.assertIn("Memory bodies", payload["privacy_note"])
 
     def test_memory_log_can_hide_capture_events(self):
@@ -61,6 +62,29 @@ class MemoryLogCoreTests(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["entries"][0]["operation"], "demo")
         self.assertEqual(payload["entries"][0]["memory_paths"], ["wiki/memories/prefer-local-memory.md"])
+
+    def test_memory_log_extracts_privacy_safe_state_changes(self):
+        root = Path(tempfile.mkdtemp(prefix="link-memory-log-"))
+        wiki = root / "wiki"
+        wiki.mkdir(parents=True)
+        append_log(
+            wiki,
+            "2026-05-25T00:00:00Z",
+            "set-memory-visibility",
+            "Prefer local memory",
+            [
+                "Updated: memories/prefer-local-memory.md",
+                "Previous visibility: private",
+                "New visibility: team",
+            ],
+        )
+
+        payload = memory_log_payload(wiki)
+        entry = payload["entries"][0]
+
+        self.assertEqual(entry["summary"], "Changed memory visibility: wiki/memories/prefer-local-memory.md")
+        self.assertEqual(entry["impact"], "Sharing intent changed from private to team.")
+        self.assertEqual(entry["changes"], [{"field": "visibility", "from": "private", "to": "team"}])
 
 
 if __name__ == "__main__":

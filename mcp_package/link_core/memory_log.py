@@ -15,6 +15,7 @@ MEMORY_OPERATIONS = {
     "remember",
     "restore-memory",
     "review-memory",
+    "set-memory-visibility",
     "update-memory",
 }
 CAPTURE_OPERATIONS = {
@@ -80,6 +81,7 @@ def _memory_log_entry(entry: Mapping[str, object]) -> dict[str, object]:
     memory_paths = _memory_paths(entry, details)
     category = "capture" if operation in CAPTURE_OPERATIONS else "memory"
     details = _safe_details(operation, details)
+    changes = _state_changes(details)
     return {
         "timestamp": str(entry.get("timestamp") or ""),
         "operation": operation,
@@ -87,6 +89,8 @@ def _memory_log_entry(entry: Mapping[str, object]) -> dict[str, object]:
         "description": str(entry.get("description") or ""),
         "memory_paths": memory_paths,
         "details": details,
+        "changes": changes,
+        "impact": _impact(operation, changes),
         "summary": _summary(operation, str(entry.get("description") or ""), memory_paths),
     }
 
@@ -131,6 +135,57 @@ def _safe_details(operation: str, details: list[str]) -> list[str]:
     return safe[:8]
 
 
+def _state_changes(details: list[str]) -> list[dict[str, str]]:
+    previous: dict[str, str] = {}
+    current: dict[str, str] = {}
+    for detail in details:
+        key, sep, value = detail.partition(":")
+        if not sep:
+            continue
+        key = key.strip().lower()
+        value = value.strip()
+        if key.startswith("previous "):
+            previous[key.removeprefix("previous ").strip()] = value
+        elif key.startswith("new "):
+            current[key.removeprefix("new ").strip()] = value
+    changes: list[dict[str, str]] = []
+    for field in sorted(previous.keys() | current.keys()):
+        before = previous.get(field, "")
+        after = current.get(field, "")
+        if before or after:
+            changes.append({
+                "field": field,
+                "from": before,
+                "to": after,
+            })
+    return changes
+
+
+def _impact(operation: str, changes: list[dict[str, str]]) -> str:
+    if operation == "remember":
+        return "New durable memory is pending review before default trust."
+    if operation == "update-memory":
+        return "Memory changed and returned to review before agents rely on it."
+    if operation == "review-memory":
+        return "Memory is now reviewed for normal recall."
+    if operation == "archive-memory":
+        return "Memory is hidden from default recall without deleting the page."
+    if operation == "restore-memory":
+        return "Memory is available for recall again."
+    if operation == "forget-memory":
+        return "Memory page was permanently deleted after confirmation."
+    if operation == "set-memory-visibility":
+        for change in changes:
+            if change.get("field") == "visibility":
+                return f"Sharing intent changed from {change.get('from') or 'unset'} to {change.get('to') or 'unset'}."
+        return "Memory sharing intent changed."
+    if operation == "accept-capture":
+        return "A reviewed capture proposal became durable memory."
+    if operation in CAPTURE_OPERATIONS:
+        return "Raw capture lifecycle changed; capture contents are not exposed here."
+    return ""
+
+
 def _summary(operation: str, description: str, memory_paths: list[str]) -> str:
     target = memory_paths[0] if memory_paths else description
     if operation == "remember":
@@ -147,6 +202,8 @@ def _summary(operation: str, description: str, memory_paths: list[str]) -> str:
         return f"Restored memory: {target}"
     if operation == "forget-memory":
         return f"Permanently forgot memory: {target}"
+    if operation == "set-memory-visibility":
+        return f"Changed memory visibility: {target}"
     if operation == "capture-session":
         return f"Captured proposal-only notes: {description}"
     if operation == "redact-capture":
