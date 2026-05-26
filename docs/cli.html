@@ -95,6 +95,7 @@ link doctor --fix
 link health
 link status --validate
 link memory-audit
+link compliance-export --output link-audit.json
 link operations
 link benchmark "agent memory"
 link rebuild-index
@@ -123,6 +124,7 @@ link health [dir] [--json]
 link status [--validate]
 link operations [--limit 20]
 link backup [--label name] [--include-raw]
+link compliance-export [dir] [--output audit.json] [--project slug]
 link ingest-status
 link import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
 link remember "text" [--project slug] [--review-after YYYY-MM-DD]

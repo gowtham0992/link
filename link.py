@@ -12,6 +12,7 @@ Usage:
   python link.py health [target]
   python link.py operations [target]
   python link.py backup [target]
+  python link.py compliance-export [target]
   python link.py doctor [target]
   python link.py migrate [target]
   python link.py validate [target]
@@ -127,6 +128,11 @@ from link_core.backup import (
     BackupError as _CoreBackupError,
     create_backup as _core_create_backup,
     list_backups as _core_list_backups,
+)
+from link_core.audit_export import (
+    build_compliance_export as _core_build_compliance_export,
+    render_compliance_export_text as _core_render_compliance_export_text,
+    write_compliance_export as _core_write_compliance_export,
 )
 from link_core.benchmark import (
     build_benchmark_payload as _core_build_benchmark_payload,
@@ -746,6 +752,34 @@ def backup(
     code, text = _core_render_backup_created_text(payload, include_raw=include_raw)
     print(text)
     return code
+
+
+def compliance_export(
+    target: Path,
+    output: str | None = None,
+    project: str | None = None,
+    limit: int = 100,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    payload = _core_build_compliance_export(
+        wiki_dir,
+        version=LINK_VERSION,
+        project=project or _default_project(target),
+        limit=limit,
+    )
+    if output:
+        output_path = Path(output).expanduser()
+        _core_write_compliance_export(output_path, payload)
+        if json_output:
+            print(json.dumps({"wrote": str(output_path), "export": payload}, indent=2))
+            return 0
+        code, text = _core_render_compliance_export_text(payload, output=str(output_path))
+        print(text)
+        return code
+    print(json.dumps(payload, indent=2))
+    return 0
 
 
 def ingest_status(target: Path, json_output: bool = False) -> int:
@@ -1833,6 +1867,7 @@ def main(argv: list[str] | None = None) -> int:
             "health": health,
             "operations": operations,
             "backup": backup,
+            "compliance-export": compliance_export,
             "doctor": doctor,
             "migrate": migrate,
             "validate": validate,

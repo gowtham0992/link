@@ -71,6 +71,13 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     backup_cmd.add_argument("--list", action="store_true", dest="list_only", help="list recent backups instead of creating one")
     backup_cmd.add_argument("--json", action="store_true", help="print machine-readable backup status")
 
+    compliance_cmd = sub.add_parser("compliance-export", help="export a redacted audit packet for security or team review")
+    compliance_cmd.add_argument("target", nargs="?", default=".")
+    compliance_cmd.add_argument("--output", default=None, help="write JSON to this file instead of stdout")
+    compliance_cmd.add_argument("--project", default=None, help="filter project-scoped memory context")
+    compliance_cmd.add_argument("--limit", type=int, default=100, help="maximum memories/log entries to include")
+    compliance_cmd.add_argument("--json", action="store_true", help="print machine-readable export status after writing --output")
+
     doctor_cmd = sub.add_parser("doctor", help="check a Link wiki for common health issues")
     doctor_cmd.add_argument("target", nargs="?", default=".")
     doctor_cmd.add_argument("--fix", action="store_true", help="repair safe structural and backlink issues")
@@ -306,6 +313,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             label=args.label,
             include_raw=args.include_raw,
             list_only=args.list_only,
+            json_output=args.json,
+        )
+    if command == "compliance-export":
+        return handlers["compliance-export"](
+            Path(args.target),
+            output=args.output,
+            project=args.project,
+            limit=args.limit,
             json_output=args.json,
         )
     if command == "doctor":

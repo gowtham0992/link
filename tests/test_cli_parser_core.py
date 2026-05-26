@@ -106,6 +106,28 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.limit, 12)
         self.assertTrue(args.json)
 
+    def test_compliance_export_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "compliance-export",
+            "/tmp/link",
+            "--output",
+            "/tmp/audit.json",
+            "--project",
+            "alpha",
+            "--limit",
+            "25",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "compliance-export")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.output, "/tmp/audit.json")
+        self.assertEqual(args.project, "alpha")
+        self.assertEqual(args.limit, 25)
+        self.assertTrue(args.json)
+
     def test_version_command_routes_to_handler(self):
         parser = build_cli_parser()
 
@@ -277,6 +299,34 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertTrue(calls[0][2]["dry_run"])
         self.assertEqual(calls[0][2]["limit"], 3)
         self.assertTrue(calls[0][2]["json_output"])
+
+    def test_dispatch_routes_compliance_export_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "compliance-export",
+            "/tmp/link",
+            "--output",
+            "/tmp/audit.json",
+            "--project",
+            "alpha",
+            "--limit",
+            "25",
+            "--json",
+        ])
+        calls = []
+
+        def compliance_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 6
+
+        code = dispatch_cli_command(args, {"compliance-export": compliance_handler})
+
+        self.assertEqual(code, 6)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1]["output"], "/tmp/audit.json")
+        self.assertEqual(calls[0][1]["project"], "alpha")
+        self.assertEqual(calls[0][1]["limit"], 25)
+        self.assertTrue(calls[0][1]["json_output"])
 
     def test_dispatch_routes_welcome_arguments(self):
         parser = build_cli_parser()

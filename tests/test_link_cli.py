@@ -255,6 +255,24 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Obsidian import:", out.getvalue())
         self.assertIn("Ask your agent: ingest raw/obsidian/vault into Link", out.getvalue())
 
+    def test_compliance_export_writes_redacted_audit_json(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-compliance-cli-"))
+        target = tmp / "demo"
+        output = tmp / "audit.json"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.compliance_export(target, output=str(output))
+
+        self.assertEqual(code, 0)
+        self.assertTrue(output.exists())
+        data = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(data["schema"], "link-compliance-export-v1")
+        self.assertIn("memory_profile", data)
+        self.assertNotIn("body", json.dumps(data["memories"]))
+        self.assertIn("Link compliance export", out.getvalue())
+
     def test_demo_refuses_to_overwrite_non_demo_directory(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-demo-test-"))
         target = tmp / "not-demo"

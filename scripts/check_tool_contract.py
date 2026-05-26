@@ -17,6 +17,7 @@ EXPECTED_CLI_COMMANDS = {
     "capture-inbox",
     "capture-session",
     "connect",
+    "compliance-export",
     "delete-capture",
     "demo",
     "doctor",
