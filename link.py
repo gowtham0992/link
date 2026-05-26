@@ -14,6 +14,7 @@ Usage:
   python link.py backup [target]
   python link.py compliance-export [target]
   python link.py team-sync [target]
+  python link.py share <page-or-memory> [target]
   python link.py doctor [target]
   python link.py migrate [target]
   python link.py validate [target]
@@ -138,6 +139,10 @@ from link_core.audit_export import (
 from link_core.team_sync import (
     build_team_sync_payload as _core_build_team_sync_payload,
     render_team_sync_text as _core_render_team_sync_text,
+)
+from link_core.share import (
+    render_share_text as _core_render_share_text,
+    share_page_payload as _core_share_page_payload,
 )
 from link_core.benchmark import (
     build_benchmark_payload as _core_build_benchmark_payload,
@@ -798,6 +803,15 @@ def team_sync(target: Path, remote: str | None = None, json_output: bool = False
     code, text = _core_render_team_sync_text(payload)
     print(text)
     return code
+
+
+def share(target: Path, identifier: str, port: int = 3000, host: str = "127.0.0.1", json_output: bool = False) -> int:
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    payload = _core_share_page_payload(wiki_dir, identifier, host=host, port=port)
+    return _emit_json_or_text(payload, json_output, _core_render_share_text, json_code=0 if payload.get("found") else 1)
 
 
 def ingest_status(target: Path, json_output: bool = False) -> int:
@@ -1889,6 +1903,7 @@ def main(argv: list[str] | None = None) -> int:
             "backup": backup,
             "compliance-export": compliance_export,
             "team-sync": team_sync,
+            "share": share,
             "doctor": doctor,
             "migrate": migrate,
             "validate": validate,

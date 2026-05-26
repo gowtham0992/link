@@ -84,6 +84,27 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.python, "/tmp/python")
         self.assertTrue(args.json)
 
+    def test_share_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "share",
+            "Prefer local memory",
+            "/tmp/link",
+            "--port",
+            "3456",
+            "--host",
+            "localhost",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "share")
+        self.assertEqual(args.identifier, "Prefer local memory")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.port, 3456)
+        self.assertEqual(args.host, "localhost")
+        self.assertTrue(args.json)
+
     def test_import_obsidian_command_options(self):
         parser = build_cli_parser()
 
@@ -304,6 +325,24 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertTrue(calls[0][2]["write"])
         self.assertEqual(calls[0][2]["config_path"], "/tmp/mcp.json")
         self.assertEqual(calls[0][2]["python_cmd"], "/tmp/python")
+        self.assertTrue(calls[0][2]["json_output"])
+
+    def test_dispatch_routes_share_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args(["share", "Prefer local memory", "/tmp/link", "--port", "3456", "--host", "localhost", "--json"])
+        calls = []
+
+        def share_handler(target, identifier, **kwargs):
+            calls.append((target, identifier, kwargs))
+            return 9
+
+        code = dispatch_cli_command(args, {"share": share_handler})
+
+        self.assertEqual(code, 9)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], "Prefer local memory")
+        self.assertEqual(calls[0][2]["port"], 3456)
+        self.assertEqual(calls[0][2]["host"], "localhost")
         self.assertTrue(calls[0][2]["json_output"])
 
     def test_dispatch_routes_import_obsidian_arguments(self):

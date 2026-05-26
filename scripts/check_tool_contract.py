@@ -46,6 +46,7 @@ EXPECTED_CLI_COMMANDS = {
     "restore-memory",
     "review-memory",
     "serve",
+    "share",
     "status",
     "team-sync",
     "try",

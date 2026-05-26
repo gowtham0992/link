@@ -341,6 +341,13 @@ and local MCP Python markers private by default.
 link team-sync ~/link --remote git@example.com:team/link-memory.git
 ```
 
+For a teammate, reviewer, or another agent, `link share` resolves a page,
+memory, title, alias, or search phrase into a local viewer URL:
+
+```bash
+link share "Prefer local memory" ~/link
+```
+
 ## Agent Contract
 
 Agents should use Link in this order:

@@ -68,6 +68,7 @@ link health
 link ingest-status
 link remember "User prefers feature branches for Link work." --type preference --scope project --project link --review-after 2026-08-01
 link remember "Temporary launch branch is release/one-off." --type project --project link --expires-at 2026-09-01
+link share "Prefer local memory"
 link brief "working on Link release" --project link
 link query "what should I know before changing the MCP tools?" --budget small --project link
 link validate</code></pre>
@@ -129,6 +130,7 @@ link operations [--limit 20]
 link backup [--label name] [--include-raw]
 link compliance-export [dir] [--output audit.json] [--project slug]
 link team-sync [dir] [--remote git-url]
+link share &lt;page-or-memory&gt; [dir] [--port 3000]
 link ingest-status
 link import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
 link remember "text" [--project slug] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD]

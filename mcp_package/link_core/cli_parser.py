@@ -83,6 +83,13 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     team_sync_cmd.add_argument("--remote", default=None, help="optional Git remote URL to include in setup commands")
     team_sync_cmd.add_argument("--json", action="store_true", help="print machine-readable team sync guidance")
 
+    share_cmd = sub.add_parser("share", help="print a local viewer permalink for a page or memory")
+    share_cmd.add_argument("identifier", help="page name, title, path, alias, or search query")
+    share_cmd.add_argument("target", nargs="?", default=".")
+    share_cmd.add_argument("--port", type=int, default=3000, help="local viewer port to include in the URL")
+    share_cmd.add_argument("--host", default="127.0.0.1", help="local viewer host to include in the URL")
+    share_cmd.add_argument("--json", action="store_true", help="print machine-readable share details")
+
     doctor_cmd = sub.add_parser("doctor", help="check a Link wiki for common health issues")
     doctor_cmd.add_argument("target", nargs="?", default=".")
     doctor_cmd.add_argument("--fix", action="store_true", help="repair safe structural and backlink issues")
@@ -331,6 +338,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         )
     if command == "team-sync":
         return handlers["team-sync"](Path(args.target), remote=args.remote, json_output=args.json)
+    if command == "share":
+        return handlers["share"](
+            Path(args.target),
+            args.identifier,
+            port=args.port,
+            host=args.host,
+            json_output=args.json,
+        )
     if command == "doctor":
         return handlers["doctor"](Path(args.target), fix=args.fix)
     if command == "migrate":
