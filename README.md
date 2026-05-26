@@ -412,6 +412,7 @@ More detail: [Security guide](https://gowtham0992.github.io/link/security.html).
 | Find a command | [CLI reference](https://gowtham0992.github.io/link/cli.html) |
 | Use local HTTP endpoints | [HTTP API](https://gowtham0992.github.io/link/api.html) |
 | Review security boundaries | [Security model](https://gowtham0992.github.io/link/security.html) |
+| Evaluate Link for a small team | [Team security review](https://gowtham0992.github.io/link/team-security.html) |
 | Fix setup issues | [Troubleshooting](https://gowtham0992.github.io/link/troubleshooting.html) |
 
 ## Contributing

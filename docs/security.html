@@ -48,6 +48,7 @@
         <a href="#secrets">Secret handling</a>
         <a href="#http">HTTP boundary</a>
         <a href="#backups">Backups</a>
+        <a href="#team">Team review</a>
         <a href="#share">Before sharing</a>
         <a href="#reporting">Reporting</a>
       </aside>
@@ -83,6 +84,10 @@ python3 scripts/check_release_hygiene.py</code></pre>
 link backup --include-raw
 link doctor --fix</code></pre>
         <p>Run a backup before broad repair work or large generated changes.</p>
+
+        <h2 id="team">Team Review</h2>
+        <p>For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed <code>wiki/</code> pages can be shared through Git when the team explicitly wants shared memory.</p>
+        <p><a class="button" href="team-security.html">Open the team security checklist</a></p>
 
         <h2 id="share">Before Sharing A Repo Or Wiki</h2>
         <pre><code>python3 link.py doctor
