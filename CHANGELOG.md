@@ -16,6 +16,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `link compliance-export` for redacted readiness, validation, memory-review, operation, and log exports for team or security review.
 - Added `link team-sync` to print a safe Git sharing plan for reviewed team memory without pushing private raw sources automatically.
 - Added `link share <page-or-memory>` to print a local viewer permalink and agent prompt for a specific Link page.
+- Added `link snapshot` to export a static, read-only HTML snapshot for demos or reviews while excluding raw sources, captures, live state, and memory pages by default.
 - Added `link memory-log`, MCP `memory_log`, `/memory-log`, and `/api/memory-log` for recent memory lifecycle changes without exposing raw source or memory bodies.
 - Added `link wins`, MCP `memory_wins`, `/wins`, and `/api/wins` for local, non-telemetry proof signals about what Link memory is carrying.
 - Added a team security review docs page covering local deployment, data boundaries, memory approval gates, Git sharing, audit exports, and current limits.

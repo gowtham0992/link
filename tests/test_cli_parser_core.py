@@ -105,6 +105,31 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.host, "localhost")
         self.assertTrue(args.json)
 
+    def test_snapshot_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "snapshot",
+            "/tmp/link",
+            "--output",
+            "/tmp/link-snapshot",
+            "--include-memories",
+            "--allow-sensitive",
+            "--force",
+            "--title",
+            "Team Link",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "snapshot")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.output, "/tmp/link-snapshot")
+        self.assertTrue(args.include_memories)
+        self.assertTrue(args.allow_sensitive)
+        self.assertTrue(args.force)
+        self.assertEqual(args.title, "Team Link")
+        self.assertTrue(args.json)
+
     def test_memory_log_command_options(self):
         parser = build_cli_parser()
 
@@ -366,6 +391,37 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][2]["port"], 3456)
         self.assertEqual(calls[0][2]["host"], "localhost")
         self.assertTrue(calls[0][2]["json_output"])
+
+    def test_dispatch_routes_snapshot_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "snapshot",
+            "/tmp/link",
+            "--output",
+            "/tmp/snapshot",
+            "--include-memories",
+            "--allow-sensitive",
+            "--force",
+            "--title",
+            "Team Link",
+            "--json",
+        ])
+        calls = []
+
+        def snapshot_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 3
+
+        code = dispatch_cli_command(args, {"snapshot": snapshot_handler})
+
+        self.assertEqual(code, 3)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1]["output"], "/tmp/snapshot")
+        self.assertTrue(calls[0][1]["include_memories"])
+        self.assertTrue(calls[0][1]["allow_sensitive"])
+        self.assertTrue(calls[0][1]["force"])
+        self.assertEqual(calls[0][1]["title"], "Team Link")
+        self.assertTrue(calls[0][1]["json_output"])
 
     def test_dispatch_routes_import_obsidian_arguments(self):
         parser = build_cli_parser()

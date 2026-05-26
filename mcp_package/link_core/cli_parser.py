@@ -90,6 +90,15 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     share_cmd.add_argument("--host", default="127.0.0.1", help="local viewer host to include in the URL")
     share_cmd.add_argument("--json", action="store_true", help="print machine-readable share details")
 
+    snapshot_cmd = sub.add_parser("snapshot", help="export a static read-only HTML snapshot")
+    snapshot_cmd.add_argument("target", nargs="?", default=".")
+    snapshot_cmd.add_argument("--output", default="link-snapshot", help="directory to write the snapshot into")
+    snapshot_cmd.add_argument("--include-memories", action="store_true", help="include memory pages intentionally")
+    snapshot_cmd.add_argument("--allow-sensitive", action="store_true", help="export even if wiki pages contain secret-looking values")
+    snapshot_cmd.add_argument("--force", action="store_true", help="replace a non-empty output directory")
+    snapshot_cmd.add_argument("--title", default="Link", help="snapshot title")
+    snapshot_cmd.add_argument("--json", action="store_true", help="print machine-readable snapshot status")
+
     doctor_cmd = sub.add_parser("doctor", help="check a Link wiki for common health issues")
     doctor_cmd.add_argument("target", nargs="?", default=".")
     doctor_cmd.add_argument("--fix", action="store_true", help="repair safe structural and backlink issues")
@@ -356,6 +365,16 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             args.identifier,
             port=args.port,
             host=args.host,
+            json_output=args.json,
+        )
+    if command == "snapshot":
+        return handlers["snapshot"](
+            Path(args.target),
+            output=args.output,
+            include_memories=args.include_memories,
+            allow_sensitive=args.allow_sensitive,
+            force=args.force,
+            title=args.title,
             json_output=args.json,
         )
     if command == "doctor":

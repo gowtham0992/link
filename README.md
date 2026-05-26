@@ -360,6 +360,16 @@ memory, title, alias, or search phrase into a local viewer URL:
 link share "Prefer local memory" ~/link
 ```
 
+For a static, read-only review packet, `link snapshot` exports rendered wiki
+HTML without `raw/`, captures, operation markers, live MCP state, or memory pages
+by default. It blocks export if wiki pages contain secret-looking values unless
+you explicitly override it.
+
+```bash
+link snapshot ~/link --output link-snapshot
+link snapshot ~/link --output link-snapshot --include-memories --force
+```
+
 ## Agent Contract
 
 Agents should use Link in this order:
