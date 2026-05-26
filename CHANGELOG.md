@@ -21,6 +21,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `link memory-log`, MCP `memory_log`, `/memory-log`, and `/api/memory-log` for recent memory lifecycle changes without exposing raw source or memory bodies.
 - Added `link wins`, MCP `memory_wins`, `/wins`, and `/api/wins` for local, non-telemetry proof signals about what Link memory is carrying.
 - Added a team security review docs page covering local deployment, data boundaries, memory approval gates, Git sharing, audit exports, and current limits.
+- Added a memory contract docs page that explains the stable MCP agent loop, tool groups, write rules, budget behavior, and sharing semantics.
 - Added `python -m link_mcp --version` so MCP package installs can be verified before a wiki exists.
 - Added an Obsidian guide for opening Link's Markdown wiki as a vault and rebuilding indexes after manual edits.
 

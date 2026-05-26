@@ -325,6 +325,11 @@ creating a duplicate.
 - `memory_wins`: local proof signals for what Link memory is carrying, based
   on wiki metadata rather than telemetry.
 
+The stable agent-facing loop is documented at
+[Link Memory Contract](https://gowtham0992.github.io/link/memory-contract.html):
+readiness first, bounded recall, explicit memory writes, audit tools, and
+sharing semantics.
+
 Use `review_after` for time-sensitive preferences or decisions. When that date
 arrives, the memory reappears in Link's review inbox so an agent can ask the
 user to confirm, update, archive, or forget it instead of trusting stale context.

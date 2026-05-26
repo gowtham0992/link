@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The stable Link memory contract for MCP agents: readiness, prompts, query packets, briefs, memory lifecycle, audit, and sharing safety.">
+  <title>Link - Memory Contract</title>
+  <link rel="stylesheet" href="assets/site.css">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/logo-512.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Link">
+  <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <script src="assets/site.js" defer></script>
+</head>
+<body>
+  <nav class="site-nav" aria-label="Main">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
+    <div class="nav-links">
+      <a href="getting-started.html">Start</a>
+      <a href="why-link.html">Why</a>
+      <a href="ui.html">UI</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html" aria-current="page">Contract</a>
+      <a href="cli.html">CLI</a>
+      <a href="api.html">API</a>
+      <a href="security.html">Security</a>
+      <a href="contributing.html">Contribute</a>
+      <a href="https://github.com/gowtham0992/link">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="hero-inner">
+      <span class="eyebrow">Agent memory contract</span>
+      <h1>A predictable local memory interface for agents.</h1>
+      <p>Link's MCP tools give agents one stable loop: check readiness, get starter prompts, retrieve compact context, write only approved memory, and audit what changed.</p>
+    </div>
+  </header>
+
+  <main class="doc-section">
+    <div class="section-inner doc-grid">
+      <aside class="toc">
+        <strong>On this page</strong>
+        <a href="#promise">Contract promise</a>
+        <a href="#loop">Agent loop</a>
+        <a href="#tools">Core tools</a>
+        <a href="#writes">Write rules</a>
+        <a href="#sharing">Sharing semantics</a>
+        <a href="#budgets">Budgets</a>
+      </aside>
+      <article class="doc-content">
+        <h2 id="promise">Contract Promise</h2>
+        <p>Link is not asking every agent to learn a new notes app. It gives agents a small, repeatable memory contract backed by local Markdown files.</p>
+        <div class="grid compact-grid">
+          <article class="feature"><h3>Readable storage</h3><p>Raw source notes live in <code>raw/</code>. Structured pages and durable memories live in <code>wiki/</code>.</p></article>
+          <article class="feature"><h3>Bounded recall</h3><p>Agents ask for a task-sized packet instead of dumping the whole wiki into context.</p></article>
+          <article class="feature"><h3>Reviewable writes</h3><p>Durable memory writes are explicit, duplicate-checked, conflict-checked, and logged.</p></article>
+          <article class="feature"><h3>Local trust</h3><p>The CLI, HTTP viewer, and MCP server read the same local files. <code>serve.py</code> is not required for MCP.</p></article>
+        </div>
+
+        <h2 id="loop">Recommended Agent Loop</h2>
+        <ol>
+          <li>Call <code>link_status</code>. If schema or validation needs attention, call the repair tool the payload suggests.</li>
+          <li>Call <code>starter_prompts</code> when a user asks what to try first.</li>
+          <li>Call <code>memory_brief</code> before substantive work.</li>
+          <li>Call <code>query_link</code> for answer-ready context packets.</li>
+          <li>Call <code>ingest_status</code> after the user drops files into <code>raw/</code>.</li>
+          <li>Use <code>propose_memories</code> before writing durable memories from long notes.</li>
+          <li>Use <code>remember_memory</code> only after the user explicitly asks to remember something.</li>
+        </ol>
+        <pre><code>User: is Link ready?
+Agent: link_status()
+
+User: brief me from Link before we continue
+Agent: memory_brief(query="current task")
+
+User: query Link for the release plan
+Agent: query_link(query="release plan", budget="small")</code></pre>
+
+        <h2 id="tools">Core Tool Groups</h2>
+        <table>
+          <thead><tr><th>Need</th><th>Primary tools</th><th>Contract behavior</th></tr></thead>
+          <tbody>
+            <tr><td>Readiness</td><td><code>link_status</code>, <code>validate_wiki</code>, <code>link_operations</code></td><td>Returns safe next actions instead of guessing.</td></tr>
+            <tr><td>First use</td><td><code>starter_prompts</code>, <code>ingest_status</code></td><td>Provides natural prompts and exact post-ingest checks.</td></tr>
+            <tr><td>Recall</td><td><code>memory_brief</code>, <code>query_link</code>, <code>recall_memory</code>, <code>get_context</code></td><td>Returns ranked memory/wiki context with reasons and budget limits.</td></tr>
+            <tr><td>Graph</td><td><code>get_graph_summary</code>, <code>get_backlinks</code>, <code>get_graph</code></td><td>Starts bounded, then asks before expanding to large exports.</td></tr>
+            <tr><td>Memory writes</td><td><code>propose_memories</code>, <code>remember_memory</code>, <code>update_memory</code>, <code>review_memory</code></td><td>Requires explicit approval and surfaces duplicate/conflict candidates.</td></tr>
+            <tr><td>Audit</td><td><code>memory_log</code>, <code>memory_wins</code>, <code>memory_audit</code>, <code>backup_wiki</code></td><td>Reports lifecycle and proof signals without raw memory bodies.</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="writes">Write Rules</h2>
+        <p>Agents should treat Link memory as durable state, not scratch space.</p>
+        <ul>
+          <li>Do not call <code>remember_memory</code> unless the user explicitly asks to remember something.</li>
+          <li>Use <code>propose_memories</code> for transcripts, long notes, or uncertain context.</li>
+          <li>If a write returns <code>duplicate_candidates</code>, update the existing memory instead of creating another one.</li>
+          <li>If a write returns <code>conflict_candidates</code>, explain the conflict and ask the user before overriding.</li>
+          <li>Use <code>review_after</code> for memories that should be re-checked, and <code>expires_at</code> for temporary context.</li>
+        </ul>
+
+        <h2 id="sharing">Sharing Semantics</h2>
+        <p><code>scope</code> answers where a memory applies. <code>visibility</code> answers who should see it.</p>
+        <table>
+          <thead><tr><th>Field</th><th>Values</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>scope</code></td><td><code>user</code>, <code>project</code>, <code>global</code></td><td>Controls relevance for recall and project filters.</td></tr>
+            <tr><td><code>visibility</code></td><td><code>private</code>, <code>project</code>, <code>team</code></td><td>Controls sharing intent for Git sync and snapshots.</td></tr>
+          </tbody>
+        </table>
+        <p>By default, user/global memories are private and project memories are project-visible. <code>link team-sync</code> blocks ready status if private memories would be included in a broad Git share. <code>link snapshot --include-memories</code> still excludes private memories unless <code>--include-private-memories</code> is explicitly passed.</p>
+
+        <h2 id="budgets">Budgets</h2>
+        <p><code>query_link</code> supports <code>small</code>, <code>medium</code>, and <code>large</code> budgets. Each packet includes why an item was selected, estimated tokens, <code>has_more</code> flags, and follow-up actions. This keeps agents from reading a 500-page or 10,000-page wiki just to answer one task.</p>
+        <pre><code>query_link(query="what should I know before changing release docs?", budget="small")</code></pre>
+      </article>
+    </div>
+  </main>
+
+  <footer>
+    <a href="https://github.com/gowtham0992/link">GitHub</a>
+    <a href="https://pypi.org/project/link-mcp/">PyPI</a>
+    <a href="https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink">MCP Registry</a>
+    <a href="https://github.com/gowtham0992/link">Star Link if it helps</a>
+  </footer>
+</body>
+</html>
