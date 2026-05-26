@@ -90,7 +90,7 @@ Agent: query_link(query="release plan", budget="small")</code></pre>
             <tr><td>First use</td><td><code>starter_prompts</code>, <code>ingest_status</code></td><td>Provides natural prompts and exact post-ingest checks.</td></tr>
             <tr><td>Recall</td><td><code>memory_brief</code>, <code>query_link</code>, <code>recall_memory</code>, <code>get_context</code></td><td>Returns ranked memory/wiki context with reasons and budget limits.</td></tr>
             <tr><td>Graph</td><td><code>get_graph_summary</code>, <code>get_backlinks</code>, <code>get_graph</code></td><td>Starts bounded, then asks before expanding to large exports.</td></tr>
-            <tr><td>Memory writes</td><td><code>propose_memories</code>, <code>remember_memory</code>, <code>update_memory</code>, <code>review_memory</code></td><td>Requires explicit approval and surfaces duplicate/conflict candidates.</td></tr>
+            <tr><td>Memory writes</td><td><code>propose_memories</code>, <code>remember_memory</code>, <code>update_memory</code>, <code>set_memory_visibility</code>, <code>review_memory</code></td><td>Requires explicit approval and surfaces duplicate/conflict candidates.</td></tr>
             <tr><td>Audit</td><td><code>memory_log</code>, <code>memory_wins</code>, <code>memory_audit</code>, <code>backup_wiki</code></td><td>Reports lifecycle and proof signals without raw memory bodies.</td></tr>
           </tbody>
         </table>
@@ -115,6 +115,7 @@ Agent: query_link(query="release plan", budget="small")</code></pre>
           </tbody>
         </table>
         <p>By default, user/global memories are private and project memories are project-visible. <code>link team-sync</code> blocks ready status if private memories would be included in a broad Git share. <code>link snapshot --include-memories</code> still excludes private memories unless <code>--include-private-memories</code> is explicitly passed.</p>
+        <p>Use <code>set_memory_visibility</code> or <code>link set-memory-visibility</code> only after explicit user approval when an existing memory should move between private, project, and team sharing intent.</p>
 
         <h2 id="budgets">Budgets</h2>
         <p><code>query_link</code> supports <code>small</code>, <code>medium</code>, and <code>large</code> budgets. Each packet includes why an item was selected, estimated tokens, <code>has_more</code> flags, and follow-up actions. This keeps agents from reading a 500-page or 10,000-page wiki just to answer one task.</p>

@@ -155,6 +155,7 @@ In the local web proposal picker, unreadable raw files are surfaced as
 | `redact_capture(capture, replacement?)` | Redact secret-looking values from a saved raw capture after user approval. |
 | `delete_capture(capture, confirm?)` | Delete a saved raw capture after explicit confirmation. |
 | `update_memory(identifier, memory, source?, allow_conflict?, project?)` | Merge new information into an existing memory, blocking likely conflicts with other active memories by default. |
+| `set_memory_visibility(identifier, visibility)` | Change a memory's sharing intent between `private`, `project`, and `team` after explicit user approval. |
 | `archive_memory(identifier, reason?)` | Archive stale or wrong memory without deleting the Markdown page. |
 | `restore_memory(identifier)` | Restore archived memory to active status. |
 | `forget_memory(identifier, confirm?)` | Permanently delete a memory only after explicit user confirmation; prefer archive for reversible cleanup. |

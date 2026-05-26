@@ -130,6 +130,7 @@ from link_core.memory import (
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
+    set_memory_visibility as _core_set_memory_visibility,
     slim_memory as _core_slim_memory,
     top_tags as _core_top_tags,
     update_memory_page as _core_update_memory_page,
@@ -715,6 +716,20 @@ def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[s
     return result
 
 
+def _set_memory_visibility(identifier: str, visibility: str) -> dict[str, object]:
+    result = _core_set_memory_visibility(
+        WIKI_DIR,
+        _clean_text_input(identifier, max_len=300),
+        _clean_text_input(visibility, max_len=40),
+        timestamp=_utc_timestamp(),
+        records=_memory_records(),
+        log_writer=_append_log,
+    )
+    if result["updated"]:
+        _clear_cache()
+    return result
+
+
 def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
     result = _core_forget_memory_page(
         WIKI_DIR,
@@ -1174,6 +1189,21 @@ def update_memory(
             allow_conflict=allow_conflict,
             project=project,
         )
+    except ValueError as exc:
+        return json.dumps({"updated": False, "error": str(exc)})
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def set_memory_visibility(identifier: str, visibility: str) -> str:
+    """Change a memory's sharing visibility.
+
+    Use this after explicit user approval when a memory should move between
+    private, project, and team visibility. This updates frontmatter and logs the
+    visibility change; it does not expose raw sources or memory bodies in logs.
+    """
+    try:
+        result = _set_memory_visibility(identifier, visibility)
     except ValueError as exc:
         return json.dumps({"updated": False, "error": str(exc)})
     return json.dumps(result, ensure_ascii=False)

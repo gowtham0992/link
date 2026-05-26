@@ -141,6 +141,22 @@ def render_update_memory_text(result: Mapping[str, object], *, target: object = 
     ])
 
 
+def render_set_memory_visibility_text(result: Mapping[str, object], *, target: object = ".") -> tuple[int, str]:
+    headline = "Memory visibility updated" if result.get("updated") else "Memory visibility already set"
+    return 0, "\n".join([
+        headline,
+        f"Title: {result['title']}",
+        f"Path: {result['path']}",
+        f"Scope: {result['scope']}",
+        f"Visibility: {result['previous_visibility']} -> {result['visibility']}",
+        f"Review: {result.get('review_status', 'pending')}",
+        "",
+        "Next:",
+        f"  {_shell_words('python3', 'link.py', 'explain-memory', result['name'], target)}",
+        f"  {_shell_words('python3', 'link.py', 'team-sync', target)}",
+    ])
+
+
 def render_propose_memories_text(result: Mapping[str, object]) -> tuple[int, str]:
     proposals = result.get("proposals")
     if not isinstance(proposals, Sequence) or isinstance(proposals, (str, bytes)):

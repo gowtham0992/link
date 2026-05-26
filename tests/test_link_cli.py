@@ -1048,6 +1048,32 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("update-memory", log_text)
         self.assertIn("prefer-local-personal-memory", backlinks["backlinks"]["link"])
 
+    def test_set_memory_visibility_updates_frontmatter_and_log(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-memory-visibility-cli-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.set_memory_visibility(
+                target,
+                "prefer-local-personal-memory",
+                "team",
+                json_output=True,
+            )
+        payload = json.loads(out.getvalue())
+        memory_text = (target / "wiki/memories/prefer-local-personal-memory.md").read_text(encoding="utf-8")
+        log_text = (target / "wiki/log.md").read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["updated"])
+        self.assertEqual(payload["previous_visibility"], "private")
+        self.assertEqual(payload["visibility"], "team")
+        self.assertIn("visibility: team", memory_text)
+        self.assertIn("set-memory-visibility", log_text)
+        self.assertIn("Previous visibility: private", log_text)
+        self.assertIn("New visibility: team", log_text)
+
     def test_propose_memories_from_session_note_without_writing(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-memory-test-"))
         target = tmp / "demo"

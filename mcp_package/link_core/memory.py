@@ -970,6 +970,57 @@ def set_memory_status(
     }
 
 
+def set_memory_visibility(
+    wiki_dir: Path,
+    identifier: str,
+    visibility: str,
+    timestamp: str,
+    records: Iterable[Mapping[str, object]] | None = None,
+    log_writer: MemoryLogWriter | None = None,
+) -> dict[str, object]:
+    page_path, record, error = resolve_memory_page(wiki_dir, identifier, records=records)
+    if error:
+        raise ValueError(error)
+    assert page_path is not None and record is not None
+
+    scope = str(record.get("scope") or "user").lower()
+    clean_visibility = normalize_memory_visibility(scope, visibility)
+    previous_visibility = str(record.get("visibility") or default_memory_visibility(scope))
+    changed = previous_visibility != clean_visibility
+    if changed:
+        with operation_journal(
+            wiki_dir,
+            "set-memory-visibility",
+            str(record["title"]),
+            timestamp=timestamp,
+            paths=[f"wiki/memories/{page_path.name}", "wiki/log.md"],
+        ):
+            text = page_path.read_text(encoding="utf-8", errors="replace")
+            atomic_write_text(page_path, update_frontmatter_fields(text, {"visibility": clean_visibility}))
+            if log_writer:
+                log_writer(
+                    timestamp,
+                    "set-memory-visibility",
+                    str(record["title"]),
+                    [
+                        f"Updated: memories/{page_path.name}",
+                        f"Previous visibility: {previous_visibility}",
+                        f"New visibility: {clean_visibility}",
+                    ],
+                )
+
+    return {
+        "updated": changed,
+        "name": record["name"],
+        "path": record["path"],
+        "title": record["title"],
+        "scope": scope,
+        "previous_visibility": previous_visibility,
+        "visibility": clean_visibility,
+        "review_status": record.get("review_status", "pending"),
+    }
+
+
 def forget_memory_page(
     wiki_dir: Path,
     identifier: str,

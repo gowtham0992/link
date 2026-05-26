@@ -29,6 +29,7 @@ from link_core.memory import (  # noqa: E402
     recall_state,
     resolve_memory_page,
     set_memory_status,
+    set_memory_visibility,
     update_memory_page,
     write_memory_page,
 )
@@ -890,6 +891,34 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertNotIn("archived_at:", restored_text)
         self.assertNotIn("archive_reason:", restored_text)
         self.assertEqual(logged[-1][1], "restore-memory")
+
+        visibility = set_memory_visibility(
+            wiki,
+            "prefer-focused-commits",
+            "team",
+            timestamp="2026-05-05T05:30:00Z",
+            records=memory_records(wiki),
+            log_writer=log_writer,
+        )
+        visibility_text = memory_path.read_text(encoding="utf-8")
+
+        self.assertTrue(visibility["updated"])
+        self.assertEqual(visibility["previous_visibility"], "project")
+        self.assertEqual(visibility["visibility"], "team")
+        self.assertIn("visibility: team", visibility_text)
+        self.assertEqual(logged[-1][1], "set-memory-visibility")
+
+        unchanged_visibility = set_memory_visibility(
+            wiki,
+            "prefer-focused-commits",
+            "team",
+            timestamp="2026-05-05T05:35:00Z",
+            records=memory_records(wiki),
+            log_writer=log_writer,
+        )
+
+        self.assertFalse(unchanged_visibility["updated"])
+        self.assertEqual(unchanged_visibility["visibility"], "team")
 
         (wiki / "index.md").write_text("### memories\n- [[prefer-focused-commits]] - old entry\n", encoding="utf-8")
         denied = forget_memory_page(

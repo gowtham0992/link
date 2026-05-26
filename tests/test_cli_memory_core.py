@@ -12,6 +12,7 @@ from mcp_package.link_core.cli_memory import (
     render_recall_text,
     render_review_memory_text,
     render_remember_text,
+    render_set_memory_visibility_text,
     render_update_memory_text,
 )
 
@@ -90,6 +91,23 @@ class CliMemoryCoreTests(unittest.TestCase):
         self.assertIn("Memory updated", text)
         self.assertIn("Review: reviewed -> pending", text)
         self.assertIn("python3 link.py review-memory prefer-release-branches", text)
+
+    def test_render_set_memory_visibility_text(self):
+        code, text = render_set_memory_visibility_text({
+            "updated": True,
+            "name": "prefer-release-branches",
+            "title": "Prefer release branches",
+            "path": "wiki/memories/prefer-release-branches.md",
+            "scope": "project",
+            "previous_visibility": "private",
+            "visibility": "team",
+            "review_status": "reviewed",
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Memory visibility updated", text)
+        self.assertIn("Visibility: private -> team", text)
+        self.assertIn("python3 link.py team-sync", text)
 
     def test_render_propose_memories_text(self):
         code, text = render_propose_memories_text({

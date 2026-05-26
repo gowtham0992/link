@@ -197,6 +197,12 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     update_memory_cmd.add_argument("--allow-conflict", action="store_true", help="update even if the text may conflict with another active memory")
     update_memory_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
+    visibility_cmd = sub.add_parser("set-memory-visibility", help="change a memory sharing visibility")
+    visibility_cmd.add_argument("identifier", help="memory page name, title, or path")
+    visibility_cmd.add_argument("visibility", choices=MEMORY_VISIBILITIES, help="new visibility: private, project, or team")
+    visibility_cmd.add_argument("target", nargs="?", default=".")
+    visibility_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
+
     recall_cmd = sub.add_parser("recall", help="search local agent memories")
     recall_cmd.add_argument("query", help="memory query")
     recall_cmd.add_argument("target", nargs="?", default=".")
@@ -476,6 +482,13 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             source=args.source,
             allow_conflict=args.allow_conflict,
             project=args.project,
+            json_output=args.json,
+        )
+    if command == "set-memory-visibility":
+        return handlers["set-memory-visibility"](
+            Path(args.target),
+            args.identifier,
+            args.visibility,
             json_output=args.json,
         )
     if command == "recall":

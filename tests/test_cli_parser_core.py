@@ -518,6 +518,29 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["project"], "alpha")
         self.assertTrue(calls[0][1]["json_output"])
 
+    def test_dispatch_routes_set_memory_visibility_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "set-memory-visibility",
+            "prefer-local-memory",
+            "team",
+            "/tmp/link",
+            "--json",
+        ])
+        calls = []
+
+        def visibility_handler(target, identifier, visibility, **kwargs):
+            calls.append((target, identifier, visibility, kwargs))
+            return 4
+
+        code = dispatch_cli_command(args, {"set-memory-visibility": visibility_handler})
+
+        self.assertEqual(code, 4)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], "prefer-local-memory")
+        self.assertEqual(calls[0][2], "team")
+        self.assertTrue(calls[0][3]["json_output"])
+
     def test_dispatch_routes_accept_capture_arguments(self):
         parser = build_cli_parser()
         args = parser.parse_args([

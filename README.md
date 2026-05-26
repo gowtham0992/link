@@ -322,6 +322,8 @@ creating a duplicate.
 - `remember_memory`: durable local memory with duplicate/conflict checks,
   `visibility` sharing intent, review state, optional `review_after` re-check
   dates, optional `expires_at` expiry dates, provenance, and audit logging.
+- `set_memory_visibility`: explicit post-review sharing changes between
+  `private`, `project`, and `team` visibility without editing Markdown by hand.
 - `explain_memory`: why a memory exists, what it links to, whether it is ready
   for recall, and what needs review.
 - `memory_log`: recent memory lifecycle changes from `wiki/log.md`, without

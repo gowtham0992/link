@@ -903,6 +903,23 @@ class McpContractTests(unittest.TestCase):
         self.assertNotIn("reviewed_at:", memory_text)
         self.assertIn("update-memory", log_text)
 
+    def test_set_memory_visibility_contract(self):
+        updated = json.loads(self.server.set_memory_visibility("prefer-local-personal-memory", "team"))
+        unchanged = json.loads(self.server.set_memory_visibility("prefer-local-personal-memory", "team"))
+        rejected = json.loads(self.server.set_memory_visibility("prefer-local-personal-memory", "public"))
+        memory_text = (self.target / "wiki/memories/prefer-local-personal-memory.md").read_text(encoding="utf-8")
+        log_text = (self.target / "wiki/log.md").read_text(encoding="utf-8")
+
+        self.assertTrue(updated["updated"])
+        self.assertEqual(updated["previous_visibility"], "private")
+        self.assertEqual(updated["visibility"], "team")
+        self.assertFalse(unchanged["updated"])
+        self.assertEqual(unchanged["visibility"], "team")
+        self.assertFalse(rejected["updated"])
+        self.assertIn("visibility must be one of", rejected["error"])
+        self.assertIn("visibility: team", memory_text)
+        self.assertIn("set-memory-visibility", log_text)
+
     def test_update_memory_blocks_conflict_with_other_memory(self):
         created = json.loads(self.server.remember_memory(
             "User prefers release branches for Link work.",

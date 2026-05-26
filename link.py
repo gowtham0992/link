@@ -125,6 +125,7 @@ from link_core.memory import (
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
+    set_memory_visibility as _core_set_memory_visibility,
     top_tags as _core_top_tags,
     update_memory_page as _core_update_memory_page,
     write_memory_page as _core_write_memory_page,
@@ -199,6 +200,7 @@ from link_core.cli_memory import (
     render_recall_text as _core_render_recall_text,
     render_review_memory_text as _core_render_review_memory_text,
     render_remember_text as _core_render_remember_text,
+    render_set_memory_visibility_text as _core_render_set_memory_visibility_text,
     render_update_memory_text as _core_render_update_memory_text,
 )
 from link_core.capture import (
@@ -529,6 +531,23 @@ def _set_memory_status(
         identifier,
         status,
         reason=reason,
+        timestamp=timestamp or _utc_timestamp(),
+        records=records,
+        log_writer=_log_writer_for(wiki_dir),
+    )
+
+
+def _set_memory_visibility(
+    target: Path,
+    identifier: str,
+    visibility: str,
+    timestamp: str | None = None,
+) -> dict[str, object]:
+    wiki_dir, records = _memory_runtime(target)
+    return _core_set_memory_visibility(
+        wiki_dir,
+        identifier,
+        visibility,
         timestamp=timestamp or _utc_timestamp(),
         records=records,
         log_writer=_log_writer_for(wiki_dir),
@@ -1357,6 +1376,25 @@ def update_memory(
     )
 
 
+def set_memory_visibility(
+    target: Path,
+    identifier: str,
+    visibility: str,
+    json_output: bool = False,
+) -> int:
+    try:
+        result = _set_memory_visibility(target, identifier, visibility)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Could not set memory visibility: {exc}", file=sys.stderr)
+        return 1
+
+    return _emit_json_or_text(
+        result,
+        json_output,
+        lambda payload: _core_render_set_memory_visibility_text(payload, target=target),
+    )
+
+
 def recall(
     target: Path,
     query: str,
@@ -1996,6 +2034,7 @@ def main(argv: list[str] | None = None) -> int:
             "redact-capture": redact_capture,
             "delete-capture": delete_capture,
             "update-memory": update_memory,
+            "set-memory-visibility": set_memory_visibility,
             "recall": recall,
             "query": query,
             "graph-summary": graph_summary,
