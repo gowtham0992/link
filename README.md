@@ -158,6 +158,10 @@ python3 scripts/smoke_large_wiki.py --pages 10000
 This generates a temporary synthetic wiki, verifies bounded graph/query payloads,
 and reports cache timing, persistent-cache reuse, search, query, graph, and
 health signals without touching your real Link wiki.
+The public scale model is documented at
+[Link Scale](https://gowtham0992.github.io/link/scale.html): what stays
+bounded by default, how to measure your own wiki, and where the current local
+limits are.
 
 ## Three Ways To Use Link
 

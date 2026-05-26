@@ -25,9 +25,15 @@ class DocsSiteTests(unittest.TestCase):
         index_html = (ROOT / "docs/index.html").read_text(encoding="utf-8")
         self.assertIn("Link gives every agent the same memory.", index_html)
         self.assertIn("MCP Registry", index_html)
+        self.assertIn("scale.html", index_html)
         self.assertGreaterEqual(len(all_refs), 10)
         for ref in all_refs:
             self.assertTrue((ROOT / "docs" / ref).exists(), ref)
+
+        scale_html = (ROOT / "docs/scale.html").read_text(encoding="utf-8")
+        self.assertIn("bounded local memory", scale_html)
+        self.assertIn("python3 scripts/smoke_large_wiki.py --pages 10000", scale_html)
+        self.assertIn("Current Limits", scale_html)
 
     def test_github_pages_site_has_no_external_runtime_dependencies(self):
         for page in self.docs_pages():

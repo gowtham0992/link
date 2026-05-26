@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How Link handles larger local wikis, what stays bounded, what users can measure, and where the current limits are.">
+  <title>Link - Scale</title>
+  <link rel="stylesheet" href="assets/site.css">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/logo-512.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Link">
+  <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <script src="assets/site.js" defer></script>
+</head>
+<body>
+  <nav class="site-nav" aria-label="Main">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
+    <div class="nav-links">
+      <a href="getting-started.html">Start</a>
+      <a href="why-link.html">Why</a>
+      <a href="scale.html" aria-current="page">Scale</a>
+      <a href="ui.html">UI</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
+      <a href="cli.html">CLI</a>
+      <a href="api.html">API</a>
+      <a href="security.html">Security</a>
+      <a href="contributing.html">Contribute</a>
+      <a href="https://github.com/gowtham0992/link">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="hero-inner">
+      <span class="eyebrow">Scale model</span>
+      <h1>Link is built for bounded local memory, not full-folder context dumps.</h1>
+      <p>Large local wikis should stay usable because agents receive budgets, graph overviews open bounded first, search uses SQLite FTS when available, and unchanged pages are reused from the persistent cache.</p>
+    </div>
+  </header>
+
+  <main class="doc-section">
+    <div class="section-inner doc-grid">
+      <aside class="toc">
+        <strong>On this page</strong>
+        <a href="#promise">Practical promise</a>
+        <a href="#bounded">Bounded surfaces</a>
+        <a href="#measure">Measure locally</a>
+        <a href="#large">Large wiki habits</a>
+        <a href="#limits">Current limits</a>
+      </aside>
+      <article class="doc-content">
+        <h2 id="promise">Practical Promise</h2>
+        <p>Link is local personal memory software. The expected sweet spot is a real user's working wiki: hundreds to thousands of Markdown pages, raw sources, durable memories, and graph links. The product is designed so agents do not need to enumerate that whole corpus for normal work.</p>
+        <div class="grid two-up">
+          <article class="panel"><h3>Search</h3><p>SQLite FTS5 is used when Python provides it. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend in status and benchmark output.</p></article>
+          <article class="panel"><h3>Cache reuse</h3><p>Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command.</p></article>
+          <article class="panel"><h3>Graph</h3><p>Large graphs open as a bounded high-signal overview first. Users can search, filter, focus neighborhoods, or explicitly load more when they need it.</p></article>
+          <article class="panel"><h3>Agent context</h3><p>MCP and CLI query packets use small, medium, and large budgets with follow-up actions instead of dumping every page into the model.</p></article>
+        </div>
+
+        <h2 id="bounded">Bounded Surfaces</h2>
+        <p>The important scale behavior is not "can Link list every page?" It is "does the default agent and UI path stay bounded?"</p>
+        <div class="choice-table">
+          <div><strong>Surface</strong><strong>Default behavior</strong><strong>Expansion path</strong></div>
+          <div><span><code>query_link</code></span><span>Returns a budgeted context packet with why each item was selected.</span><span>Use follow-up actions for more memory, search, context, or graph detail.</span></div>
+          <div><span><code>get_graph_summary</code></span><span>Returns a bounded topic or high-degree graph neighborhood.</span><span>Increase limit/depth or request the full graph only when needed.</span></div>
+          <div><span>Local graph UI</span><span>Starts capped with sparse labels and motion limits for large wikis.</span><span>Use type filters, node search, focused neighborhoods, fullscreen, and explicit all-data loading.</span></div>
+          <div><span>All pages</span><span>Lists a bounded window grouped by page type.</span><span>Use paging, search, and type filters instead of scrolling the whole wiki.</span></div>
+          <div><span>Health</span><span>Shows readiness, validation, interrupted writes, backend, and cache reuse.</span><span>Run repair commands only when health points to a specific issue.</span></div>
+        </div>
+
+        <h2 id="measure">Measure Locally</h2>
+        <p>Use <code>link benchmark</code> on your real wiki. It reports cache time, persistent-cache reuse, search backend, search/query timing, graph payload shape, and recommendations.</p>
+        <pre><code>link benchmark "agent memory"
+link health
+link status --validate</code></pre>
+        <p>From a source checkout, use a synthetic 10k-page check without touching your real wiki:</p>
+        <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
+        <p>The smoke script prints the generated wiki path, the local viewer command, and graph URLs so you can inspect browser behavior manually.</p>
+
+        <h2 id="large">Large Wiki Habits</h2>
+        <ul>
+          <li>Prefer <code>brief</code>, <code>query</code>, and <code>graph-summary</code> over full exports.</li>
+          <li>Use page-type filters and search before opening full graph data.</li>
+          <li>Run <code>link health</code> after ingest or broad manual edits.</li>
+          <li>Run <code>link doctor --fix</code> only when health or validation points to a repairable issue.</li>
+          <li>Keep private raw sources out of Git; use <code>snapshot</code>, <code>team-sync</code>, and <code>compliance-export</code> for reviewable sharing paths.</li>
+        </ul>
+
+        <h2 id="limits">Current Limits</h2>
+        <p>Link is not pretending to be an enterprise search cluster. These are the current boundaries to understand before betting a huge corpus on it:</p>
+        <ul>
+          <li>Indexes are local and process-owned. Very large wikis still use memory proportional to the page/index size.</li>
+          <li>The SQLite FTS index is built locally from wiki pages rather than maintained as a separate hosted service.</li>
+          <li>The local HTTP viewer is for personal loopback use, not a multi-user hosted deployment.</li>
+          <li>Full graph exports are intentionally not the default for large wikis. Use bounded graph summaries first.</li>
+          <li>At tens of thousands of pages and beyond, persistent on-disk indexing and chunked graph loading become the next engineering frontier.</li>
+        </ul>
+        <p>The near-term direction is clear: preserve the plain Markdown storage model while making cache, search, graph, and validation paths more incremental over time.</p>
+      </article>
+    </div>
+  </main>
+
+  <footer>
+    <div class="section-inner"><a href="cli.html">CLI</a> · <a href="ui.html">UI</a> · <a href="troubleshooting.html">Troubleshooting</a> · If Link helps your agents remember better, <a href="https://github.com/gowtham0992/link">star it on GitHub</a>.</div>
+    <p class="analytics-note">The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest.</p>
+  </footer>
+</body>
+</html>
