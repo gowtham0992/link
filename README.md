@@ -353,8 +353,9 @@ Link itself is local-first:
 - No external API calls from `serve.py` or `link-mcp`.
 - Raw sources and generated wiki pages are ignored by git by default.
 - `link backup` excludes `raw/` unless you explicitly pass `--include-raw`.
-- Secret-looking values are detected in raw sources, captures, and release
-  hygiene checks.
+- Secret-looking API keys, provider tokens, JWTs, registry credentials, and
+  private key blocks are detected in raw sources, captures, and release hygiene
+  checks.
 - The local web server binds to `127.0.0.1` and is not meant to be exposed to
   the internet without additional auth.
 

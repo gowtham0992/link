@@ -32,6 +32,43 @@ class SecurityCoreTests(unittest.TestCase):
         self.assertNotIn(fake_key, redacted)
         self.assertIn("[redacted-secret]", redacted)
 
+    def test_secret_warnings_cover_common_provider_tokens(self):
+        text = "\n".join(
+            [
+                "hf_" + "A" * 24,
+                "npm_" + "b" * 24,
+                "vercel_" + "C" * 24,
+                "AccountKey=" + "D" * 48,
+                "DD_API_KEY=" + "a" * 32,
+                "https://" + ("b" * 32) + "@sentry.example.com/42",
+                "eyJ" + ("a" * 16) + "." + ("b" * 16) + "." + ("c" * 16),
+                '{"auths":{"registry.example.com":{"auth":"' + ("d" * 24) + '"}}}',
+            ]
+        )
+
+        warnings = secret_value_warnings(text)
+
+        self.assertEqual(
+            warnings,
+            [
+                "Hugging Face token",
+                "npm token",
+                "Vercel token",
+                "Azure storage account key",
+                "Datadog API key",
+                "Sentry DSN",
+                "JWT token",
+                "Docker registry auth",
+            ],
+        )
+
+    def test_anthropic_key_is_not_double_reported_as_openai(self):
+        fake_key = "sk-ant-" + "a" * 48
+
+        warnings = secret_value_warnings(f"token {fake_key}")
+
+        self.assertEqual(warnings, ["Anthropic API key"])
+
     def test_secret_file_warnings_streams_across_chunks(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-security-core-"))
         fake_key = "sk-" + "a" * 48

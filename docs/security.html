@@ -63,7 +63,7 @@
         <p>The public GitHub Pages documentation may use lightweight analytics to understand install interest. It does not run inside Link, read local wiki data, or capture source/memory content.</p>
 
         <h2 id="secrets">Secret Handling</h2>
-        <p>Link scans raw sources, captures, release files, and public artifacts for secret-looking values. It detects common API keys and token formats, warns without logging secret values, and refuses normal ingest guidance when raw safety cannot be established.</p>
+        <p>Link scans raw sources, captures, release files, and public artifacts for secret-looking values. It detects common API keys, provider tokens, JWTs, private key blocks, and registry credentials, warns without logging secret values, and refuses normal ingest guidance when raw safety cannot be established.</p>
         <pre><code>link ingest-status
 link capture-inbox
 link redact-capture raw/memory-captures/&lt;capture&gt;.md

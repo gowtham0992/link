@@ -18,6 +18,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Changed
 
+- Broadened local secret detection for common modern provider tokens and credentials before capture, ingest, Obsidian import, and doctor scans.
 - Broadened Windows CI from a small portability subset to most non-installer/non-server tests.
 - Clarified that the Homebrew formula lives in the separate `gowtham0992/homebrew-link` tap.
 - Tightened security reporting guidance to prefer private maintainer contact before public GitHub issues.
