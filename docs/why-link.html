@@ -45,6 +45,7 @@
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#fit">Best fit</a>
+        <a href="#loop">Session loop</a>
         <a href="#compare">How to choose</a>
         <a href="#trust">Trust model</a>
         <a href="#boundaries">Boundaries</a>
@@ -57,6 +58,16 @@
           <article class="panel"><h3>Source-backed knowledge</h3><p>Raw notes, transcripts, release notes, articles, and project files that should become cited Markdown pages instead of hidden context.</p></article>
           <article class="panel"><h3>Inspectable retrieval</h3><p>Smart query packets with reasons, sources, graph links, budgets, and follow-up actions instead of full-folder dumps.</p></article>
           <article class="panel"><h3>Local ownership</h3><p>Plain Markdown and JSON indexes on your machine. No hosted backend, telemetry, or required cloud account.</p></article>
+        </div>
+
+        <h2 id="loop">The Loop Link Changes</h2>
+        <p>Link is useful when it changes the start and end of real agent sessions.</p>
+        <div class="choice-table">
+          <div><strong>Moment</strong><strong>Without Link</strong><strong>With Link</strong></div>
+          <div><span>Starting work</span><span>You retype project state and preferences.</span><span>The agent calls <code>memory_brief</code> or <code>query_link</code> for compact local context.</span></div>
+          <div><span>Switching agents</span><span>Each tool has its own memory gap.</span><span>Codex, Claude, Cursor, Kiro, VS Code, and Antigravity can point at the same wiki.</span></div>
+          <div><span>Saving a decision</span><span>The note disappears into chat history.</span><span>An explicit remember becomes a reviewable Markdown memory.</span></div>
+          <div><span>Trusting memory</span><span>You cannot see why the agent knows something.</span><span>You can inspect sources, graph links, review state, and lifecycle history.</span></div>
         </div>
 
         <h2 id="compare">How To Choose</h2>
