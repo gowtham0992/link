@@ -572,6 +572,7 @@ def _accept_capture(
     title: str = "",
     memory_type: str = "",
     scope: str = "",
+    visibility: str = "",
     tags: str = "",
     project: str = "",
     allow_duplicate: bool = False,
@@ -599,6 +600,7 @@ def _accept_capture(
         title=_clean_text_input(title),
         memory_type=_clean_text_input(memory_type).lower(),
         scope=_clean_text_input(scope).lower(),
+        visibility=_clean_text_input(visibility).lower(),
         tags=tags,
     )
     result = _write_mcp_memory_page(
@@ -606,6 +608,7 @@ def _accept_capture(
         title=str(memory_args["title"]),
         memory_type=str(memory_args["memory_type"]),
         scope=str(memory_args["scope"]),
+        visibility=str(memory_args["visibility"] or ""),
         tags=memory_args["tags"] if isinstance(memory_args["tags"], str) else "",
         source=str(memory_args["source"]),
         allow_duplicate=allow_duplicate,
@@ -767,7 +770,7 @@ def _write_mcp_memory_page(
     text: str, title: str = "", memory_type: str = "note",
     scope: str = "user", tags: str = "", source: str = "mcp",
     allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
-    review_after: str = "", expires_at: str = "",
+    visibility: str = "", review_after: str = "", expires_at: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -777,6 +780,7 @@ def _write_mcp_memory_page(
         WIKI_DIR, clean_text, title=_clean_text_input(title),
         memory_type=memory_type, scope=scope,
         tags=_clean_text_input(tags, max_len=500), source=_clean_text_input(source, max_len=500),
+        visibility=_clean_text_input(visibility, max_len=40) or None,
         review_after=_clean_text_input(review_after, max_len=40) or None,
         expires_at=_clean_text_input(expires_at, max_len=40) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
@@ -1009,6 +1013,7 @@ def accept_capture(
     title: str = "",
     memory_type: str = "",
     scope: str = "",
+    visibility: str = "",
     tags: str = "",
     project: str = "",
     allow_duplicate: bool = False,
@@ -1026,6 +1031,7 @@ def accept_capture(
             title=title,
             memory_type=memory_type,
             scope=scope,
+            visibility=visibility,
             tags=tags,
             project=project,
             allow_duplicate=allow_duplicate,
@@ -1220,6 +1226,7 @@ def remember_memory(
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     project: str = "",
+    visibility: str = "",
     review_after: str = "",
     expires_at: str = "",
 ) -> str:
@@ -1231,6 +1238,7 @@ def remember_memory(
     Potential conflicts are refused unless allow_conflict is true.
     memory_type: preference, decision, project, fact, or note.
     scope: user, project, or global.
+    visibility: private, project, or team. Defaults to private for user/global and project for project-scoped memories.
     project: optional project key for project-scoped memories.
     tags: optional comma-separated tags.
     review_after: optional YYYY-MM-DD date when this memory should be checked again.
@@ -1247,6 +1255,7 @@ def remember_memory(
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
             project=project,
+            visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
         )

@@ -114,6 +114,7 @@ class CliParserCoreTests(unittest.TestCase):
             "--output",
             "/tmp/link-snapshot",
             "--include-memories",
+            "--include-private-memories",
             "--allow-sensitive",
             "--force",
             "--title",
@@ -125,6 +126,7 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.target, "/tmp/link")
         self.assertEqual(args.output, "/tmp/link-snapshot")
         self.assertTrue(args.include_memories)
+        self.assertTrue(args.include_private_memories)
         self.assertTrue(args.allow_sensitive)
         self.assertTrue(args.force)
         self.assertEqual(args.title, "Team Link")
@@ -266,6 +268,8 @@ class CliParserCoreTests(unittest.TestCase):
             "preference",
             "--scope",
             "user",
+            "--visibility",
+            "private",
             "--review-after",
             "2026-06-01",
             "--expires-at",
@@ -274,6 +278,7 @@ class CliParserCoreTests(unittest.TestCase):
 
         self.assertEqual(args.memory_type, "preference")
         self.assertEqual(args.scope, "user")
+        self.assertEqual(args.visibility, "private")
         self.assertEqual(args.review_after, "2026-06-01")
         self.assertEqual(args.expires_at, "2026-07-01")
         with self.assertRaises(SystemExit):
@@ -400,6 +405,7 @@ class CliParserCoreTests(unittest.TestCase):
             "--output",
             "/tmp/snapshot",
             "--include-memories",
+            "--include-private-memories",
             "--allow-sensitive",
             "--force",
             "--title",
@@ -418,6 +424,7 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][0], Path("/tmp/link"))
         self.assertEqual(calls[0][1]["output"], "/tmp/snapshot")
         self.assertTrue(calls[0][1]["include_memories"])
+        self.assertTrue(calls[0][1]["include_private_memories"])
         self.assertTrue(calls[0][1]["allow_sensitive"])
         self.assertTrue(calls[0][1]["force"])
         self.assertEqual(calls[0][1]["title"], "Team Link")
@@ -523,6 +530,8 @@ class CliParserCoreTests(unittest.TestCase):
             "decision",
             "--scope",
             "project",
+            "--visibility",
+            "team",
             "--project",
             "alpha",
             "--allow-conflict",
@@ -542,6 +551,7 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][2]["index"], 2)
         self.assertEqual(calls[0][2]["memory_type"], "decision")
         self.assertEqual(calls[0][2]["scope"], "project")
+        self.assertEqual(calls[0][2]["visibility"], "team")
         self.assertEqual(calls[0][2]["project"], "alpha")
         self.assertTrue(calls[0][2]["allow_conflict"])
         self.assertTrue(calls[0][2]["json_output"])

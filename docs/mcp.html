@@ -166,7 +166,7 @@ get_graph_summary
 get_graph
 rebuild_index
 rebuild_backlinks</code></pre>
-        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page. <code>remember_memory</code> also accepts optional <code>review_after</code> and <code>expires_at</code> dates for scheduled re-checks and temporary memories.</p>
+        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page. <code>remember_memory</code> also accepts optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled re-checks, and temporary memories.</p>
         <p>Project-aware tools accept an optional <code>project</code> argument. When set, Link returns broad user/global memory plus memories for that project, while excluding memories from other explicit projects.</p>
 
 <h2 id="verify">Verify Setup</h2>

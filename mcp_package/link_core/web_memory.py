@@ -140,6 +140,7 @@ def render_memory_card(
     meta_parts = [
         str(record.get("memory_type") or "note"),
         str(record.get("scope") or "user"),
+        f'visibility {record.get("visibility") or "private"}',
         str(record.get("status") or "active"),
     ]
     if record.get("updated_at"):

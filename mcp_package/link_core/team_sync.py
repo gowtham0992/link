@@ -5,7 +5,7 @@ import configparser
 from pathlib import Path
 from typing import Mapping
 
-from .memory import is_active_memory, memory_inbox, memory_records
+from .memory import default_memory_visibility, is_active_memory, memory_inbox, memory_records
 from .mcp_verify import display_command
 
 
@@ -55,6 +55,11 @@ def _gitignore_raw_status(root: Path) -> dict[str, object]:
     return {"path": str(path), "exists": True, "protects_raw": protects_raw}
 
 
+def _record_visibility(record: Mapping[str, object]) -> str:
+    scope = str(record.get("scope") or "user").lower()
+    return str(record.get("visibility") or default_memory_visibility(scope)).lower()
+
+
 def _action(label: str, command: list[str]) -> dict[str, str]:
     return {
         "label": label,
@@ -68,6 +73,9 @@ def _memory_share_status(wiki_dir: Path) -> dict[str, object]:
             "active_count": 0,
             "review_count": 0,
             "user_scoped_count": 0,
+            "private_visibility_count": 0,
+            "project_visibility_count": 0,
+            "team_visibility_count": 0,
             "project_scoped_count": 0,
             "global_scoped_count": 0,
             "safe_for_team_git": False,
@@ -78,6 +86,18 @@ def _memory_share_status(wiki_dir: Path) -> dict[str, object]:
     user_scoped = [
         record for record in active_records
         if str(record.get("scope") or "user").lower() == "user"
+    ]
+    private_visibility = [
+        record for record in active_records
+        if _record_visibility(record) == "private"
+    ]
+    project_visibility = [
+        record for record in active_records
+        if _record_visibility(record) == "project"
+    ]
+    team_visibility = [
+        record for record in active_records
+        if _record_visibility(record) == "team"
     ]
     project_scoped = [
         record for record in active_records
@@ -91,6 +111,9 @@ def _memory_share_status(wiki_dir: Path) -> dict[str, object]:
         "active_count": len(active_records),
         "review_count": review_count,
         "user_scoped_count": len(user_scoped),
+        "private_visibility_count": len(private_visibility),
+        "project_visibility_count": len(project_visibility),
+        "team_visibility_count": len(team_visibility),
         "project_scoped_count": len(project_scoped),
         "global_scoped_count": len(global_scoped),
         "user_scoped": [
@@ -101,7 +124,15 @@ def _memory_share_status(wiki_dir: Path) -> dict[str, object]:
             }
             for record in user_scoped[:8]
         ],
-        "safe_for_team_git": review_count == 0 and len(user_scoped) == 0,
+        "private_visibility": [
+            {
+                "name": str(record.get("name") or ""),
+                "title": str(record.get("title") or record.get("name") or ""),
+                "path": str(record.get("path") or ""),
+            }
+            for record in private_visibility[:8]
+        ],
+        "safe_for_team_git": review_count == 0 and len(private_visibility) == 0,
     }
 
 
@@ -124,8 +155,8 @@ def build_team_sync_payload(target: Path, *, remote: str | None = None) -> dict[
         warnings.append("Git repository has no remote configured.")
     if int(memory_share.get("review_count") or 0):
         warnings.append("memory review inbox is not clear; review or archive pending memories before team sharing.")
-    if int(memory_share.get("user_scoped_count") or 0):
-        warnings.append("active user-scoped memories would be included by git add wiki; do not team-sync until they are archived, moved to project scope, or intentionally shared.")
+    if int(memory_share.get("private_visibility_count") or 0):
+        warnings.append("active private memories would be included by git add wiki; do not team-sync until they are archived or marked visibility: project/team intentionally.")
 
     setup_actions: list[dict[str, str]] = []
     sync_actions: list[dict[str, str]] = [
@@ -176,7 +207,7 @@ def build_team_sync_payload(target: Path, *, remote: str | None = None) -> dict[
         "notes": [
             "Share wiki/ and LINK.md for team agent memory.",
             "Keep raw/ private unless every source is approved for the team.",
-            "Keep user-scoped memories private unless the user intentionally converts or archives them before Git sharing.",
+            "Keep visibility: private memories out of team Git until the user intentionally converts or archives them.",
             "Review memory inbox and validation before pushing shared memory updates.",
         ],
     }
@@ -198,7 +229,7 @@ def render_team_sync_text(payload: Mapping[str, object]) -> tuple[int, str]:
             "Memory share gate: "
             f"{memory_share.get('active_count', 0)} active · "
             f"{memory_share.get('review_count', 0)} review · "
-            f"{memory_share.get('user_scoped_count', 0)} user-scoped"
+            f"{memory_share.get('private_visibility_count', 0)} private"
         )
     remotes = payload.get("remotes")
     if isinstance(remotes, list) and remotes:

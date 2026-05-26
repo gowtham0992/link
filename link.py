@@ -579,6 +579,7 @@ def _write_memory_page(
     tags: str | None = None, source: str = "manual",
     timestamp: str | None = None, allow_duplicate: bool = False,
     allow_conflict: bool = False, project: str | None = None,
+    visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
 ) -> dict[str, object]:
@@ -588,6 +589,7 @@ def _write_memory_page(
     return _core_write_memory_page(
         wiki_dir, clean_text, title=title, memory_type=memory_type,
         scope=scope, tags=tags, source=source,
+        visibility=visibility,
         review_after=review_after,
         expires_at=expires_at,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
@@ -833,6 +835,7 @@ def snapshot(
     target: Path,
     output: str = "link-snapshot",
     include_memories: bool = False,
+    include_private_memories: bool = False,
     allow_sensitive: bool = False,
     force: bool = False,
     title: str = "Link",
@@ -843,6 +846,7 @@ def snapshot(
         wiki_dir,
         Path(output),
         include_memories=include_memories,
+        include_private_memories=include_private_memories,
         allow_sensitive=allow_sensitive,
         force=force,
         title=title,
@@ -941,6 +945,7 @@ def remember(
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     project: str | None = None,
+    visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
     json_output: bool = False,
@@ -960,6 +965,7 @@ def remember(
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
             project=project or _default_project(target),
+            visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
         )
@@ -1152,6 +1158,7 @@ def accept_capture(
     scope: str | None = None,
     tags: str | None = None,
     project: str | None = None,
+    visibility: str | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     json_output: bool = False,
@@ -1197,6 +1204,7 @@ def accept_capture(
         title=title,
         memory_type=memory_type,
         scope=scope,
+        visibility=visibility,
         tags=tags,
     )
     result = _write_memory_page(
@@ -1205,6 +1213,7 @@ def accept_capture(
         title=str(memory_args["title"]),
         memory_type=str(memory_args["memory_type"]),
         scope=str(memory_args["scope"]),
+        visibility=str(memory_args["visibility"] or "") or None,
         tags=memory_args["tags"] if isinstance(memory_args["tags"], str) else None,
         source=str(memory_args["source"]),
         allow_duplicate=allow_duplicate,

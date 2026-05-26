@@ -147,11 +147,11 @@ In the local web proposal picker, unreadable raw files are surfaced as
 | `review_memory(identifier, note?)` | Mark a confirmed memory as reviewed. |
 | `explain_memory(identifier)` | Explain provenance, lifecycle, graph links, review issues, and recall readiness for one memory. |
 | `recall_memory(query, limit?, include_archived?, project?)` | Search durable local memories for preferences, decisions, and project context. |
-| `remember_memory(memory, title?, memory_type?, scope?, tags?, source?, allow_duplicate?, allow_conflict?, project?, review_after?, expires_at?)` | Save an explicit user-approved local memory under `wiki/memories/`; strong duplicates and likely conflicts require explicit override. `review_after` accepts `YYYY-MM-DD` for scheduled re-checks; `expires_at` accepts `YYYY-MM-DD` for temporary memories that should leave default recall. |
+| `remember_memory(memory, title?, memory_type?, scope?, tags?, source?, allow_duplicate?, allow_conflict?, project?, visibility?, review_after?, expires_at?)` | Save an explicit user-approved local memory under `wiki/memories/`; strong duplicates and likely conflicts require explicit override. `visibility` accepts `private`, `project`, or `team` sharing intent. `review_after` accepts `YYYY-MM-DD` for scheduled re-checks; `expires_at` accepts `YYYY-MM-DD` for temporary memories that should leave default recall. |
 | `propose_memories(text, source?, limit?, project?)` | Propose durable memories from chat/session notes without writing them. |
 | `capture_session(text, title?, source?, limit?, project?)` | Save long chat/session notes under `raw/memory-captures/` and return proposal-only memory candidates plus secret-looking content warnings. |
 | `capture_inbox(limit?, project?)` | Review saved raw captures with redacted snippets, secret-warning labels, and accept/redact/delete commands. |
-| `accept_capture(capture, index?, title?, memory_type?, scope?, tags?, project?, allow_duplicate?, allow_conflict?)` | Accept one proposal from a saved raw capture using duplicate/conflict-safe memory writes. |
+| `accept_capture(capture, index?, title?, memory_type?, scope?, visibility?, tags?, project?, allow_duplicate?, allow_conflict?)` | Accept one proposal from a saved raw capture using duplicate/conflict-safe memory writes. |
 | `redact_capture(capture, replacement?)` | Redact secret-looking values from a saved raw capture after user approval. |
 | `delete_capture(capture, confirm?)` | Delete a saved raw capture after explicit confirmation. |
 | `update_memory(identifier, memory, source?, allow_conflict?, project?)` | Merge new information into an existing memory, blocking likely conflicts with other active memories by default. |

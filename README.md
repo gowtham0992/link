@@ -316,8 +316,8 @@ creating a duplicate.
 - `ingest_status`: exact next steps for raw files, including source safety,
   stale ingest detection, validation, and memory proposal guidance.
 - `remember_memory`: durable local memory with duplicate/conflict checks,
-  review state, optional `review_after` re-check dates, optional `expires_at`
-  expiry dates, provenance, and audit logging.
+  `visibility` sharing intent, review state, optional `review_after` re-check
+  dates, optional `expires_at` expiry dates, provenance, and audit logging.
 - `explain_memory`: why a memory exists, what it links to, whether it is ready
   for recall, and what needs review.
 - `memory_log`: recent memory lifecycle changes from `wiki/log.md`, without
@@ -331,6 +331,9 @@ user to confirm, update, archive, or forget it instead of trusting stale context
 Use `expires_at` for temporary context that should automatically leave default
 recall after a date; Link keeps the Markdown page inspectable and asks the user
 to update, archive, or delete it.
+Use `visibility` to separate where a memory applies from who should see it:
+`private` stays personal, `project` is intended for a project workspace, and
+`team` means the user explicitly approved sharing it with a team.
 
 For team handoff or security review, `link compliance-export --output audit.json`
 writes a redacted JSON packet with readiness, validation, memory review status,
@@ -348,8 +351,8 @@ prompts without tracking user behavior.
 For Git-backed team memory, `link team-sync ~/link` checks whether the workspace
 is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,
 and local MCP Python markers private by default. It also blocks "ready" status
-when the memory inbox is not clear or active user-scoped memories would be
-included by a broad `git add wiki`.
+when the memory inbox is not clear or active `visibility: private` memories
+would be included by a broad `git add wiki`.
 
 ```bash
 link team-sync ~/link --remote git@example.com:team/link-memory.git
@@ -364,12 +367,15 @@ link share "Prefer local memory" ~/link
 
 For a static, read-only review packet, `link snapshot` exports rendered wiki
 HTML without `raw/`, captures, operation markers, live MCP state, or memory pages
-by default. It blocks export if wiki pages contain secret-looking values unless
-you explicitly override it.
+by default. `--include-memories` exports only non-private memories; use
+`--include-private-memories` only for a personal archive or an explicitly
+approved review. It blocks export if wiki pages contain secret-looking values
+unless you explicitly override it.
 
 ```bash
 link snapshot ~/link --output link-snapshot
 link snapshot ~/link --output link-snapshot --include-memories --force
+link snapshot ~/link --output personal-snapshot --include-memories --include-private-memories --force
 ```
 
 ## Agent Contract

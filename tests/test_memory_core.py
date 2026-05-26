@@ -955,11 +955,14 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(rebuilds, [True])
         self.assertIn('title: "Prefer release branches"', memory_text)
         self.assertIn("memory_type: preference", memory_text)
+        self.assertIn("visibility: project", memory_text)
         self.assertIn('review_after: "2026-08-01"', memory_text)
         self.assertIn('expires_at: "2026-12-01"', memory_text)
         self.assertIn("tags: [memory, preference, git, release]", memory_text)
         self.assertEqual(created["review_after"], "2026-08-01")
         self.assertEqual(created["expires_at"], "2026-12-01")
+        self.assertEqual(created["visibility"], "project")
+        self.assertEqual(memory_records(wiki)[0]["visibility"], "project")
         self.assertIn("## Source\n\nunit test", memory_text)
         self.assertIn("[[prefer-release-branches]]", index_text)
         self.assertEqual(logged[-1][1], "remember")
@@ -979,6 +982,7 @@ class MemoryCoreTests(unittest.TestCase):
         )
         self.assertFalse(duplicate["created"])
         self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["visibility"], "project")
         self.assertEqual(duplicate["candidates"][0]["name"], "prefer-release-branches")
 
         conflict = write_memory_page(
@@ -1027,6 +1031,43 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertTrue(duplicate_override["created"])
         self.assertTrue(duplicate_override["duplicate_override"])
         self.assertEqual(duplicate_override["name"], "prefer-release-branches-2")
+
+    def test_write_memory_page_allows_explicit_team_visibility(self):
+        root = Path(tempfile.mkdtemp(prefix="link-memory-visibility-"))
+        wiki = root / "wiki"
+        wiki.mkdir(parents=True)
+
+        created = write_memory_page(
+            wiki,
+            "Team should share release checklist decisions.",
+            title="Team release checklist",
+            memory_type="decision",
+            scope="project",
+            visibility="team",
+            tags="release",
+            source="unit test",
+            timestamp="2026-05-05T06:00:00Z",
+            records=[],
+        )
+
+        self.assertTrue(created["created"])
+        self.assertEqual(created["visibility"], "team")
+        self.assertIn("visibility: team", (wiki / "memories/team-release-checklist.md").read_text(encoding="utf-8"))
+        self.assertEqual(memory_profile(memory_records(wiki))["by_visibility"], {"team": 1})
+
+        with self.assertRaises(ValueError):
+            write_memory_page(
+                wiki,
+                "Bad visibility.",
+                title="Bad",
+                memory_type="note",
+                scope="user",
+                visibility="public",
+                tags="",
+                source="unit test",
+                timestamp="2026-05-05T06:01:00Z",
+                records=[],
+            )
 
 
 if __name__ == "__main__":

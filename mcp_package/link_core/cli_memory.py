@@ -58,6 +58,7 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
                 f"Title requested: {result['title']}",
                 f"Type: {result['memory_type']}",
                 f"Scope: {result['scope']}",
+                f"Visibility: {result.get('visibility', 'private')}",
                 "",
                 "Conflict candidates:",
                 *_candidate_lines(result.get("conflict_candidates", []), include_reasons=True),
@@ -75,6 +76,7 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
             f"Title requested: {result['title']}",
             f"Type: {result['memory_type']}",
             f"Scope: {result['scope']}",
+            f"Visibility: {result.get('visibility', 'private')}",
             "",
             "Existing candidates:",
             *_candidate_lines(result.get("candidates", [])),
@@ -93,6 +95,7 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
         f"Path: {result['path']}",
         f"Type: {result['memory_type']}",
         f"Scope: {result['scope']}",
+        f"Visibility: {result.get('visibility', 'private')}",
     ]
     if result.get("project"):
         lines.append(f"Project: {result['project']}")
@@ -430,7 +433,7 @@ def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, 
         f"Link memory explanation: {memory['title']}",
         "",
         f"Path: {memory['path']}",
-        f"Type: {memory['memory_type']} · Scope: {memory['scope']} · Status: {lifecycle['status']}",
+        f"Type: {memory['memory_type']} · Scope: {memory['scope']} · Visibility: {memory.get('visibility', 'private')} · Status: {lifecycle['status']}",
         f"Source: {provenance['source'] or 'missing'}",
         f"Captured: {provenance['date_captured'] or 'missing'}",
         f"Review: {review['status']} · Issues: {review['issue_count']}",
@@ -499,6 +502,7 @@ def render_brief_text(payload: Mapping[str, object], *, query: str = "", project
         ),
         f"Types: {format_counts(profile_data['by_type'])}",
         f"Scopes: {format_counts(profile_data['by_scope'])}",
+        f"Visibility: {format_counts(profile_data.get('by_visibility', {}))}",
         "",
         render_memory_list("Relevant memories", payload.get("relevant_memories", [])),
     ])
@@ -552,6 +556,7 @@ def render_profile_text(
         f"{memory_count} memor{'y' if memory_count == 1 else 'ies'} · {active_count} active · {review_count} need review",
         f"Types: {format_counts(profile_data['by_type'])}",
         f"Scopes: {format_counts(profile_data['by_scope'])}",
+        f"Visibility: {format_counts(profile_data.get('by_visibility', {}))}",
     ])
     if profile_data["by_project"]:
         lines.append(f"Projects: {format_counts(profile_data['by_project'])}")

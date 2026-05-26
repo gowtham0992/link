@@ -180,6 +180,7 @@ class CaptureCoreTests(unittest.TestCase):
                 "memory": "The user prefers release branches.",
                 "memory_type": "preference",
                 "scope": "project",
+                "visibility": "team",
                 "project": "link",
             },
         }
@@ -195,6 +196,7 @@ class CaptureCoreTests(unittest.TestCase):
         self.assertEqual(args["title"], "Release branch preference")
         self.assertEqual(args["memory_type"], "preference")
         self.assertEqual(args["scope"], "project")
+        self.assertEqual(args["visibility"], "team")
         self.assertEqual(args["tags"], "workflow")
         self.assertEqual(args["source"], "raw/memory-captures/session.md")
         self.assertEqual(args["project"], "link")

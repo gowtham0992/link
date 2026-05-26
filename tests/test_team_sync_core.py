@@ -10,7 +10,14 @@ sys.path.insert(0, str(ROOT / "mcp_package"))
 from link_core.team_sync import build_team_sync_payload, render_team_sync_text  # noqa: E402
 
 
-def write_memory(root: Path, name: str, *, scope: str = "project", review_status: str = "reviewed") -> None:
+def write_memory(
+    root: Path,
+    name: str,
+    *,
+    scope: str = "project",
+    visibility: str | None = None,
+    review_status: str = "reviewed",
+) -> None:
     path = root / "wiki" / "memories" / f"{name}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -19,8 +26,11 @@ def write_memory(root: Path, name: str, *, scope: str = "project", review_status
             f"title: {name.replace('-', ' ').title()}",
             "memory_type: preference",
             f"scope: {scope}",
+            f"visibility: {visibility or ('project' if scope == 'project' else 'private')}",
             "project: link",
             "status: active",
+            'date_captured: "2026-05-01T00:00:00Z"',
+            "source: unit test",
             f"review_status: {review_status}",
             "---",
             "",
@@ -83,7 +93,7 @@ class TeamSyncCoreTests(unittest.TestCase):
         self.assertFalse(payload["ready"])
         self.assertIn("raw/ is not protected", payload["warnings"][0])
 
-    def test_user_scoped_memories_block_team_sync_readiness(self):
+    def test_private_memories_block_team_sync_readiness(self):
         root = Path(tempfile.mkdtemp(prefix="link-team-sync-"))
         (root / "wiki").mkdir()
         (root / "wiki" / "_link_schema.json").write_text("{}", encoding="utf-8")
@@ -93,7 +103,7 @@ class TeamSyncCoreTests(unittest.TestCase):
             '[remote "origin"]\n\turl = git@example.com:team/link-memory.git\n',
             encoding="utf-8",
         )
-        write_memory(root, "private-preference", scope="user", review_status="reviewed")
+        write_memory(root, "private-preference", scope="user", visibility="private", review_status="reviewed")
 
         payload = build_team_sync_payload(root)
         code, text = render_team_sync_text(payload)
@@ -101,9 +111,29 @@ class TeamSyncCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(payload["ready"])
         self.assertEqual(payload["memory_share"]["user_scoped_count"], 1)
+        self.assertEqual(payload["memory_share"]["private_visibility_count"], 1)
         self.assertFalse(payload["memory_share"]["safe_for_team_git"])
-        self.assertIn("active user-scoped memories", " ".join(payload["warnings"]))
-        self.assertIn("1 user-scoped", text)
+        self.assertIn("active private memories", " ".join(payload["warnings"]))
+        self.assertIn("1 private", text)
+
+    def test_user_scoped_team_visibility_can_be_intentionally_shared(self):
+        root = Path(tempfile.mkdtemp(prefix="link-team-sync-"))
+        (root / "wiki").mkdir()
+        (root / "wiki" / "_link_schema.json").write_text("{}", encoding="utf-8")
+        (root / ".gitignore").write_text("raw/*\n", encoding="utf-8")
+        (root / ".git").mkdir()
+        (root / ".git" / "config").write_text(
+            '[remote "origin"]\n\turl = git@example.com:team/link-memory.git\n',
+            encoding="utf-8",
+        )
+        write_memory(root, "shared-team-preference", scope="user", visibility="team", review_status="reviewed")
+
+        payload = build_team_sync_payload(root)
+
+        self.assertTrue(payload["ready"])
+        self.assertEqual(payload["memory_share"]["user_scoped_count"], 1)
+        self.assertEqual(payload["memory_share"]["team_visibility_count"], 1)
+        self.assertEqual(payload["memory_share"]["private_visibility_count"], 0)
 
     def test_unreviewed_memories_block_team_sync_readiness(self):
         root = Path(tempfile.mkdtemp(prefix="link-team-sync-"))

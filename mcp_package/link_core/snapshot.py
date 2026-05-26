@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from .files import atomic_write_json, atomic_write_text
 from .markdown import markdown_to_html
+from .memory import default_memory_visibility
 from .search import close_wiki_cache
 from .security import find_sensitive_values
 from .wiki import build_wiki_cache
@@ -104,14 +105,31 @@ def _category_title(category: str) -> str:
     }.get(category, category.replace("-", " ").title())
 
 
-def _include_page(page: Mapping[str, Any], *, include_memories: bool) -> bool:
+def _include_page(
+    page: Mapping[str, Any],
+    *,
+    include_memories: bool,
+    include_private_memories: bool,
+    meta_index: Mapping[str, Mapping[str, Any]],
+) -> bool:
     name = str(page.get("name") or "").lower()
     category = str(page.get("category") or "")
     if name in {"index", "log"}:
         return False
-    if category == "memories" and not include_memories:
-        return False
+    if category == "memories":
+        if not include_memories:
+            return False
+        if _memory_visibility(name, meta_index) == "private" and not include_private_memories:
+            return False
     return True
+
+
+def _memory_visibility(name: str, meta_index: Mapping[str, Mapping[str, Any]]) -> str:
+    meta = meta_index.get(name.lower(), {})
+    if not isinstance(meta, Mapping):
+        meta = {}
+    scope = str(meta.get("scope") or "user").lower()
+    return str(meta.get("visibility") or default_memory_visibility(scope)).lower()
 
 
 def _metadata_line(page: Mapping[str, Any]) -> str:
@@ -174,7 +192,12 @@ def _index_html(
             f"<ul class=\"page-list\">{''.join(items)}</ul>"
             "</section>"
         )
-    memory_note = "included" if include_memories else "excluded by default"
+    if not include_memories:
+        memory_note = "excluded by default"
+    elif excluded_counts.get("private_memories"):
+        memory_note = "non-private included"
+    else:
+        memory_note = "included"
     body = (
         "<header>"
         f"<div class=\"brand\"><h1>{html.escape(title)}</h1><span>Link read-only snapshot</span></div>"
@@ -187,6 +210,7 @@ def _index_html(
         "Secret-looking wiki contents are blocked before export unless explicitly overridden."
         "</section>"
         f"<p class=\"meta\">Excluded: {int(excluded_counts.get('memories', 0))} memories, "
+        f"{int(excluded_counts.get('private_memories', 0))} private memories, "
         f"{int(excluded_counts.get('root', 0))} generated root pages.</p>"
         f"<div class=\"grid\">{''.join(sections)}</div>"
         "</main>"
@@ -222,6 +246,7 @@ def export_snapshot(
     output_dir: Path,
     *,
     include_memories: bool = False,
+    include_private_memories: bool = False,
     allow_sensitive: bool = False,
     force: bool = False,
     title: str = "Link",
@@ -268,12 +293,28 @@ def export_snapshot(
     resolved_cache = cache or build_wiki_cache(wiki_dir)
     try:
         all_pages = [page for page in list(resolved_cache.get("pages") or []) if isinstance(page, Mapping)]
+        meta_index = resolved_cache.get("meta_index") if isinstance(resolved_cache.get("meta_index"), dict) else {}
         included_pages = [
             page for page in all_pages
-            if _include_page(page, include_memories=include_memories)
+            if _include_page(
+                page,
+                include_memories=include_memories,
+                include_private_memories=include_private_memories,
+                meta_index=meta_index,
+            )
         ]
         excluded_counts = {
-            "memories": sum(1 for page in all_pages if str(page.get("category") or "") == "memories" and page not in included_pages),
+            "memories": sum(
+                1
+                for page in all_pages
+                if str(page.get("category") or "") == "memories" and page not in included_pages
+            ),
+            "private_memories": sum(
+                1
+                for page in all_pages
+                if str(page.get("category") or "") == "memories"
+                and _memory_visibility(str(page.get("name") or ""), meta_index) == "private"
+            ),
             "root": sum(1 for page in all_pages if str(page.get("name") or "").lower() in {"index", "log"}),
         }
         page_href = {
@@ -311,6 +352,7 @@ def export_snapshot(
             "created_at": created_at,
             "page_count": len(included_pages),
             "include_memories": include_memories,
+            "include_private_memories": include_private_memories,
             "excluded_counts": excluded_counts,
             "privacy_note": (
                 "Snapshot includes rendered wiki pages only. Raw sources, raw captures, operation markers, "
@@ -357,6 +399,7 @@ def render_snapshot_text(payload: Mapping[str, object]) -> tuple[int, str]:
         f"Open: {payload.get('index')}",
         f"Pages: {payload.get('page_count')}",
         f"Memories included: {'yes' if payload.get('include_memories') else 'no'}",
+        f"Private memories included: {'yes' if payload.get('include_private_memories') else 'no'}",
         "",
         "Safe sharing note:",
         f"  {payload.get('privacy_note')}",

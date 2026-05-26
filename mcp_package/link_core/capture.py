@@ -234,6 +234,7 @@ def capture_accept_memory_args(
     title: str | None = None,
     memory_type: str | None = None,
     scope: str | None = None,
+    visibility: str | None = None,
     tags: str | None = None,
 ) -> dict[str, object]:
     """Build write_memory_page arguments for an accepted capture proposal."""
@@ -247,6 +248,7 @@ def capture_accept_memory_args(
         "title": title or str(proposal.get("title") or "Memory"),
         "memory_type": memory_type or str(proposal.get("memory_type") or "note"),
         "scope": chosen_scope,
+        "visibility": visibility or str(proposal.get("visibility") or ""),
         "tags": tags,
         "source": str(selection.get("capture") or ""),
         "project": project_name if chosen_scope == "project" else "",

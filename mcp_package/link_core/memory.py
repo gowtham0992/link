@@ -30,6 +30,7 @@ from .wiki import (
 
 MEMORY_TYPES = ("preference", "decision", "project", "fact", "note")
 MEMORY_SCOPES = ("user", "project", "global")
+MEMORY_VISIBILITIES = ("private", "project", "team")
 MEMORY_REVIEW_STATUSES = ("pending", "reviewed", "needs_update")
 MEMORY_PROPOSAL_MIN_SCORE = 70
 MEMORY_CONFLICT_TYPES = {"preference", "decision", "project"}
@@ -112,6 +113,20 @@ def slugify(value: str, fallback: str = "memory") -> str:
 
 def normalize_project(value: str | None) -> str:
     return slugify(value or "", fallback="")
+
+
+def default_memory_visibility(scope: str) -> str:
+    """Return the safest sharing visibility for a memory scope."""
+    return "project" if scope == "project" else "private"
+
+
+def normalize_memory_visibility(scope: str, visibility: object | None = None) -> str:
+    value = str(visibility or "").strip().lower()
+    if not value:
+        return default_memory_visibility(scope)
+    if value not in MEMORY_VISIBILITIES:
+        raise ValueError(f"visibility must be one of: {', '.join(MEMORY_VISIBILITIES)}")
+    return value
 
 
 def default_project_for_target(target: Path) -> str:
@@ -262,12 +277,18 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
     text = path.read_text(encoding="utf-8", errors="replace")
     meta, body = parse_frontmatter(text)
     title = meta.get("title") or _heading_title(body) or memory_title(body) or path.stem
+    scope = str(meta.get("scope") or "user").lower()
+    try:
+        visibility = normalize_memory_visibility(scope, meta.get("visibility"))
+    except ValueError:
+        visibility = str(meta.get("visibility") or "")
     record: dict[str, object] = {
         "name": path.stem,
         "path": f"wiki/{path.relative_to(wiki_root).as_posix()}",
         "title": title,
         "memory_type": meta.get("memory_type") or "note",
-        "scope": meta.get("scope") or "user",
+        "scope": scope,
+        "visibility": visibility,
         "project": normalize_project(str(meta.get("project", ""))),
         "status": meta.get("status") or "active",
         "date_captured": meta.get("date_captured", ""),
@@ -314,6 +335,7 @@ def memory_review_issues(
     review_status = str(record.get("review_status") or "pending").lower()
     memory_type = str(record.get("memory_type") or "")
     scope = str(record.get("scope") or "")
+    visibility = str(record.get("visibility") or default_memory_visibility(scope))
 
     if review_status in {"pending", "needs_review"}:
         issues.append({
@@ -396,6 +418,13 @@ def memory_review_issues(
             "severity": "high",
             "message": f"Unknown scope: {scope or 'missing'}.",
             "suggested_action": f"Use one of: {', '.join(MEMORY_SCOPES)}.",
+        })
+    if visibility not in MEMORY_VISIBILITIES:
+        issues.append({
+            "code": "invalid_visibility",
+            "severity": "high",
+            "message": f"Unknown visibility: {visibility or 'missing'}.",
+            "suggested_action": f"Use one of: {', '.join(MEMORY_VISIBILITIES)}.",
         })
     if not str(record.get("source") or "").strip():
         issues.append({
@@ -1171,6 +1200,7 @@ def write_memory_page(
     source: str,
     timestamp: str,
     project: str | None = None,
+    visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
@@ -1183,6 +1213,7 @@ def write_memory_page(
         raise ValueError(f"memory_type must be one of: {', '.join(MEMORY_TYPES)}")
     if scope not in MEMORY_SCOPES:
         raise ValueError(f"scope must be one of: {', '.join(MEMORY_SCOPES)}")
+    clean_visibility = normalize_memory_visibility(scope, visibility)
 
     clean_text = text.strip()
     if not clean_text:
@@ -1216,6 +1247,7 @@ def write_memory_page(
             "title": memory_title_value,
             "memory_type": memory_type,
             "scope": scope,
+            "visibility": clean_visibility,
             "project": clean_project,
             "candidates": duplicate_candidates,
         }
@@ -1235,6 +1267,7 @@ def write_memory_page(
             "title": memory_title_value,
             "memory_type": memory_type,
             "scope": scope,
+            "visibility": clean_visibility,
             "project": clean_project,
             "conflict_candidates": conflict_candidates,
         }
@@ -1257,6 +1290,7 @@ type: memory
 title: "{frontmatter_string(memory_title_value)}"
 memory_type: {memory_type}
 scope: {scope}
+visibility: {clean_visibility}
 {project_line}status: active
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
@@ -1300,6 +1334,7 @@ tags: {yaml_list(tag_values)}
                     f"Created: memories/{page_path.name}",
                     f"Type: {memory_type}",
                     f"Scope: {scope}",
+                    f"Visibility: {clean_visibility}",
                 ],
             )
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
@@ -1310,6 +1345,7 @@ tags: {yaml_list(tag_values)}
         "title": memory_title_value,
         "memory_type": memory_type,
         "scope": scope,
+        "visibility": clean_visibility,
         "project": clean_project,
         "review_after": clean_review_after,
         "expires_at": clean_expires_at,
@@ -1448,6 +1484,7 @@ def memory_profile(
         "project": project_name,
         "by_type": count_values(record_list, "memory_type"),
         "by_scope": count_values(record_list, "scope"),
+        "by_visibility": count_values(record_list, "visibility"),
         "by_project": count_values(
             [
                 record
@@ -2040,6 +2077,7 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
     title = str(proposal.get("title") or proposal_title(memory, str(proposal.get("memory_type") or "note")))
     memory_type = str(proposal.get("memory_type") or "note")
     scope = str(proposal.get("scope") or "user")
+    visibility = str(proposal.get("visibility") or default_memory_visibility(scope))
     source = str(proposal.get("source") or "proposal")
     project = str(proposal.get("project") or "")
     duplicate_candidates = proposal.get("duplicate_candidates")
@@ -2105,6 +2143,8 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
         memory_type,
         "--scope",
         scope,
+        "--visibility",
+        visibility,
         "--source",
         source,
     ]
@@ -2113,6 +2153,7 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
         "title": title,
         "memory_type": memory_type,
         "scope": scope,
+        "visibility": visibility,
         "source": source,
     }
     if project:

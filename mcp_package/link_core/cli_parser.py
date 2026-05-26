@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .memory import MEMORY_SCOPES, MEMORY_TYPES
+from .memory import MEMORY_SCOPES, MEMORY_TYPES, MEMORY_VISIBILITIES
 from .version import LINK_VERSION
 
 
@@ -94,6 +94,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     snapshot_cmd.add_argument("target", nargs="?", default=".")
     snapshot_cmd.add_argument("--output", default="link-snapshot", help="directory to write the snapshot into")
     snapshot_cmd.add_argument("--include-memories", action="store_true", help="include memory pages intentionally")
+    snapshot_cmd.add_argument("--include-private-memories", action="store_true", help="include visibility: private memory pages too")
     snapshot_cmd.add_argument("--allow-sensitive", action="store_true", help="export even if wiki pages contain secret-looking values")
     snapshot_cmd.add_argument("--force", action="store_true", help="replace a non-empty output directory")
     snapshot_cmd.add_argument("--title", default="Link", help="snapshot title")
@@ -130,6 +131,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     remember_cmd.add_argument("--title", default=None, help="memory page title")
     remember_cmd.add_argument("--type", choices=MEMORY_TYPES, default="note", dest="memory_type")
     remember_cmd.add_argument("--scope", choices=MEMORY_SCOPES, default="user")
+    remember_cmd.add_argument("--visibility", choices=MEMORY_VISIBILITIES, default=None, help="sharing intent: private, project, or team")
     remember_cmd.add_argument("--tags", default=None, help="comma-separated tags")
     remember_cmd.add_argument("--source", default="manual", help="where this memory came from")
     remember_cmd.add_argument("--project", default=None, help="project key for project-scoped memories")
@@ -167,6 +169,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     accept_capture_cmd.add_argument("--title", default=None, help="override accepted memory title")
     accept_capture_cmd.add_argument("--type", dest="memory_type", choices=MEMORY_TYPES, default=None)
     accept_capture_cmd.add_argument("--scope", choices=MEMORY_SCOPES, default=None)
+    accept_capture_cmd.add_argument("--visibility", choices=MEMORY_VISIBILITIES, default=None, help="sharing intent for the accepted memory")
     accept_capture_cmd.add_argument("--tags", default=None, help="comma-separated tags")
     accept_capture_cmd.add_argument("--project", default=None, help="project key for accepted project memory")
     accept_capture_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
@@ -372,6 +375,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             Path(args.target),
             output=args.output,
             include_memories=args.include_memories,
+            include_private_memories=args.include_private_memories,
             allow_sensitive=args.allow_sensitive,
             force=args.force,
             title=args.title,
@@ -401,6 +405,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             title=args.title,
             memory_type=args.memory_type,
             scope=args.scope,
+            visibility=args.visibility,
             tags=args.tags,
             source=args.source,
             project=args.project,
@@ -442,6 +447,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             title=args.title,
             memory_type=args.memory_type,
             scope=args.scope,
+            visibility=args.visibility,
             tags=args.tags,
             project=args.project,
             allow_duplicate=args.allow_duplicate,

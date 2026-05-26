@@ -92,7 +92,7 @@ POST /api/restore-memory
 POST /api/rebuild-backlinks
 POST /api/rebuild-index</code></pre>
         <p>Web memory approval APIs intentionally do not honor duplicate/conflict override flags. If Link reports a duplicate or conflict, review the existing memory and use the CLI or MCP tool explicitly after deciding what should coexist.</p>
-        <p><code>POST /api/remember-memory</code> accepts optional <code>review_after</code> and <code>expires_at</code> dates in <code>YYYY-MM-DD</code> form for scheduled review and temporary-memory expiry.</p>
+        <p><code>POST /api/remember-memory</code> accepts optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled review, and temporary-memory expiry.</p>
 
         <h2 id="large">Large Wiki Endpoints</h2>
         <p>Agents and integrations should prefer bounded endpoints over full dumps:</p>

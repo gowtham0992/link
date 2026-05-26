@@ -77,19 +77,19 @@ link doctor ~/link
 link validate ~/link</code></pre>
 
         <h2 id="review">Memory Approval Gates</h2>
-        <p>Agents can propose memories, but durable memory should be explicit and reviewable. Link keeps memory as Markdown with type, scope, project, source, review status, optional review dates, and optional expiry dates.</p>
+        <p>Agents can propose memories, but durable memory should be explicit and reviewable. Link keeps memory as Markdown with type, scope, visibility, project, source, review status, optional review dates, and optional expiry dates.</p>
         <pre><code>link propose-memories raw/notes.md ~/link
 link memory-inbox ~/link
 link review-memory memory-name ~/link
 link archive-memory memory-name ~/link --reason stale</code></pre>
-        <p>For temporary context, use <code>expires_at</code>. For decisions that should be re-confirmed, use <code>review_after</code>.</p>
+        <p>For temporary context, use <code>expires_at</code>. For decisions that should be re-confirmed, use <code>review_after</code>. For team handoff, keep personal context at <code>visibility: private</code> and only mark memories <code>project</code> or <code>team</code> after the user explicitly approves sharing them.</p>
 
         <h2 id="share">Team Sharing Pattern</h2>
         <p>The safest early team workflow is Git-backed sharing of reviewed wiki pages. Keep raw sources local unless the team explicitly decides to share them.</p>
         <pre><code>link team-sync ~/link --remote git@example.com:team/link-memory.git
 link compliance-export ~/link --output link-audit.json
 link backup ~/link</code></pre>
-        <p><code>link team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and whether active user-scoped memories would be swept into a broad <code>git add wiki</code>. It prints paste-safe commands instead of pushing data for you.</p>
+        <p><code>link team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and whether active <code>visibility: private</code> memories would be swept into a broad <code>git add wiki</code>. It prints paste-safe commands instead of pushing data for you.</p>
 
         <h2 id="audit">Audit Packet</h2>
         <p><code>link compliance-export</code> creates a redacted JSON packet for review. It includes readiness, validation status, memory review counts, operation markers, recent audit log metadata, and safe next actions. Raw source contents and memory bodies are excluded.</p>
@@ -112,7 +112,7 @@ link memory-log ~/link</code></pre>
           <li>Run <code>link compliance-export ~/link --output link-audit.json</code>.</li>
           <li>Confirm <code>raw/</code>, backups, caches, and local MCP Python markers are ignored by Git.</li>
           <li>Review <code>wiki/log.md</code>, <code>link memory-log ~/link</code>, and <code>link wins ~/link</code>.</li>
-          <li>Only share reviewed <code>wiki/</code> pages that your team intends to share.</li>
+          <li>Only share reviewed <code>wiki/</code> pages whose memories are marked <code>visibility: project</code> or <code>visibility: team</code>.</li>
         </ol>
       </article>
     </div>

@@ -17,6 +17,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `link team-sync` to print a safe Git sharing plan for reviewed team memory without pushing private raw sources automatically.
 - Added `link share <page-or-memory>` to print a local viewer permalink and agent prompt for a specific Link page.
 - Added `link snapshot` to export a static, read-only HTML snapshot for demos or reviews while excluding raw sources, captures, live state, and memory pages by default.
+- Added memory `visibility` metadata (`private`, `project`, or `team`) so team sharing can rely on explicit user intent instead of inferring privacy from scope alone.
 - Added `link memory-log`, MCP `memory_log`, `/memory-log`, and `/api/memory-log` for recent memory lifecycle changes without exposing raw source or memory bodies.
 - Added `link wins`, MCP `memory_wins`, `/wins`, and `/api/wins` for local, non-telemetry proof signals about what Link memory is carrying.
 - Added a team security review docs page covering local deployment, data boundaries, memory approval gates, Git sharing, audit exports, and current limits.
@@ -26,7 +27,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 ### Changed
 
 - Broadened local secret detection for common modern provider tokens and credentials before capture, ingest, Obsidian import, and doctor scans.
-- Tightened `link team-sync` readiness so unreviewed memories or active user-scoped memories block "ready" status before Git sharing.
+- Tightened `link team-sync` readiness so unreviewed memories or active `visibility: private` memories block "ready" status before Git sharing.
+- Tightened `link snapshot --include-memories` so private memories stay excluded unless `--include-private-memories` is explicitly passed.
 - Broadened Windows CI from a small portability subset to most non-installer/non-server tests.
 - Clarified that the Homebrew formula lives in the separate `gowtham0992/homebrew-link` tap.
 - Tightened security reporting guidance to prefer private maintainer contact before public GitHub issues.

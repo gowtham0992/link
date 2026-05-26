@@ -57,6 +57,22 @@ class SnapshotCoreTests(unittest.TestCase):
             "memory",
             "> **TLDR:** User prefers local memory.\n\nPrivate preference.",
         )
+        private_text = (self.wiki / "memories/prefer-local-memory.md").read_text(encoding="utf-8")
+        (self.wiki / "memories/prefer-local-memory.md").write_text(
+            private_text.replace("type: memory\n", "type: memory\nscope: user\nvisibility: private\n"),
+            encoding="utf-8",
+        )
+        _write_page(
+            self.wiki / "memories/team-release-plan.md",
+            "Team release plan",
+            "memory",
+            "> **TLDR:** Team-visible release memory.\n\nShared release context.",
+        )
+        team_text = (self.wiki / "memories/team-release-plan.md").read_text(encoding="utf-8")
+        (self.wiki / "memories/team-release-plan.md").write_text(
+            team_text.replace("type: memory\n", "type: memory\nscope: project\nvisibility: team\n"),
+            encoding="utf-8",
+        )
 
     def test_export_snapshot_excludes_memories_and_raw_by_default(self):
         output = self.root / "snapshot"
@@ -80,7 +96,7 @@ class SnapshotCoreTests(unittest.TestCase):
         self.assertNotIn("output", manifest)
         self.assertNotIn(str(self.root), json.dumps(manifest))
 
-    def test_export_snapshot_can_include_memories_intentionally(self):
+    def test_export_snapshot_includes_only_non_private_memories_intentionally(self):
         output = self.root / "snapshot"
 
         payload = export_snapshot(self.wiki, output, include_memories=True)
@@ -88,6 +104,25 @@ class SnapshotCoreTests(unittest.TestCase):
         self.assertTrue(payload["created"])
         self.assertTrue(payload["include_memories"])
         self.assertEqual(payload["page_count"], 3)
+        self.assertFalse((output / "pages/prefer-local-memory.html").exists())
+        self.assertTrue((output / "pages/team-release-plan.html").exists())
+        manifest = json.loads((output / "snapshot.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["excluded_counts"]["private_memories"], 1)
+
+    def test_export_snapshot_can_include_private_memories_with_explicit_flag(self):
+        output = self.root / "snapshot"
+
+        payload = export_snapshot(
+            self.wiki,
+            output,
+            include_memories=True,
+            include_private_memories=True,
+        )
+
+        self.assertTrue(payload["created"])
+        self.assertTrue(payload["include_memories"])
+        self.assertTrue(payload["include_private_memories"])
+        self.assertEqual(payload["page_count"], 4)
         self.assertTrue((output / "pages/prefer-local-memory.html").exists())
 
     def test_export_snapshot_blocks_secret_looking_wiki_values(self):
