@@ -80,6 +80,14 @@ bash integrations/antigravity/install.sh</code></pre>
 .\integrations\copilot\install.ps1
 .\integrations\vscode\install.ps1
 .\integrations\antigravity\install.ps1</code></pre>
+        <p>If you already have agent instructions and only need the MCP config, use <code>link connect</code>. It previews the target file and config snippet first; add <code>--write</code> for an explicit update.</p>
+        <pre><code>link connect codex ~/link
+link connect codex ~/link --write
+link connect kiro ~/link --write
+link connect claude-code ~/link --write
+link connect cursor ~/link --write
+link connect antigravity ~/link --write
+link verify-mcp ~/link</code></pre>
 
         <h2 id="mcp-only">MCP Only</h2>
         <pre><code>python3 -m pip install --upgrade link-mcp

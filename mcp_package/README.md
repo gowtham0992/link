@@ -23,6 +23,15 @@ bash link/integrations/codex/install.sh   # or claude-code, cursor, kiro, vscode
 The installer scaffolds `~/link/`, installs or upgrades `link-mcp`, writes agent
 instructions, and prints the exact MCP config for your machine.
 
+If Link is already installed and you only need to wire MCP into an agent, use
+the CLI helper from the main Link package:
+
+```bash
+link connect codex ~/link
+link connect codex ~/link --write
+link verify-mcp ~/link
+```
+
 After install, ask your agent:
 
 ```text

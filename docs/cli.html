@@ -102,6 +102,11 @@ link rebuild-backlinks
 link validate
 link verify-mcp</code></pre>
         <p>Use <code>link backup</code> before broad repair work. Use <code>link benchmark</code> when a wiki starts to feel slow. <code>link status --validate</code> and <code>link benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
+        <p>Use <code>link connect &lt;agent&gt;</code> when an agent already has Link instructions but still needs MCP wiring. It previews the config before writing.</p>
+        <pre><code>link connect codex ~/link
+link connect codex ~/link --write
+link connect kiro ~/link --write
+link verify-mcp ~/link</code></pre>
         <p>From a source checkout, use the synthetic large-wiki smoke when you want local scale evidence without touching your real wiki. The script prints the exact <code>link serve</code> command and graph URL for the generated fixture.</p>
         <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
 
@@ -147,6 +152,7 @@ link validate [--strict]
 link rebuild-index
 link rebuild-backlinks
 link verify-mcp [--json]
+link connect &lt;agent&gt; [dir] [--write] [--config path] [--python python]
 python3 link.py demo
 python3 link.py query-link "task" [dir]</code></pre>
         <p><code>query-link</code> is kept as an internal/backward-compatible alias. Prefer <code>link query</code> in user-facing docs.</p>

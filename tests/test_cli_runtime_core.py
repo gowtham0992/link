@@ -3,6 +3,7 @@ import unittest
 from mcp_package.link_core.cli_runtime import (
     render_demo_text,
     render_init_text,
+    render_mcp_connect_text,
     render_starter_prompts_text,
     render_try_text,
     render_welcome_text,
@@ -103,6 +104,28 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Query proof:", text)
         self.assertIn("Ask an agent:", text)
         self.assertIn("link next /tmp/link-demo", text)
+
+    def test_render_mcp_connect_text_preview(self):
+        code, text = render_mcp_connect_text({
+            "display_name": "Codex",
+            "wiki": "/tmp/link/wiki",
+            "python": "/tmp/python",
+            "config_path": "/tmp/config.toml",
+            "snippet": "[mcp_servers.link]\ncommand = \"/tmp/python\"",
+            "write": {"requested": False, "ok": False, "message": "preview only"},
+            "next_actions": [
+                {"label": "write config", "command_text": "link connect codex /tmp/link --write"},
+                {"label": "verify MCP runtime", "command_text": "link verify-mcp /tmp/link --python /tmp/python"},
+            ],
+            "restart_hint": "Restart the agent, then ask: is Link ready?",
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Link connect: Codex", text)
+        self.assertIn("Preview only", text)
+        self.assertIn("link connect codex /tmp/link --write", text)
+        self.assertIn("[mcp_servers.link]", text)
+        self.assertIn("link verify-mcp /tmp/link --python /tmp/python", text)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ Usage:
   python link.py rebuild-index [target]
   python link.py rebuild-backlinks [target]
   python link.py verify-mcp [target]
+  python link.py connect <agent> [target]
 """
 from __future__ import annotations
 
@@ -202,6 +203,9 @@ from link_core.mcp_verify import (
     display_command as _core_display_command,
     render_mcp_verify_text as _core_render_mcp_verify_text,
 )
+from link_core.mcp_connect import (
+    build_mcp_connect_payload as _core_build_mcp_connect_payload,
+)
 from link_core.operations import (
     operation_report as _core_operation_report,
     render_operations_text as _core_render_operations_text,
@@ -222,6 +226,7 @@ from link_core.cli_query import (
 from link_core.cli_runtime import (
     render_demo_text as _core_render_demo_text,
     render_init_text as _core_render_init_text,
+    render_mcp_connect_text as _core_render_mcp_connect_text,
     render_starter_prompts_text as _core_render_starter_prompts_text,
     render_try_text as _core_render_try_text,
     render_welcome_text as _core_render_welcome_text,
@@ -1564,6 +1569,39 @@ def verify_mcp(
     return code
 
 
+def connect_mcp(
+    target: Path,
+    agent: str,
+    *,
+    write: bool = False,
+    config_path: str | None = None,
+    python_cmd: str | None = None,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    payload = _core_build_mcp_connect_payload(
+        target=target,
+        wiki_dir=wiki_dir,
+        agent=agent,
+        expected_version=LINK_VERSION,
+        init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+        python_cmd=python_cmd,
+        default_python=sys.executable,
+        config_path=config_path,
+        write=write,
+    )
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
+        return 0 if not write or bool(write_status.get("ok")) else 1
+
+    code, text = _core_render_mcp_connect_text(payload)
+    print(text)
+    return code
+
+
 def _copy_runtime_files(target: Path) -> None:
     _core_copy_runtime_files(ROOT, target)
 
@@ -1790,6 +1828,7 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
             "verify-mcp": verify_mcp,
+            "connect": connect_mcp,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,
         })
     except ValueError as exc:

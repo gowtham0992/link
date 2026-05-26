@@ -230,6 +230,17 @@ query Link for the release process
 what does Link remember about local personal memory?
 ```
 
+If your agent already has instructions and you only need MCP wiring, use the
+connection helper. It previews the exact config first; add `--write` when you
+want Link to update the agent config file.
+
+```bash
+link connect codex ~/link
+link connect codex ~/link --write
+link connect kiro ~/link --write
+link verify-mcp ~/link
+```
+
 <details>
 <summary>MCP-only install</summary>
 

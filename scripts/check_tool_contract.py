@@ -16,6 +16,7 @@ EXPECTED_CLI_COMMANDS = {
     "brief",
     "capture-inbox",
     "capture-session",
+    "connect",
     "delete-capture",
     "demo",
     "doctor",

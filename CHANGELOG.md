@@ -9,6 +9,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 ### Added
 
 - Added `link try` as a one-command demo proof loop that creates the demo, checks readiness, runs query/brief examples, and prints first agent prompts.
+- Added `link connect <agent>` to preview or write MCP client config for Codex, Kiro, Claude Code, Cursor, Antigravity, VS Code, and Copilot.
 - Added `python -m link_mcp --version` so MCP package installs can be verified before a wiki exists.
 - Added an Obsidian guide for opening Link's Markdown wiki as a vault and rebuilding indexes after manual edits.
 

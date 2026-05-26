@@ -251,6 +251,14 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     verify_mcp_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
     verify_mcp_cmd.add_argument("--python", default=None, help="Python executable to verify")
 
+    connect_cmd = sub.add_parser("connect", help="print or write MCP config for a local agent")
+    connect_cmd.add_argument("agent", help="agent to connect: codex, kiro, claude-code, cursor, antigravity, vscode, copilot")
+    connect_cmd.add_argument("target", nargs="?", default=".")
+    connect_cmd.add_argument("--write", action="store_true", help="update the detected agent config file")
+    connect_cmd.add_argument("--config", default=None, help="override the agent config file path")
+    connect_cmd.add_argument("--python", default=None, help="Python executable for the MCP server")
+    connect_cmd.add_argument("--json", action="store_true", help="print machine-readable connection plan")
+
     return parser
 
 
@@ -439,4 +447,13 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["rebuild-backlinks"](Path(args.target))
     if command == "verify-mcp":
         return handlers["verify-mcp"](Path(args.target), json_output=args.json, python_cmd=args.python)
+    if command == "connect":
+        return handlers["connect"](
+            Path(args.target),
+            args.agent,
+            write=args.write,
+            config_path=args.config,
+            python_cmd=args.python,
+            json_output=args.json,
+        )
     raise ValueError(f"unknown command: {command}")

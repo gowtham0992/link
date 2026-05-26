@@ -61,6 +61,29 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.target, "/tmp/link")
         self.assertTrue(args.json)
 
+    def test_connect_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "connect",
+            "codex",
+            "/tmp/link",
+            "--write",
+            "--config",
+            "/tmp/config.toml",
+            "--python",
+            "/tmp/python",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "connect")
+        self.assertEqual(args.agent, "codex")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertTrue(args.write)
+        self.assertEqual(args.config, "/tmp/config.toml")
+        self.assertEqual(args.python, "/tmp/python")
+        self.assertTrue(args.json)
+
     def test_version_command_routes_to_handler(self):
         parser = build_cli_parser()
 
@@ -165,6 +188,35 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(code, 6)
         self.assertEqual(calls[0][0], Path("/tmp/link"))
         self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_connect_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "connect",
+            "kiro",
+            "/tmp/link",
+            "--write",
+            "--config",
+            "/tmp/mcp.json",
+            "--python",
+            "/tmp/python",
+            "--json",
+        ])
+        calls = []
+
+        def connect_handler(target, agent, **kwargs):
+            calls.append((target, agent, kwargs))
+            return 4
+
+        code = dispatch_cli_command(args, {"connect": connect_handler})
+
+        self.assertEqual(code, 4)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], "kiro")
+        self.assertTrue(calls[0][2]["write"])
+        self.assertEqual(calls[0][2]["config_path"], "/tmp/mcp.json")
+        self.assertEqual(calls[0][2]["python_cmd"], "/tmp/python")
+        self.assertTrue(calls[0][2]["json_output"])
 
     def test_dispatch_routes_welcome_arguments(self):
         parser = build_cli_parser()

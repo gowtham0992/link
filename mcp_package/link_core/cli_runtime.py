@@ -141,3 +141,49 @@ def render_try_text(
         "More first-run prompts:",
         f"  {next_command}",
     ])
+
+
+def render_mcp_connect_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render a safe MCP connection plan for a local agent."""
+    write_status = payload.get("write") if isinstance(payload.get("write"), Mapping) else {}
+    requested = bool(write_status.get("requested"))
+    ok = bool(write_status.get("ok"))
+    code = 0 if not requested or ok else 1
+    lines = [
+        f"Link connect: {payload.get('display_name')}",
+        "",
+        f"Wiki: {payload.get('wiki')}",
+        f"Python: {payload.get('python')}",
+        f"Config: {payload.get('config_path')}",
+        "",
+    ]
+    if requested:
+        lines.append(f"Write: {'updated' if ok else 'failed'}")
+        message = write_status.get("message")
+        if message:
+            lines.append(f"  {message}")
+        lines.append("")
+    else:
+        lines.extend([
+            "Preview only. To update the agent config:",
+        ])
+        actions = payload.get("next_actions", [])
+        if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)):
+            for action in actions:
+                if isinstance(action, Mapping) and action.get("label") == "write config":
+                    lines.append(f"  {action.get('command_text')}")
+                    break
+        lines.append("")
+    lines.append("Config snippet:")
+    snippet = str(payload.get("snippet") or "")
+    lines.extend(f"  {line}" if line else "" for line in snippet.splitlines())
+    lines.extend(["", "Then:"])
+    actions = payload.get("next_actions", [])
+    if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)):
+        for action in actions:
+            if isinstance(action, Mapping) and action.get("label") != "write config":
+                lines.append(f"  {action.get('command_text')}")
+    restart_hint = payload.get("restart_hint")
+    if restart_hint:
+        lines.append(f"  {restart_hint}")
+    return code, "\n".join(lines)
