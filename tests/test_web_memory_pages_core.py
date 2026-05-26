@@ -13,6 +13,7 @@ from link_core.web_memory_pages import (  # noqa: E402
     render_memory_log_page,
     render_memory_audit_page,
     render_memory_dashboard_page,
+    render_memory_wins_page,
     render_profile_page,
 )
 
@@ -296,3 +297,43 @@ def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
     assert "2026-05-05 remember &lt;memory&gt;" in html
     assert "<p>Trusted body</p>" in html
     assert "<unit test>" not in html
+
+
+def test_render_memory_wins_page_shows_local_proof_signals():
+    payload = {
+        "active_count": 2,
+        "reviewed_active_count": 1,
+        "review_count": 1,
+        "project_count": 1,
+        "honest_note": "These are local wiki signals, not telemetry.",
+        "wins": [
+            {
+                "label": "Reusable <context>",
+                "count": 2,
+                "description": "Active memories can appear in briefs.",
+                "prompt": "brief me from Link before we continue",
+            }
+        ],
+        "recent_memories": [
+            {
+                "name": "alpha",
+                "title": "Alpha <memory>",
+                "memory_type": "project",
+                "scope": "project",
+                "tldr": "Alpha context.",
+            }
+        ],
+        "prompts": ["what does Link remember about me?"],
+        "next_actions": [
+            {"label": "Use memory", "reason": "Try the value loop.", "command": "link brief current-task ."}
+        ],
+    }
+
+    html = render_memory_wins_page(payload, page_href=_page_href, layout=_layout)
+
+    assert "Memory Wins" in html
+    assert "not telemetry" in html
+    assert "Reusable &lt;context&gt;" in html
+    assert "Alpha &lt;memory&gt;" in html
+    assert 'data-copy-text="what does Link remember about me?"' in html
+    assert "link brief current-task ." in html

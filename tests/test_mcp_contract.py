@@ -714,6 +714,14 @@ class McpContractTests(unittest.TestCase):
         self.assertIn("entries", payload)
         self.assertIn("Memory bodies", payload["privacy_note"])
 
+    def test_memory_wins_contract(self):
+        payload = json.loads(self.server.memory_wins())
+
+        self.assertEqual(payload["schema"], "link-memory-wins-v1")
+        self.assertGreaterEqual(payload["active_count"], 1)
+        self.assertIn("wins", payload)
+        self.assertIn("not telemetry", payload["honest_note"])
+
     def test_memory_inbox_project_filter_contract(self):
         self.server.review_memory("prefer-local-personal-memory")
         alpha = json.loads(self.server.remember_memory(

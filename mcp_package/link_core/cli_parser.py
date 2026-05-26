@@ -228,6 +228,12 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     profile_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     profile_cmd.add_argument("--json", action="store_true", help="print machine-readable profile")
 
+    wins_cmd = sub.add_parser("wins", help="show local proof signals for what Link memory is carrying")
+    wins_cmd.add_argument("target", nargs="?", default=".")
+    wins_cmd.add_argument("--limit", type=int, default=6)
+    wins_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
+    wins_cmd.add_argument("--json", action="store_true", help="print machine-readable memory wins")
+
     audit_cmd = sub.add_parser("memory-audit", help="audit memory health, review backlog, and raw captures")
     audit_cmd.add_argument("target", nargs="?", default=".")
     audit_cmd.add_argument("--limit", type=int, default=10)
@@ -485,6 +491,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["brief"](Path(args.target), query=args.query, limit=args.limit, project=args.project, json_output=args.json)
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
+    if command == "wins":
+        return handlers["wins"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "memory-audit":
         return handlers["memory-audit"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "archive-memory":

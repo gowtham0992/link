@@ -304,6 +304,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
 .memory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 12px 0; }
 .memory-card { border: 1px solid var(--border-soft); border-radius: 6px; padding: 12px; min-width: 0; background: var(--surface); }
 .memory-card h3 { margin-top: 0; font-size: 16px; }
+.memory-card .memory-metric { font-family: Georgia, serif; font-size: 32px; font-weight: 700; line-height: 1; margin: 4px 0 8px; color: var(--accent); }
 .memory-card .summary { color: var(--muted); font-family: sans-serif; font-size: 13px; line-height: 1.5; margin: 8px 0; }
 .memory-card .memory-meta { color: var(--subtle); font-size: 12px; font-family: sans-serif; }
 .memory-actions { margin-top: 10px; display: grid; gap: 6px; }

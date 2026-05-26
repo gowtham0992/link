@@ -165,6 +165,9 @@ from link_core.log import (
 from link_core.memory_log import (
     memory_log_payload as _core_memory_log_payload,
 )
+from link_core.memory_wins import (
+    memory_wins_payload as _core_memory_wins_payload,
+)
 from link_core.operations import (
     operation_report as _core_operation_report,
 )
@@ -322,6 +325,16 @@ def _memory_log(limit: int = 50, include_captures: bool = True) -> dict[str, obj
         WIKI_DIR,
         limit=_parse_limit(limit, default=50),
         include_captures=include_captures,
+    )
+
+
+def _memory_wins(limit: int = 6, project: str = "") -> dict[str, object]:
+    limit = _parse_limit(limit, default=6)
+    return _core_memory_wins_payload(
+        WIKI_DIR,
+        limit=limit,
+        project=project,
+        records=_memory_records(),
     )
 
 
@@ -1096,6 +1109,17 @@ def memory_log(limit: int = 50, include_captures: bool = True) -> str:
     bodies.
     """
     return json.dumps(_memory_log(limit=limit, include_captures=include_captures), ensure_ascii=False)
+
+
+@mcp.tool()
+def memory_wins(limit: int = 6, project: str = "") -> str:
+    """Summarize local proof signals for Link memory value.
+
+    Use this when the user asks whether Link is useful, what memory value has
+    accumulated, or how to demonstrate the local memory loop. The result is
+    based on local wiki metadata only; Link does not track telemetry.
+    """
+    return json.dumps(_memory_wins(limit=limit, project=project), ensure_ascii=False)
 
 
 @mcp.tool()

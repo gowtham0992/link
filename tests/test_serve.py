@@ -332,6 +332,7 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(payload["local_only"])
         self.assertEqual(payload["recommended"]["readiness"], "/api/health")
         self.assertIn("/api/query-link", payload["endpoints"]["read"])
+        self.assertIn("/api/wins", payload["endpoints"]["read"])
         self.assertIn("/api/memory-log", payload["endpoints"]["read"])
         self.assertIn("/api/remember-memory", payload["endpoints"]["write"])
         self.assertEqual(payload["write_header"]["X-Link-Local-Action"], "true")
@@ -358,8 +359,41 @@ class ServeTests(unittest.TestCase):
         self.assertIn(b"/prompts", body)
         self.assertIn(b"/propose", body)
         self.assertIn(b"/captures", body)
+        self.assertIn(b"/wins", body)
         self.assertIn(b"/memory-log", body)
         self.assertIn(b"/all", body)
+
+    def test_memory_wins_page_and_api_show_local_value_signals(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "memories/prefer-local-memory.md",
+            "---\n"
+            "type: memory\n"
+            "title: \"Prefer local memory\"\n"
+            "memory_type: preference\n"
+            "scope: user\n"
+            "status: active\n"
+            "date_captured: \"2026-05-25T00:00:00Z\"\n"
+            "source: \"unit test\"\n"
+            "review_status: reviewed\n"
+            "---\n\n"
+            "# Prefer local memory\n\n"
+            "> **TLDR:** User prefers local memory.\n\n"
+            "## Memory\n\nUser prefers local memory.\n",
+        )
+
+        html = serve._render_memory_wins()
+        status, payload = run_handler("GET", "/api/wins")
+        page_status, body, _ = run_handler_raw("GET", "/wins")
+
+        self.assertIn("Memory Wins", html)
+        self.assertIn("not telemetry", html)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["schema"], "link-memory-wins-v1")
+        self.assertEqual(payload["active_count"], 1)
+        self.assertEqual(page_status, 200)
+        self.assertIn(b"Memory Wins", body)
 
     def test_memory_log_page_and_api_show_lifecycle_events(self):
         wiki = self.make_wiki()

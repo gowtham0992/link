@@ -116,6 +116,17 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertTrue(args.no_captures)
         self.assertTrue(args.json)
 
+    def test_wins_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args(["wins", "/tmp/link", "--limit", "4", "--project", "alpha", "--json"])
+
+        self.assertEqual(args.command, "wins")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.limit, 4)
+        self.assertEqual(args.project, "alpha")
+        self.assertTrue(args.json)
+
     def test_import_obsidian_command_options(self):
         parser = build_cli_parser()
 

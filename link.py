@@ -30,6 +30,7 @@ Usage:
   python link.py brief ["task or question"] [target]
   python link.py recall "query" [target]
   python link.py profile [target]
+  python link.py wins [target]
   python link.py memory-audit [target]
   python link.py archive-memory <name-or-title> [target]
   python link.py restore-memory <name-or-title> [target]
@@ -140,6 +141,9 @@ from link_core.audit_export import (
 from link_core.memory_log import (
     memory_log_payload as _core_memory_log_payload,
 )
+from link_core.memory_wins import (
+    memory_wins_payload as _core_memory_wins_payload,
+)
 from link_core.team_sync import (
     build_team_sync_payload as _core_build_team_sync_payload,
     render_team_sync_text as _core_render_team_sync_text,
@@ -184,6 +188,7 @@ from link_core.cli_memory import (
     render_memory_inbox_text as _core_render_memory_inbox_text,
     render_memory_log_text as _core_render_memory_log_text,
     render_memory_status_text as _core_render_memory_status_text,
+    render_memory_wins_text as _core_render_memory_wins_text,
     render_profile_text as _core_render_profile_text,
     render_propose_memories_text as _core_render_propose_memories_text,
     render_recall_text as _core_render_recall_text,
@@ -1461,6 +1466,20 @@ def memory_log(target: Path, limit: int = 50, include_captures: bool = True, jso
     )
 
 
+def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_output: bool = False) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    payload = _core_memory_wins_payload(wiki_dir, limit=limit, project=project)
+    return _emit_json_or_text(
+        payload,
+        json_output,
+        lambda data: _core_render_memory_wins_text(data, target=target),
+    )
+
+
 def review_memory(target: Path, identifier: str, note: str | None = None, json_output: bool = False) -> int:
     try:
         result = _mark_memory_reviewed(target, identifier, note=note)
@@ -1942,6 +1961,7 @@ def main(argv: list[str] | None = None) -> int:
             "benchmark": benchmark,
             "brief": brief,
             "profile": profile,
+            "wins": memory_wins,
             "memory-audit": memory_audit,
             "archive-memory": archive_memory,
             "restore-memory": restore_memory,

@@ -56,6 +56,9 @@ from link_core.log import (
 from link_core.memory_log import (
     memory_log_payload as _core_memory_log_payload,
 )
+from link_core.memory_wins import (
+    memory_wins_payload as _core_memory_wins_payload,
+)
 from link_core.markdown import (
     markdown_to_html as _core_markdown_to_html,
 )
@@ -91,6 +94,7 @@ from link_core.web_memory_pages import (
     render_memory_log_page as _core_render_memory_log_page,
     render_memory_audit_page as _core_render_memory_audit_page,
     render_memory_dashboard_page as _core_render_memory_dashboard_page,
+    render_memory_wins_page as _core_render_memory_wins_page,
     render_profile_page as _core_render_profile_page,
 )
 from link_core.web_layout import (
@@ -777,6 +781,15 @@ def _memory_log(limit: int = 50, include_captures: bool = True) -> dict[str, obj
     )
 
 
+def _memory_wins(limit: int = 6, project: str | None = None) -> dict[str, object]:
+    return _core_memory_wins_payload(
+        WIKI_DIR,
+        limit=max(1, min(limit, 50)),
+        project=project,
+        records=_memory_records(),
+    )
+
+
 def _json_for_script(data) -> str:
     """Serialize JSON for direct embedding inside a <script> tag."""
     return (
@@ -904,6 +917,7 @@ def _render_more():
         ("/inbox", "Inbox", "Confirm, update, archive, or explain memories needing review."),
         ("/captures", "Captures", "Inspect saved raw session captures before accepting them."),
         ("/profile", "Profile", "See what Link remembers by type, scope, status, and recency."),
+        ("/wins", "Wins", "Show local proof signals for what Link memory is carrying."),
         ("/memory-log", "Memory Log", "See recent memory lifecycle changes without opening raw log text."),
         ("/page/log", "Log", "Read the append-only wiki operation log."),
         ("/all", "All Pages", "Browse grouped wiki pages with filters and pagination."),
@@ -1091,6 +1105,14 @@ def _render_inbox(project: str | None = None):
 
 def _render_memory_log():
     return _core_render_memory_log_page(_memory_log(limit=100), layout=_layout)
+
+
+def _render_memory_wins(project: str | None = None):
+    return _core_render_memory_wins_page(
+        _memory_wins(limit=8, project=project),
+        page_href=_page_href,
+        layout=_layout,
+    )
 
 
 def _render_explain_memory(identifier: str):
@@ -1357,6 +1379,7 @@ def _api_discovery_payload() -> dict[str, object]:
                 "/api/memory-audit",
                 "/api/memory-profile",
                 "/api/memory-inbox",
+                "/api/wins",
                 "/api/memory-log",
                 "/api/capture-inbox",
                 "/api/explain-memory",
@@ -1578,6 +1601,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._ok(_render_explain_memory(identifier))
         elif path == "/profile":
             self._ok(_render_profile(project=_query_text(query, "project", max_len=80)))
+        elif path == "/wins":
+            self._ok(_render_memory_wins(project=_query_text(query, "project", max_len=80)))
         elif path == "/memory-log":
             self._ok(_render_memory_log())
         elif path == "/all":
@@ -1667,6 +1692,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/api/query-link",
             "/api/memory-audit",
             "/api/memory-inbox",
+            "/api/wins",
             "/api/memory-log",
             "/api/capture-inbox",
         }:
@@ -1774,6 +1800,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     include_archived=include_archived,
                     project=_query_text(query, "project", max_len=80),
                 ))
+        elif path == "/api/wins":
+            limit = self._query_limit_or_reply(query, "6")
+            if limit is not None:
+                self._json(_memory_wins(limit=limit, project=_query_text(query, "project", max_len=80)))
         elif path == "/api/memory-log":
             limit = self._query_limit_or_reply(query, "50")
             if limit is not None:

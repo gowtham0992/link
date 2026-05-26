@@ -322,6 +322,8 @@ creating a duplicate.
   for recall, and what needs review.
 - `memory_log`: recent memory lifecycle changes from `wiki/log.md`, without
   raw source or memory bodies.
+- `memory_wins`: local proof signals for what Link memory is carrying, based
+  on wiki metadata rather than telemetry.
 
 Use `review_after` for time-sensitive preferences or decisions. When that date
 arrives, the memory reappears in Link's review inbox so an agent can ask the
@@ -338,6 +340,10 @@ bodies are not included.
 For day-to-day auditability, `link memory-log ~/link` shows what Link recently
 remembered, updated, reviewed, archived, restored, forgot, or accepted from raw
 captures.
+
+For local proof of value, `link wins ~/link` shows reusable memories, reviewed
+memory, provenance, project continuity, freshness guardrails, and copyable
+prompts without tracking user behavior.
 
 For Git-backed team memory, `link team-sync ~/link` checks whether the workspace
 is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,

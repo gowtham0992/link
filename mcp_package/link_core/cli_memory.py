@@ -372,6 +372,50 @@ def render_memory_log_text(payload: Mapping[str, object], *, target: object) -> 
     return 0, "\n".join(lines)
 
 
+def render_memory_wins_text(payload: Mapping[str, object], *, target: object) -> tuple[int, str]:
+    lines = [
+        f"Link memory wins: {target}",
+        str(payload.get("honest_note") or ""),
+        "",
+        (
+            f"{payload.get('active_count', 0)} active · "
+            f"{payload.get('reviewed_active_count', 0)} reviewed · "
+            f"{payload.get('review_count', 0)} need review · "
+            f"{payload.get('project_count', 0)} projects"
+        ),
+        "",
+        "Signals:",
+    ]
+    wins = payload.get("wins", [])
+    if isinstance(wins, Sequence) and not isinstance(wins, (str, bytes)):
+        for win in wins:
+            if not isinstance(win, Mapping):
+                continue
+            lines.append(f"- {win.get('label')}: {win.get('count')}")
+            lines.append(f"  {win.get('description')}")
+    recent = payload.get("recent_memories", [])
+    if isinstance(recent, Sequence) and not isinstance(recent, (str, bytes)) and recent:
+        lines.extend(["", "Recent reusable memories:"])
+        for memory in recent[:5]:
+            if isinstance(memory, Mapping):
+                lines.append(f"- {memory.get('title')} ({memory.get('memory_type')} · {memory.get('scope')})")
+                summary = memory.get("tldr") or memory.get("snippet")
+                if summary:
+                    lines.append(f"  {summary}")
+    actions = payload.get("next_actions", [])
+    if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)) and actions:
+        lines.extend(["", "Next:"])
+        for action in actions:
+            if isinstance(action, Mapping):
+                lines.append(f"- {action.get('label')}: {action.get('command')}")
+    prompts = payload.get("prompts", [])
+    if isinstance(prompts, Sequence) and not isinstance(prompts, (str, bytes)) and prompts:
+        lines.extend(["", "Useful prompts:"])
+        for prompt in prompts[:4]:
+            lines.append(f"- {prompt}")
+    return 0, "\n".join(lines)
+
+
 def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, str]:
     memory = explanation["memory"]
     recall_info = explanation["recall"]
