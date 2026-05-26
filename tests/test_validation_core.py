@@ -177,6 +177,30 @@ class ValidationCoreTests(unittest.TestCase):
         self.assertIn("unreadable_page", {finding["code"] for finding in payload["findings"]})
         self.assertNotIn("stale_backlinks", {finding["code"] for finding in payload["findings"]})
 
+    def test_validate_wiki_rejects_secret_values_without_echoing_them(self):
+        wiki = self.make_wiki()
+        fake_key = "sk-" + ("A" * 24)
+        write_page(
+            wiki,
+            "sources/leaky-source.md",
+            "---\ntype: source\ntitle: Leaky Source\n---\n\n"
+            "# Leaky Source\n\n"
+            "> **TLDR:** A source with a secret-looking value.\n\n"
+            "## Summary\n\nDo not keep this token here.\n\n"
+            f"{fake_key}\n\n"
+            "## Raw Source\n\n`raw/leaky-source.md`\n",
+        )
+        (wiki / "_backlinks.json").write_text(json.dumps(build_backlinks(wiki, body_only=False)), encoding="utf-8")
+
+        payload = validate_wiki(wiki)
+        secret_findings = [finding for finding in payload["findings"] if finding["code"] == "secret_value"]
+
+        self.assertFalse(payload["passed"])
+        self.assertEqual(len(secret_findings), 1)
+        self.assertEqual(secret_findings[0]["path"], "sources/leaky-source.md")
+        self.assertIn("OpenAI API key", secret_findings[0]["message"])
+        self.assertNotIn(fake_key, secret_findings[0]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

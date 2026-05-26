@@ -25,6 +25,7 @@ DOCTOR_VALIDATION_CODES = {
     "missing_frontmatter",
     "missing_frontmatter_field",
     "missing_required_section",
+    "secret_value",
     "type_directory_mismatch",
     "unreadable_page",
 }

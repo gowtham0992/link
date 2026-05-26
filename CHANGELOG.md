@@ -27,6 +27,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added a scale model docs page covering bounded defaults, benchmark/health checks, large-wiki habits, and current local limits.
 - Added `python -m link_mcp --version` so MCP package installs can be verified before a wiki exists.
 - Added an Obsidian guide for opening Link's Markdown wiki as a vault and rebuilding indexes after manual edits.
+- Added validation and doctor failures for secret-looking values already present in wiki pages so local UI and MCP context do not quietly serve manually introduced secrets.
 
 ### Changed
 

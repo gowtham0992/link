@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .frontmatter import parse_frontmatter
+from .security import secret_value_warnings
 from .wiki import WIKILINK_RE, load_backlinks_index
 
 
@@ -132,6 +133,18 @@ def validate_wiki(wiki_dir: Path, *, strict: bool = False) -> dict[str, Any]:
             unreadable_pages.add(rel)
             findings.append(_finding("error", "unreadable_page", rel, f"Could not read wiki page: {exc}"))
             continue
+        secret_labels = secret_value_warnings(text)
+        if secret_labels:
+            label = secret_labels[0]
+            extra = f" and {len(secret_labels) - 1} more type(s)" if len(secret_labels) > 1 else ""
+            findings.append(
+                _finding(
+                    "error",
+                    "secret_value",
+                    rel,
+                    f"Secret-looking value detected in wiki page ({label}{extra}); redact before serving or querying it.",
+                )
+            )
         _add_links_to_index(
             page.stem.lower(),
             text,

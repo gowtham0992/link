@@ -415,7 +415,9 @@ Link itself is local-first:
 - `link backup` excludes `raw/` unless you explicitly pass `--include-raw`.
 - Secret-looking API keys, provider tokens, JWTs, registry credentials, and
   private key blocks are detected in raw sources, captures, and release hygiene
-  checks.
+  checks. `link validate` and `link doctor` also fail if secret-looking values
+  are found inside wiki pages before they can be served through the local UI or
+  returned through MCP context.
 - The local web server binds to `127.0.0.1` and is not meant to be exposed to
   the internet without additional auth.
 
