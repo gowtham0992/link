@@ -17,9 +17,9 @@ def _page_href(name: str) -> str:
 
 
 def test_copy_button_escapes_text_and_label():
-    html = copy_button('link "<raw>"', "<Copy>")
+    html = copy_button('lnk "<raw>"', "<Copy>")
 
-    assert 'data-copy-text="link &quot;&lt;raw&gt;&quot;"' in html
+    assert 'data-copy-text="lnk &quot;&lt;raw&gt;&quot;"' in html
     assert "&lt;Copy&gt;" in html
     assert "<raw>" not in html
 
@@ -35,7 +35,7 @@ def test_render_ingest_page_shows_pending_workflow():
             "state": "pending_raw",
             "summary": "1 raw file needs ingest.",
             "agent_prompt": "ingest raw/new-source.md into Link",
-            "commands": ["link validate"],
+            "commands": ["lnk validate"],
             "notes": ["After ingest, validate."],
         },
         "safety": {"status": "clear", "summary": "No secret-looking values detected in raw sources.", "labels": []},
@@ -47,7 +47,7 @@ def test_render_ingest_page_shows_pending_workflow():
             "memory_prompt": "propose memories from raw/new-source.md",
             "steps": ["Read each raw file."],
             "batch": [{"raw": "raw/new-source.md", "suggested_source_page": "wiki/sources/new-source.md"}],
-            "post_checks": ["link validate"],
+            "post_checks": ["lnk validate"],
         },
     }
 
@@ -62,7 +62,7 @@ def test_render_ingest_page_shows_pending_workflow():
     assert '<strong>Validate</strong><span>wait</span><small>graph current</small>' in html
     assert "Copy this into your agent chat" in html
     assert 'data-copy-text="ingest raw/new-source.md into Link"' in html
-    assert 'data-copy-text="link validate"' in html
+    assert 'data-copy-text="lnk validate"' in html
     assert "Ingest path" in html
     assert "Ingest pending raw sources" in html
     assert "wiki/sources/new-source.md" in html
@@ -127,7 +127,7 @@ def test_render_ingest_page_targets_next_step_commands():
         "guidance": {
             "state": "empty",
             "summary": "Link is ready, but raw/ has no source files yet.",
-            "commands": ["link ingest-status /tmp/link"],
+            "commands": ["lnk ingest-status /tmp/link"],
         },
         "safety": {"status": "clear", "summary": "No warnings.", "labels": []},
         "pending_raw": [],
@@ -137,8 +137,8 @@ def test_render_ingest_page_targets_next_step_commands():
 
     html = render_ingest_page(payload, page_href=_page_href, layout=_layout)
 
-    assert 'data-copy-text="link ingest-status /tmp/link"' in html
-    assert "<code>link validate /tmp/link</code>" in html
+    assert 'data-copy-text="lnk ingest-status /tmp/link"' in html
+    assert "<code>lnk validate /tmp/link</code>" in html
 
 
 def test_render_ingest_page_blocks_secret_raw_without_proposal_link():

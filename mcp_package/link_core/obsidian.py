@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 from .files import atomic_write_bytes
 from .security import secret_value_warnings
@@ -101,9 +100,9 @@ def import_obsidian_vault(
     elif skipped_large:
         status = "partial"
     has_wiki_dir = (root / "wiki").is_dir()
-    next_commands = [f"link ingest-status {root}", f"link validate {root}", f"link health {root}"]
+    next_commands = [f"lnk ingest-status {root}", f"lnk validate {root}", f"lnk health {root}"]
     if not has_wiki_dir:
-        next_commands = [f"link init {root}", *next_commands]
+        next_commands = [f"lnk init {root}", *next_commands]
     return {
         "status": status,
         "target": str(root),

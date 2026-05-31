@@ -52,8 +52,8 @@ link_print_next_steps() {
         echo "    ingest raw/<file> into Link"
     else
         echo "  Drop sources into ~/link/raw/."
-        echo "  View wiki: link serve"
-        echo "  Print starter prompts: link next"
+        echo "  View wiki: lnk serve"
+        echo "  Print starter prompts: lnk next"
         echo "  Try in your agent:"
         echo "    is Link ready?"
         echo "    brief me from Link before we continue"

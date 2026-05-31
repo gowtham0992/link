@@ -54,8 +54,8 @@ class LinkCliTests(unittest.TestCase):
         backlinks = json.loads((target / "wiki/_backlinks.json").read_text(encoding="utf-8"))
         self.assertIn("backlinks", backlinks)
         self.assertIn("forward", backlinks)
-        self.assertIn("link health", out.getvalue())
-        self.assertIn("link serve", out.getvalue())
+        self.assertIn("lnk health", out.getvalue())
+        self.assertIn("lnk serve", out.getvalue())
 
     def test_init_preserves_existing_pages(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-init-test-"))
@@ -101,7 +101,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("remember that I prefer local-first agent memory", out.getvalue())
         self.assertIn("query Link for what you know about me", out.getvalue())
         self.assertIn("propose memories from raw/<file>", out.getvalue())
-        self.assertIn("link health", out.getvalue())
+        self.assertIn("lnk health", out.getvalue())
 
     def test_prompts_json_supports_project_examples(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-prompts-test-"))
@@ -130,7 +130,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Link welcome:", text)
         self.assertIn("1. is Link ready?", text)
         self.assertIn("Proves: Agent can find Link", text)
-        self.assertIn("link health", text)
+        self.assertIn("lnk health", text)
         self.assertIn("http://127.0.0.1:3000/health", text)
 
     def test_welcome_json_supports_project_examples(self):
@@ -175,7 +175,7 @@ class LinkCliTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("Link wiki missing", out.getvalue())
-        self.assertIn("link init", out.getvalue())
+        self.assertIn("lnk init", out.getvalue())
 
     def test_serve_validates_port_before_spawning_viewer(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-serve-test-"))
@@ -373,12 +373,12 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("raw/new-source.md", out.getvalue())
         self.assertIn("Guidance: 1 raw file needs ingest.", out.getvalue())
         self.assertIn("Ask your agent: ingest raw/new-source.md into Link", out.getvalue())
-        self.assertIn("Run: link validate", out.getvalue())
+        self.assertIn("Run: lnk validate", out.getvalue())
         self.assertIn("Suggested workflow: Ingest pending raw sources", out.getvalue())
         self.assertIn("Memory review: propose memories from raw/new-source.md", out.getvalue())
         self.assertIn("raw/new-source.md -> wiki/sources/new-source.md", out.getvalue())
         self.assertIn("Post-ingest checks:", out.getvalue())
-        self.assertIn("link health", out.getvalue())
+        self.assertIn("lnk health", out.getvalue())
 
     def test_ingest_status_reports_represented_completion(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-ingest-test-"))
@@ -530,7 +530,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Backlinks: stale", out.getvalue())
         self.assertIn("Guidance: Raw files are represented, but the graph index needs repair.", out.getvalue())
-        self.assertIn("Run: link rebuild-backlinks", out.getvalue())
+        self.assertIn("Run: lnk rebuild-backlinks", out.getvalue())
 
     def test_status_reports_demo_readiness(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-status-test-"))
@@ -629,7 +629,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Link operations:", out.getvalue())
         self.assertIn("remember | pending | stale", out.getvalue())
-        self.assertIn("link validate", out.getvalue())
+        self.assertIn("lnk validate", out.getvalue())
 
         json_out = StringIO()
         with redirect_stdout(json_out):
@@ -658,7 +658,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Ready: no", out.getvalue())
         self.assertIn("Operations: 1 total", out.getvalue())
-        self.assertIn("link operations", out.getvalue())
+        self.assertIn("lnk operations", out.getvalue())
 
     def test_status_prints_readiness_warnings(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-status-test-"))
@@ -1111,7 +1111,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(payload["proposals"][1]["memory_type"], "decision")
         self.assertEqual(payload["proposals"][1]["scope"], "project")
         self.assertEqual(payload["proposals"][1]["primary_action"]["kind"], "remember")
-        self.assertIn(str(target), payload["proposals"][1]["primary_action"]["command"])
+        self.assertIn(str(target.resolve()), payload["proposals"][1]["primary_action"]["command"])
         self.assertFalse((target / "wiki/memories/decision-keep-memory-mode-local.md").exists())
 
     def test_recall_finds_memory_pages(self):
@@ -2063,7 +2063,10 @@ class LinkCliTests(unittest.TestCase):
                 f"link-mcp=={link_cli.LINK_VERSION}",
             ],
         )
-        self.assertIn("'/tmp/Link Python/bin/python'", data["next_actions"][0]["command_text"])
+        self.assertEqual(
+            data["next_actions"][0]["command_text"],
+            link_cli._display_command(data["next_actions"][0]["command"]),
+        )
 
     def test_verify_mcp_json_reports_missing_wiki_action(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-verify-test-"))
@@ -2128,7 +2131,15 @@ class LinkCliTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("link-mcp: installed (0.9.0)", text)
         self.assertIn(f"Expected version: {link_cli.LINK_VERSION}", text)
-        self.assertIn(f"'/tmp/Link Python/bin/python' -m pip install --upgrade link-mcp=={link_cli.LINK_VERSION}", text)
+        expected = link_cli._display_command([
+            "/tmp/Link Python/bin/python",
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            f"link-mcp=={link_cli.LINK_VERSION}",
+        ])
+        self.assertIn(expected, text)
 
     def test_verify_mcp_reports_missing_mcp_sdk_dependency(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-verify-test-"))

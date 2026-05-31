@@ -43,12 +43,21 @@ function Install-LinkCommandWrapper {
     }
 
     $cliDir = if ($env:LINK_CLI_DIR) { $env:LINK_CLI_DIR } else { Join-Path $HOME ".local\bin" }
-    $cmdPath = Join-Path $cliDir "link.cmd"
-    $psPath = Join-Path $cliDir "link.ps1"
+    $cmdPath = Join-Path $cliDir "lnk.cmd"
+    $psPath = Join-Path $cliDir "lnk.ps1"
+    $legacyCmdPath = Join-Path $cliDir "link.cmd"
+    $legacyPsPath = Join-Path $cliDir "link.ps1"
     $marker = "Link command wrapper"
     $linkPy = Join-Path $TargetDir "link.py"
 
     New-Item -ItemType Directory -Force -Path $cliDir | Out-Null
+
+    foreach ($legacyPath in @($legacyCmdPath, $legacyPsPath)) {
+        if ((Test-Path $legacyPath) -and (Select-String -Quiet -SimpleMatch $marker $legacyPath)) {
+            Remove-Item -Force $legacyPath
+            Write-Host "  Removed old Link wrapper: $legacyPath"
+        }
+    }
 
     if ((Test-Path $cmdPath) -and -not (Select-String -Quiet -SimpleMatch $marker $cmdPath)) {
         Write-Host "  · $cmdPath already exists and is not a Link wrapper; not overwriting."
@@ -59,12 +68,14 @@ function Install-LinkCommandWrapper {
     $cmd = @"
 @echo off
 REM $marker
+set LINK_CLI_COMMAND=lnk
 $BasePython "$linkPy" %*
 "@
     Set-Content -Encoding ASCII -Path $cmdPath -Value $cmd
 
     $ps = @"
 # $marker
+$env:LINK_CLI_COMMAND = "lnk"
 & $BasePython "$linkPy" @args
 exit `$LASTEXITCODE
 "@
@@ -73,7 +84,7 @@ exit `$LASTEXITCODE
     Write-Host "  ✓ Link command: $cmdPath"
     $pathParts = ($env:PATH -split [IO.Path]::PathSeparator)
     if ($pathParts -notcontains $cliDir) {
-        Write-Host "  · Add $cliDir to PATH to run: link health"
+        Write-Host "  · Add $cliDir to PATH to run: lnk health"
     }
 }
 
@@ -117,13 +128,10 @@ foreach ($dir in $dirs) {
 }
 
 if (-not $isUpdate) {
-    $backlinks = Join-Path $TargetDir "wiki\_backlinks.json"
-    if (-not (Test-Path $backlinks)) {
-        Set-Content -Encoding UTF8 -Path $backlinks -Value "{`n  `"backlinks`": {},`n  `"forward`": {}`n}`n"
-        Write-Host "  Created wiki/_backlinks.json"
+    & $BasePython (Join-Path $TargetDir "link.py") doctor --fix $TargetDir *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Link wiki initialization failed."
     }
-    Copy-LinkFile (Join-Path $LinkRoot "wiki\index.md") (Join-Path $TargetDir "wiki\index.md")
-    Copy-LinkFile (Join-Path $LinkRoot "wiki\log.md") (Join-Path $TargetDir "wiki\log.md")
     Write-Host "  Wiki structure created at $TargetDir"
 }
 
@@ -220,8 +228,8 @@ if (Test-Path (Join-Path $TargetDir "link.py")) {
         Write-Host "    py link.py verify-mcp"
     } else {
         Write-Host "  Check Link readiness:"
-        Write-Host "    link health"
+        Write-Host "    lnk health"
         Write-Host "  Verify MCP setup:"
-        Write-Host "    link verify-mcp"
+        Write-Host "    lnk verify-mcp"
     }
 }

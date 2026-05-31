@@ -32,8 +32,8 @@ Validate locally:
 brew audit --strict --online gowtham0992/link/link
 brew install --build-from-source gowtham0992/link/link
 brew test gowtham0992/link/link
-link --version
-link demo
+lnk --version
+lnk demo
 ```
 
 Then push the tap repo:

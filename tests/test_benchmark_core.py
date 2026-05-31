@@ -81,7 +81,7 @@ class BenchmarkCoreTests(unittest.TestCase):
         self.assertEqual(health["label"], "review")
         self.assertIn("search took 1.5000s", health["warnings"][0])
         self.assertIn("Review recommended", health["summary"])
-        self.assertIn("Run link doctor --fix", health["recommendations"][0])
+        self.assertIn("Run lnk doctor --fix", health["recommendations"][0])
         self.assertIn("sqlite3/FTS5", health["recommendations"][1])
 
     def test_benchmark_health_warns_on_large_token_fallback(self):

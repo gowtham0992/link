@@ -147,8 +147,8 @@ function Link-PrintNextSteps {
         Write-Host "    ingest raw/<file> into Link"
     } else {
         Write-Host "  Drop sources into ~/link/raw/."
-        Write-Host "  View wiki: link serve"
-        Write-Host "  Print starter prompts: link next"
+        Write-Host "  View wiki: lnk serve"
+        Write-Host "  Print starter prompts: lnk next"
         Write-Host "  Try in your agent:"
         Write-Host "    is Link ready?"
         Write-Host "    brief me from Link before we continue"

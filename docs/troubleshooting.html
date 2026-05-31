@@ -57,32 +57,32 @@
       </aside>
       <article class="doc-content">
 <h2 id="ready">Is Link Ready?</h2>
-        <pre><code>link health
-link status --validate
-link doctor
-link next</code></pre>
+        <pre><code>lnk health
+lnk status --validate
+lnk doctor
+lnk next</code></pre>
         <p>If <code>link</code> is not on your <code>PATH</code>, run from the source checkout with <code>python3 link.py</code>, or add <code>~/.local/bin</code> to your shell path.</p>
 
         <h2 id="mcp">MCP Is Not Visible</h2>
-        <pre><code>link verify-mcp
+        <pre><code>lnk verify-mcp
 python3 -m pip index versions link-mcp</code></pre>
         <p>Restart the MCP client after changing its config. If your installer printed a venv Python path, use that exact path in the MCP config.</p>
-        <p>You do not need <code>link serve</code> or <code>serve.py</code> running for MCP. The web viewer is separate from the MCP server.</p>
+        <p>You do not need <code>lnk serve</code> or <code>serve.py</code> running for MCP. The web viewer is separate from the MCP server.</p>
 
         <h2 id="ingest">Ingest Is Blocked</h2>
-        <pre><code>link ingest-status</code></pre>
+        <pre><code>lnk ingest-status</code></pre>
         <p>Blocked ingest usually means a raw source has secret-looking values, cannot be read safely, or source representation counts may be incomplete. Redact or fix the local file, then ask the agent to ingest again.</p>
 
         <h2 id="operations">Interrupted Writes</h2>
-        <pre><code>link operations
-link validate
-link doctor --fix</code></pre>
+        <pre><code>lnk operations
+lnk validate
+lnk doctor --fix</code></pre>
         <p>If a memory write was interrupted, Link leaves a marker under <code>wiki/.link-operations/</code>. Inspect it before deleting anything manually, then validate the wiki and repair generated indexes if needed.</p>
 
         <h2 id="graph">Graph Is Stale</h2>
-        <pre><code>link rebuild-index
-link rebuild-backlinks
-link validate</code></pre>
+        <pre><code>lnk rebuild-index
+lnk rebuild-backlinks
+lnk validate</code></pre>
         <p>Run this after manual Obsidian edits, hand-written wikilinks, or a failed ingest.</p>
 
         <h2 id="demo">Demo Looks Stale</h2>
@@ -93,10 +93,10 @@ python3 link.py query "why does Link help agents?" link-demo --budget small</cod
         <p>The current generated demo should include three raw sources, source-backed wiki pages, one starter memory, one exploration, current backlinks, and schema v1.</p>
 
         <h2 id="slow">The Wiki Feels Slow</h2>
-        <pre><code>link benchmark "agent memory"
-link graph-summary "agent memory" --limit 40 --depth 1</code></pre>
+        <pre><code>lnk benchmark "agent memory"
+lnk graph-summary "agent memory" --limit 40 --depth 1</code></pre>
         <p>Large graph views intentionally open bounded first. Use type filters, node search, depth controls, and explicit all-data loading only when you need search or filtering across every page.</p>
-        <p>If <code>link health</code> or <code>link benchmark</code> shows low persistent-cache reuse after repeated runs, inspect recently edited pages or generated files that are changing on every request.</p>
+        <p>If <code>lnk health</code> or <code>lnk benchmark</code> shows low persistent-cache reuse after repeated runs, inspect recently edited pages or generated files that are changing on every request.</p>
         <p>From a source checkout, use the synthetic smoke script when you want local scale evidence without touching your real wiki:</p>
         <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
 

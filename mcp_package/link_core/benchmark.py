@@ -184,7 +184,7 @@ def benchmark_health(payload: Mapping[str, object]) -> dict[str, object]:
     if warnings:
         summary = "Review recommended before relying on this wiki for interactive agent work."
         recommendations = [
-            "Run link doctor --fix and link benchmark again after repairing wiki/index state.",
+            "Run lnk doctor --fix and lnk benchmark again after repairing wiki/index state.",
         ]
         if large_token_fallback or "search" in slow_paths or "query" in slow_paths:
             recommendations.append("Use a Python build with sqlite3/FTS5 enabled for large local wikis.")

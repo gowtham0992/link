@@ -59,12 +59,12 @@ def memory_log_payload(
         "next_actions": [
             {
                 "label": "Inspect memory review queue",
-                "command": "link memory-inbox",
+                "command": "lnk memory-inbox",
                 "reason": "Review pending, stale, expired, or underspecified memories before relying on them.",
             },
             {
                 "label": "Explain a changed memory",
-                "command": "link explain-memory <memory-name>",
+                "command": "lnk explain-memory <memory-name>",
                 "reason": "Open provenance, review status, graph links, and matching log entries for one memory.",
             },
         ],

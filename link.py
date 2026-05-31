@@ -49,6 +49,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -240,6 +241,7 @@ from link_core.mcp_verify import (
     check_link_mcp_import as _core_check_link_mcp_import,
     display_command as _core_display_command,
     render_mcp_verify_text as _core_render_mcp_verify_text,
+    set_link_command_override as _core_set_link_command_override,
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
@@ -1797,6 +1799,13 @@ def _display_command(parts: list[str]) -> str:
     return _core_display_command(parts)
 
 
+def _configure_link_command_display() -> None:
+    if os.environ.get("LINK_CLI_COMMAND"):
+        _core_set_link_command_override(None)
+    else:
+        _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
+
+
 def verify_mcp(
     target: Path,
     json_output: bool = False,
@@ -2043,6 +2052,7 @@ def try_link(
 def main(argv: list[str] | None = None) -> int:
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR)
     args = parser.parse_args(argv)
+    _configure_link_command_display()
     try:
         return _core_dispatch_cli_command(args, {
             "init": init_wiki,
@@ -2098,6 +2108,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
         return 2
+    finally:
+        _core_set_link_command_override(None)
 
 
 if __name__ == "__main__":

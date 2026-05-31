@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import html
-import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -283,7 +282,7 @@ def export_snapshot(
         if sensitive_values or sensitive_read_errors:
             return {
                 "created": False,
-                "error": "wiki contains secret-looking values or unreadable files; run link doctor before exporting",
+                "error": "wiki contains secret-looking values or unreadable files; run lnk doctor before exporting",
                 "output": str(output_dir),
                 "sensitive_values": sensitive_values,
                 "read_errors": sensitive_read_errors,
@@ -389,7 +388,7 @@ def render_snapshot_text(payload: Mapping[str, object]) -> tuple[int, str]:
             lines.append("")
             lines.append("Unreadable files:")
             lines.extend(f"- {item}" for item in read_errors[:8])
-        lines.extend(["", "Next:", "  link doctor"])
+        lines.extend(["", "Next:", "  lnk doctor"])
         return 1, "\n".join(lines)
 
     lines = [

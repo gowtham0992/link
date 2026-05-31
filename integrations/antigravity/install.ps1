@@ -27,7 +27,7 @@ if (-not $Project -and (Test-Path $settings)) {
     Link-UpsertMcpJson -Path $settings -Command $mcpPython -WikiPath $wikiPath
 } else {
     Write-Host ""
-    Write-Host "  MCP: add to $settings:"
+    Write-Host "  MCP: add to ${settings}:"
     Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`"] } } }"
 }
 

@@ -51,7 +51,7 @@ class ShareCoreTests(unittest.TestCase):
         self.assertEqual(payload["resolution"], "exact")
         self.assertEqual(payload["page"]["name"], "prefer-local-memory")
         self.assertEqual(payload["url"], "http://127.0.0.1:3456/page/prefer-local-memory")
-        self.assertIn("link serve", payload["serve_command_text"])
+        self.assertIn("lnk serve", payload["serve_command_text"])
 
     def test_share_resolves_path_alias_and_search(self):
         wiki = self.make_wiki()

@@ -211,12 +211,12 @@ def _next_actions(
             {
                 "label": "Create first memory",
                 "reason": "A wins report becomes useful after Link has at least one durable memory.",
-                "command": f'link remember "I prefer ..." {target} --type preference --scope user',
+                "command": f'lnk remember "I prefer ..." {target} --type preference --scope user',
             },
             {
                 "label": "Propose from sources",
                 "reason": "Use source-backed proposals when raw notes contain preferences or decisions.",
-                "command": f"link propose-memories raw/<source>.md {target}",
+                "command": f"lnk propose-memories raw/<source>.md {target}",
             },
         ]
     if review_count:
@@ -224,7 +224,7 @@ def _next_actions(
             {
                 "label": "Review memory inbox",
                 "reason": "Reviewed memory is safer to reuse across agents.",
-                "command": f"link memory-inbox {target}{project_arg}",
+                "command": f"lnk memory-inbox {target}{project_arg}",
             }
         ]
     if active_count:
@@ -232,13 +232,13 @@ def _next_actions(
             {
                 "label": "Use the memory",
                 "reason": "Ask an agent for a brief before work to see the value loop.",
-                "command": f"link brief \"current task\" {target}{project_arg}",
+                "command": f"lnk brief \"current task\" {target}{project_arg}",
             }
         ]
     return [
         {
             "label": "Restore or create memory",
             "reason": "No active memories are currently available for default recall.",
-            "command": f"link profile {target}{project_arg}",
+            "command": f"lnk profile {target}{project_arg}",
         }
     ]

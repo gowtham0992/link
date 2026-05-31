@@ -74,10 +74,10 @@
         </div>
 
         <h2 id="measure">Measure Locally</h2>
-        <p>Use <code>link benchmark</code> on your real wiki. It reports cache time, persistent-cache reuse, search backend, search/query timing, graph payload shape, and recommendations.</p>
-        <pre><code>link benchmark "agent memory"
-link health
-link status --validate</code></pre>
+        <p>Use <code>lnk benchmark</code> on your real wiki. It reports cache time, persistent-cache reuse, search backend, search/query timing, graph payload shape, and recommendations.</p>
+        <pre><code>lnk benchmark "agent memory"
+lnk health
+lnk status --validate</code></pre>
         <p>From a source checkout, use a synthetic 10k-page check without touching your real wiki:</p>
         <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
         <p>The smoke script prints the generated wiki path, the local viewer command, and graph URLs so you can inspect browser behavior manually.</p>
@@ -86,8 +86,8 @@ link status --validate</code></pre>
         <ul>
           <li>Prefer <code>brief</code>, <code>query</code>, and <code>graph-summary</code> over full exports.</li>
           <li>Use page-type filters and search before opening full graph data.</li>
-          <li>Run <code>link health</code> after ingest or broad manual edits.</li>
-          <li>Run <code>link doctor --fix</code> only when health or validation points to a repairable issue.</li>
+          <li>Run <code>lnk health</code> after ingest or broad manual edits.</li>
+          <li>Run <code>lnk doctor --fix</code> only when health or validation points to a repairable issue.</li>
           <li>Keep private raw sources out of Git; use <code>snapshot</code>, <code>team-sync</code>, and <code>compliance-export</code> for reviewable sharing paths.</li>
         </ul>
 

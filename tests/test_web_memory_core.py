@@ -32,7 +32,7 @@ class WebMemoryCoreTests(unittest.TestCase):
             "actions": [{
                 "label": "Review",
                 "kind": "review",
-                "command": "link review-memory local-memory",
+                "command": "lnk review-memory local-memory",
                 "arguments": {"identifier": "local-memory"},
             }],
         }
@@ -44,7 +44,7 @@ class WebMemoryCoreTests(unittest.TestCase):
         self.assertIn('/graph?focus=local-memory&amp;depth=2', html)
         self.assertIn("Use &lt;local&gt; memory.", html)
         self.assertIn('data-memory-action="review"', html)
-        self.assertIn('data-copy-text="link review-memory local-memory"', html)
+        self.assertIn('data-copy-text="lnk review-memory local-memory"', html)
         self.assertNotIn("<Local Memory>", html)
 
     def test_memory_card_escapes_generated_trust_links(self):
@@ -68,7 +68,7 @@ class WebMemoryCoreTests(unittest.TestCase):
             action_hints=lambda _record: [{
                 "label": "Archive",
                 "kind": "archive",
-                "command": "link archive-memory agent-memory",
+                "command": "lnk archive-memory agent-memory",
                 "arguments": {"identifier": "agent-memory"},
             }],
             href="/inbox",
@@ -76,7 +76,7 @@ class WebMemoryCoreTests(unittest.TestCase):
 
         self.assertIn('<a href="/inbox">view all</a>', html)
         self.assertIn('data-memory-action="archive"', html)
-        self.assertIn("link archive-memory agent-memory", html)
+        self.assertIn("lnk archive-memory agent-memory", html)
 
     def test_capture_card_escapes_warnings_and_commands(self):
         html = render_capture_card({
@@ -108,14 +108,14 @@ class WebMemoryCoreTests(unittest.TestCase):
         html = render_memory_next_actions([{
             "label": "Review",
             "detail": "Open inbox.",
-            "command": "link memory-inbox",
+            "command": "lnk memory-inbox",
             "href": "/inbox",
         }])
 
         self.assertIn('<a href="/inbox">Review</a>', html)
         self.assertIn("Open inbox.", html)
-        self.assertIn("link memory-inbox", html)
-        self.assertIn('data-copy-text="link memory-inbox"', html)
+        self.assertIn("lnk memory-inbox", html)
+        self.assertIn('data-copy-text="lnk memory-inbox"', html)
 
     def test_memory_dashboard_next_actions_cover_empty_ready_and_review_states(self):
         empty_actions = memory_dashboard_next_actions(

@@ -83,14 +83,14 @@ bash integrations/antigravity/install.sh</code></pre>
 .\integrations\copilot\install.ps1
 .\integrations\vscode\install.ps1
 .\integrations\antigravity\install.ps1</code></pre>
-        <p>If you already have agent instructions and only need the MCP config, use <code>link connect</code>. It previews the target file and config snippet first; add <code>--write</code> for an explicit update.</p>
-        <pre><code>link connect codex ~/link
-link connect codex ~/link --write
-link connect kiro ~/link --write
-link connect claude-code ~/link --write
-link connect cursor ~/link --write
-link connect antigravity ~/link --write
-link verify-mcp ~/link</code></pre>
+        <p>If you already have agent instructions and only need the MCP config, use <code>lnk connect</code>. It previews the target file and config snippet first; add <code>--write</code> for an explicit update.</p>
+        <pre><code>lnk connect codex ~/link
+lnk connect codex ~/link --write
+lnk connect kiro ~/link --write
+lnk connect claude-code ~/link --write
+lnk connect cursor ~/link --write
+lnk connect antigravity ~/link --write
+lnk verify-mcp ~/link</code></pre>
 
         <h2 id="mcp-only">MCP Only</h2>
         <pre><code>python3 -m pip install --upgrade link-mcp
@@ -174,10 +174,10 @@ rebuild_backlinks</code></pre>
         <p>Project-aware tools accept an optional <code>project</code> argument. When set, Link returns broad user/global memory plus memories for that project, while excluding memories from other explicit projects.</p>
 
 <h2 id="verify">Verify Setup</h2>
-        <pre><code>link verify-mcp
-link health
-link next</code></pre>
-        <p><code>link verify-mcp --json</code> is useful when an agent or script should read structured issues and next actions.</p>
+        <pre><code>lnk verify-mcp
+lnk health
+lnk next</code></pre>
+        <p><code>lnk verify-mcp --json</code> is useful when an agent or script should read structured issues and next actions.</p>
         <div class="callout">
           <strong>Natural prompts to try</strong>
           <p><code>is Link ready?</code></p>

@@ -17,28 +17,28 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Link wiki ready at /tmp/link", text)
         self.assertIn("Initialized:", text)
-        self.assertIn("link health /tmp/link", text)
-        self.assertIn("link serve /tmp/link", text)
+        self.assertIn("lnk health /tmp/link", text)
+        self.assertIn("lnk serve /tmp/link", text)
 
     def test_render_starter_prompts_text(self):
         code, text = render_starter_prompts_text({
             "target": "/tmp/link",
             "project": "link",
-            "shortcut": "link next /tmp/link",
+            "shortcut": "lnk next /tmp/link",
             "prompts": [{
                 "prompt": "is Link ready?",
                 "when": "first run",
             }],
-            "commands": ["link health"],
+            "commands": ["lnk health"],
         })
 
         self.assertEqual(code, 0)
         self.assertIn("Link starter prompts: /tmp/link", text)
         self.assertIn("Project: link", text)
         self.assertIn("Shortcut", text)
-        self.assertIn("- link next /tmp/link", text)
+        self.assertIn("- lnk next /tmp/link", text)
         self.assertIn("- is Link ready?", text)
-        self.assertIn("- link health", text)
+        self.assertIn("- lnk health", text)
 
     def test_render_welcome_text(self):
         code, text = render_welcome_text({
@@ -49,7 +49,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
                 "prompt": "is Link ready?",
                 "proves": "Agent can find Link.",
             }],
-            "commands": ["link health"],
+            "commands": ["lnk health"],
             "urls": ["http://127.0.0.1:3000/health"],
         })
 
@@ -58,7 +58,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Project: link", text)
         self.assertIn("1. is Link ready?", text)
         self.assertIn("Proves: Agent can find Link.", text)
-        self.assertIn("- link health", text)
+        self.assertIn("- lnk health", text)
         self.assertIn("- http://127.0.0.1:3000/health", text)
 
     def test_render_demo_text(self):
@@ -89,12 +89,12 @@ class CliRuntimeCoreTests(unittest.TestCase):
             search_backend="sqlite-fts",
             query_summary="agent-memory · 1 memories · 3 context items",
             brief_summary="1 relevant memories · 1 review items",
-            serve_command="link serve /tmp/link-demo",
-            next_command="link next /tmp/link-demo",
-            health_command="link health /tmp/link-demo",
-            query_command="link query 'why does Link help agents?' /tmp/link-demo --budget small",
-            brief_command="link brief 'working on agent memory' /tmp/link-demo",
-            benchmark_command="link benchmark 'agent memory' /tmp/link-demo",
+            serve_command="lnk serve /tmp/link-demo",
+            next_command="lnk next /tmp/link-demo",
+            health_command="lnk health /tmp/link-demo",
+            query_command="lnk query 'why does Link help agents?' /tmp/link-demo --budget small",
+            brief_command="lnk brief 'working on agent memory' /tmp/link-demo",
+            benchmark_command="lnk benchmark 'agent memory' /tmp/link-demo",
             url="http://127.0.0.1:3000",
         )
 
@@ -103,7 +103,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Demo: ready", text)
         self.assertIn("Query proof:", text)
         self.assertIn("Ask an agent:", text)
-        self.assertIn("link next /tmp/link-demo", text)
+        self.assertIn("lnk next /tmp/link-demo", text)
 
     def test_render_mcp_connect_text_preview(self):
         code, text = render_mcp_connect_text({
@@ -114,8 +114,8 @@ class CliRuntimeCoreTests(unittest.TestCase):
             "snippet": "[mcp_servers.link]\ncommand = \"/tmp/python\"",
             "write": {"requested": False, "ok": False, "message": "preview only"},
             "next_actions": [
-                {"label": "write config", "command_text": "link connect codex /tmp/link --write"},
-                {"label": "verify MCP runtime", "command_text": "link verify-mcp /tmp/link --python /tmp/python"},
+                {"label": "write config", "command_text": "lnk connect codex /tmp/link --write"},
+                {"label": "verify MCP runtime", "command_text": "lnk verify-mcp /tmp/link --python /tmp/python"},
             ],
             "restart_hint": "Restart the agent, then ask: is Link ready?",
         })
@@ -123,9 +123,9 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Link connect: Codex", text)
         self.assertIn("Preview only", text)
-        self.assertIn("link connect codex /tmp/link --write", text)
+        self.assertIn("lnk connect codex /tmp/link --write", text)
         self.assertIn("[mcp_servers.link]", text)
-        self.assertIn("link verify-mcp /tmp/link --python /tmp/python", text)
+        self.assertIn("lnk verify-mcp /tmp/link --python /tmp/python", text)
 
 
 if __name__ == "__main__":

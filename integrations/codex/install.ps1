@@ -40,7 +40,7 @@ if (Test-Path $codexConfig) {
     Set-Content -Encoding UTF8 -NoNewline -Path $codexConfig -Value $text
     Write-Host "  ✓ Link MCP registered in $codexConfig"
 } else {
-    Write-Host "  MCP config: add to $codexConfig:"
+    Write-Host "  MCP config: add to ${codexConfig}:"
     Write-Host "  [mcp_servers.link]"
     Write-Host "  command = `"$mcpPython`""
     Write-Host "  args = [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`"]"

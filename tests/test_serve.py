@@ -298,7 +298,7 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(page_status, 200)
         self.assertIn(b"Health", body)
         self.assertIn(b"Interrupted Operations", body)
-        self.assertIn(b"link operations", body)
+        self.assertIn(b"lnk operations", body)
         self.assertEqual(api_status, 200)
         self.assertEqual(payload["api_version"], serve.API_VERSION)
         self.assertEqual(payload["stale_count"], 1)
@@ -548,7 +548,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn("Ask Your Agent", html)
         self.assertIn("Local Checks", html)
         self.assertIn("Project examples are scoped to <code>client-launch</code>", html)
-        self.assertIn("link health", html)
+        self.assertIn("lnk health", html)
 
     def test_css_has_explicit_black_dark_theme(self):
         self.assertIn(':root[data-theme="dark"]', serve.CSS)
@@ -1930,7 +1930,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn('data-copy-text="ingest raw/new-source.md into Link"', html)
         self.assertIn("Copy prompt", html)
         self.assertIn("Copy command", html)
-        self.assertIn('data-copy-text="link validate ', html)
+        self.assertIn('data-copy-text="lnk validate ', html)
         self.assertIn(str(wiki.parent), html)
         self.assertIn("ingest raw/new-source.md into Link", html)
         self.assertIn("open memory proposals first", html)

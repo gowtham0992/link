@@ -14,15 +14,15 @@ class CliQueryCoreTests(unittest.TestCase):
         self.assertIn("No Link context found for: missing", text)
         self.assertIn("Next:", text)
         self.assertIn("ingest the new raw Link files", text)
-        self.assertIn("Run: link ingest-status", text)
-        self.assertIn("Then rerun: link query missing", text)
+        self.assertIn("Run: lnk ingest-status", text)
+        self.assertIn("Then rerun: lnk query missing", text)
 
     def test_render_query_not_found_can_include_explicit_target(self):
         code, text = render_query_text({"found": False}, query_text="missing topic", command_target="/tmp/Link Demo")
 
         self.assertEqual(code, 0)
-        self.assertIn("Run: link ingest-status", text)
-        self.assertIn("Then rerun: link query", text)
+        self.assertIn("Run: lnk ingest-status", text)
+        self.assertIn("Then rerun: lnk query", text)
         self.assertIn("missing topic", text)
         self.assertIn("/tmp/Link Demo", text)
 

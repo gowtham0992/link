@@ -23,7 +23,7 @@ class McpConnectCoreTests(unittest.TestCase):
             root = Path(temp)
             wiki = root / "wiki"
             wiki.mkdir()
-            (root / ".link-mcp-python").write_text("/tmp/link python/bin/python\n", encoding="utf-8")
+            (root / ".link-mcp-python").write_text("/tmp/Link Python/bin/python\n", encoding="utf-8")
 
             payload = build_mcp_connect_payload(
                 target=root,
@@ -35,9 +35,9 @@ class McpConnectCoreTests(unittest.TestCase):
             )
 
         self.assertEqual(payload["agent"], "codex")
-        self.assertEqual(payload["python"], "/tmp/link python/bin/python")
+        self.assertEqual(payload["python"], "/tmp/Link Python/bin/python")
         self.assertIn("[mcp_servers.link]", str(payload["snippet"]))
-        self.assertIn(str(wiki), str(payload["snippet"]))
+        self.assertIn(json.dumps(str(wiki)), str(payload["snippet"]))
 
     def test_write_codex_config_replaces_existing_link_block(self):
         with tempfile.TemporaryDirectory() as temp:

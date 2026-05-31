@@ -10,10 +10,14 @@ from mcp_package.link_core.mcp_verify import (
     mcp_verify_guidance,
     resolve_mcp_python,
     render_mcp_verify_text,
+    set_link_command_override,
 )
 
 
 class McpVerifyCoreTests(unittest.TestCase):
+    def tearDown(self):
+        set_link_command_override(None)
+
     def test_guidance_reports_missing_sdk_and_version_mismatch(self):
         issues, actions = mcp_verify_guidance(
             target=Path("/tmp/link"),
@@ -78,6 +82,25 @@ class McpVerifyCoreTests(unittest.TestCase):
         self.assertIn("/tmp/Link Python/bin/python", text)
         self.assertIn("-m", text)
         self.assertIn("pip", text)
+
+    def test_display_command_uses_non_conflicting_default_link_command(self):
+        text = display_command(["link", "health", "/tmp/link"])
+
+        self.assertEqual(text, "lnk health /tmp/link")
+
+    def test_display_command_can_use_source_checkout_command(self):
+        set_link_command_override(["python3", "/repo/link.py"])
+
+        text = display_command(["link", "health", "/tmp/link"])
+
+        self.assertEqual(text, "python3 /repo/link.py health /tmp/link")
+
+    def test_display_command_rewrites_lnk_when_source_checkout_command_is_set(self):
+        set_link_command_override(["python3", "/repo/link.py"])
+
+        text = display_command(["lnk", "doctor", "/tmp/link"])
+
+        self.assertEqual(text, "python3 /repo/link.py doctor /tmp/link")
 
     def test_expand_command_prefix_preserves_command_path_syntax(self):
         self.assertEqual(expand_command_prefix("/tmp/python"), "/tmp/python")

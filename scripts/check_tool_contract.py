@@ -179,8 +179,10 @@ def _missing_cli_reference(path: Path = ROOT / CLI_DOC_PATH) -> list[str]:
     missing: list[str] = []
     for command in sorted(DOCS_CLI_COMMANDS):
         command_tokens = (
+            f"`lnk {command}",
             f"`link {command}",
             f"`python3 link.py {command}",
+            f"lnk {command}",
             f"link {command}",
             f"python3 link.py {command}",
         )

@@ -111,7 +111,7 @@ def find_sensitive_filenames(
             if not path.is_file():
                 continue
             if any(fnmatch.fnmatch(path.name, pattern) for pattern in patterns):
-                matches.append(str(path.relative_to(root)))
+                matches.append(path.relative_to(root).as_posix())
     return sorted(matches)
 
 
