@@ -39,13 +39,15 @@
     <div class="hero-copy">
       <span class="eyebrow">Local agent memory</span>
       <h1>Link gives every agent the same memory.</h1>
-      <p>Source-backed Markdown memory for Codex, Claude, Cursor, Kiro, VS Code, Copilot, and any MCP client. Local files. Inspectable sources. Budgeted context.</p>
+      <p>Source-backed Markdown memory for Codex, Claude, Cursor, Kiro, VS Code, Copilot, Antigravity, and local agents. Local files. Inspectable sources. Budgeted context.</p>
       <ul class="hero-notes" aria-label="Link storage model">
         <li>raw/</li>
         <li>wiki/</li>
         <li>memories/</li>
         <li>graph</li>
+        <li>CLI</li>
         <li>MCP</li>
+        <li>skills</li>
       </ul>
       <div class="actions">
         <a class="button primary" href="getting-started.html">Try Link</a>
@@ -64,7 +66,7 @@
         <div class="grid">
           <article class="feature"><h3>Personal memory</h3><p>Preferences, decisions, facts, and project context stay durable across agent sessions.</p></article>
           <article class="feature"><h3>Source-backed wiki</h3><p>Raw sources compile into Markdown pages with citations, backlinks, and reviewable provenance.</p></article>
-          <article class="feature"><h3>MCP-native recall</h3><p>One local memory works across MCP-capable tools through the same query, brief, graph, and memory lifecycle tools.</p></article>
+          <article class="feature"><h3>Agent-ready recall</h3><p>One local memory works across CLI, skills, MCP-capable tools, and the local viewer through the same query, brief, graph, and memory lifecycle paths.</p></article>
           <article class="feature"><h3>Budgeted context</h3><p>Smart query packets return the right memory, pages, graph neighborhood, and follow-up actions without flooding tokens.</p></article>
           <article class="feature"><h3><a href="scale.html">Measured scale</a></h3><p>Health and benchmark commands show cache reuse, search backend, graph shape, and bounded payload behavior as a wiki grows.</p></article>
           <article class="feature"><h3>Private by default</h3><p>No hosted backend, no telemetry, no cloud lock-in. Your memory stays on disk as plain Markdown.</p></article>
@@ -78,9 +80,9 @@
       <div class="section-inner">
         <p class="section-kicker">How it works</p>
         <h2>A local memory pipeline agents can trust.</h2>
-        <p class="lead">Raw sources become structured wiki pages. Explicit remembers become reviewed memory. Agents retrieve compact MCP context packets instead of reading your whole folder.</p>
+        <p class="lead">Raw sources become structured wiki pages. Explicit remembers become reviewed memory. Agents retrieve compact context packets instead of reading your whole folder.</p>
         <figure class="architecture-card">
-          <img src="assets/link-memory-flow.svg" alt="Link architecture: capture sources, structure wiki knowledge, review memory, and retrieve compact MCP context">
+          <img src="assets/link-memory-flow.svg" alt="Link architecture: capture sources, structure wiki knowledge, review memory, and retrieve compact context">
           <figcaption>Link keeps the knowledge base plain and local while giving agents a predictable recall path.</figcaption>
         </figure>
       </div>
@@ -129,34 +131,35 @@ Agent: Here is the relevant memory, sources, and next safe action.</code></pre>
             <a class="button" href="troubleshooting.html">Troubleshooting</a>
           </div>
         </div>
-        <pre><code># macOS
+        <pre><code># macOS/Homebrew proof loop
 brew install gowtham0992/link/link
 lnk demo
 lnk next link-demo
 lnk serve link-demo
+lnk query "why does Link help agents?" link-demo --budget small
+lnk brief "working on agent memory" link-demo
+lnk benchmark "agent memory" link-demo
 
-# or from source
+# source checkout proof loop
 git clone https://github.com/gowtham0992/link.git
 cd link
 python3 link.py demo
 python3 link.py next link-demo
 python3 link.py serve link-demo
-
-# then try
-lnk query "why does Link help agents?" link-demo --budget small
-lnk brief "working on agent memory" link-demo
-lnk benchmark "agent memory" link-demo</code></pre>
+python3 link.py query "why does Link help agents?" link-demo --budget small
+python3 link.py brief "working on agent memory" link-demo
+python3 link.py benchmark "agent memory" link-demo</code></pre>
       </div>
     </section>
 
     <section id="surfaces">
       <div class="section-inner">
-        <p class="section-kicker">Three surfaces</p>
+        <p class="section-kicker">Access paths</p>
         <h2>Review it, script it, or let an agent call it.</h2>
-        <p class="lead">The web UI, CLI, and MCP server all operate on the same local Markdown wiki. Read it like a local document, script it from a terminal, or let an agent query the same memory through MCP.</p>
+        <p class="lead">The web UI, CLI, official skills, and MCP server all operate on the same local Markdown wiki. Read it like a local document, script it from a terminal, lazy-load a skill, or let an MCP client query the same memory.</p>
         <div class="callout">
           <strong>No background web server required</strong>
-          <code>lnk serve</code> only starts the human web viewer. The CLI and MCP server read the same local files directly, so agents can query Link when the viewer is closed.
+          <code>lnk serve</code> only starts the human web viewer. The CLI, skills, and MCP server read the same local files directly, so agents can query Link when the viewer is closed.
         </div>
         <div class="media-grid">
           <article class="media-card">

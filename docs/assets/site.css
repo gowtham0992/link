@@ -263,6 +263,7 @@ section:nth-child(2n),
 
 .feature,
 .panel {
+  min-width: 0;
   min-height: 198px;
   padding: 20px;
   border: 3px solid var(--border);
@@ -297,6 +298,7 @@ section:nth-child(2n),
 }
 
 .proof-column {
+  min-width: 0;
   padding: 22px;
   border: 3px solid var(--border);
   background: var(--paper-2);
@@ -336,6 +338,7 @@ section:nth-child(2n),
 }
 
 .media-card {
+  min-width: 0;
   padding: 12px;
   border: 3px solid var(--border);
   background: var(--paper-2);
@@ -369,6 +372,7 @@ section:nth-child(2n),
 }
 
 .screenshot-card {
+  min-width: 0;
   margin: 0;
   padding: 12px;
   border: 3px solid var(--border);
@@ -378,6 +382,7 @@ section:nth-child(2n),
 }
 
 .architecture-card {
+  min-width: 0;
   margin: 34px 0 0;
   padding: 12px;
   border: 3px solid var(--border);
@@ -418,6 +423,7 @@ figcaption {
 
 pre {
   position: relative;
+  max-width: 100%;
   overflow-x: auto;
   margin: 0;
   padding: 20px;
@@ -610,7 +616,7 @@ footer a {
   .doc-table,
   .choice-table,
   .choice-table div {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .toc {

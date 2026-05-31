@@ -8,7 +8,7 @@
 
 <p align="center">
   Link gives Codex, Claude, Cursor, Kiro, VS Code, Copilot, Antigravity, and
-  other MCP clients the same source-backed memory, stored locally as Markdown.
+  other local agents the same source-backed memory, stored locally as Markdown.
 </p>
 
 <p align="center">
@@ -33,8 +33,9 @@
 
 Link is an open-source memory layer for local AI agents. Raw sources become an
 inspectable Markdown wiki. Explicit "remember this" requests become reviewable
-memories. Agents retrieve compact, source-backed context through MCP without
-dumping the whole wiki into a chat window.
+memories. Agents retrieve compact, source-backed context through the CLI, MCP,
+official skills, or the local viewer without dumping the whole wiki into a chat
+window.
 
 The wiki is the storage layer. The product is durable memory that stays on your
 machine, remains readable in plain files, and can be shared across multiple
@@ -47,7 +48,7 @@ Link gives agents four simple moves:
 1. **Capture** notes, transcripts, docs, screenshots, and project context in `raw/`.
 2. **Structure** source-backed pages under `wiki/`.
 3. **Remember** explicit preferences, decisions, facts, and project context as reviewable memory.
-4. **Retrieve** compact query packets through CLI, MCP, or the local web viewer.
+4. **Retrieve** compact query packets through the CLI, MCP, official skills, or the local web viewer.
 
 Most agent sessions start from zero. You re-explain preferences, repo decisions,
 project constraints, and why something matters. Link turns that repeated context
@@ -81,7 +82,7 @@ lnk serve link-demo
 The installed command is `lnk` because `link` is already a POSIX/macOS system
 utility. From a source checkout, use `python3 link.py ...` instead.
 
-Windows or source checkout:
+Windows PowerShell:
 
 ```powershell
 git clone https://github.com/gowtham0992/link.git
@@ -91,7 +92,7 @@ py link.py next link-demo
 py link.py serve link-demo
 ```
 
-Or from source:
+Source checkout on macOS/Linux:
 
 ```bash
 git clone https://github.com/gowtham0992/link.git
@@ -310,10 +311,10 @@ Under the hood, Link separates source-backed knowledge from durable agent memory
 1. Drop raw notes, transcripts, articles, and project context into `raw/`.
 2. Agents compile those sources into inspectable pages under `wiki/`.
 3. Explicit "remember" requests become reviewable memory pages.
-4. Queries retrieve compact MCP context from both the wiki and memory layer.
+4. Queries retrieve compact agent context from both the wiki and memory layer.
 
 <p align="center">
-  <img src="docs/assets/link-memory-flow.svg" alt="Link architecture: raw sources become wiki knowledge, explicit remembers become reviewed memory, and agents retrieve compact MCP context" width="820">
+  <img src="docs/assets/link-memory-flow.svg" alt="Link architecture: raw sources become wiki knowledge, explicit remembers become reviewed memory, and agents retrieve compact context" width="820">
 </p>
 
 The storage model is plain and inspectable:
@@ -322,13 +323,16 @@ The storage model is plain and inspectable:
 |-------|------------------|
 | `raw/` | Original notes, transcripts, articles, PDFs, screenshots, and project files. |
 | `wiki/` | Source-backed pages, concepts, entities, explorations, comparisons, and memories. |
-| MCP tools | Compact packets agents can use without dumping the whole wiki into context. |
+| Agent interfaces | CLI, skills, MCP, and local viewer paths that avoid dumping the whole wiki into context. |
 
 If a raw file was already ingested and later edited, `lnk ingest-status` marks it
 as stale and tells your agent to refresh the existing source page instead of
 creating a duplicate.
 
 ## What Agents Get
+
+When an agent uses Link through MCP, these are the stable tools it receives.
+CLI and skill workflows call the same core behavior through `lnk`.
 
 - `query_link`: an answer-ready packet with relevant memories, pages, graph
   neighborhood, reasons for selection, budget limits, and follow-up actions.
@@ -413,7 +417,7 @@ lnk snapshot ~/link --output personal-snapshot --include-memories --include-priv
 
 ## Agent Contract
 
-Agents should use Link in this order:
+For MCP clients, agents should use Link in this order:
 
 1. `link_status` to check readiness and safe next actions.
 2. `starter_prompts` when the user asks what to try first.
@@ -439,7 +443,7 @@ Link itself is local-first:
   private key blocks are detected in raw sources, captures, and release hygiene
   checks. `lnk validate` and `lnk doctor` also fail if secret-looking values
   are found inside wiki pages before they can be served through the local UI or
-  returned through MCP context.
+  returned through agent context.
 - The local web server binds to `127.0.0.1` and is not meant to be exposed to
   the internet without additional auth.
 
