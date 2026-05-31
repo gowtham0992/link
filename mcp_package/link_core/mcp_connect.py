@@ -5,7 +5,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .files import atomic_write_json, atomic_write_text
 from .mcp_verify import display_command, normalize_command_parts, resolve_mcp_python

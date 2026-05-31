@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import html
-import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path

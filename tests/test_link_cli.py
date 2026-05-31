@@ -1111,7 +1111,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(payload["proposals"][1]["memory_type"], "decision")
         self.assertEqual(payload["proposals"][1]["scope"], "project")
         self.assertEqual(payload["proposals"][1]["primary_action"]["kind"], "remember")
-        self.assertIn(str(target), payload["proposals"][1]["primary_action"]["command"])
+        self.assertIn(str(target.resolve()), payload["proposals"][1]["primary_action"]["command"])
         self.assertFalse((target / "wiki/memories/decision-keep-memory-mode-local.md").exists())
 
     def test_recall_finds_memory_pages(self):
@@ -2063,7 +2063,10 @@ class LinkCliTests(unittest.TestCase):
                 f"link-mcp=={link_cli.LINK_VERSION}",
             ],
         )
-        self.assertIn("'/tmp/Link Python/bin/python'", data["next_actions"][0]["command_text"])
+        self.assertEqual(
+            data["next_actions"][0]["command_text"],
+            link_cli._display_command(data["next_actions"][0]["command"]),
+        )
 
     def test_verify_mcp_json_reports_missing_wiki_action(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-verify-test-"))
@@ -2128,7 +2131,15 @@ class LinkCliTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("link-mcp: installed (0.9.0)", text)
         self.assertIn(f"Expected version: {link_cli.LINK_VERSION}", text)
-        self.assertIn(f"'/tmp/Link Python/bin/python' -m pip install --upgrade link-mcp=={link_cli.LINK_VERSION}", text)
+        expected = link_cli._display_command([
+            "/tmp/Link Python/bin/python",
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            f"link-mcp=={link_cli.LINK_VERSION}",
+        ])
+        self.assertIn(expected, text)
 
     def test_verify_mcp_reports_missing_mcp_sdk_dependency(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-verify-test-"))

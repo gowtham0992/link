@@ -37,7 +37,7 @@ class McpConnectCoreTests(unittest.TestCase):
         self.assertEqual(payload["agent"], "codex")
         self.assertEqual(payload["python"], "/tmp/Link Python/bin/python")
         self.assertIn("[mcp_servers.link]", str(payload["snippet"]))
-        self.assertIn(str(wiki), str(payload["snippet"]))
+        self.assertIn(json.dumps(str(wiki)), str(payload["snippet"]))
 
     def test_write_codex_config_replaces_existing_link_block(self):
         with tempfile.TemporaryDirectory() as temp:

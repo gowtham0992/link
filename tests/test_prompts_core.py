@@ -30,7 +30,7 @@ class PromptsCoreTests(unittest.TestCase):
         self.assertIn("propose memories from raw/<file>", prompts)
         self.assertTrue(str(payload["shortcut"]).startswith("lnk next "))
         self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
-        self.assertTrue(any(str(root) in command for command in payload["commands"]))
+        self.assertTrue(any(str(root.resolve()) in command for command in payload["commands"]))
 
     def test_git_project_gets_project_memory_prompts(self):
         root = Path(tempfile.mkdtemp(prefix="link-prompts-core-"))
@@ -64,7 +64,7 @@ class PromptsCoreTests(unittest.TestCase):
         self.assertEqual(payload["steps"][0]["prompt"], "is Link ready?")
         self.assertIn("Agent can find Link", payload["steps"][0]["proves"])
         self.assertTrue(any(command.startswith("lnk serve ") for command in payload["commands"]))
-        self.assertTrue(any(str(root) in command for command in payload["commands"]))
+        self.assertTrue(any(str(root.resolve()) in command for command in payload["commands"]))
         self.assertIn("http://127.0.0.1:3000/health", payload["urls"])
 
 
