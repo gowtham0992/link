@@ -68,12 +68,14 @@ function Install-LinkCommandWrapper {
     $cmd = @"
 @echo off
 REM $marker
+set LINK_CLI_COMMAND=lnk
 $BasePython "$linkPy" %*
 "@
     Set-Content -Encoding ASCII -Path $cmdPath -Value $cmd
 
     $ps = @"
 # $marker
+$env:LINK_CLI_COMMAND = "lnk"
 & $BasePython "$linkPy" @args
 exit `$LASTEXITCODE
 "@

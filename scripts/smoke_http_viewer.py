@@ -144,7 +144,10 @@ def run_smoke(work_dir: Path, python: str) -> None:
         require(status == 200, "health page did not return 200")
         require("Health" in health_html, "health page did not render")
         require("Repair Commands" in health_html, "health page did not show repair commands")
-        require("link operations" in health_html, "health page did not include operation inspection guidance")
+        require(
+            "lnk operations" in health_html or "link.py operations" in health_html,
+            "health page did not include operation inspection guidance",
+        )
 
         status, headers, status_payload = request_json(base_url, "/api/status?validate=true")
         require(status == 200, "status API did not return 200")

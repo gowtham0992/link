@@ -44,6 +44,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Link command wrapper", scaffold)
         self.assertIn("not overwriting", scaffold)
         self.assertIn("lnk health", scaffold)
+        self.assertIn("LINK_CLI_COMMAND=lnk exec python3", scaffold)
         self.assertIn('if [ "$MODE" = "--project" ]', scaffold)
 
     def test_scaffold_project_mode_uses_absolute_target(self):
@@ -62,6 +63,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("link.cmd", scaffold)
         self.assertIn("Removed old Link wrapper", scaffold)
         self.assertIn("Link command wrapper", scaffold)
+        self.assertIn("set LINK_CLI_COMMAND=lnk", scaffold)
+        self.assertIn('$env:LINK_CLI_COMMAND = "lnk"', scaffold)
         self.assertIn("Get-Command py", scaffold)
         self.assertIn("-m venv", scaffold)
 

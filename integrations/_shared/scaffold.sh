@@ -54,7 +54,7 @@ install_link_cli_wrapper() {
 #!/bin/sh
 $LINK_CLI_MARKER
 cd $TARGET_DIR_Q || exit 1
-exec python3 $LINK_PY_Q "\$@"
+LINK_CLI_COMMAND=lnk exec python3 $LINK_PY_Q "\$@"
 EOF
     chmod +x "$LINK_CLI_BIN"
 

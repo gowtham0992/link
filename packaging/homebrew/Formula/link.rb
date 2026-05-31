@@ -23,7 +23,7 @@ class Link < Formula
 
     (bin/"lnk").write <<~SH
       #!/bin/sh
-      exec "#{python3}" "#{libexec}/link.py" "$@"
+      LINK_CLI_COMMAND=lnk exec "#{python3}" "#{libexec}/link.py" "$@"
     SH
   end
 

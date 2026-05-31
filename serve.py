@@ -6,6 +6,7 @@ import errno
 import html
 import http.server
 import json
+import os
 import re
 import socketserver
 import sys
@@ -79,6 +80,9 @@ from link_core.doctor import (
 )
 from link_core.version import (
     LINK_VERSION,
+)
+from link_core.mcp_verify import (
+    set_link_command_override as _core_set_link_command_override,
 )
 from link_core.web_assets import CSS  # noqa: F401 - kept as serve.CSS for tests and compatibility
 from link_core.web_memory import (
@@ -2038,6 +2042,10 @@ def _serve_bind_error_message(exc: OSError, port: int) -> str:
 def main():
     global PORT, WIKI_DIR, RAW_DIR
     PORT, root = _parse_serve_args(sys.argv[1:], default_port=PORT, default_root=ROOT)
+    if os.environ.get("LINK_CLI_COMMAND"):
+        _core_set_link_command_override(None)
+    else:
+        _core_set_link_command_override([sys.executable, str(root / "link.py")])
     WIKI_DIR = root / "wiki"
     RAW_DIR = root / "raw"
     try:
