@@ -53,10 +53,10 @@
       </aside>
       <article class="doc-content">
         <h2 id="import">Import An Existing Obsidian Vault</h2>
-        <p>Use <code>link import-obsidian</code> when you already have project notes in Obsidian and want Link agents to ingest them as source-backed knowledge. Link copies Markdown notes into <code>raw/obsidian/&lt;vault&gt;/</code>, skips Obsidian plugin state, and blocks notes with secret-looking values before writing them.</p>
-        <pre><code>link init ~/link
-link import-obsidian ~/Documents/ObsidianVault ~/link
-link ingest-status ~/link</code></pre>
+        <p>Use <code>lnk import-obsidian</code> when you already have project notes in Obsidian and want Link agents to ingest them as source-backed knowledge. Link copies Markdown notes into <code>raw/obsidian/&lt;vault&gt;/</code>, skips Obsidian plugin state, and blocks notes with secret-looking values before writing them.</p>
+        <pre><code>lnk init ~/link
+lnk import-obsidian ~/Documents/ObsidianVault ~/link
+lnk ingest-status ~/link</code></pre>
         <p>The import does not silently create durable memories. It stages raw source notes, then the normal ingest and proposal workflow decides what becomes wiki knowledge or reviewed memory.</p>
 
         <h2 id="open">Open The Link Wiki</h2>
@@ -73,10 +73,10 @@ link ingest-status ~/link</code></pre>
 
         <h2 id="sync">Keep Link Indexes Current</h2>
         <p>After manual Obsidian edits, rebuild derived indexes and validate the wiki before asking agents to rely on the new content:</p>
-        <pre><code>link rebuild-index ~/link
-link rebuild-backlinks ~/link
-link validate ~/link
-link health ~/link</code></pre>
+        <pre><code>lnk rebuild-index ~/link
+lnk rebuild-backlinks ~/link
+lnk validate ~/link
+lnk health ~/link</code></pre>
         <p>The local web viewer is still useful for Link-specific views like health, ingest, memory review, captures, and MCP-ready query context. Obsidian is an editor/viewer for the same underlying files, not a replacement for Link's validation and memory lifecycle.</p>
       </article>
     </div>

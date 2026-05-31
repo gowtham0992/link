@@ -156,7 +156,7 @@ def _target_command(command: str, target: str) -> str:
     if target and target in command:
         return command
     parts = command.split()
-    if not parts or parts[0] != "link" or not target:
+    if not parts or parts[0] not in {"link", "lnk"} or not target:
         return command
     if target in parts[1:]:
         return display_command(parts)
@@ -268,10 +268,10 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
             "agent_prompt": guidance.get("agent_prompt"),
             "memory_prompt": f"propose memories from {first['raw']}",
             "post_checks": [
-                "link rebuild-index",
-                "link rebuild-backlinks",
-                "link validate",
-                "link health",
+                "lnk rebuild-index",
+                "lnk rebuild-backlinks",
+                "lnk validate",
+                "lnk health",
             ],
         }
 
@@ -294,10 +294,10 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
             "agent_prompt": guidance.get("agent_prompt"),
             "memory_prompt": f"propose memories from {first['raw']}",
             "post_checks": [
-                "link rebuild-index",
-                "link rebuild-backlinks",
-                "link validate",
-                "link health",
+                "lnk rebuild-index",
+                "lnk rebuild-backlinks",
+                "lnk validate",
+                "lnk health",
             ],
         }
 
@@ -325,7 +325,7 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
             ],
             "agent_prompt": None,
             "memory_prompt": None,
-            "post_checks": ["link ingest-status", "link health"],
+            "post_checks": ["lnk ingest-status", "lnk health"],
         }
 
     if state == "blocked_raw_access":
@@ -352,7 +352,7 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
             ],
             "agent_prompt": None,
             "memory_prompt": None,
-            "post_checks": ["link ingest-status", "link health"],
+            "post_checks": ["lnk ingest-status", "lnk health"],
         }
 
     if state == "blocked_source_access":
@@ -378,7 +378,7 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
             ],
             "agent_prompt": None,
             "memory_prompt": None,
-            "post_checks": ["link ingest-status", "link validate", "link health"],
+            "post_checks": ["lnk ingest-status", "lnk validate", "lnk health"],
         }
 
     if state == "stale_graph":
@@ -392,7 +392,7 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
                 "Validate the wiki after rebuilding backlinks.",
             ],
             "agent_prompt": guidance.get("agent_prompt"),
-            "post_checks": ["link rebuild-backlinks", "link validate", "link health"],
+            "post_checks": ["lnk rebuild-backlinks", "lnk validate", "lnk health"],
         }
 
     if state == "empty":
@@ -407,7 +407,7 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
                 "Review generated pages before relying on them as memory.",
             ],
             "agent_prompt": None,
-            "post_checks": ["link ingest-status", "link health"],
+            "post_checks": ["lnk ingest-status", "lnk health"],
         }
 
     if state == "ready":
@@ -421,7 +421,7 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
                 "Add new files to raw/ when Link should learn new source-backed context.",
             ],
             "agent_prompt": None,
-            "post_checks": ["link doctor", "link health"],
+            "post_checks": ["lnk doctor", "lnk health"],
         }
 
     return {
@@ -430,11 +430,11 @@ def build_ingest_plan(status: dict[str, object], limit: int = 5) -> dict[str, ob
         "summary": "Link needs its raw/ and wiki/ structure before ingest can start.",
         "batch": [],
         "steps": [
-            "Run link init or rerun an installer.",
+            "Run lnk init or rerun an installer.",
             "Check readiness before adding sources.",
         ],
         "agent_prompt": None,
-        "post_checks": ["link init", "link health"],
+        "post_checks": ["lnk init", "lnk health"],
     }
 
 
@@ -497,7 +497,7 @@ def render_ingest_status_text(target: str, status: dict[str, object]) -> str:
     if not status["has_wiki_dir"]:
         lines.append("Missing wiki/ directory")
     if not status["has_raw_dir"] or not status["has_wiki_dir"]:
-        lines.extend(["", "Next:", f"  Run an installer or initialize this directory: {_target_command('link init', target)}"])
+        lines.extend(["", "Next:", f"  Run an installer or initialize this directory: {_target_command('lnk init', target)}"])
         return "\n".join(lines)
 
     lines.append(f"Raw files: {status['raw_count']}")
@@ -626,7 +626,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "missing_structure",
             "summary": "Link is not initialized here yet.",
             "agent_prompt": None,
-            "commands": ["link init", "link health"],
+            "commands": ["lnk init", "lnk health"],
             "notes": ["Run the installer or initialize this directory before ingesting sources."],
         }
 
@@ -635,7 +635,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "blocked_source_access",
             "summary": f"{source_read_warning_count} source page could not be inspected. Fix source page access before ingest.",
             "agent_prompt": None,
-            "commands": ["link ingest-status", "link validate", "link health"],
+            "commands": ["lnk ingest-status", "lnk validate", "lnk health"],
             "notes": [
                 "Represented and pending raw counts may be incomplete while source pages cannot be read.",
                 "Fix permissions or repair the page, then refresh ingest status.",
@@ -652,7 +652,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "blocked_raw_access",
             "summary": summary + f" Fix access for {first} before ingest.",
             "agent_prompt": None,
-            "commands": ["link ingest-status", "link health"],
+            "commands": ["lnk ingest-status", "lnk health"],
             "notes": [
                 "Do not ask an agent to ingest raw files that Link cannot read and scan for secret-looking values.",
                 "Fix permissions or replace the file, then refresh ingest status.",
@@ -669,7 +669,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "blocked_secrets",
             "summary": summary + f" Redact {first} before ingest.",
             "agent_prompt": None,
-            "commands": ["link ingest-status", "link health"],
+            "commands": ["lnk ingest-status", "lnk health"],
             "notes": [
                 "Do not ask an agent to ingest flagged raw files until the secret-looking values are removed or redacted.",
                 "After redaction, refresh ingest status and continue with the normal ingest prompt.",
@@ -686,7 +686,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "stale_raw",
             "summary": summary,
             "agent_prompt": f"re-ingest {first} into Link",
-            "commands": ["link rebuild-index", "link rebuild-backlinks", "link validate", "link health"],
+            "commands": ["lnk rebuild-index", "lnk rebuild-backlinks", "lnk validate", "lnk health"],
             "notes": [
                 "The raw file is represented, but it is newer than the linked source page.",
                 "Ask the agent to refresh the existing source page before relying on retrieval.",
@@ -705,7 +705,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "pending_raw",
             "summary": summary,
             "agent_prompt": f"ingest {first} into Link",
-            "commands": ["link rebuild-index", "link rebuild-backlinks", "link validate", "link health"],
+            "commands": ["lnk rebuild-index", "lnk rebuild-backlinks", "lnk validate", "lnk health"],
             "notes": [
                 "If the source contains user preferences, decisions, or project context, ask for memory proposals before saving durable memories.",
                 "After ingest, rebuild index/backlinks if your agent did not already do it.",
@@ -717,7 +717,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "stale_graph",
             "summary": "Raw files are represented, but the graph index needs repair.",
             "agent_prompt": "rebuild Link backlinks and validate the wiki",
-            "commands": ["link rebuild-backlinks", "link validate", "link doctor"],
+            "commands": ["lnk rebuild-backlinks", "lnk validate", "lnk doctor"],
             "notes": ["Run the graph repair before relying on context or graph views."],
         }
 
@@ -726,7 +726,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
             "state": "empty",
             "summary": "Link is ready, but raw/ has no source files yet.",
             "agent_prompt": None,
-            "commands": ["link health", "link serve"],
+            "commands": ["lnk health", "lnk serve"],
             "notes": ["Drop notes, articles, transcripts, or project files into raw/, then ask your agent to ingest them into Link."],
         }
 
@@ -734,7 +734,7 @@ def build_ingest_guidance(status: dict[str, object]) -> dict[str, object]:
         "state": "ready",
         "summary": "All raw files are represented in wiki/sources and the graph index is current.",
         "agent_prompt": None,
-        "commands": ["link doctor", "link health"],
+        "commands": ["lnk doctor", "lnk health"],
         "notes": ["Add new files to raw/ when you want Link to learn new source-backed knowledge."],
     }
 

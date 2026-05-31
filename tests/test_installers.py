@@ -38,10 +38,12 @@ class InstallerTests(unittest.TestCase):
     def test_scaffold_installs_short_global_link_command(self):
         scaffold = (ROOT / "integrations/_shared/scaffold.sh").read_text(encoding="utf-8")
 
-        self.assertIn('LINK_CLI_BIN="$LINK_CLI_DIR/link"', scaffold)
+        self.assertIn('LINK_CLI_BIN="$LINK_CLI_DIR/lnk"', scaffold)
+        self.assertIn('LEGACY_LINK_CLI_BIN="$LINK_CLI_DIR/link"', scaffold)
+        self.assertIn("Removed old Link wrapper", scaffold)
         self.assertIn("Link command wrapper", scaffold)
         self.assertIn("not overwriting", scaffold)
-        self.assertIn("link health", scaffold)
+        self.assertIn("lnk health", scaffold)
         self.assertIn('if [ "$MODE" = "--project" ]', scaffold)
 
     def test_scaffold_project_mode_uses_absolute_target(self):
@@ -56,7 +58,9 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("--break-system-packages", scaffold)
         self.assertIn(".link-mcp-venv", scaffold)
         self.assertIn(".link-mcp-python", scaffold)
+        self.assertIn("lnk.cmd", scaffold)
         self.assertIn("link.cmd", scaffold)
+        self.assertIn("Removed old Link wrapper", scaffold)
         self.assertIn("Link command wrapper", scaffold)
         self.assertIn("Get-Command py", scaffold)
         self.assertIn("-m venv", scaffold)
@@ -80,9 +84,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("link_print_next_steps()", instructions)
         self.assertIn('if [ "$mode" = "--project" ]; then', instructions)
         self.assertIn("View wiki: python3 link.py serve", instructions)
-        self.assertIn("View wiki: link serve", instructions)
+        self.assertIn("View wiki: lnk serve", instructions)
         self.assertIn("Print starter prompts: python3 link.py next", instructions)
-        self.assertIn("Print starter prompts: link next", instructions)
+        self.assertIn("Print starter prompts: lnk next", instructions)
         self.assertIn("Try in your agent:", instructions)
         self.assertIn("is Link ready?", instructions)
         self.assertIn("brief me from Link before we continue", instructions)

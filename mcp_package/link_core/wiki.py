@@ -1040,7 +1040,7 @@ def rebuild_index(
             "next_actions": [
                 {
                     "tool": "rebuild_backlinks",
-                    "command": "link rebuild-backlinks",
+                    "command": "lnk rebuild-backlinks",
                     "reason": "Regenerated index links change graph edges; rebuild backlinks before validation.",
                 }
             ],

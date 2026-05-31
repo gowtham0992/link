@@ -32,7 +32,7 @@ class IngestCoreTests(unittest.TestCase):
         self.assertFalse(payload["has_wiki_dir"])
         self.assertEqual(payload["guidance"]["state"], "missing_structure")
         self.assertIn("Missing raw/ directory", text)
-        self.assertIn("Run an installer or initialize this directory: link init", text)
+        self.assertIn("Run an installer or initialize this directory: lnk init", text)
 
     def test_collect_ingest_status_reports_pending_raw(self):
         root = Path(tempfile.mkdtemp(prefix="link-ingest-core-"))
@@ -56,16 +56,16 @@ class IngestCoreTests(unittest.TestCase):
         self.assertEqual(payload["plan"]["title"], "Ingest pending raw sources")
         self.assertEqual(payload["plan"]["batch"][0]["suggested_source_page"], "wiki/sources/new-note.md")
         self.assertEqual(payload["plan"]["memory_prompt"], "propose memories from raw/new-note.md")
-        self.assertTrue(any(command.startswith("link rebuild-index ") for command in payload["plan"]["post_checks"]))
-        self.assertIn(resolved_root, "\n".join(payload["plan"]["post_checks"]))
+        self.assertTrue(any(command.startswith("lnk rebuild-index ") for command in payload["plan"]["post_checks"]))
 
         text = render_ingest_status_text(str(root), payload)
+        self.assertIn(f"lnk rebuild-index {resolved_root}", text)
         self.assertIn(f"Link ingest status: {root}", text)
         self.assertIn("Raw files: 1", text)
         self.assertIn("Pending raw files:\n- raw/new-note.md", text)
         self.assertIn("Ask your agent: ingest raw/new-note.md into Link", text)
-        self.assertIn(f"Run: link rebuild-index {resolved_root}", text)
-        self.assertIn(f"- link health {resolved_root}", text)
+        self.assertIn(f"Run: lnk rebuild-index {resolved_root}", text)
+        self.assertIn(f"- lnk health {resolved_root}", text)
         self.assertIn("Suggested workflow: Ingest pending raw sources", text)
         self.assertIn("Memory review: propose memories from raw/new-note.md", text)
 

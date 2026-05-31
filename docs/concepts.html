@@ -113,11 +113,11 @@ query Link for the release process</code></pre>
 
         <h2 id="scale">Scale Model</h2>
         <p>Link uses local caching, token indexes, bounded page APIs, bounded graph summaries, and optional in-memory SQLite FTS5 for fast search. If SQLite is unavailable, Link falls back to the token index.</p>
-        <pre><code>link benchmark "agent memory"
-link graph-summary "local memory" --limit 40 --depth 1
-link validate
-link rebuild-backlinks</code></pre>
-        <p>Use <code>link benchmark</code> when a wiki starts to feel slow. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, and readiness recommendations.</p>
+        <pre><code>lnk benchmark "agent memory"
+lnk graph-summary "local memory" --limit 40 --depth 1
+lnk validate
+lnk rebuild-backlinks</code></pre>
+        <p>Use <code>lnk benchmark</code> when a wiki starts to feel slow. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, and readiness recommendations.</p>
       </article>
     </div>
   </main>

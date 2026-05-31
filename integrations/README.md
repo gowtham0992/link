@@ -49,7 +49,7 @@ query Link for what you know about this project
 2. Scaffolds wiki structure at `~/link/` or the current directory with `--project`.
 3. Installs or upgrades `link-mcp`, using `~/.link-mcp-venv` when system Python is externally managed.
 4. Writes `.link-mcp-python` so clients can use the Python that actually has `link-mcp`.
-5. Adds a short `link` command wrapper for global installs, so checks are short: `link health`.
+5. Adds a short `lnk` command wrapper for global installs, so checks are short: `lnk health`.
 6. Prints next prompts and verification commands for your install mode.
 
 The instruction file is intentionally small. It tells the agent to check

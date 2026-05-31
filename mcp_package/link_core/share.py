@@ -95,7 +95,7 @@ def share_page_payload(
         summary = _page_summary(page)
         page_name = str(summary["name"])
         root = wiki_dir.parent if wiki_dir.name == "wiki" else wiki_dir
-        serve_command = ["link", "serve", str(root), "--port", str(port)]
+        serve_command = ["lnk", "serve", str(root), "--port", str(port)]
         return {
             "found": True,
             "query": query,

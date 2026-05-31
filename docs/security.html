@@ -67,11 +67,11 @@
 
         <h2 id="secrets">Secret Handling</h2>
         <p>Link scans raw sources, captures, wiki pages, release files, and public artifacts for secret-looking values. It detects common API keys, provider tokens, JWTs, private key blocks, and registry credentials, warns without logging secret values, and refuses normal ingest guidance when raw safety cannot be established. Validation and doctor checks also fail if a secret-looking value is already present in a wiki page before the local UI or MCP tools can serve it as context.</p>
-        <pre><code>link ingest-status
-link capture-inbox
-link redact-capture raw/memory-captures/&lt;capture&gt;.md
-link validate
-link doctor
+        <pre><code>lnk ingest-status
+lnk capture-inbox
+lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
+lnk validate
+lnk doctor
 python3 scripts/check_release_hygiene.py</code></pre>
         <div class="callout">
           <strong>Rule</strong>
@@ -83,10 +83,10 @@ python3 scripts/check_release_hygiene.py</code></pre>
         <p>HTTP write actions require <code>X-Link-Local-Action: true</code>. Responses include <code>X-Link-API-Version</code>. Proposal analysis does not write pages.</p>
 
         <h2 id="backups">Backups</h2>
-        <p><code>link backup</code> and MCP <code>backup_wiki</code> write local <code>.link-backups/</code> archives. Raw sources are excluded unless explicitly requested.</p>
-        <pre><code>link backup
-link backup --include-raw
-link doctor --fix</code></pre>
+        <p><code>lnk backup</code> and MCP <code>backup_wiki</code> write local <code>.link-backups/</code> archives. Raw sources are excluded unless explicitly requested.</p>
+        <pre><code>lnk backup
+lnk backup --include-raw
+lnk doctor --fix</code></pre>
         <p>Run a backup before broad repair work or large generated changes.</p>
 
         <h2 id="team">Team Review</h2>

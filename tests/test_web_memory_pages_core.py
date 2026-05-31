@@ -86,7 +86,7 @@ def test_render_memory_dashboard_page_shows_counts_next_actions_and_sections():
         "archived_count": 0,
         "by_type": {"preference": 2},
         "by_scope": {"project": 1},
-        "next_actions": [{"label": "Review", "detail": "Confirm memory", "command": "link memory-inbox"}],
+        "next_actions": [{"label": "Review", "detail": "Confirm memory", "command": "lnk memory-inbox"}],
         "review": [],
         "captures": [],
         "recent_updates": [],
@@ -102,7 +102,7 @@ def test_render_memory_dashboard_page_shows_counts_next_actions_and_sections():
     assert 'data-copy-text="brief me from Link for project alpha"' in html
     assert 'data-copy-text="audit Link memory for project alpha"' in html
     assert "<strong>Types:</strong> preference: 2" in html
-    assert "link memory-inbox" in html
+    assert "lnk memory-inbox" in html
     assert "No memories need review." in html
 
 
@@ -243,7 +243,7 @@ def test_render_inbox_page_lists_review_items_and_actions():
                 "tldr": "Needs review.",
                 "issues": [{"severity": "warning", "code": "pending", "message": "Needs <review>"}],
                 "primary_action": {"label": "Review", "description": "Confirm it"},
-                "actions": [{"label": "Mark reviewed", "command": "link review-memory memory-one"}],
+                "actions": [{"label": "Mark reviewed", "command": "lnk review-memory memory-one"}],
             }
         ],
     }
@@ -255,7 +255,7 @@ def test_render_inbox_page_lists_review_items_and_actions():
     assert "Memory &lt;One&gt;" in html
     assert "Needs &lt;review&gt;" in html
     assert "/explain-memory?memory=memory-one" in html
-    assert "link review-memory memory-one" in html
+    assert "lnk review-memory memory-one" in html
 
 
 def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
@@ -271,7 +271,7 @@ def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
             "issue_count": 1,
             "issues": [{"severity": "warning", "code": "pending", "message": "Needs <review>"}],
             "primary_action": {"label": "Review", "description": "Confirm it"},
-            "actions": [{"label": "Forget", "command": "link forget-memory prefer-reviewable-memory"}],
+            "actions": [{"label": "Forget", "command": "lnk forget-memory prefer-reviewable-memory"}],
         },
         "provenance": {
             "source": "<unit test>",
@@ -290,7 +290,7 @@ def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
     assert "needs_review" in html
     assert "Needs &lt;review&gt;" in html
     assert "Next:</strong> Review" in html
-    assert "link forget-memory prefer-reviewable-memory" in html
+    assert "lnk forget-memory prefer-reviewable-memory" in html
     assert "/graph?focus=prefer-reviewable-memory&amp;depth=2" in html
     assert "Open local graph" in html
     assert "agent-memory" in html
@@ -325,7 +325,7 @@ def test_render_memory_wins_page_shows_local_proof_signals():
         ],
         "prompts": ["what does Link remember about me?"],
         "next_actions": [
-            {"label": "Use memory", "reason": "Try the value loop.", "command": "link brief current-task ."}
+            {"label": "Use memory", "reason": "Try the value loop.", "command": "lnk brief current-task ."}
         ],
     }
 
@@ -336,4 +336,4 @@ def test_render_memory_wins_page_shows_local_proof_signals():
     assert "Reusable &lt;context&gt;" in html
     assert "Alpha &lt;memory&gt;" in html
     assert 'data-copy-text="what does Link remember about me?"' in html
-    assert "link brief current-task ." in html
+    assert "lnk brief current-task ." in html

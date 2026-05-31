@@ -59,12 +59,12 @@
         <p>Link is designed as a local personal or repo-local memory layer. Each developer runs the CLI and MCP server on their own machine. The web viewer is optional and only serves the local UI.</p>
         <div class="callout">
           <strong>No server dependency</strong>
-          <code>link serve</code> is only the human web viewer. CLI and MCP access work directly against local Markdown files when the viewer is closed.
+          <code>lnk serve</code> is only the human web viewer. CLI and MCP access work directly against local Markdown files when the viewer is closed.
         </div>
         <pre><code>brew install gowtham0992/link/link
-link init ~/link
-link health ~/link
-link connect codex ~/link</code></pre>
+lnk init ~/link
+lnk health ~/link
+lnk connect codex ~/link</code></pre>
 
         <h2 id="data">Data Boundaries</h2>
         <ul>
@@ -74,30 +74,30 @@ link connect codex ~/link</code></pre>
           <li>The installed product has no telemetry, hosted backend, or outbound API calls.</li>
           <li>Secret-looking values are scanned before capture, ingest, Obsidian import, and doctor checks.</li>
         </ul>
-        <pre><code>link ingest-status ~/link
-link doctor ~/link
-link validate ~/link</code></pre>
+        <pre><code>lnk ingest-status ~/link
+lnk doctor ~/link
+lnk validate ~/link</code></pre>
 
         <h2 id="review">Memory Approval Gates</h2>
         <p>Agents can propose memories, but durable memory should be explicit and reviewable. Link keeps memory as Markdown with type, scope, visibility, project, source, review status, optional review dates, and optional expiry dates.</p>
-        <pre><code>link propose-memories raw/notes.md ~/link
-link memory-inbox ~/link
-link review-memory memory-name ~/link
-link archive-memory memory-name ~/link --reason stale</code></pre>
+        <pre><code>lnk propose-memories raw/notes.md ~/link
+lnk memory-inbox ~/link
+lnk review-memory memory-name ~/link
+lnk archive-memory memory-name ~/link --reason stale</code></pre>
         <p>For temporary context, use <code>expires_at</code>. For decisions that should be re-confirmed, use <code>review_after</code>. For team handoff, keep personal context at <code>visibility: private</code> and only mark memories <code>project</code> or <code>team</code> after the user explicitly approves sharing them.</p>
 
         <h2 id="share">Team Sharing Pattern</h2>
         <p>The safest early team workflow is Git-backed sharing of reviewed wiki pages. Keep raw sources local unless the team explicitly decides to share them.</p>
-        <pre><code>link team-sync ~/link --remote git@example.com:team/link-memory.git
-link compliance-export ~/link --output link-audit.json
-link backup ~/link</code></pre>
-        <p><code>link team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and whether active <code>visibility: private</code> memories would be swept into a broad <code>git add wiki</code>. It prints paste-safe commands instead of pushing data for you.</p>
+        <pre><code>lnk team-sync ~/link --remote git@example.com:team/link-memory.git
+lnk compliance-export ~/link --output link-audit.json
+lnk backup ~/link</code></pre>
+        <p><code>lnk team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and whether active <code>visibility: private</code> memories would be swept into a broad <code>git add wiki</code>. It prints paste-safe commands instead of pushing data for you.</p>
 
         <h2 id="audit">Audit Packet</h2>
-        <p><code>link compliance-export</code> creates a redacted JSON packet for review. It includes readiness, validation status, memory review counts, operation markers, recent audit log metadata, and safe next actions. Raw source contents and memory bodies are excluded.</p>
-        <pre><code>link compliance-export ~/link --output link-audit.json
-link wins ~/link
-link memory-log ~/link</code></pre>
+        <p><code>lnk compliance-export</code> creates a redacted JSON packet for review. It includes readiness, validation status, memory review counts, operation markers, recent audit log metadata, and safe next actions. Raw source contents and memory bodies are excluded.</p>
+        <pre><code>lnk compliance-export ~/link --output link-audit.json
+lnk wins ~/link
+lnk memory-log ~/link</code></pre>
 
         <h2 id="limits">Current Limits</h2>
         <ul>
@@ -109,11 +109,11 @@ link memory-log ~/link</code></pre>
 
         <h2 id="checklist">Security Review Checklist</h2>
         <ol>
-          <li>Run <code>link health ~/link</code> and verify readiness is green.</li>
-          <li>Run <code>link doctor ~/link</code> and resolve secret or validation warnings.</li>
-          <li>Run <code>link compliance-export ~/link --output link-audit.json</code>.</li>
+          <li>Run <code>lnk health ~/link</code> and verify readiness is green.</li>
+          <li>Run <code>lnk doctor ~/link</code> and resolve secret or validation warnings.</li>
+          <li>Run <code>lnk compliance-export ~/link --output link-audit.json</code>.</li>
           <li>Confirm <code>raw/</code>, backups, caches, and local MCP Python markers are ignored by Git.</li>
-          <li>Review <code>wiki/log.md</code>, <code>link memory-log ~/link</code>, and <code>link wins ~/link</code>.</li>
+          <li>Review <code>wiki/log.md</code>, <code>lnk memory-log ~/link</code>, and <code>lnk wins ~/link</code>.</li>
           <li>Only share reviewed <code>wiki/</code> pages whose memories are marked <code>visibility: project</code> or <code>visibility: team</code>.</li>
         </ol>
       </article>

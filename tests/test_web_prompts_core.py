@@ -15,9 +15,9 @@ def _layout(title: str, body: str) -> str:
 def test_render_prompts_page_shows_project_and_commands():
     payload = {
         "project": "client-launch",
-        "shortcut": "link next /tmp/link",
+        "shortcut": "lnk next /tmp/link",
         "prompts": [{"label": "Readiness", "prompt": "is Link ready?", "when": "Before work"}],
-        "commands": ["link health"],
+        "commands": ["lnk health"],
     }
 
     html = render_prompts_page(payload, layout=_layout)
@@ -26,22 +26,22 @@ def test_render_prompts_page_shows_project_and_commands():
     assert "Project examples are scoped to <code>client-launch</code>" in html
     assert "One Command" in html
     assert "Use this any time you forget what to ask next." in html
-    assert "link next /tmp/link" in html
-    assert 'data-copy-text="link next /tmp/link"' in html
+    assert "lnk next /tmp/link" in html
+    assert 'data-copy-text="lnk next /tmp/link"' in html
     assert "Ask Your Agent" in html
     assert "Local Checks" in html
     assert "is Link ready?" in html
     assert 'data-copy-text="is Link ready?"' in html
     assert "Before work" in html
-    assert "link health" in html
-    assert 'data-copy-text="link health"' in html
+    assert "lnk health" in html
+    assert 'data-copy-text="lnk health"' in html
 
 
 def test_render_prompts_page_escapes_payload_fields():
     payload = {
         "project": "<project>",
         "prompts": [{"label": "<label>", "prompt": "ingest raw/<file>", "when": "<when>"}],
-        "commands": ["link query '<topic>'"],
+        "commands": ["lnk query '<topic>'"],
     }
 
     html = render_prompts_page(payload, layout=_layout)
@@ -51,7 +51,7 @@ def test_render_prompts_page_escapes_payload_fields():
     assert "ingest raw/&lt;file&gt;" in html
     assert 'data-copy-text="ingest raw/&lt;file&gt;"' in html
     assert "&lt;when&gt;" in html
-    assert "link query &#x27;&lt;topic&gt;&#x27;" in html
+    assert "lnk query &#x27;&lt;topic&gt;&#x27;" in html
     assert "<project>" not in html
 
 

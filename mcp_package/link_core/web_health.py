@@ -193,7 +193,7 @@ def _render_health_cards(status: Mapping[str, object], operations: Mapping[str, 
     validation_detail = (
         f"{int(validation.get('error_count') or 0)} errors · {int(validation.get('warning_count') or 0)} warnings"
         if validation_checked
-        else "run link health"
+        else "run lnk health"
     )
     cards = [
         (

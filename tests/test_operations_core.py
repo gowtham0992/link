@@ -84,7 +84,7 @@ class OperationsCoreTests(unittest.TestCase):
         self.assertIn("remember | pending | stale", text)
         self.assertIn("Description: Save memory", text)
         self.assertIn("Touched: wiki/memories/prefer-local.md, wiki/log.md", text)
-        self.assertIn("link validate", text)
+        self.assertIn("lnk validate", text)
         self.assertIn(str(wiki.parent), text)
         self.assertIn("Result: needs attention", text)
 

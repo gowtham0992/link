@@ -50,7 +50,7 @@ else:
 if not WIKI_DIR.exists():
     print(
         f"[link-mcp] Wiki not found at {WIKI_DIR}. "
-        "Initialize Link first with `link init` or `python3 link.py init`, "
+        "Initialize Link first with `lnk init` or `python3 link.py init`, "
         "run an integration installer under integrations/*/install.sh, "
         "or pass --wiki /path/to/wiki.",
         file=sys.stderr,

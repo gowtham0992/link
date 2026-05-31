@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .files import atomic_write_json, atomic_write_text
-from .mcp_verify import display_command, resolve_mcp_python
+from .mcp_verify import display_command, normalize_command_parts, resolve_mcp_python
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ AGENT_CONFIGS: tuple[AgentMcpConfig, ...] = (
 
 
 def supported_agents() -> tuple[str, ...]:
-    """Return canonical agent names supported by `link connect`."""
+    """Return canonical agent names supported by `lnk connect`."""
     return tuple(config.name for config in AGENT_CONFIGS)
 
 
@@ -93,7 +93,7 @@ def _agent_by_name(agent: str) -> AgentMcpConfig:
         if normalized == config.name or normalized in config.aliases:
             return config
     choices = ", ".join(supported_agents())
-    raise ValueError(f"unsupported agent for link connect: {agent}. Try one of: {choices}")
+    raise ValueError(f"unsupported agent for lnk connect: {agent}. Try one of: {choices}")
 
 
 def _config_path(default_config: str, override: str | None) -> Path:
@@ -196,7 +196,7 @@ def build_mcp_connect_payload(
         except Exception as exc:
             write_status = {"requested": True, "ok": False, "message": str(exc)}
 
-    connect_command = ["link", "connect", config.name, str(target)]
+    connect_command = ["lnk", "connect", config.name, str(target)]
     if config_path:
         connect_command.extend(["--config", str(path)])
     if python_cmd:
@@ -223,12 +223,12 @@ def build_mcp_connect_payload(
             },
             {
                 "label": "verify MCP runtime",
-                "command": ["link", "verify-mcp", str(target), "--python", resolved_python],
-                "command_text": display_command(["link", "verify-mcp", str(target), "--python", resolved_python]),
+                "command": ["lnk", "verify-mcp", str(target), "--python", resolved_python],
+                "command_text": display_command(["lnk", "verify-mcp", str(target), "--python", resolved_python]),
             },
             {
                 "label": "create wiki if missing",
-                "command": init_command,
+                "command": normalize_command_parts(init_command),
                 "command_text": display_command(init_command),
             },
         ],

@@ -54,8 +54,8 @@ class LinkCliTests(unittest.TestCase):
         backlinks = json.loads((target / "wiki/_backlinks.json").read_text(encoding="utf-8"))
         self.assertIn("backlinks", backlinks)
         self.assertIn("forward", backlinks)
-        self.assertIn("link health", out.getvalue())
-        self.assertIn("link serve", out.getvalue())
+        self.assertIn("lnk health", out.getvalue())
+        self.assertIn("lnk serve", out.getvalue())
 
     def test_init_preserves_existing_pages(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-init-test-"))
@@ -101,7 +101,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("remember that I prefer local-first agent memory", out.getvalue())
         self.assertIn("query Link for what you know about me", out.getvalue())
         self.assertIn("propose memories from raw/<file>", out.getvalue())
-        self.assertIn("link health", out.getvalue())
+        self.assertIn("lnk health", out.getvalue())
 
     def test_prompts_json_supports_project_examples(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-prompts-test-"))
@@ -130,7 +130,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Link welcome:", text)
         self.assertIn("1. is Link ready?", text)
         self.assertIn("Proves: Agent can find Link", text)
-        self.assertIn("link health", text)
+        self.assertIn("lnk health", text)
         self.assertIn("http://127.0.0.1:3000/health", text)
 
     def test_welcome_json_supports_project_examples(self):
@@ -175,7 +175,7 @@ class LinkCliTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("Link wiki missing", out.getvalue())
-        self.assertIn("link init", out.getvalue())
+        self.assertIn("lnk init", out.getvalue())
 
     def test_serve_validates_port_before_spawning_viewer(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-serve-test-"))
@@ -373,12 +373,12 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("raw/new-source.md", out.getvalue())
         self.assertIn("Guidance: 1 raw file needs ingest.", out.getvalue())
         self.assertIn("Ask your agent: ingest raw/new-source.md into Link", out.getvalue())
-        self.assertIn("Run: link validate", out.getvalue())
+        self.assertIn("Run: lnk validate", out.getvalue())
         self.assertIn("Suggested workflow: Ingest pending raw sources", out.getvalue())
         self.assertIn("Memory review: propose memories from raw/new-source.md", out.getvalue())
         self.assertIn("raw/new-source.md -> wiki/sources/new-source.md", out.getvalue())
         self.assertIn("Post-ingest checks:", out.getvalue())
-        self.assertIn("link health", out.getvalue())
+        self.assertIn("lnk health", out.getvalue())
 
     def test_ingest_status_reports_represented_completion(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-ingest-test-"))
@@ -530,7 +530,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Backlinks: stale", out.getvalue())
         self.assertIn("Guidance: Raw files are represented, but the graph index needs repair.", out.getvalue())
-        self.assertIn("Run: link rebuild-backlinks", out.getvalue())
+        self.assertIn("Run: lnk rebuild-backlinks", out.getvalue())
 
     def test_status_reports_demo_readiness(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-status-test-"))
@@ -629,7 +629,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Link operations:", out.getvalue())
         self.assertIn("remember | pending | stale", out.getvalue())
-        self.assertIn("link validate", out.getvalue())
+        self.assertIn("lnk validate", out.getvalue())
 
         json_out = StringIO()
         with redirect_stdout(json_out):
@@ -658,7 +658,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Ready: no", out.getvalue())
         self.assertIn("Operations: 1 total", out.getvalue())
-        self.assertIn("link operations", out.getvalue())
+        self.assertIn("lnk operations", out.getvalue())
 
     def test_status_prints_readiness_warnings(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-status-test-"))

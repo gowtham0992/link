@@ -9,14 +9,27 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 
+PREFERRED_LINK_COMMAND = "lnk"
+LEGACY_LINK_COMMAND = "link"
+
+
+def normalize_command_parts(parts: list[str]) -> list[str]:
+    """Use Link's non-conflicting CLI command name in generated user commands."""
+    if parts and parts[0] == LEGACY_LINK_COMMAND:
+        return [PREFERRED_LINK_COMMAND, *parts[1:]]
+    return list(parts)
+
+
 def display_command(parts: list[str]) -> str:
     """Return a shell-safe command for the current platform."""
+    parts = normalize_command_parts(parts)
     if os.name == "nt":
         return subprocess.list2cmdline(parts)
     return shlex.join(parts)
 
 
 def mcp_verify_action(tool: str, label: str, command: list[str]) -> dict[str, object]:
+    command = normalize_command_parts(command)
     return {
         "tool": tool,
         "label": label,

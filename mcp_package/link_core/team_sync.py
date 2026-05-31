@@ -148,7 +148,7 @@ def build_team_sync_payload(target: Path, *, remote: str | None = None) -> dict[
 
     warnings: list[str] = []
     if not wiki_dir.exists():
-        warnings.append("Link wiki is missing. Run link init before preparing team sync.")
+        warnings.append("Link wiki is missing. Run lnk init before preparing team sync.")
     if git_root and not bool(gitignore.get("protects_raw")):
         warnings.append("raw/ is not protected by the workspace .gitignore; do not push until raw sources are intentionally handled.")
     if git_root and not remotes and not remote_clean:
@@ -160,10 +160,10 @@ def build_team_sync_payload(target: Path, *, remote: str | None = None) -> dict[
 
     setup_actions: list[dict[str, str]] = []
     sync_actions: list[dict[str, str]] = [
-        _action("check Link health", ["link", "health", str(root)]),
-        _action("review pending memories", ["link", "memory-inbox", str(root)]),
-        _action("validate before sharing", ["link", "validate", str(root)]),
-        _action("backup before sharing", ["link", "backup", str(root)]),
+        _action("check Link health", ["lnk", "health", str(root)]),
+        _action("review pending memories", ["lnk", "memory-inbox", str(root)]),
+        _action("validate before sharing", ["lnk", "validate", str(root)]),
+        _action("backup before sharing", ["lnk", "backup", str(root)]),
     ]
     if git_root is None:
         setup_actions.extend([

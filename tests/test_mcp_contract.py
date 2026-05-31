@@ -190,7 +190,7 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["stale_count"], 1)
         self.assertEqual(payload["operations"][0]["operation"], "remember")
         self.assertEqual(payload["operations"][0]["description"], "Save memory")
-        self.assertIn("link operations", payload["next_actions"][0]["command"])
+        self.assertIn("lnk operations", payload["next_actions"][0]["command"])
 
     def test_starter_prompts_contract(self):
         payload = json.loads(self.server.starter_prompts(project="Client Launch"))
@@ -198,7 +198,7 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["project"], "client-launch")
         self.assertEqual(payload["prompts"][0]["prompt"], "is Link ready?")
         self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
-        self.assertTrue(any(command.startswith("link health ") for command in payload["commands"]))
+        self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
 
     def test_missing_wiki_message_points_to_current_setup_paths(self):
         previous_argv = sys.argv[:]
@@ -216,7 +216,7 @@ class McpContractTests(unittest.TestCase):
             self.assertEqual(cm.exception.code, 1)
             text = err.getvalue()
             self.assertIn("Wiki not found", text)
-            self.assertIn("link init", text)
+            self.assertIn("lnk init", text)
             self.assertIn("python3 link.py init", text)
             self.assertIn("integrations/*/install.sh", text)
             self.assertIn("--wiki /path/to/wiki", text)

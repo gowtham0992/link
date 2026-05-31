@@ -73,9 +73,12 @@ macOS with Homebrew:
 
 ```bash
 brew install gowtham0992/link/link
-link try
-link serve link-demo
+lnk try
+lnk serve link-demo
 ```
+
+The installed command is `lnk` because `link` is already a POSIX/macOS system
+utility. From a source checkout, use `python3 link.py ...` instead.
 
 Windows or source checkout:
 
@@ -97,7 +100,7 @@ python3 link.py next link-demo
 python3 link.py serve link-demo
 ```
 
-Use `link try` for the shortest Homebrew proof loop. It creates the demo,
+Use `lnk try` for the shortest Homebrew proof loop. It creates the demo,
 checks readiness, runs a compact query/brief proof, and prints the agent prompts
 and viewer command. From source, use `python3 link.py try`.
 
@@ -116,15 +119,15 @@ The web viewer is for local use only. It binds to `127.0.0.1`, has no user
 accounts or authentication, and should not be exposed to the internet unless you
 add your own auth layer.
 
-For the shortest guided proof path, run `link welcome link-demo`.
+For the shortest guided proof path, run `lnk welcome link-demo`.
 
 Try the value loop:
 
 ```bash
-link query "why does Link help agents?" link-demo --budget small
-link brief "working on agent memory" link-demo
-link benchmark "agent memory" link-demo
-link health link-demo
+lnk query "why does Link help agents?" link-demo --budget small
+lnk brief "working on agent memory" link-demo
+lnk benchmark "agent memory" link-demo
+lnk health link-demo
 ```
 
 The `/health` page mirrors the readiness loop in the browser: validation state,
@@ -168,7 +171,7 @@ limits are.
 Pick the surface that matches how you work. They all read and write the same
 local Markdown wiki.
 
-These surfaces are independent. `link serve` / `serve.py` is only the local web
+These surfaces are independent. `lnk serve` / `serve.py` is only the local web
 viewer. CLI commands and MCP tools read the same `wiki/` files directly, so
 Claude, Codex, Kiro, Cursor, or another MCP client can use Link even when the
 web viewer is not running.
@@ -239,10 +242,10 @@ connection helper. It previews the exact config first; add `--write` when you
 want Link to update the agent config file.
 
 ```bash
-link connect codex ~/link
-link connect codex ~/link --write
-link connect kiro ~/link --write
-link verify-mcp ~/link
+lnk connect codex ~/link
+lnk connect codex ~/link --write
+lnk connect kiro ~/link --write
+lnk verify-mcp ~/link
 ```
 
 <details>
@@ -279,8 +282,8 @@ Obsidian users can import an existing vault into `raw/` for agent ingest, or
 open `~/link/wiki` directly as a vault for editing Link pages:
 
 ```bash
-link init ~/link
-link import-obsidian ~/Documents/ObsidianVault ~/link
+lnk init ~/link
+lnk import-obsidian ~/Documents/ObsidianVault ~/link
 ```
 
 See the [Obsidian guide](https://gowtham0992.github.io/link/obsidian.html) for
@@ -307,7 +310,7 @@ The storage model is plain and inspectable:
 | `wiki/` | Source-backed pages, concepts, entities, explorations, comparisons, and memories. |
 | MCP tools | Compact packets agents can use without dumping the whole wiki into context. |
 
-If a raw file was already ingested and later edited, `link ingest-status` marks it
+If a raw file was already ingested and later edited, `lnk ingest-status` marks it
 as stale and tells your agent to refresh the existing source page instead of
 creating a duplicate.
 
@@ -346,42 +349,42 @@ Use `visibility` to separate where a memory applies from who should see it:
 `private` stays personal, `project` is intended for a project workspace, and
 `team` means the user explicitly approved sharing it with a team.
 
-For team handoff or security review, `link compliance-export --output audit.json`
+For team handoff or security review, `lnk compliance-export --output audit.json`
 writes a redacted JSON packet with readiness, validation, memory review status,
 operation markers, and recent audit log entries. Raw source contents and memory
 bodies are not included.
 
-For day-to-day auditability, `link memory-log ~/link` shows what Link recently
+For day-to-day auditability, `lnk memory-log ~/link` shows what Link recently
 remembered, updated, reviewed, archived, restored, forgot, or accepted from raw
 captures.
 
-For recovery, `link backup ~/link` creates a local archive and `link
+For recovery, `lnk backup ~/link` creates a local archive and `lnk
 restore-backup <archive> ~/link` previews what would be restored. Passing
 `--confirm` replaces local files after creating a safety backup when possible;
 `raw/` is still excluded unless `--include-raw` is explicit.
 
-For local proof of value, `link wins ~/link` shows reusable memories, reviewed
+For local proof of value, `lnk wins ~/link` shows reusable memories, reviewed
 memory, provenance, project continuity, freshness guardrails, and copyable
 prompts without tracking user behavior.
 
-For Git-backed team memory, `link team-sync ~/link` checks whether the workspace
+For Git-backed team memory, `lnk team-sync ~/link` checks whether the workspace
 is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,
 and local MCP Python markers private by default. It also blocks "ready" status
 when the memory inbox is not clear or active `visibility: private` memories
 would be included by a broad `git add wiki`.
 
 ```bash
-link team-sync ~/link --remote git@example.com:team/link-memory.git
+lnk team-sync ~/link --remote git@example.com:team/link-memory.git
 ```
 
-For a teammate, reviewer, or another agent, `link share` resolves a page,
+For a teammate, reviewer, or another agent, `lnk share` resolves a page,
 memory, title, alias, or search phrase into a local viewer URL:
 
 ```bash
-link share "Prefer local memory" ~/link
+lnk share "Prefer local memory" ~/link
 ```
 
-For a static, read-only review packet, `link snapshot` exports rendered wiki
+For a static, read-only review packet, `lnk snapshot` exports rendered wiki
 HTML without `raw/`, captures, operation markers, live MCP state, or memory pages
 by default. `--include-memories` exports only non-private memories; use
 `--include-private-memories` only for a personal archive or an explicitly
@@ -389,9 +392,9 @@ approved review. It blocks export if wiki pages contain secret-looking values
 unless you explicitly override it.
 
 ```bash
-link snapshot ~/link --output link-snapshot
-link snapshot ~/link --output link-snapshot --include-memories --force
-link snapshot ~/link --output personal-snapshot --include-memories --include-private-memories --force
+lnk snapshot ~/link --output link-snapshot
+lnk snapshot ~/link --output link-snapshot --include-memories --force
+lnk snapshot ~/link --output personal-snapshot --include-memories --include-private-memories --force
 ```
 
 ## Agent Contract
@@ -417,10 +420,10 @@ Link itself is local-first:
 - No hosted backend.
 - No external API calls from `serve.py` or `link-mcp`.
 - Raw sources and generated wiki pages are ignored by git by default.
-- `link backup` excludes `raw/` unless you explicitly pass `--include-raw`.
+- `lnk backup` excludes `raw/` unless you explicitly pass `--include-raw`.
 - Secret-looking API keys, provider tokens, JWTs, registry credentials, and
   private key blocks are detected in raw sources, captures, and release hygiene
-  checks. `link validate` and `link doctor` also fail if secret-looking values
+  checks. `lnk validate` and `lnk doctor` also fail if secret-looking values
   are found inside wiki pages before they can be served through the local UI or
   returned through MCP context.
 - The local web server binds to `127.0.0.1` and is not meant to be exposed to

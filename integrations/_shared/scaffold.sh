@@ -31,10 +31,16 @@ install_link_cli_wrapper() {
     fi
 
     LINK_CLI_DIR="${LINK_CLI_DIR:-$HOME/.local/bin}"
-    LINK_CLI_BIN="$LINK_CLI_DIR/link"
+    LINK_CLI_BIN="$LINK_CLI_DIR/lnk"
+    LEGACY_LINK_CLI_BIN="$LINK_CLI_DIR/link"
     LINK_CLI_MARKER="# Link command wrapper"
 
     mkdir -p "$LINK_CLI_DIR"
+
+    if [ -e "$LEGACY_LINK_CLI_BIN" ] && grep -q "$LINK_CLI_MARKER" "$LEGACY_LINK_CLI_BIN" 2>/dev/null; then
+        rm -f "$LEGACY_LINK_CLI_BIN"
+        echo "  Removed old Link wrapper: $LEGACY_LINK_CLI_BIN"
+    fi
 
     if [ -e "$LINK_CLI_BIN" ] && ! grep -q "$LINK_CLI_MARKER" "$LINK_CLI_BIN" 2>/dev/null; then
         echo "  · $LINK_CLI_BIN already exists and is not a Link wrapper; not overwriting."
@@ -54,9 +60,9 @@ EOF
 
     echo "  ✓ Link command: $LINK_CLI_BIN"
 
-    RESOLVED_LINK="$(command -v link 2>/dev/null || true)"
+    RESOLVED_LINK="$(command -v lnk 2>/dev/null || true)"
     if [ "$RESOLVED_LINK" != "$LINK_CLI_BIN" ]; then
-        echo "  · Add $LINK_CLI_DIR to the front of PATH to run: link health"
+        echo "  · Add $LINK_CLI_DIR to the front of PATH to run: lnk health"
     fi
 }
 
@@ -230,18 +236,18 @@ if [ -f "$TARGET_DIR/link.py" ]; then
         echo "    python3 link.py rebuild-backlinks"
     else
         echo "  Check Link readiness:"
-        echo "    link health"
+        echo "    lnk health"
         echo "  Print starter prompts:"
-        echo "    link next"
+        echo "    lnk next"
         echo "  Check wiki health:"
-        echo "    link doctor"
+        echo "    lnk doctor"
         echo "  Create a local backup:"
-        echo "    link backup"
+        echo "    lnk backup"
         echo "  Validate ingest output:"
-        echo "    link validate"
+        echo "    lnk validate"
         echo "  Verify MCP setup:"
-        echo "    link verify-mcp"
+        echo "    lnk verify-mcp"
         echo "  Repair stale graph index:"
-        echo "    link rebuild-backlinks"
+        echo "    lnk rebuild-backlinks"
     fi
 fi

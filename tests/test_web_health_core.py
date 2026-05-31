@@ -37,7 +37,7 @@ def test_render_health_page_shows_readiness_operations_and_commands(tmp_path):
             "next_actions": [
                 {
                     "label": "inspect operation marker files before deleting them",
-                    "command": f"link operations {tmp_path}",
+                    "command": f"lnk operations {tmp_path}",
                 }
             ],
             "operations": [{"operation": "remember", "description": "Save memory", "marker": "remember-1.json"}],
@@ -60,8 +60,8 @@ def test_render_health_page_shows_readiness_operations_and_commands(tmp_path):
     assert "remember-1.json" in html
     assert "Operation Next Actions" in html
     assert str(tmp_path) in html
-    assert "link operations" in html
-    assert "link benchmark" in html
+    assert "lnk operations" in html
+    assert "lnk benchmark" in html
     assert "agent memory" in html
 
 
@@ -93,7 +93,7 @@ def test_render_health_page_maps_ready_actions_to_targeted_commands(tmp_path):
     )
 
     assert "Next Safe Action" in html
-    assert "link query" in html
+    assert "lnk query" in html
     assert "what should I know before continuing?" in html
     assert str(tmp_path) in html
 
@@ -126,5 +126,5 @@ def test_render_health_page_targets_memory_review_command(tmp_path):
     )
 
     assert "Review pending memories" in html
-    assert "link memory-inbox" in html
+    assert "lnk memory-inbox" in html
     assert str(tmp_path) in html

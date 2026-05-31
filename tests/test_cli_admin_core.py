@@ -73,7 +73,7 @@ class CliAdminCoreTests(unittest.TestCase):
         self.assertIn("Ready: no", text)
         self.assertIn("Missing: wiki/index.md", text)
         self.assertIn("migrate_wiki: migrate schema", text)
-        self.assertIn("Run: link migrate /tmp/link", text)
+        self.assertIn("Run: lnk migrate /tmp/link", text)
 
     def test_render_status_ready_includes_human_query_command(self):
         code, text = render_status_text({
@@ -94,7 +94,7 @@ class CliAdminCoreTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("query_link: answer with compact local context", text)
-        self.assertIn("Run: link query", text)
+        self.assertIn("Run: lnk query", text)
         self.assertIn("what should I know before continuing?", text)
         self.assertIn("/tmp/link", text)
 

@@ -269,7 +269,7 @@ class CliMemoryCoreTests(unittest.TestCase):
                     "kind": "review",
                     "label": "Review",
                     "description": "Mark memory reviewed",
-                    "command": "link review-memory prefer-local-memory",
+                    "command": "lnk review-memory prefer-local-memory",
                 },
                 "actions": [
                     {"kind": "review", "label": "Review"},
@@ -463,7 +463,7 @@ class CliMemoryCoreTests(unittest.TestCase):
             "next_actions": [{
                 "label": "Review memory inbox",
                 "recommended": True,
-                "command": "link memory-inbox",
+                "command": "lnk memory-inbox",
             }],
         }, target="/tmp/link")
 

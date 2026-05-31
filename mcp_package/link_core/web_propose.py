@@ -58,7 +58,7 @@ def _render_proposal_path() -> str:
         '<code>remember that ...</code></article>'
         '<article class="ingest-step"><span class="step-num">4</span>'
         '<h3>Review later</h3><p>Use the inbox and explain views to review, archive, update, or forget memories.</p>'
-        '<code>link memory-inbox</code></article>'
+        '<code>lnk memory-inbox</code></article>'
         '</section>'
     )
 
