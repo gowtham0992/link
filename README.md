@@ -15,6 +15,7 @@
   <a href="https://gowtham0992.github.io/link/">Website</a> ·
   <a href="https://gowtham0992.github.io/link/getting-started.html">Quick start</a> ·
   <a href="https://gowtham0992.github.io/link/mcp.html">MCP setup</a> ·
+  <a href="https://gowtham0992.github.io/link/skills.html">Skills</a> ·
   <a href="https://gowtham0992.github.io/link/cli.html">CLI</a> ·
   <a href="https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink">MCP Registry</a> ·
   <a href="https://pypi.org/project/link-mcp/">PyPI</a> ·
@@ -166,15 +167,15 @@ The public scale model is documented at
 bounded by default, how to measure your own wiki, and where the current local
 limits are.
 
-## Three Ways To Use Link
+## Ways To Use Link
 
 Pick the surface that matches how you work. They all read and write the same
 local Markdown wiki.
 
 These surfaces are independent. `lnk serve` / `serve.py` is only the local web
-viewer. CLI commands and MCP tools read the same `wiki/` files directly, so
-Claude, Codex, Kiro, Cursor, or another MCP client can use Link even when the
-web viewer is not running.
+viewer. CLI commands, official skills, and MCP tools read the same `wiki/` files
+directly, so Claude, Codex, Kiro, Cursor, or another agent can use Link even
+when the web viewer is not running.
 
 <table>
   <tr>
@@ -195,6 +196,19 @@ web viewer is not running.
     </td>
   </tr>
 </table>
+
+Prefer skills instead of MCP? Link ships small, lazy-loadable CLI skills under
+`skills/`. They let an agent use `lnk health`, `lnk query`, `lnk ingest-status`,
+and `lnk remember` directly, without MCP setup or a running web viewer.
+
+```text
+skills/link-health/SKILL.md
+skills/link-retrieve/SKILL.md
+skills/link-ingest/SKILL.md
+skills/link-memory/SKILL.md
+```
+
+Full guide: [Link Skills](https://gowtham0992.github.io/link/skills.html).
 
 ## Install For Your Agent
 
@@ -449,6 +463,7 @@ More detail: [Security guide](https://gowtham0992.github.io/link/security.html).
 | Understand raw/wiki/memory | [Concepts](https://gowtham0992.github.io/link/concepts.html) |
 | Configure MCP | [MCP setup](https://gowtham0992.github.io/link/mcp.html) |
 | Find a command | [CLI reference](https://gowtham0992.github.io/link/cli.html) |
+| Use Link without MCP setup | [Official skills](https://gowtham0992.github.io/link/skills.html) |
 | Use local HTTP endpoints | [HTTP API](https://gowtham0992.github.io/link/api.html) |
 | Review security boundaries | [Security model](https://gowtham0992.github.io/link/security.html) |
 | Evaluate Link for a small team | [Team security review](https://gowtham0992.github.io/link/team-security.html) |
