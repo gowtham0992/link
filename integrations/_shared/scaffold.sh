@@ -116,21 +116,7 @@ if [ "$IS_UPDATE" = false ]; then
         touch "$TARGET_DIR/$dir/.gitkeep"
     done
 
-    if [ ! -f "$TARGET_DIR/wiki/_backlinks.json" ]; then
-        printf '{\n  "backlinks": {},\n  "forward": {}\n}\n' > "$TARGET_DIR/wiki/_backlinks.json"
-        echo "  Created wiki/_backlinks.json"
-    fi
-
-    if [ ! -f "$TARGET_DIR/wiki/index.md" ]; then
-        cp "$LINK_ROOT/wiki/index.md" "$TARGET_DIR/wiki/index.md"
-        echo "  Created wiki/index.md"
-    fi
-
-    if [ ! -f "$TARGET_DIR/wiki/log.md" ]; then
-        cp "$LINK_ROOT/wiki/log.md" "$TARGET_DIR/wiki/log.md"
-        echo "  Created wiki/log.md"
-    fi
-
+    python3 "$TARGET_DIR/link.py" doctor --fix "$TARGET_DIR" >/dev/null
     echo "  Wiki structure created at $TARGET_DIR"
 else
     # On update: ensure directory structure exists (in case new dirs were added)

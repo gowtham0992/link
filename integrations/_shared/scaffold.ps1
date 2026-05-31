@@ -128,13 +128,10 @@ foreach ($dir in $dirs) {
 }
 
 if (-not $isUpdate) {
-    $backlinks = Join-Path $TargetDir "wiki\_backlinks.json"
-    if (-not (Test-Path $backlinks)) {
-        Set-Content -Encoding UTF8 -Path $backlinks -Value "{`n  `"backlinks`": {},`n  `"forward`": {}`n}`n"
-        Write-Host "  Created wiki/_backlinks.json"
+    & $BasePython (Join-Path $TargetDir "link.py") doctor --fix $TargetDir *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Link wiki initialization failed."
     }
-    Copy-LinkFile (Join-Path $LinkRoot "wiki\index.md") (Join-Path $TargetDir "wiki\index.md")
-    Copy-LinkFile (Join-Path $LinkRoot "wiki\log.md") (Join-Path $TargetDir "wiki\log.md")
     Write-Host "  Wiki structure created at $TargetDir"
 }
 

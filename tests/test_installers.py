@@ -46,6 +46,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("lnk health", scaffold)
         self.assertIn("LINK_CLI_COMMAND=lnk exec python3", scaffold)
         self.assertIn('if [ "$MODE" = "--project" ]', scaffold)
+        self.assertIn('python3 "$TARGET_DIR/link.py" doctor --fix "$TARGET_DIR"', scaffold)
+        self.assertNotIn('cp "$LINK_ROOT/wiki/index.md"', scaffold)
 
     def test_scaffold_project_mode_uses_absolute_target(self):
         scaffold = (ROOT / "integrations/_shared/scaffold.sh").read_text(encoding="utf-8")
@@ -67,6 +69,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('$env:LINK_CLI_COMMAND = "lnk"', scaffold)
         self.assertIn("Get-Command py", scaffold)
         self.assertIn("-m venv", scaffold)
+        self.assertIn("doctor --fix $TargetDir", scaffold)
+        self.assertNotIn('Copy-LinkFile (Join-Path $LinkRoot "wiki\\index.md")', scaffold)
 
     def test_installers_read_resolved_mcp_python_marker(self):
         for installer in INSTALLERS:
