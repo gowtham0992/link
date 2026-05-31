@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Use Link through official lazy-loadable CLI skills when MCP setup is not needed.">
+  <title>Link - Skills</title>
+  <link rel="stylesheet" href="assets/site.css">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/logo-512.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Link">
+  <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <script src="assets/site.js" defer></script>
+</head>
+<body>
+  <nav class="site-nav" aria-label="Main">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
+    <div class="nav-links">
+      <a href="getting-started.html">Start</a>
+      <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
+      <a href="ui.html">UI</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
+      <a href="cli.html">CLI</a>
+      <a href="skills.html" aria-current="page">Skills</a>
+      <a href="api.html">API</a>
+      <a href="security.html">Security</a>
+      <a href="contributing.html">Contribute</a>
+      <a href="https://github.com/gowtham0992/link">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="hero-inner">
+      <span class="eyebrow">No MCP required</span>
+      <h1>Lazy-load Link through skills.</h1>
+      <p>Official skills are small CLI workflows an agent can load only when needed: health, retrieval, ingest, and memory lifecycle.</p>
+    </div>
+  </header>
+
+  <main class="doc-section">
+    <div class="section-inner doc-grid">
+      <aside class="toc">
+        <strong>On this page</strong>
+        <a href="#why">Why skills</a>
+        <a href="#included">Included skills</a>
+        <a href="#install">Use them</a>
+        <a href="#rules">Rules</a>
+      </aside>
+      <article class="doc-content">
+        <h2 id="why">Why Skills</h2>
+        <p>MCP gives Link structured tool calls, but it should not be the only path. If an agent can run local commands, it can use Link through <code>lnk</code> without an MCP server, background viewer, or extra client configuration. From a source checkout, the same workflows work with <code>python3 link.py</code>.</p>
+        <div class="callout">
+          <strong><code>lnk serve</code> is optional</strong>
+          <p>The web viewer is only for humans. Skills, CLI commands, and MCP tools all read the same local Markdown wiki directly.</p>
+        </div>
+
+        <h2 id="included">Included Skills</h2>
+        <p>The repo ships official skill folders under <code>skills/</code>:</p>
+        <table>
+          <thead>
+            <tr><th>Skill</th><th>Use it for</th><th>First command</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>link-health</code></td><td>Readiness, interrupted writes, backups, repair, validation.</td><td><code>lnk health</code></td></tr>
+            <tr><td><code>link-retrieve</code></td><td>Bounded query packets, briefs, graph summaries, benchmarks.</td><td><code>lnk query "..."</code></td></tr>
+            <tr><td><code>link-ingest</code></td><td>Raw source ingest, stale sources, memory proposals, post-ingest checks.</td><td><code>lnk ingest-status</code></td></tr>
+            <tr><td><code>link-memory</code></td><td>Remember, recall, review, explain, update, archive, restore, forget.</td><td><code>lnk brief "..."</code></td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="install">Use Them</h2>
+        <p>Point your agent at the skill folder it supports, or copy the relevant <code>SKILL.md</code> into that agent's local skill directory.</p>
+        <pre><code>skills/link-health/SKILL.md
+skills/link-retrieve/SKILL.md
+skills/link-ingest/SKILL.md
+skills/link-memory/SKILL.md</code></pre>
+        <p>Then use natural prompts that map to the skills:</p>
+        <pre><code>is Link ready?
+brief me from Link before we continue
+query Link for the release process
+ingest raw/notes.md into Link
+remember that I prefer short release notes</code></pre>
+
+        <h2 id="rules">Rules For Agents</h2>
+        <ul>
+          <li>Prefer <code>lnk health</code> when readiness is unclear.</li>
+          <li>Prefer <code>lnk query</code>, <code>lnk brief</code>, and <code>lnk graph-summary</code> over reading the whole wiki.</li>
+          <li>Use <code>lnk ingest-status</code> before touching raw sources.</li>
+          <li>Do not silently create durable memory; use <code>lnk remember</code> only when the user asks or approves a proposal.</li>
+          <li>Run <code>lnk validate</code> and <code>lnk health</code> after ingest or broad wiki edits.</li>
+        </ul>
+        <p>Use MCP when you want structured tool calls inside an MCP client. Use skills when you want a lightweight, lazy-loaded CLI workflow.</p>
+      </article>
+    </div>
+  </main>
+
+  <footer>
+    <div class="section-inner"><a href="getting-started.html">First 10 minutes</a> · <a href="mcp.html">MCP setup</a> · <a href="cli.html">CLI reference</a> · If Link helps your agents remember better, <a href="https://github.com/gowtham0992/link">star it on GitHub</a>.</div>
+    <p class="analytics-note">The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest.</p>
+  </footer>
+</body>
+</html>
