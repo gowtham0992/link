@@ -21,10 +21,13 @@
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
       <a href="why-link.html" aria-current="page">Why</a>
+      <a href="scale.html">Scale</a>
       <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
       <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
       <a href="api.html">API</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
@@ -45,6 +48,7 @@
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#fit">Best fit</a>
+        <a href="#loop">Session loop</a>
         <a href="#compare">How to choose</a>
         <a href="#trust">Trust model</a>
         <a href="#boundaries">Boundaries</a>
@@ -53,10 +57,20 @@
         <h2 id="fit">Best Fit</h2>
         <p>Use Link when you want one local memory layer that multiple agents can share. It is strongest for developer and power-user workflows where privacy, provenance, and inspectable files matter.</p>
         <div class="grid two-up">
-          <article class="panel"><h3>Personal agent memory</h3><p>Preferences, decisions, project conventions, and active context that should survive between Codex, Kiro, Claude, Cursor, and other MCP clients.</p></article>
+          <article class="panel"><h3>Personal agent memory</h3><p>Preferences, decisions, project conventions, and active context that should survive between Codex, Kiro, Claude, Cursor, Antigravity, and other local agents.</p></article>
           <article class="panel"><h3>Source-backed knowledge</h3><p>Raw notes, transcripts, release notes, articles, and project files that should become cited Markdown pages instead of hidden context.</p></article>
           <article class="panel"><h3>Inspectable retrieval</h3><p>Smart query packets with reasons, sources, graph links, budgets, and follow-up actions instead of full-folder dumps.</p></article>
           <article class="panel"><h3>Local ownership</h3><p>Plain Markdown and JSON indexes on your machine. No hosted backend, telemetry, or required cloud account.</p></article>
+        </div>
+
+        <h2 id="loop">The Loop Link Changes</h2>
+        <p>Link is useful when it changes the start and end of real agent sessions.</p>
+        <div class="choice-table">
+          <div><strong>Moment</strong><strong>Without Link</strong><strong>With Link</strong></div>
+          <div><span>Starting work</span><span>You retype project state and preferences.</span><span>The agent asks for a brief or calls <code>memory_brief</code>/<code>query_link</code> for compact local context.</span></div>
+          <div><span>Switching agents</span><span>Each tool has its own memory gap.</span><span>Codex, Claude, Cursor, Kiro, VS Code, and Antigravity can point at the same wiki.</span></div>
+          <div><span>Saving a decision</span><span>The note disappears into chat history.</span><span>An explicit remember becomes a reviewable Markdown memory.</span></div>
+          <div><span>Trusting memory</span><span>You cannot see why the agent knows something.</span><span>You can inspect sources, graph links, review state, and lifecycle history.</span></div>
         </div>
 
         <h2 id="compare">How To Choose</h2>

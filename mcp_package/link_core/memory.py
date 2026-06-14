@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import urllib.parse
 from collections.abc import Callable, Iterable, Mapping
+from datetime import date
 from pathlib import Path
 
 from .files import atomic_write_text
@@ -29,6 +30,7 @@ from .wiki import (
 
 MEMORY_TYPES = ("preference", "decision", "project", "fact", "note")
 MEMORY_SCOPES = ("user", "project", "global")
+MEMORY_VISIBILITIES = ("private", "project", "team")
 MEMORY_REVIEW_STATUSES = ("pending", "reviewed", "needs_update")
 MEMORY_PROPOSAL_MIN_SCORE = 70
 MEMORY_CONFLICT_TYPES = {"preference", "decision", "project"}
@@ -101,6 +103,7 @@ CONFLICT_GROUP_CONTEXT = {
 }
 MemoryLogWriter = Callable[[str, str, str, list[str]], None]
 BacklinkRebuilder = Callable[[], bool]
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def slugify(value: str, fallback: str = "memory") -> str:
@@ -110,6 +113,20 @@ def slugify(value: str, fallback: str = "memory") -> str:
 
 def normalize_project(value: str | None) -> str:
     return slugify(value or "", fallback="")
+
+
+def default_memory_visibility(scope: str) -> str:
+    """Return the safest sharing visibility for a memory scope."""
+    return "project" if scope == "project" else "private"
+
+
+def normalize_memory_visibility(scope: str, visibility: object | None = None) -> str:
+    value = str(visibility or "").strip().lower()
+    if not value:
+        return default_memory_visibility(scope)
+    if value not in MEMORY_VISIBILITIES:
+        raise ValueError(f"visibility must be one of: {', '.join(MEMORY_VISIBILITIES)}")
+    return value
 
 
 def default_project_for_target(target: Path) -> str:
@@ -193,7 +210,37 @@ def slim_memory(record: Mapping[str, object]) -> dict[str, object]:
 
 
 def is_active_memory(record: Mapping[str, object]) -> bool:
-    return str(record.get("status") or "active").lower() not in {"archived", "stale"}
+    return str(record.get("status") or "active").lower() not in {"archived", "stale"} and not memory_expired(record)
+
+
+def _parse_date_field(value: object, field: str) -> date | None:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return None
+    if not DATE_RE.match(text):
+        raise ValueError(f"{field} must use YYYY-MM-DD")
+    return date.fromisoformat(text)
+
+
+def _parse_review_date(value: object) -> date | None:
+    return _parse_date_field(value, "review_after")
+
+
+def _parse_expires_date(value: object) -> date | None:
+    return _parse_date_field(value, "expires_at")
+
+
+def _today(today: str | None = None) -> date:
+    return _parse_review_date(today) if today else date.today()
+
+
+def memory_expired(record: Mapping[str, object], today: str | None = None) -> bool:
+    """Return true when a memory has passed its optional expiry date."""
+    try:
+        expires = _parse_expires_date(record.get("expires_at"))
+    except ValueError:
+        return False
+    return expires is not None and expires <= _today(today)
 
 
 def memory_visible_for_project(record: Mapping[str, object], project: str | None = None) -> bool:
@@ -230,12 +277,18 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
     text = path.read_text(encoding="utf-8", errors="replace")
     meta, body = parse_frontmatter(text)
     title = meta.get("title") or _heading_title(body) or memory_title(body) or path.stem
+    scope = str(meta.get("scope") or "user").lower()
+    try:
+        visibility = normalize_memory_visibility(scope, meta.get("visibility"))
+    except ValueError:
+        visibility = str(meta.get("visibility") or "")
     record: dict[str, object] = {
         "name": path.stem,
         "path": f"wiki/{path.relative_to(wiki_root).as_posix()}",
         "title": title,
         "memory_type": meta.get("memory_type") or "note",
-        "scope": meta.get("scope") or "user",
+        "scope": scope,
+        "visibility": visibility,
         "project": normalize_project(str(meta.get("project", ""))),
         "status": meta.get("status") or "active",
         "date_captured": meta.get("date_captured", ""),
@@ -248,6 +301,8 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "source": meta.get("source", ""),
         "review_status": meta.get("review_status") or "pending",
         "reviewed_at": meta.get("reviewed_at", ""),
+        "review_after": meta.get("review_after", ""),
+        "expires_at": meta.get("expires_at", ""),
         "review_note": meta.get("review_note", ""),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
@@ -273,12 +328,14 @@ def memory_records(wiki_dir: Path, include_body: bool = True) -> list[dict[str, 
 def memory_review_issues(
     record: Mapping[str, object],
     review_command: str = "review-memory",
+    today: str | None = None,
 ) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     status = str(record.get("status") or "active").lower()
     review_status = str(record.get("review_status") or "pending").lower()
     memory_type = str(record.get("memory_type") or "")
     scope = str(record.get("scope") or "")
+    visibility = str(record.get("visibility") or default_memory_visibility(scope))
 
     if review_status in {"pending", "needs_review"}:
         issues.append({
@@ -301,6 +358,45 @@ def memory_review_issues(
             "message": f"Unknown review_status: {review_status}.",
             "suggested_action": "Use pending, reviewed, or needs_update.",
         })
+    review_after = str(record.get("review_after") or "").strip()
+    if review_after:
+        try:
+            due = _parse_review_date(review_after)
+        except ValueError as exc:
+            issues.append({
+                "code": "invalid_review_after",
+                "severity": "high",
+                "message": str(exc),
+                "suggested_action": "Use a YYYY-MM-DD date or remove review_after.",
+            })
+        else:
+            if status == "active" and due is not None and due <= _today(today):
+                issues.append({
+                    "code": "review_due",
+                    "severity": "medium",
+                    "message": f"Memory review is due after {review_after}.",
+                    "suggested_action": f"Confirm it is still accurate, then run {review_command}.",
+                })
+
+    expires_at = str(record.get("expires_at") or "").strip()
+    if expires_at:
+        try:
+            expires = _parse_expires_date(expires_at)
+        except ValueError as exc:
+            issues.append({
+                "code": "invalid_expires_at",
+                "severity": "high",
+                "message": str(exc),
+                "suggested_action": "Use a YYYY-MM-DD date or remove expires_at.",
+            })
+        else:
+            if status == "active" and expires is not None and expires <= _today(today):
+                issues.append({
+                    "code": "expired",
+                    "severity": "high",
+                    "message": f"Memory expired at {expires_at} and is excluded from default recall.",
+                    "suggested_action": "Update it with a new expiry date, archive it, or delete it after confirmation.",
+                })
 
     if status == "stale":
         issues.append({
@@ -322,6 +418,13 @@ def memory_review_issues(
             "severity": "high",
             "message": f"Unknown scope: {scope or 'missing'}.",
             "suggested_action": f"Use one of: {', '.join(MEMORY_SCOPES)}.",
+        })
+    if visibility not in MEMORY_VISIBILITIES:
+        issues.append({
+            "code": "invalid_visibility",
+            "severity": "high",
+            "message": f"Unknown visibility: {visibility or 'missing'}.",
+            "suggested_action": f"Use one of: {', '.join(MEMORY_VISIBILITIES)}.",
         })
     if not str(record.get("source") or "").strip():
         issues.append({
@@ -430,7 +533,15 @@ def memory_action_hints(
         ))
         return actions
 
-    if issue_codes & {"invalid_review_status", "invalid_memory_type", "invalid_scope", "missing_source", "missing_date_captured"}:
+    if issue_codes & {
+        "invalid_review_status",
+        "invalid_review_after",
+        "invalid_expires_at",
+        "invalid_memory_type",
+        "invalid_scope",
+        "missing_source",
+        "missing_date_captured",
+    }:
         add(_memory_action(
             kind="edit_metadata",
             label="Edit metadata",
@@ -450,17 +561,18 @@ def memory_action_hints(
             arguments={"identifier": name, "memory": "new detail"},
             priority="high",
         ))
-    if "stale_status" in issue_codes:
+    if issue_codes & {"stale_status", "expired"}:
+        reason = "expired" if "expired" in issue_codes else "stale"
         add(_memory_action(
             kind="archive",
             label="Archive",
-            description="Archive this stale memory so default recall ignores it.",
-            command=_shell_words("python3", "link.py", "archive-memory", name, command_target, "--reason", "stale"),
+            description="Archive this memory so default recall ignores it.",
+            command=_shell_words("python3", "link.py", "archive-memory", name, command_target, "--reason", reason),
             tool="archive_memory",
-            arguments={"identifier": name, "reason": "stale"},
+            arguments={"identifier": name, "reason": reason},
             priority="high",
         ))
-    if "pending_review" in issue_codes and not any(
+    if issue_codes & {"pending_review", "review_due"} and not any(
         issue.get("severity") == "high" for issue in issue_list
     ):
         add(_memory_action(
@@ -568,7 +680,10 @@ def recall_state(
     high_issues = [issue for issue in issues if str(issue.get("severity") or "") == "high"]
     if not default_enabled:
         state = "disabled"
-        reason = f"Memory status is {record.get('status')}; default recall excludes archived and stale memories."
+        if memory_expired(record):
+            reason = f"Memory expired at {record.get('expires_at')}; default recall excludes expired memories."
+        else:
+            reason = f"Memory status is {record.get('status')}; default recall excludes archived and stale memories."
     elif high_issues:
         state = "unsafe"
         reason = "Memory is active but has high-severity quality issues."
@@ -647,6 +762,7 @@ def memory_explanation(
             "archived_at": record.get("archived_at", ""),
             "archive_reason": record.get("archive_reason", ""),
             "restored_at": record.get("restored_at", ""),
+            "expires_at": record.get("expires_at", ""),
         },
         "graph": graph,
         "log_entries": memory_log_entries(wiki_dir, record),
@@ -851,6 +967,57 @@ def set_memory_status(
         "title": record["title"],
         "previous_status": current_status,
         "status": status,
+    }
+
+
+def set_memory_visibility(
+    wiki_dir: Path,
+    identifier: str,
+    visibility: str,
+    timestamp: str,
+    records: Iterable[Mapping[str, object]] | None = None,
+    log_writer: MemoryLogWriter | None = None,
+) -> dict[str, object]:
+    page_path, record, error = resolve_memory_page(wiki_dir, identifier, records=records)
+    if error:
+        raise ValueError(error)
+    assert page_path is not None and record is not None
+
+    scope = str(record.get("scope") or "user").lower()
+    clean_visibility = normalize_memory_visibility(scope, visibility)
+    previous_visibility = str(record.get("visibility") or default_memory_visibility(scope))
+    changed = previous_visibility != clean_visibility
+    if changed:
+        with operation_journal(
+            wiki_dir,
+            "set-memory-visibility",
+            str(record["title"]),
+            timestamp=timestamp,
+            paths=[f"wiki/memories/{page_path.name}", "wiki/log.md"],
+        ):
+            text = page_path.read_text(encoding="utf-8", errors="replace")
+            atomic_write_text(page_path, update_frontmatter_fields(text, {"visibility": clean_visibility}))
+            if log_writer:
+                log_writer(
+                    timestamp,
+                    "set-memory-visibility",
+                    str(record["title"]),
+                    [
+                        f"Updated: memories/{page_path.name}",
+                        f"Previous visibility: {previous_visibility}",
+                        f"New visibility: {clean_visibility}",
+                    ],
+                )
+
+    return {
+        "updated": changed,
+        "name": record["name"],
+        "path": record["path"],
+        "title": record["title"],
+        "scope": scope,
+        "previous_visibility": previous_visibility,
+        "visibility": clean_visibility,
+        "review_status": record.get("review_status", "pending"),
     }
 
 
@@ -1084,6 +1251,9 @@ def write_memory_page(
     source: str,
     timestamp: str,
     project: str | None = None,
+    visibility: str | None = None,
+    review_after: str | None = None,
+    expires_at: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
@@ -1094,11 +1264,18 @@ def write_memory_page(
         raise ValueError(f"memory_type must be one of: {', '.join(MEMORY_TYPES)}")
     if scope not in MEMORY_SCOPES:
         raise ValueError(f"scope must be one of: {', '.join(MEMORY_SCOPES)}")
+    clean_visibility = normalize_memory_visibility(scope, visibility)
 
     clean_text = text.strip()
     if not clean_text:
         raise ValueError("memory text required")
     clean_source = source.strip() if source is not None else ""
+    clean_review_after = str(review_after or "").strip()
+    if clean_review_after:
+        _parse_review_date(clean_review_after)
+    clean_expires_at = str(expires_at or "").strip()
+    if clean_expires_at:
+        _parse_expires_date(clean_expires_at)
     clean_project = normalize_project(project) if scope == "project" else ""
     memory_title_value = memory_title(clean_text, title)
     summary = clean_text.splitlines()[0].strip()
@@ -1121,6 +1298,7 @@ def write_memory_page(
             "title": memory_title_value,
             "memory_type": memory_type,
             "scope": scope,
+            "visibility": clean_visibility,
             "project": clean_project,
             "candidates": duplicate_candidates,
         }
@@ -1140,6 +1318,7 @@ def write_memory_page(
             "title": memory_title_value,
             "memory_type": memory_type,
             "scope": scope,
+            "visibility": clean_visibility,
             "project": clean_project,
             "conflict_candidates": conflict_candidates,
         }
@@ -1154,16 +1333,20 @@ def write_memory_page(
         if slug_tag and slug_tag not in tag_values:
             tag_values.append(slug_tag)
     project_line = f'project: "{frontmatter_string(clean_project)}"\n' if clean_project else ""
+    review_after_line = f'review_after: "{frontmatter_string(clean_review_after)}"\n' if clean_review_after else ""
+    expires_at_line = f'expires_at: "{frontmatter_string(clean_expires_at)}"\n' if clean_expires_at else ""
 
     page = f"""---
 type: memory
 title: "{frontmatter_string(memory_title_value)}"
 memory_type: {memory_type}
 scope: {scope}
+visibility: {clean_visibility}
 {project_line}status: active
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
+{review_after_line}{expires_at_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1202,6 +1385,7 @@ tags: {yaml_list(tag_values)}
                     f"Created: memories/{page_path.name}",
                     f"Type: {memory_type}",
                     f"Scope: {scope}",
+                    f"Visibility: {clean_visibility}",
                 ],
             )
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
@@ -1212,7 +1396,10 @@ tags: {yaml_list(tag_values)}
         "title": memory_title_value,
         "memory_type": memory_type,
         "scope": scope,
+        "visibility": clean_visibility,
         "project": clean_project,
+        "review_after": clean_review_after,
+        "expires_at": clean_expires_at,
         "backlinks_rebuilt": bool(backlinks_rebuilt),
         "duplicate_override": bool(duplicate_candidates and allow_duplicate),
         "duplicate_candidates": duplicate_candidates,
@@ -1348,6 +1535,7 @@ def memory_profile(
         "project": project_name,
         "by_type": count_values(record_list, "memory_type"),
         "by_scope": count_values(record_list, "scope"),
+        "by_visibility": count_values(record_list, "visibility"),
         "by_project": count_values(
             [
                 record
@@ -1940,6 +2128,7 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
     title = str(proposal.get("title") or proposal_title(memory, str(proposal.get("memory_type") or "note")))
     memory_type = str(proposal.get("memory_type") or "note")
     scope = str(proposal.get("scope") or "user")
+    visibility = str(proposal.get("visibility") or default_memory_visibility(scope))
     source = str(proposal.get("source") or "proposal")
     project = str(proposal.get("project") or "")
     duplicate_candidates = proposal.get("duplicate_candidates")
@@ -2005,6 +2194,8 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
         memory_type,
         "--scope",
         scope,
+        "--visibility",
+        visibility,
         "--source",
         source,
     ]
@@ -2013,6 +2204,7 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
         "title": title,
         "memory_type": memory_type,
         "scope": scope,
+        "visibility": visibility,
         "source": source,
     }
     if project:

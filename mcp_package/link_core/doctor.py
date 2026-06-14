@@ -25,6 +25,7 @@ DOCTOR_VALIDATION_CODES = {
     "missing_frontmatter",
     "missing_frontmatter_field",
     "missing_required_section",
+    "secret_value",
     "type_directory_mismatch",
     "unreadable_page",
 }
@@ -118,7 +119,7 @@ def wiki_page_records(wiki_dir: Path) -> list[dict[str, object]]:
         meta, body = parse_frontmatter(text)
         records.append({
             "path": md,
-            "rel": str(md.relative_to(wiki_dir)),
+            "rel": md.relative_to(wiki_dir).as_posix(),
             "stem": md.stem.lower(),
             "meta": meta,
             "body": body,

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from .frontmatter import parse_frontmatter
+from .security import secret_value_warnings
 from .wiki import WIKILINK_RE, load_backlinks_index
 
 
@@ -37,6 +39,7 @@ REQUIRED_SECTIONS = {
 }
 
 SUMMARY_RE = re.compile(r">\s*\*\*(?:TLDR|Query):\*\*", re.IGNORECASE)
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _finding(severity: str, code: str, path: str, message: str) -> dict[str, str]:
@@ -130,6 +133,18 @@ def validate_wiki(wiki_dir: Path, *, strict: bool = False) -> dict[str, Any]:
             unreadable_pages.add(rel)
             findings.append(_finding("error", "unreadable_page", rel, f"Could not read wiki page: {exc}"))
             continue
+        secret_labels = secret_value_warnings(text)
+        if secret_labels:
+            label = secret_labels[0]
+            extra = f" and {len(secret_labels) - 1} more type(s)" if len(secret_labels) > 1 else ""
+            findings.append(
+                _finding(
+                    "error",
+                    "secret_value",
+                    rel,
+                    f"Secret-looking value detected in wiki page ({label}{extra}); redact before serving or querying it.",
+                )
+            )
         _add_links_to_index(
             page.stem.lower(),
             text,
@@ -162,6 +177,26 @@ def validate_wiki(wiki_dir: Path, *, strict: bool = False) -> dict[str, Any]:
         for field in required_fields:
             if not str(meta.get(field) or "").strip():
                 findings.append(_finding("error", "missing_frontmatter_field", rel, f"Missing required frontmatter field: {field}"))
+
+        review_after = str(meta.get("review_after") or "").strip().strip('"')
+        if expected_type == "memory" and review_after:
+            if not DATE_RE.match(review_after):
+                findings.append(_finding("error", "invalid_review_after", rel, "review_after must use YYYY-MM-DD."))
+            else:
+                try:
+                    date.fromisoformat(review_after)
+                except ValueError:
+                    findings.append(_finding("error", "invalid_review_after", rel, "review_after must be a valid calendar date."))
+
+        expires_at = str(meta.get("expires_at") or "").strip().strip('"')
+        if expected_type == "memory" and expires_at:
+            if not DATE_RE.match(expires_at):
+                findings.append(_finding("error", "invalid_expires_at", rel, "expires_at must use YYYY-MM-DD."))
+            else:
+                try:
+                    date.fromisoformat(expires_at)
+                except ValueError:
+                    findings.append(_finding("error", "invalid_expires_at", rel, "expires_at must be a valid calendar date."))
 
         if not SUMMARY_RE.search(body):
             findings.append(_finding("warning", "missing_summary", rel, "Page should include a TLDR or Query summary."))

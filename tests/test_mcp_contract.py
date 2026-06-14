@@ -147,6 +147,17 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["warnings"], [])
         self.assertEqual(payload["next_actions"][0]["tool"], "query_link")
 
+    def test_mcp_cache_throttles_repeated_mtime_scans(self):
+        self.server._clear_cache()
+        self.server.CACHE_MTIME_CHECK_INTERVAL_SECONDS = 60.0
+        self.server._build_cache()
+
+        with patch.object(self.server, "_wiki_mtime", wraps=self.server._wiki_mtime) as mtime:
+            self.server._build_cache()
+            self.server._build_cache()
+
+        self.assertEqual(mtime.call_count, 0)
+
     def test_link_status_contract_reports_cache_warnings(self):
         locked = self.target / "wiki/concepts/locked-page.md"
         locked.write_text("---\ntype: concept\ntitle: Locked\n---\n\n# Locked\n", encoding="utf-8")
@@ -179,7 +190,7 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["stale_count"], 1)
         self.assertEqual(payload["operations"][0]["operation"], "remember")
         self.assertEqual(payload["operations"][0]["description"], "Save memory")
-        self.assertIn("link operations", payload["next_actions"][0]["command"])
+        self.assertIn("lnk operations", payload["next_actions"][0]["command"])
 
     def test_starter_prompts_contract(self):
         payload = json.loads(self.server.starter_prompts(project="Client Launch"))
@@ -187,7 +198,7 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["project"], "client-launch")
         self.assertEqual(payload["prompts"][0]["prompt"], "is Link ready?")
         self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
-        self.assertTrue(any(command.startswith("link health ") for command in payload["commands"]))
+        self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
 
     def test_missing_wiki_message_points_to_current_setup_paths(self):
         previous_argv = sys.argv[:]
@@ -205,12 +216,33 @@ class McpContractTests(unittest.TestCase):
             self.assertEqual(cm.exception.code, 1)
             text = err.getvalue()
             self.assertIn("Wiki not found", text)
-            self.assertIn("link init", text)
+            self.assertIn("lnk init", text)
             self.assertIn("python3 link.py init", text)
             self.assertIn("integrations/*/install.sh", text)
             self.assertIn("--wiki /path/to/wiki", text)
             self.assertNotIn("install.sh first", text)
         finally:
+            sys.argv = previous_argv
+
+    def test_version_flag_does_not_require_wiki_or_mcp_sdk(self):
+        previous_argv = sys.argv[:]
+        missing = Path(tempfile.mkdtemp(prefix="link-mcp-version-")) / "missing" / "wiki"
+        module_name = f"link_mcp_server_version_{id(missing)}"
+        try:
+            sys.argv = ["link_mcp.server", "--wiki", str(missing), "--version"]
+            spec = importlib.util.spec_from_file_location(module_name, ROOT / "mcp_package/link_mcp/server.py")
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            out = StringIO()
+            err = StringIO()
+            with redirect_stdout(out), redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                spec.loader.exec_module(module)
+
+            self.assertEqual(cm.exception.code, 0)
+            self.assertIn("link-mcp", out.getvalue())
+            self.assertEqual(err.getvalue(), "")
+        finally:
+            sys.modules.pop(module_name, None)
             sys.argv = previous_argv
 
     def test_migrate_wiki_contract(self):
@@ -668,6 +700,28 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(reviewed["remaining_issue_count"], 0)
         self.assertEqual(clear["review_count"], 0)
 
+    def test_memory_log_contract(self):
+        created = json.loads(self.server.remember_memory(
+            "Memory log contract tests should be visible in the lifecycle log.",
+            title="Memory log contract",
+        ))
+        payload = json.loads(self.server.memory_log())
+
+        self.assertTrue(created["created"])
+        self.assertEqual(payload["schema"], "link-memory-log-v1")
+        self.assertGreaterEqual(payload["count"], 1)
+        self.assertEqual(payload["entries"][-1]["operation"], "remember")
+        self.assertIn("entries", payload)
+        self.assertIn("Memory bodies", payload["privacy_note"])
+
+    def test_memory_wins_contract(self):
+        payload = json.loads(self.server.memory_wins())
+
+        self.assertEqual(payload["schema"], "link-memory-wins-v1")
+        self.assertGreaterEqual(payload["active_count"], 1)
+        self.assertIn("wins", payload)
+        self.assertIn("not telemetry", payload["honest_note"])
+
     def test_memory_inbox_project_filter_contract(self):
         self.server.review_memory("prefer-local-personal-memory")
         alpha = json.loads(self.server.remember_memory(
@@ -760,12 +814,18 @@ class McpContractTests(unittest.TestCase):
             scope="project",
             tags="git, release",
             source="unit test",
+            review_after="2026-08-01",
+            expires_at="2026-12-01",
         ))
         recall = json.loads(self.server.recall_memory("release branches"))
+        memory_text = (self.target / "wiki/memories/prefer-release-branches.md").read_text(encoding="utf-8")
 
         self.assertTrue(payload["created"])
         self.assertEqual(payload["name"], "prefer-release-branches")
+        self.assertEqual(payload["review_after"], "2026-08-01")
+        self.assertEqual(payload["expires_at"], "2026-12-01")
         self.assertTrue((self.target / "wiki/memories/prefer-release-branches.md").exists())
+        self.assertIn('expires_at: "2026-12-01"', memory_text)
         self.assertEqual(recall["memories"][0]["name"], "prefer-release-branches")
 
     def test_remember_memory_blocks_strong_duplicate(self):
@@ -842,6 +902,23 @@ class McpContractTests(unittest.TestCase):
         self.assertIn("update_count: 1", memory_text)
         self.assertNotIn("reviewed_at:", memory_text)
         self.assertIn("update-memory", log_text)
+
+    def test_set_memory_visibility_contract(self):
+        updated = json.loads(self.server.set_memory_visibility("prefer-local-personal-memory", "team"))
+        unchanged = json.loads(self.server.set_memory_visibility("prefer-local-personal-memory", "team"))
+        rejected = json.loads(self.server.set_memory_visibility("prefer-local-personal-memory", "public"))
+        memory_text = (self.target / "wiki/memories/prefer-local-personal-memory.md").read_text(encoding="utf-8")
+        log_text = (self.target / "wiki/log.md").read_text(encoding="utf-8")
+
+        self.assertTrue(updated["updated"])
+        self.assertEqual(updated["previous_visibility"], "private")
+        self.assertEqual(updated["visibility"], "team")
+        self.assertFalse(unchanged["updated"])
+        self.assertEqual(unchanged["visibility"], "team")
+        self.assertFalse(rejected["updated"])
+        self.assertIn("visibility must be one of", rejected["error"])
+        self.assertIn("visibility: team", memory_text)
+        self.assertIn("set-memory-visibility", log_text)
 
     def test_update_memory_blocks_conflict_with_other_memory(self):
         created = json.loads(self.server.remember_memory(

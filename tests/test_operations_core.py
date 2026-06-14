@@ -62,7 +62,7 @@ class OperationsCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["operation_count"], 0)
         self.assertIn("No pending, failed, or interrupted Link operations.", text)
-        self.assertIn(str(wiki.parent), text)
+        self.assertIn(str(wiki.parent.resolve()), text)
         self.assertIn("Result: clear", text)
 
     def test_operation_report_renders_stale_marker_guidance(self):
@@ -84,8 +84,8 @@ class OperationsCoreTests(unittest.TestCase):
         self.assertIn("remember | pending | stale", text)
         self.assertIn("Description: Save memory", text)
         self.assertIn("Touched: wiki/memories/prefer-local.md, wiki/log.md", text)
-        self.assertIn("link validate", text)
-        self.assertIn(str(wiki.parent), text)
+        self.assertIn("lnk validate", text)
+        self.assertIn(str(wiki.parent.resolve()), text)
         self.assertIn("Result: needs attention", text)
 
 

@@ -76,7 +76,7 @@ def run_smoke(work_dir: Path, python: str = sys.executable) -> None:
         "prompts did not start with readiness guidance",
     )
     require(
-        any(str(command).startswith("link health ") for command in init_prompts.get("commands", [])),
+        any("health" in str(command).split() for command in init_prompts.get("commands", [])),
         "prompts did not include readiness command",
     )
     init_welcome = run_json("welcome", str(init_target), "--json", python=python)

@@ -365,6 +365,72 @@ def render_inbox_page(
     return layout("Memory Review Inbox", body)
 
 
+def render_memory_log_page(log_payload: Mapping[str, object], *, layout: PageLayout) -> str:
+    entries = _dict_list(log_payload.get("entries"))
+    if entries:
+        rows = "".join(_render_memory_log_item(entry) for entry in entries)
+        content = f"<ul class='page-list memory-log-list'>{rows}</ul>"
+    else:
+        content = (
+            "<p>No memory lifecycle events yet.</p>"
+            '<p><a class="button-link" href="/propose">Create memory proposals</a></p>'
+        )
+    body = (
+        '<div class="breadcrumb"><a href="/">Link</a> / memory log</div>'
+        '<h1>Memory Changelog</h1>'
+        '<div class="memory-profile">'
+        '<p class="summary">A privacy-safe timeline of memory creates, updates, reviews, archives, restores, forgets, and capture accepts.</p>'
+        f'{render_stat_grid([(log_payload.get("count", 0), "shown"), (log_payload.get("total_matching", 0), "matching")])}'
+        f'<p>{html.escape(str(log_payload.get("privacy_note") or ""))}</p>'
+        f'{content}'
+        '</div>'
+    )
+    return layout("Memory Changelog", body)
+
+
+def render_memory_wins_page(
+    wins_payload: Mapping[str, object],
+    *,
+    page_href: PageHref,
+    layout: PageLayout,
+) -> str:
+    wins = _dict_list(wins_payload.get("wins"))
+    win_cards = "".join(_render_memory_win_card(win) for win in wins)
+    recent = _dict_list(wins_payload.get("recent_memories"))
+    recent_html = _profile_section("Recent reusable memories", recent, page_href=page_href) if recent else (
+        "<h2>Recent reusable memories</h2><p>No active memories yet.</p>"
+    )
+    prompts = "".join(
+        f"<li>{html.escape(str(prompt))} {copy_button(str(prompt), 'Copy prompt')}</li>"
+        for prompt in _list(wins_payload.get("prompts"))[:4]
+    )
+    actions = "".join(
+        "<li>"
+        f"<strong>{html.escape(str(action.get('label') or 'Next'))}</strong>"
+        f"<p>{html.escape(str(action.get('reason') or ''))}</p>"
+        f"<code>{html.escape(str(action.get('command') or ''))}</code>"
+        f"{copy_button(str(action.get('command') or ''), 'Copy command')}"
+        "</li>"
+        for action in _dict_list(wins_payload.get("next_actions"))
+    )
+    body = (
+        '<div class="breadcrumb"><a href="/">Link</a> / wins</div>'
+        '<h1>Memory Wins</h1>'
+        '<div class="memory-profile">'
+        '<p class="summary">Local proof signals for what Link memory is carrying. These are computed from the wiki, not telemetry.</p>'
+        f'{render_stat_grid([(wins_payload.get("active_count", 0), "active"), (wins_payload.get("reviewed_active_count", 0), "reviewed"), (wins_payload.get("review_count", 0), "review"), (wins_payload.get("project_count", 0), "projects")])}'
+        f'<p>{html.escape(str(wins_payload.get("honest_note") or ""))}</p>'
+        f'<section class="memory-grid">{win_cards}</section>'
+        f'{recent_html}'
+        '<h2>Try the value loop</h2>'
+        f'<ul class="memory-issues">{prompts}</ul>'
+        '<h2>Next safe action</h2>'
+        f'<ul class="page-list">{actions}</ul>'
+        '</div>'
+    )
+    return layout("Memory Wins", body)
+
+
 def render_memory_explanation_page(
     explanation: Mapping[str, object],
     *,
@@ -429,6 +495,56 @@ def render_memory_explanation_page(
         f'<h2>Memory Body</h2>{body_html}'
     )
     return layout(f"Explain: {title}", body)
+
+
+def _render_memory_log_item(entry: Mapping[str, object]) -> str:
+    paths = _list(entry.get("memory_paths"))
+    path_html = ""
+    if paths:
+        path_html = "<div class='memory-meta'>Memories: " + html.escape(", ".join(str(path) for path in paths)) + "</div>"
+    details = _list(entry.get("details"))
+    detail_html = ""
+    if details:
+        detail_html = "<ul class='memory-issues'>" + "".join(
+            f"<li>{html.escape(str(detail))}</li>"
+            for detail in details[:4]
+        ) + "</ul>"
+    changes = _dict_list(entry.get("changes"))
+    change_html = ""
+    if changes:
+        change_html = "<ul class='memory-issues'>" + "".join(
+            "<li>"
+            f"<strong>{html.escape(str(change.get('field') or 'field'))}</strong>: "
+            f"{html.escape(str(change.get('from') or 'unset'))} -> {html.escape(str(change.get('to') or 'unset'))}"
+            "</li>"
+            for change in changes[:4]
+        ) + "</ul>"
+    impact = str(entry.get("impact") or "")
+    impact_html = f'<p class="summary">{html.escape(impact)}</p>' if impact else ""
+    return (
+        "<li>"
+        f"<strong>{html.escape(str(entry.get('operation') or 'event'))}</strong>"
+        f"<div class='memory-meta'>{html.escape(str(entry.get('timestamp') or ''))} · {html.escape(str(entry.get('category') or 'memory'))}</div>"
+        f"<p>{html.escape(str(entry.get('description') or ''))}</p>"
+        f"<small>{html.escape(str(entry.get('summary') or ''))}</small>"
+        f"{impact_html}"
+        f"{change_html}"
+        f"{path_html}"
+        f"{detail_html}"
+        "</li>"
+    )
+
+
+def _render_memory_win_card(win: Mapping[str, object]) -> str:
+    prompt = str(win.get("prompt") or "")
+    return (
+        '<article class="memory-card">'
+        f'<h2>{html.escape(str(win.get("label") or ""))}</h2>'
+        f'<div class="memory-metric">{html.escape(str(win.get("count") or 0))}</div>'
+        f'<p>{html.escape(str(win.get("description") or ""))}</p>'
+        f'{copy_button(prompt, "Copy prompt") if prompt else ""}'
+        '</article>'
+    )
 
 
 def _render_inbox_item(item: Mapping[str, object], *, page_href: PageHref) -> str:

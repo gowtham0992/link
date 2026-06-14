@@ -15,7 +15,7 @@ class HomebrewFormulaTests(unittest.TestCase):
         self.assertIn('depends_on "python@3.14"', formula)
         self.assertIn('libexec.install "link.py", "serve.py", "LINK.md", ".linkignore"', formula)
         self.assertIn('(libexec/"mcp_package").install "mcp_package/link_core"', formula)
-        self.assertIn('exec "#{python3}" "#{libexec}/link.py" "$@"', formula)
+        self.assertIn('LINK_CLI_COMMAND=lnk exec "#{python3}" "#{libexec}/link.py" "$@"', formula)
 
     def test_formula_uses_pinned_release_tag_and_revision(self):
         formula = (ROOT / "packaging/homebrew/Formula/link.rb").read_text(encoding="utf-8")

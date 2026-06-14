@@ -8,13 +8,21 @@ from pathlib import Path
 
 SECRET_VALUE_PATTERNS = (
     ("Anthropic API key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
-    ("OpenAI API key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("OpenAI API key", re.compile(r"\bsk-(?!ant-)[A-Za-z0-9_-]{20,}\b")),
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
     ("AWS access key", re.compile(r"\bA[SK]IA[0-9A-Z]{16}\b")),
     ("PyPI token", re.compile(r"\bpypi-[A-Za-z0-9_-]{20,}\b")),
+    ("Hugging Face token", re.compile(r"\bhf_[A-Za-z0-9]{20,}\b")),
+    ("npm token", re.compile(r"\bnpm_[A-Za-z0-9]{20,}\b")),
+    ("Vercel token", re.compile(r"\bvercel_[A-Za-z0-9]{20,}\b")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
     ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b")),
     ("Stripe live secret key", re.compile(r"\bsk_live_[A-Za-z0-9]{20,}\b")),
+    ("Azure storage account key", re.compile(r"(?i)\b(?:AccountKey|AZURE_STORAGE_KEY)\s*[:=]\s*[A-Za-z0-9+/=]{40,}\b")),
+    ("Datadog API key", re.compile(r"(?i)\b(?:DD_API_KEY|DATADOG_API_KEY)\s*[:=]\s*[0-9a-f]{32}\b")),
+    ("Sentry DSN", re.compile(r"\bhttps://[0-9a-f]{32}@[A-Za-z0-9.-]+/[0-9]+\b")),
+    ("JWT token", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+    ("Docker registry auth", re.compile(r'(?is)"auths"\s*:\s*\{.{0,2000}?"auth"\s*:\s*"[A-Za-z0-9+/=]{20,}"')),
     ("Private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 )
 
@@ -103,7 +111,7 @@ def find_sensitive_filenames(
             if not path.is_file():
                 continue
             if any(fnmatch.fnmatch(path.name, pattern) for pattern in patterns):
-                matches.append(str(path.relative_to(root)))
+                matches.append(path.relative_to(root).as_posix())
     return sorted(matches)
 
 

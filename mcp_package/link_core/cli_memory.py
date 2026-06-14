@@ -58,6 +58,7 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
                 f"Title requested: {result['title']}",
                 f"Type: {result['memory_type']}",
                 f"Scope: {result['scope']}",
+                f"Visibility: {result.get('visibility', 'private')}",
                 "",
                 "Conflict candidates:",
                 *_candidate_lines(result.get("conflict_candidates", []), include_reasons=True),
@@ -75,6 +76,7 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
             f"Title requested: {result['title']}",
             f"Type: {result['memory_type']}",
             f"Scope: {result['scope']}",
+            f"Visibility: {result.get('visibility', 'private')}",
             "",
             "Existing candidates:",
             *_candidate_lines(result.get("candidates", [])),
@@ -93,9 +95,14 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
         f"Path: {result['path']}",
         f"Type: {result['memory_type']}",
         f"Scope: {result['scope']}",
+        f"Visibility: {result.get('visibility', 'private')}",
     ]
     if result.get("project"):
         lines.append(f"Project: {result['project']}")
+    if result.get("review_after"):
+        lines.append(f"Review after: {result['review_after']}")
+    if result.get("expires_at"):
+        lines.append(f"Expires at: {result['expires_at']}")
     lines.extend([
         "",
         "Next:",
@@ -131,6 +138,22 @@ def render_update_memory_text(result: Mapping[str, object], *, target: object = 
         "Next:",
         f"  {_shell_words('python3', 'link.py', 'explain-memory', result['name'], target)}",
         f"  {_shell_words('python3', 'link.py', 'review-memory', result['name'], target)}",
+    ])
+
+
+def render_set_memory_visibility_text(result: Mapping[str, object], *, target: object = ".") -> tuple[int, str]:
+    headline = "Memory visibility updated" if result.get("updated") else "Memory visibility already set"
+    return 0, "\n".join([
+        headline,
+        f"Title: {result['title']}",
+        f"Path: {result['path']}",
+        f"Scope: {result['scope']}",
+        f"Visibility: {result['previous_visibility']} -> {result['visibility']}",
+        f"Review: {result.get('review_status', 'pending')}",
+        "",
+        "Next:",
+        f"  {_shell_words('python3', 'link.py', 'explain-memory', result['name'], target)}",
+        f"  {_shell_words('python3', 'link.py', 'team-sync', target)}",
     ])
 
 
@@ -327,6 +350,101 @@ def render_memory_inbox_text(
     return 0, "\n".join(lines)
 
 
+def render_memory_log_text(payload: Mapping[str, object], *, target: object) -> tuple[int, str]:
+    lines = [
+        f"Link memory log: {target}",
+        f"{payload.get('count', 0)} recent memory event(s)",
+        str(payload.get("privacy_note") or ""),
+        "",
+    ]
+    entries = payload.get("entries", [])
+    if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes)) or not entries:
+        lines.extend([
+            "No memory lifecycle events yet.",
+            "",
+            "Next:",
+            f"  {_shell_words('python3', 'link.py', 'remember', 'a useful preference or decision', target)}",
+        ])
+        return 0, "\n".join(lines)
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        lines.append(
+            f"- {entry.get('timestamp', '')} · {entry.get('operation', '')} · {entry.get('description', '')}"
+        )
+        summary = str(entry.get("summary") or "").strip()
+        if summary:
+            lines.append(f"  {summary}")
+        impact = str(entry.get("impact") or "").strip()
+        if impact:
+            lines.append(f"  Impact: {impact}")
+        changes = entry.get("changes", [])
+        if isinstance(changes, Sequence) and not isinstance(changes, (str, bytes)):
+            for change in changes[:4]:
+                if isinstance(change, Mapping):
+                    lines.append(
+                        f"  Change: {change.get('field', '')} {change.get('from', '')} -> {change.get('to', '')}"
+                    )
+        paths = entry.get("memory_paths", [])
+        if isinstance(paths, Sequence) and not isinstance(paths, (str, bytes)) and paths:
+            lines.append("  Memories: " + ", ".join(str(path) for path in paths))
+        details = entry.get("details", [])
+        if isinstance(details, Sequence) and not isinstance(details, (str, bytes)):
+            for detail in list(details)[:4]:
+                lines.append(f"  - {detail}")
+    actions = payload.get("next_actions", [])
+    if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)) and actions:
+        lines.extend(["", "Next actions:"])
+        for action in actions:
+            if isinstance(action, Mapping):
+                lines.append(f"- {action.get('label')}: {action.get('command')}")
+    return 0, "\n".join(lines)
+
+
+def render_memory_wins_text(payload: Mapping[str, object], *, target: object) -> tuple[int, str]:
+    lines = [
+        f"Link memory wins: {target}",
+        str(payload.get("honest_note") or ""),
+        "",
+        (
+            f"{payload.get('active_count', 0)} active · "
+            f"{payload.get('reviewed_active_count', 0)} reviewed · "
+            f"{payload.get('review_count', 0)} need review · "
+            f"{payload.get('project_count', 0)} projects"
+        ),
+        "",
+        "Signals:",
+    ]
+    wins = payload.get("wins", [])
+    if isinstance(wins, Sequence) and not isinstance(wins, (str, bytes)):
+        for win in wins:
+            if not isinstance(win, Mapping):
+                continue
+            lines.append(f"- {win.get('label')}: {win.get('count')}")
+            lines.append(f"  {win.get('description')}")
+    recent = payload.get("recent_memories", [])
+    if isinstance(recent, Sequence) and not isinstance(recent, (str, bytes)) and recent:
+        lines.extend(["", "Recent reusable memories:"])
+        for memory in recent[:5]:
+            if isinstance(memory, Mapping):
+                lines.append(f"- {memory.get('title')} ({memory.get('memory_type')} · {memory.get('scope')})")
+                summary = memory.get("tldr") or memory.get("snippet")
+                if summary:
+                    lines.append(f"  {summary}")
+    actions = payload.get("next_actions", [])
+    if isinstance(actions, Sequence) and not isinstance(actions, (str, bytes)) and actions:
+        lines.extend(["", "Next:"])
+        for action in actions:
+            if isinstance(action, Mapping):
+                lines.append(f"- {action.get('label')}: {action.get('command')}")
+    prompts = payload.get("prompts", [])
+    if isinstance(prompts, Sequence) and not isinstance(prompts, (str, bytes)) and prompts:
+        lines.extend(["", "Useful prompts:"])
+        for prompt in prompts[:4]:
+            lines.append(f"- {prompt}")
+    return 0, "\n".join(lines)
+
+
 def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, str]:
     memory = explanation["memory"]
     recall_info = explanation["recall"]
@@ -341,7 +459,7 @@ def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, 
         f"Link memory explanation: {memory['title']}",
         "",
         f"Path: {memory['path']}",
-        f"Type: {memory['memory_type']} · Scope: {memory['scope']} · Status: {lifecycle['status']}",
+        f"Type: {memory['memory_type']} · Scope: {memory['scope']} · Visibility: {memory.get('visibility', 'private')} · Status: {lifecycle['status']}",
         f"Source: {provenance['source'] or 'missing'}",
         f"Captured: {provenance['date_captured'] or 'missing'}",
         f"Review: {review['status']} · Issues: {review['issue_count']}",
@@ -410,6 +528,7 @@ def render_brief_text(payload: Mapping[str, object], *, query: str = "", project
         ),
         f"Types: {format_counts(profile_data['by_type'])}",
         f"Scopes: {format_counts(profile_data['by_scope'])}",
+        f"Visibility: {format_counts(profile_data.get('by_visibility', {}))}",
         "",
         render_memory_list("Relevant memories", payload.get("relevant_memories", [])),
     ])
@@ -463,6 +582,7 @@ def render_profile_text(
         f"{memory_count} memor{'y' if memory_count == 1 else 'ies'} · {active_count} active · {review_count} need review",
         f"Types: {format_counts(profile_data['by_type'])}",
         f"Scopes: {format_counts(profile_data['by_scope'])}",
+        f"Visibility: {format_counts(profile_data.get('by_visibility', {}))}",
     ])
     if profile_data["by_project"]:
         lines.append(f"Projects: {format_counts(profile_data['by_project'])}")

@@ -21,10 +21,13 @@
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
       <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
       <a href="ui.html">UI</a>
       <a href="concepts.html" aria-current="page">Concepts</a>
       <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
       <a href="api.html">API</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
@@ -58,8 +61,12 @@
                           -> direct memories -> review/update/archive</code></pre>
         <figure class="architecture-card">
           <img src="assets/link-memory-flow.svg" alt="Link architecture: raw sources, structured wiki, reviewed memory, and MCP retrieval">
-          <figcaption>The wiki is the storage layer. Reviewed memory and MCP context are the product surface agents use.</figcaption>
+          <figcaption>The wiki is the storage layer. Reviewed memory and compact context are the product surfaces agents use.</figcaption>
         </figure>
+        <div class="callout">
+          <strong>One wiki, three independent surfaces</strong>
+          The web UI, CLI, official skills, and MCP server are separate ways to use the same local files. Closing the viewer does not stop CLI commands, skills, or MCP recall.
+        </div>
         <div class="callout">
           <strong>Public repo versus local memory</strong>
           Link deliberately keeps generated <code>raw/</code>, <code>wiki/</code>, and <code>link-demo/</code> content out of git. The tracked root wiki is scaffolding; <code>python3 link.py demo</code> creates the product-story demo wiki.
@@ -70,7 +77,7 @@
           <div><strong>wiki/memories/</strong>Preferences, decisions, project facts, and user context.</div>
           <div><strong>indexes</strong>Backlinks, page index, local cache, token index, and optional SQLite FTS.</div>
         </div>
-        <p>Markdown remains the source of truth. Derived indexes can be rebuilt. Agents maintain the files, but the files stay inspectable in git, Obsidian, or any editor.</p>
+        <p>Markdown remains the source of truth. Derived indexes can be rebuilt. Agents maintain the files, but the files stay inspectable in git, <a href="obsidian.html">Obsidian</a>, or any editor.</p>
 
         <h2 id="moves">Three User Moves</h2>
         <p>Link deliberately separates knowledge from memory:</p>
@@ -80,11 +87,13 @@ query Link for the release process</code></pre>
         <p>Raw files do not silently personalize future agents. Ingest creates source-backed wiki knowledge. Explicit <code>remember</code> creates durable user or project memory.</p>
 
         <h2 id="memory">Memory Lifecycle</h2>
-        <p>A memory is a Markdown page with status, scope, source, review state, graph links, and local log entries. It can be proposed, remembered, reviewed, updated, archived, restored, explained, or forgotten.</p>
+        <p>A memory is a Markdown page with status, scope, visibility, source, review state, optional <code>review_after</code> and <code>expires_at</code> dates, graph links, and local log entries. It can be proposed, remembered, reviewed, updated, archived, restored, explained, or forgotten.</p>
         <div class="grid">
           <article class="feature"><h3>Propose</h3><p>Generate candidate memories from chat notes or raw captures without writing durable memory.</p></article>
           <article class="feature"><h3>Approve</h3><p>Save only the memories the user explicitly wants agents to carry forward.</p></article>
           <article class="feature"><h3>Explain</h3><p>Show why a memory exists, whether it is recall-ready, and what graph links support it.</p></article>
+          <article class="feature"><h3>Re-check</h3><p>Use <code>review_after</code> when a memory should come back to the inbox after a date instead of staying trusted forever.</p></article>
+          <article class="feature"><h3>Expire</h3><p>Use <code>expires_at</code> for temporary context that should leave default recall after a date while staying inspectable.</p></article>
         </div>
 
         <h2 id="query">Smart Query Packets</h2>
@@ -105,11 +114,11 @@ query Link for the release process</code></pre>
 
         <h2 id="scale">Scale Model</h2>
         <p>Link uses local caching, token indexes, bounded page APIs, bounded graph summaries, and optional in-memory SQLite FTS5 for fast search. If SQLite is unavailable, Link falls back to the token index.</p>
-        <pre><code>link benchmark "agent memory"
-link graph-summary "local memory" --limit 40 --depth 1
-link validate
-link rebuild-backlinks</code></pre>
-        <p>Use <code>link benchmark</code> when a wiki starts to feel slow. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, and readiness recommendations.</p>
+        <pre><code>lnk benchmark "agent memory"
+lnk graph-summary "local memory" --limit 40 --depth 1
+lnk validate
+lnk rebuild-backlinks</code></pre>
+        <p>Use <code>lnk benchmark</code> when a wiki starts to feel slow. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, and readiness recommendations.</p>
       </article>
     </div>
   </main>

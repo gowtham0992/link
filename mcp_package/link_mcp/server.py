@@ -27,12 +27,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
+
+from link_core.version import LINK_VERSION
 
 # ── Resolve wiki directory ────────────────────────────────────────────
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--wiki", default=None)
+parser.add_argument("--version", action="store_true")
 args, _ = parser.parse_known_args()
+
+if args.version:
+    print(f"link-mcp {LINK_VERSION}")
+    sys.exit(0)
 
 if args.wiki:
     WIKI_DIR = Path(args.wiki).expanduser().resolve()
@@ -42,7 +50,7 @@ else:
 if not WIKI_DIR.exists():
     print(
         f"[link-mcp] Wiki not found at {WIKI_DIR}. "
-        "Initialize Link first with `link init` or `python3 link.py init`, "
+        "Initialize Link first with `lnk init` or `python3 link.py init`, "
         "run an integration installer under integrations/*/install.sh, "
         "or pass --wiki /path/to/wiki.",
         file=sys.stderr,
@@ -97,6 +105,8 @@ mcp = FastMCP(
 # ── In-memory indexes (built on first use, invalidated by mtime) ──────
 _cache: dict = {}
 _cache_mtime: float = 0.0
+_cache_checked_at: float = 0.0
+CACHE_MTIME_CHECK_INTERVAL_SECONDS = 0.5
 MAX_TEXT_INPUT = 200
 MAX_CAPTURE_INPUT = 12000
 
@@ -120,6 +130,7 @@ from link_core.memory import (
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
+    set_memory_visibility as _core_set_memory_visibility,
     slim_memory as _core_slim_memory,
     top_tags as _core_top_tags,
     update_memory_page as _core_update_memory_page,
@@ -152,6 +163,12 @@ from link_core.log import (
     append_log as _core_append_log,
     utc_timestamp as _core_utc_timestamp,
 )
+from link_core.memory_log import (
+    memory_log_payload as _core_memory_log_payload,
+)
+from link_core.memory_wins import (
+    memory_wins_payload as _core_memory_wins_payload,
+)
 from link_core.operations import (
     operation_report as _core_operation_report,
 )
@@ -167,7 +184,6 @@ from link_core.prompts import (
 from link_core.validation import (
     validate_wiki as _core_validate_wiki,
 )
-from link_core.version import LINK_VERSION
 from link_core.status import (
     link_status as _core_link_status,
 )
@@ -237,15 +253,25 @@ def _wiki_mtime() -> float:
 
 
 def _clear_cache() -> None:
-    global _cache, _cache_mtime
+    global _cache, _cache_mtime, _cache_checked_at
     _core_close_wiki_cache(_cache)
     _cache = {}
     _cache_mtime = 0.0
+    _cache_checked_at = 0.0
 
 
 def _build_cache() -> dict:
-    global _cache, _cache_mtime
+    global _cache, _cache_mtime, _cache_checked_at
+    now = time.monotonic()
+    if (
+        _cache
+        and CACHE_MTIME_CHECK_INTERVAL_SECONDS > 0
+        and now - _cache_checked_at < CACHE_MTIME_CHECK_INTERVAL_SECONDS
+    ):
+        return _cache
+
     mtime = _wiki_mtime()
+    _cache_checked_at = now
     if _cache and mtime == _cache_mtime:
         return _cache
 
@@ -292,6 +318,24 @@ def _memory_inbox(limit: int = 20, include_archived: bool = False, project: str 
         review_command="review_memory",
         project=project,
         command_target=WIKI_DIR.parent,
+    )
+
+
+def _memory_log(limit: int = 50, include_captures: bool = True) -> dict[str, object]:
+    return _core_memory_log_payload(
+        WIKI_DIR,
+        limit=_parse_limit(limit, default=50),
+        include_captures=include_captures,
+    )
+
+
+def _memory_wins(limit: int = 6, project: str = "") -> dict[str, object]:
+    limit = _parse_limit(limit, default=6)
+    return _core_memory_wins_payload(
+        WIKI_DIR,
+        limit=limit,
+        project=project,
+        records=_memory_records(),
     )
 
 
@@ -529,6 +573,7 @@ def _accept_capture(
     title: str = "",
     memory_type: str = "",
     scope: str = "",
+    visibility: str = "",
     tags: str = "",
     project: str = "",
     allow_duplicate: bool = False,
@@ -556,13 +601,15 @@ def _accept_capture(
         title=_clean_text_input(title),
         memory_type=_clean_text_input(memory_type).lower(),
         scope=_clean_text_input(scope).lower(),
+        visibility=_clean_text_input(visibility).lower(),
         tags=tags,
     )
-    result = _write_memory_page(
+    result = _write_mcp_memory_page(
         str(memory_args["text"]),
         title=str(memory_args["title"]),
         memory_type=str(memory_args["memory_type"]),
         scope=str(memory_args["scope"]),
+        visibility=str(memory_args["visibility"] or ""),
         tags=memory_args["tags"] if isinstance(memory_args["tags"], str) else "",
         source=str(memory_args["source"]),
         allow_duplicate=allow_duplicate,
@@ -669,6 +716,20 @@ def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[s
     return result
 
 
+def _set_memory_visibility(identifier: str, visibility: str) -> dict[str, object]:
+    result = _core_set_memory_visibility(
+        WIKI_DIR,
+        _clean_text_input(identifier, max_len=300),
+        _clean_text_input(visibility, max_len=40),
+        timestamp=_utc_timestamp(),
+        records=_memory_records(),
+        log_writer=_append_log,
+    )
+    if result["updated"]:
+        _clear_cache()
+    return result
+
+
 def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
     result = _core_forget_memory_page(
         WIKI_DIR,
@@ -720,10 +781,11 @@ def _update_memory_page(
     return result
 
 
-def _write_memory_page(
+def _write_mcp_memory_page(
     text: str, title: str = "", memory_type: str = "note",
     scope: str = "user", tags: str = "", source: str = "mcp",
     allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
+    visibility: str = "", review_after: str = "", expires_at: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -733,6 +795,9 @@ def _write_memory_page(
         WIKI_DIR, clean_text, title=_clean_text_input(title),
         memory_type=memory_type, scope=scope,
         tags=_clean_text_input(tags, max_len=500), source=_clean_text_input(source, max_len=500),
+        visibility=_clean_text_input(visibility, max_len=40) or None,
+        review_after=_clean_text_input(review_after, max_len=40) or None,
+        expires_at=_clean_text_input(expires_at, max_len=40) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -963,6 +1028,7 @@ def accept_capture(
     title: str = "",
     memory_type: str = "",
     scope: str = "",
+    visibility: str = "",
     tags: str = "",
     project: str = "",
     allow_duplicate: bool = False,
@@ -980,6 +1046,7 @@ def accept_capture(
             title=title,
             memory_type=memory_type,
             scope=scope,
+            visibility=visibility,
             tags=tags,
             project=project,
             allow_duplicate=allow_duplicate,
@@ -1054,6 +1121,29 @@ def memory_inbox(limit: int = 20, include_archived: bool = False, project: str =
 
 
 @mcp.tool()
+def memory_log(limit: int = 50, include_captures: bool = True) -> str:
+    """List recent memory lifecycle changes.
+
+    Use this when the user asks what Link remembered, updated, reviewed,
+    archived, restored, forgot, or accepted from captures recently. The result
+    is metadata from wiki/log.md and does not include raw source or memory
+    bodies.
+    """
+    return json.dumps(_memory_log(limit=limit, include_captures=include_captures), ensure_ascii=False)
+
+
+@mcp.tool()
+def memory_wins(limit: int = 6, project: str = "") -> str:
+    """Summarize local proof signals for Link memory value.
+
+    Use this when the user asks whether Link is useful, what memory value has
+    accumulated, or how to demonstrate the local memory loop. The result is
+    based on local wiki metadata only; Link does not track telemetry.
+    """
+    return json.dumps(_memory_wins(limit=limit, project=project), ensure_ascii=False)
+
+
+@mcp.tool()
 def review_memory(identifier: str, note: str = "") -> str:
     """Mark a memory as reviewed after user confirmation."""
     try:
@@ -1099,6 +1189,21 @@ def update_memory(
             allow_conflict=allow_conflict,
             project=project,
         )
+    except ValueError as exc:
+        return json.dumps({"updated": False, "error": str(exc)})
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def set_memory_visibility(identifier: str, visibility: str) -> str:
+    """Change a memory's sharing visibility.
+
+    Use this after explicit user approval when a memory should move between
+    private, project, and team visibility. This updates frontmatter and logs the
+    visibility change; it does not expose raw sources or memory bodies in logs.
+    """
+    try:
+        result = _set_memory_visibility(identifier, visibility)
     except ValueError as exc:
         return json.dumps({"updated": False, "error": str(exc)})
     return json.dumps(result, ensure_ascii=False)
@@ -1151,6 +1256,9 @@ def remember_memory(
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     project: str = "",
+    visibility: str = "",
+    review_after: str = "",
+    expires_at: str = "",
 ) -> str:
     """Save a local agent memory as a Markdown page.
 
@@ -1160,11 +1268,14 @@ def remember_memory(
     Potential conflicts are refused unless allow_conflict is true.
     memory_type: preference, decision, project, fact, or note.
     scope: user, project, or global.
+    visibility: private, project, or team. Defaults to private for user/global and project for project-scoped memories.
     project: optional project key for project-scoped memories.
     tags: optional comma-separated tags.
+    review_after: optional YYYY-MM-DD date when this memory should be checked again.
+    expires_at: optional YYYY-MM-DD date when this memory should leave default recall.
     """
     try:
-        result = _write_memory_page(
+        result = _write_mcp_memory_page(
             memory,
             title=title,
             memory_type=memory_type,
@@ -1174,6 +1285,9 @@ def remember_memory(
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
             project=project,
+            visibility=visibility,
+            review_after=review_after,
+            expires_at=expires_at,
         )
     except ValueError as exc:
         return json.dumps({"created": False, "error": str(exc)})

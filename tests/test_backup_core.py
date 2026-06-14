@@ -10,7 +10,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
-from link_core.backup import BackupError, create_backup, list_backups
+from link_core.backup import BackupError, RestoreError, create_backup, list_backups, restore_backup
 
 
 class BackupCoreTests(unittest.TestCase):
@@ -102,6 +102,53 @@ class BackupCoreTests(unittest.TestCase):
         with tarfile.open(result["path"], "r:gz") as tar:
             names = set(tar.getnames())
         self.assertNotIn("wiki/concepts/outside-link.md", names)
+
+    def test_restore_backup_previews_then_restores_wiki(self):
+        root = self.make_root()
+        created = create_backup(root, label="restore test")
+        (root / "wiki/index.md").write_text("# Broken\n", encoding="utf-8")
+
+        preview = restore_backup(root, created["name"])
+
+        self.assertFalse(preview["restored"])
+        self.assertTrue(preview["confirmation_required"])
+        self.assertEqual(preview["restore_roots"], ["wiki"])
+        self.assertEqual((root / "wiki/index.md").read_text(encoding="utf-8"), "# Broken\n")
+
+        restored = restore_backup(root, created["name"], confirm=True)
+
+        self.assertTrue(restored["restored"])
+        self.assertFalse(restored["confirmation_required"])
+        self.assertEqual((root / "wiki/index.md").read_text(encoding="utf-8"), "# Index\n")
+        self.assertIn("safety_backup", restored)
+
+    def test_restore_backup_skips_raw_unless_requested(self):
+        root = self.make_root()
+        created = create_backup(root, label="with raw", include_raw=True)
+        (root / "raw/secret-session.md").write_text("changed\n", encoding="utf-8")
+
+        restored = restore_backup(root, created["name"], confirm=True, safety_backup=False)
+
+        self.assertTrue(restored["restored"])
+        self.assertEqual(restored["skipped_roots"], ["raw"])
+        self.assertEqual((root / "raw/secret-session.md").read_text(encoding="utf-8"), "changed\n")
+
+        restored_with_raw = restore_backup(root, created["name"], include_raw=True, confirm=True, safety_backup=False)
+
+        self.assertTrue(restored_with_raw["restored"])
+        self.assertEqual((root / "raw/secret-session.md").read_text(encoding="utf-8"), "api key: test-secret\n")
+
+    def test_restore_backup_rejects_unsafe_tar_paths(self):
+        root = self.make_root()
+        archive = root / ".link-backups" / "bad.tar.gz"
+        archive.parent.mkdir()
+        payload = root / "payload.txt"
+        payload.write_text("bad\n", encoding="utf-8")
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(payload, arcname="../outside.txt")
+
+        with self.assertRaisesRegex(RestoreError, "unsafe path"):
+            restore_backup(root, archive)
 
 
 if __name__ == "__main__":

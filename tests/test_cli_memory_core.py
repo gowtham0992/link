@@ -12,6 +12,7 @@ from mcp_package.link_core.cli_memory import (
     render_recall_text,
     render_review_memory_text,
     render_remember_text,
+    render_set_memory_visibility_text,
     render_update_memory_text,
 )
 
@@ -25,11 +26,15 @@ class CliMemoryCoreTests(unittest.TestCase):
             "memory_type": "preference",
             "scope": "project",
             "project": "link",
+            "review_after": "2026-08-01",
+            "expires_at": "2026-12-01",
         })
 
         self.assertEqual(code, 0)
         self.assertIn("Memory saved", text)
         self.assertIn("Project: link", text)
+        self.assertIn("Review after: 2026-08-01", text)
+        self.assertIn("Expires at: 2026-12-01", text)
         self.assertIn("python3 link.py recall", text)
         self.assertIn("Prefer release branches", text)
 
@@ -86,6 +91,23 @@ class CliMemoryCoreTests(unittest.TestCase):
         self.assertIn("Memory updated", text)
         self.assertIn("Review: reviewed -> pending", text)
         self.assertIn("python3 link.py review-memory prefer-release-branches", text)
+
+    def test_render_set_memory_visibility_text(self):
+        code, text = render_set_memory_visibility_text({
+            "updated": True,
+            "name": "prefer-release-branches",
+            "title": "Prefer release branches",
+            "path": "wiki/memories/prefer-release-branches.md",
+            "scope": "project",
+            "previous_visibility": "private",
+            "visibility": "team",
+            "review_status": "reviewed",
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Memory visibility updated", text)
+        self.assertIn("Visibility: private -> team", text)
+        self.assertIn("python3 link.py team-sync", text)
 
     def test_render_propose_memories_text(self):
         code, text = render_propose_memories_text({
@@ -247,7 +269,7 @@ class CliMemoryCoreTests(unittest.TestCase):
                     "kind": "review",
                     "label": "Review",
                     "description": "Mark memory reviewed",
-                    "command": "link review-memory prefer-local-memory",
+                    "command": "lnk review-memory prefer-local-memory",
                 },
                 "actions": [
                     {"kind": "review", "label": "Review"},
@@ -441,7 +463,7 @@ class CliMemoryCoreTests(unittest.TestCase):
             "next_actions": [{
                 "label": "Review memory inbox",
                 "recommended": True,
-                "command": "link memory-inbox",
+                "command": "lnk memory-inbox",
             }],
         }, target="/tmp/link")
 

@@ -9,14 +9,49 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 
+PREFERRED_LINK_COMMAND = "lnk"
+LEGACY_LINK_COMMAND = "link"
+_link_command_override: list[str] | None = None
+
+
+def set_link_command_override(parts: list[str] | tuple[str, ...] | None) -> None:
+    """Override generated Link CLI commands for the current runtime."""
+    global _link_command_override
+    if parts is None:
+        _link_command_override = None
+        return
+    cleaned = [str(part) for part in parts if str(part)]
+    _link_command_override = cleaned or None
+
+
+def _configured_link_command() -> list[str]:
+    if _link_command_override:
+        return list(_link_command_override)
+    env_command = os.environ.get("LINK_CLI_COMMAND", "").strip()
+    if env_command:
+        return [env_command]
+    return [PREFERRED_LINK_COMMAND]
+
+
+def normalize_command_parts(parts: list[str]) -> list[str]:
+    """Use Link's non-conflicting CLI command name in generated user commands."""
+    if parts and parts[0] == LEGACY_LINK_COMMAND:
+        return [*_configured_link_command(), *parts[1:]]
+    if parts and parts[0] == PREFERRED_LINK_COMMAND and _link_command_override:
+        return [*_configured_link_command(), *parts[1:]]
+    return list(parts)
+
+
 def display_command(parts: list[str]) -> str:
     """Return a shell-safe command for the current platform."""
+    parts = normalize_command_parts(parts)
     if os.name == "nt":
         return subprocess.list2cmdline(parts)
     return shlex.join(parts)
 
 
 def mcp_verify_action(tool: str, label: str, command: list[str]) -> dict[str, object]:
+    command = normalize_command_parts(command)
     return {
         "tool": tool,
         "label": label,

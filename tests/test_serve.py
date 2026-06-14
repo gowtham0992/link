@@ -298,7 +298,7 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(page_status, 200)
         self.assertIn(b"Health", body)
         self.assertIn(b"Interrupted Operations", body)
-        self.assertIn(b"link operations", body)
+        self.assertIn(b"lnk operations", body)
         self.assertEqual(api_status, 200)
         self.assertEqual(payload["api_version"], serve.API_VERSION)
         self.assertEqual(payload["stale_count"], 1)
@@ -332,6 +332,8 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(payload["local_only"])
         self.assertEqual(payload["recommended"]["readiness"], "/api/health")
         self.assertIn("/api/query-link", payload["endpoints"]["read"])
+        self.assertIn("/api/wins", payload["endpoints"]["read"])
+        self.assertIn("/api/memory-log", payload["endpoints"]["read"])
         self.assertIn("/api/remember-memory", payload["endpoints"]["write"])
         self.assertEqual(payload["write_header"]["X-Link-Local-Action"], "true")
 
@@ -357,7 +359,64 @@ class ServeTests(unittest.TestCase):
         self.assertIn(b"/prompts", body)
         self.assertIn(b"/propose", body)
         self.assertIn(b"/captures", body)
+        self.assertIn(b"/wins", body)
+        self.assertIn(b"/memory-log", body)
         self.assertIn(b"/all", body)
+
+    def test_memory_wins_page_and_api_show_local_value_signals(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "memories/prefer-local-memory.md",
+            "---\n"
+            "type: memory\n"
+            "title: \"Prefer local memory\"\n"
+            "memory_type: preference\n"
+            "scope: user\n"
+            "status: active\n"
+            "date_captured: \"2026-05-25T00:00:00Z\"\n"
+            "source: \"unit test\"\n"
+            "review_status: reviewed\n"
+            "---\n\n"
+            "# Prefer local memory\n\n"
+            "> **TLDR:** User prefers local memory.\n\n"
+            "## Memory\n\nUser prefers local memory.\n",
+        )
+
+        html = serve._render_memory_wins()
+        status, payload = run_handler("GET", "/api/wins")
+        page_status, body, _ = run_handler_raw("GET", "/wins")
+
+        self.assertIn("Memory Wins", html)
+        self.assertIn("not telemetry", html)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["schema"], "link-memory-wins-v1")
+        self.assertEqual(payload["active_count"], 1)
+        self.assertEqual(page_status, 200)
+        self.assertIn(b"Memory Wins", body)
+
+    def test_memory_log_page_and_api_show_lifecycle_events(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "log.md",
+            "# Link Wiki Log\n\n"
+            "## [2026-05-25T00:00:00Z] remember | Prefer local memory\n\n"
+            "- Created: memories/prefer-local-memory.md\n"
+            "- Scope: user\n\n"
+            "---\n",
+        )
+
+        html = serve._render_memory_log()
+        status, payload = run_handler("GET", "/api/memory-log")
+        page_status, body, _ = run_handler_raw("GET", "/memory-log")
+
+        self.assertIn("Memory Changelog", html)
+        self.assertIn("Prefer local memory", html)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["entries"][0]["operation"], "remember")
+        self.assertEqual(page_status, 200)
+        self.assertIn(b"Memory Changelog", body)
 
     def test_head_status_sends_headers_without_body(self):
         self.make_wiki()
@@ -489,7 +548,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn("Ask Your Agent", html)
         self.assertIn("Local Checks", html)
         self.assertIn("Project examples are scoped to <code>client-launch</code>", html)
-        self.assertIn("link health", html)
+        self.assertIn("lnk health", html)
 
     def test_css_has_explicit_black_dark_theme(self):
         self.assertIn(':root[data-theme="dark"]', serve.CSS)
@@ -722,6 +781,17 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(serve._is_allowed_static_file(allowed))
         self.assertFalse(serve._is_allowed_static_file(unsupported))
         self.assertFalse(serve._is_allowed_static_file(denied))
+
+    def test_logo_serves_from_configured_link_root(self):
+        wiki = self.make_wiki()
+        (wiki.parent / "logo.svg").write_text("<svg></svg>", encoding="utf-8")
+        reset_wiki(wiki)
+
+        status, body, headers = run_handler_raw("GET", "/logo.svg")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"<svg></svg>")
+        self.assertEqual(headers["Content-Type"], "image/svg+xml")
 
     def test_static_file_resolve_handles_malformed_paths(self):
         self.assertIsNone(serve._safe_resolve(Path("bad\0path")))
@@ -1569,6 +1639,8 @@ class ServeTests(unittest.TestCase):
             "memory_type": "preference",
             "scope": "user",
             "source": "web proposal",
+            "review_after": "2026-08-01",
+            "expires_at": "2026-12-01",
         }
 
         denied_status, denied_payload = post_json("/api/remember-memory", payload, local_action=False)
@@ -1590,6 +1662,9 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(created["saved"])
         self.assertTrue(created["created"])
         self.assertEqual(created["path"], f"wiki/memories/{created['name']}.md")
+        self.assertEqual(created["review_after"], "2026-08-01")
+        self.assertEqual(created["expires_at"], "2026-12-01")
+        self.assertIn('expires_at: "2026-12-01"', page_text)
         self.assertEqual(duplicate_status, 409)
         self.assertFalse(duplicate["saved"])
         self.assertTrue(duplicate["duplicate"])
@@ -1855,7 +1930,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn('data-copy-text="ingest raw/new-source.md into Link"', html)
         self.assertIn("Copy prompt", html)
         self.assertIn("Copy command", html)
-        self.assertIn('data-copy-text="link validate ', html)
+        self.assertIn('data-copy-text="lnk validate ', html)
         self.assertIn(str(wiki.parent), html)
         self.assertIn("ingest raw/new-source.md into Link", html)
         self.assertIn("open memory proposals first", html)

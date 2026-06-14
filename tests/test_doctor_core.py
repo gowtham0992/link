@@ -59,6 +59,7 @@ class DoctorCoreTests(unittest.TestCase):
         payload = {
             "findings": [
                 {"severity": "error", "code": "missing_required_section", "path": "sources/a.md", "message": "bad"},
+                {"severity": "error", "code": "secret_value", "path": "sources/token.md", "message": "redact"},
                 {"severity": "error", "code": "dead_wikilink", "path": "concepts/b.md", "message": "missing"},
                 {"severity": "warning", "code": "missing_summary", "path": "sources/c.md", "message": "warn"},
             ]
@@ -67,8 +68,9 @@ class DoctorCoreTests(unittest.TestCase):
         findings = doctor_validation_errors(payload)
         summary = format_validation_error_summary(findings)
 
-        self.assertEqual(len(findings), 1)
+        self.assertEqual(len(findings), 2)
         self.assertIn("sources/a.md [missing_required_section] bad", summary)
+        self.assertIn("sources/token.md [secret_value] redact", summary)
         self.assertNotIn("dead_wikilink", summary)
 
     def test_join_limited_caps_items(self):

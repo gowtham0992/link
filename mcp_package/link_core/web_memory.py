@@ -140,12 +140,17 @@ def render_memory_card(
     meta_parts = [
         str(record.get("memory_type") or "note"),
         str(record.get("scope") or "user"),
+        f'visibility {record.get("visibility") or "private"}',
         str(record.get("status") or "active"),
     ]
     if record.get("updated_at"):
         meta_parts.append(f'updated {record["updated_at"]}')
     elif record.get("date_captured"):
         meta_parts.append(f'captured {record["date_captured"]}')
+    if record.get("review_after"):
+        meta_parts.append(f'review after {record["review_after"]}')
+    if record.get("expires_at"):
+        meta_parts.append(f'expires {record["expires_at"]}')
     meta = " · ".join(part for part in meta_parts if part)
     issues_html = ""
     if include_issues and record.get("issues"):

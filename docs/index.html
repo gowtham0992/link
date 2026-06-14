@@ -21,10 +21,13 @@
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
       <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
       <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
       <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
       <a href="api.html">API</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
@@ -36,13 +39,15 @@
     <div class="hero-copy">
       <span class="eyebrow">Local agent memory</span>
       <h1>Link gives every agent the same memory.</h1>
-      <p>Source-backed Markdown memory for Codex, Claude, Cursor, Kiro, VS Code, Copilot, and any MCP client. Local files. Inspectable sources. Budgeted context.</p>
+      <p>Source-backed Markdown memory for Codex, Claude, Cursor, Kiro, VS Code, Copilot, Antigravity, and local agents. Local files. Inspectable sources. Budgeted context.</p>
       <ul class="hero-notes" aria-label="Link storage model">
         <li>raw/</li>
         <li>wiki/</li>
         <li>memories/</li>
         <li>graph</li>
+        <li>CLI</li>
         <li>MCP</li>
+        <li>skills</li>
       </ul>
       <div class="actions">
         <a class="button primary" href="getting-started.html">Try Link</a>
@@ -61,10 +66,12 @@
         <div class="grid">
           <article class="feature"><h3>Personal memory</h3><p>Preferences, decisions, facts, and project context stay durable across agent sessions.</p></article>
           <article class="feature"><h3>Source-backed wiki</h3><p>Raw sources compile into Markdown pages with citations, backlinks, and reviewable provenance.</p></article>
-          <article class="feature"><h3>MCP-native recall</h3><p>One local memory works across MCP-capable tools through the same query, brief, graph, and memory lifecycle tools.</p></article>
+          <article class="feature"><h3>Agent-ready recall</h3><p>One local memory works across CLI, skills, MCP-capable tools, and the local viewer through the same query, brief, graph, and memory lifecycle paths.</p></article>
           <article class="feature"><h3>Budgeted context</h3><p>Smart query packets return the right memory, pages, graph neighborhood, and follow-up actions without flooding tokens.</p></article>
+          <article class="feature"><h3><a href="scale.html">Measured scale</a></h3><p>Health and benchmark commands show cache reuse, search backend, graph shape, and bounded payload behavior as a wiki grows.</p></article>
           <article class="feature"><h3>Private by default</h3><p>No hosted backend, no telemetry, no cloud lock-in. Your memory stays on disk as plain Markdown.</p></article>
           <article class="feature"><h3>Auditable lifecycle</h3><p>Capture, propose, approve, review, archive, restore, forget, and explain what Link remembers.</p></article>
+          <article class="feature"><h3><a href="obsidian.html">Obsidian-readable</a></h3><p>Open the same <code>wiki/</code> folder in Obsidian when you want a richer Markdown editor or graph view.</p></article>
         </div>
       </div>
     </section>
@@ -73,11 +80,43 @@
       <div class="section-inner">
         <p class="section-kicker">How it works</p>
         <h2>A local memory pipeline agents can trust.</h2>
-        <p class="lead">Raw sources become structured wiki pages. Explicit remembers become reviewed memory. Agents retrieve compact MCP context packets instead of reading your whole folder.</p>
+        <p class="lead">Raw sources become structured wiki pages. Explicit remembers become reviewed memory. Agents retrieve compact context packets instead of reading your whole folder.</p>
         <figure class="architecture-card">
-          <img src="assets/link-memory-flow.svg" alt="Link architecture: capture sources, structure wiki knowledge, review memory, and retrieve compact MCP context">
+          <img src="assets/link-memory-flow.svg" alt="Link architecture: capture sources, structure wiki knowledge, review memory, and retrieve compact context">
           <figcaption>Link keeps the knowledge base plain and local while giving agents a predictable recall path.</figcaption>
         </figure>
+      </div>
+    </section>
+
+    <section id="before-after">
+      <div class="section-inner">
+        <p class="section-kicker">Before and after</p>
+        <h2>The useful moment is not storage. It is continuity.</h2>
+        <p class="lead">Link is built for the daily handoff between sessions and agents: stop re-explaining the same context, start from a brief that has provenance.</p>
+        <div class="proof-grid">
+          <article class="proof-column before">
+            <h3>Without Link</h3>
+            <ol>
+              <li>Open a new agent session.</li>
+              <li>Explain your project, preferences, and recent decisions again.</li>
+              <li>Paste notes or ask the agent to scan a folder.</li>
+              <li>Lose the context when you switch tools.</li>
+            </ol>
+            <pre><code>User: we talked about this yesterday...
+Agent: I do not have that context.</code></pre>
+          </article>
+          <article class="proof-column after">
+            <h3>With Link</h3>
+            <ol>
+              <li>Ask: <code>brief me from Link before we continue</code>.</li>
+              <li>The agent gets reviewed memory plus source-backed wiki context.</li>
+              <li>Decisions can be remembered, reviewed, archived, or forgotten.</li>
+              <li>Another MCP agent can recall the same local memory.</li>
+            </ol>
+            <pre><code>User: brief me from Link before we continue
+Agent: Here is the relevant memory, sources, and next safe action.</code></pre>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -92,31 +131,36 @@
             <a class="button" href="troubleshooting.html">Troubleshooting</a>
           </div>
         </div>
-        <pre><code># macOS
+        <pre><code># macOS/Homebrew proof loop
 brew install gowtham0992/link/link
-link demo
-link next link-demo
-link serve link-demo
+lnk demo
+lnk next link-demo
+lnk serve link-demo
+lnk query "why does Link help agents?" link-demo --budget small
+lnk brief "working on agent memory" link-demo
+lnk benchmark "agent memory" link-demo
 
-# or from source
+# source checkout proof loop
 git clone https://github.com/gowtham0992/link.git
 cd link
 python3 link.py demo
 python3 link.py next link-demo
 python3 link.py serve link-demo
-
-# then try
-link query "why does Link help agents?" link-demo --budget small
-link brief "working on agent memory" link-demo
-link benchmark "agent memory" link-demo</code></pre>
+python3 link.py query "why does Link help agents?" link-demo --budget small
+python3 link.py brief "working on agent memory" link-demo
+python3 link.py benchmark "agent memory" link-demo</code></pre>
       </div>
     </section>
 
     <section id="surfaces">
       <div class="section-inner">
-        <p class="section-kicker">Three surfaces</p>
+        <p class="section-kicker">Access paths</p>
         <h2>Review it, script it, or let an agent call it.</h2>
-        <p class="lead">The web UI, CLI, and MCP server all operate on the same local Markdown wiki. Read it like a local document, script it from a terminal, or let an agent query the same memory through MCP.</p>
+        <p class="lead">The web UI, CLI, official skills, and MCP server all operate on the same local Markdown wiki. Read it like a local document, script it from a terminal, lazy-load a skill, or let an MCP client query the same memory.</p>
+        <div class="callout">
+          <strong>No background web server required</strong>
+          <code>lnk serve</code> only starts the human web viewer. The CLI, skills, and MCP server read the same local files directly, so agents can query Link when the viewer is closed.
+        </div>
         <div class="media-grid">
           <article class="media-card">
             <a href="ui.html"><img src="assets/link-ui-tour.gif" alt="Animated Link web UI walkthrough"></a>
@@ -179,7 +223,7 @@ link benchmark "agent memory" link-demo</code></pre>
       <div class="section-inner">
         <p class="section-kicker">Read next</p>
         <h2>Start small, then make it your agent memory.</h2>
-        <p class="lead">The docs are arranged by user path: try the demo, understand the model, wire MCP, then use the CLI and maintenance tools when you need them.</p>
+        <p class="lead">The docs are arranged by user path: try the demo, understand the model, choose MCP or skills, then use the CLI and maintenance tools when you need them.</p>
         <div class="grid">
           <article class="feature"><h3><a href="getting-started.html">First 10 minutes</a></h3><p>Run the demo, add one source, save one direct memory, and verify the loop.</p></article>
           <article class="feature"><h3><a href="why-link.html">Why Link?</a></h3><p>Understand where Link fits versus notes apps, hosted memory APIs, agent runtimes, and graph memory systems.</p></article>
@@ -187,8 +231,10 @@ link benchmark "agent memory" link-demo</code></pre>
           <article class="feature"><h3><a href="concepts.html">Concepts</a></h3><p>Understand raw sources, wiki pages, memories, graph indexes, and budgeted query packets.</p></article>
           <article class="feature"><h3><a href="mcp.html">MCP setup</a></h3><p>Install the MCP server and teach local agents how to use Link reliably.</p></article>
           <article class="feature"><h3><a href="cli.html">CLI reference</a></h3><p>Every local command, grouped by daily workflow and maintenance jobs.</p></article>
+          <article class="feature"><h3><a href="skills.html">Official skills</a></h3><p>Use lazy-loadable CLI workflows when MCP setup is more than you need.</p></article>
           <article class="feature"><h3><a href="api.html">HTTP API</a></h3><p>Local endpoints for status, query, memory, graph, validation, and web UI actions.</p></article>
           <article class="feature"><h3><a href="security.html">Security model</a></h3><p>Local-first constraints, secret scanning, backup behavior, and HTTP safety boundaries.</p></article>
+          <article class="feature"><h3><a href="team-security.html">Team security review</a></h3><p>Deployment patterns, audit exports, Git sharing, approval gates, and current limits for small teams.</p></article>
           <article class="feature"><h3><a href="contributing.html">Contributing</a></h3><p>PR expectations, test gates, branch policy, and what not to include in public changes.</p></article>
           <article class="feature"><h3><a href="troubleshooting.html">Troubleshooting</a></h3><p>Fix MCP setup, blocked ingest, stale graph indexes, slow wikis, and Python packaging issues.</p></article>
         </div>

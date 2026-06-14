@@ -23,6 +23,15 @@ bash link/integrations/codex/install.sh   # or claude-code, cursor, kiro, vscode
 The installer scaffolds `~/link/`, installs or upgrades `link-mcp`, writes agent
 instructions, and prints the exact MCP config for your machine.
 
+If Link is already installed and you only need to wire MCP into an agent, use
+the CLI helper from the main Link package:
+
+```bash
+link connect codex ~/link
+link connect codex ~/link --write
+link verify-mcp ~/link
+```
+
 After install, ask your agent:
 
 ```text
@@ -96,7 +105,9 @@ Most agents should call:
 7. `validate_wiki(strict=true)` after ingest or large edits.
 
 Use `remember_memory` only when the user explicitly approves saving durable
-memory. Use `propose_memories` or `capture_session` for proposal-only review.
+memory. Add `review_after` for memories that should return to the review inbox
+after a date, or `expires_at` for temporary context that should leave default
+recall after a date. Use `propose_memories` or `capture_session` for proposal-only review.
 For local CLI setup checks, `link verify-mcp --json` returns structured
 `issues` and `next_actions` that agents and scripts can consume without parsing
 terminal text.
@@ -131,17 +142,20 @@ In the local web proposal picker, unreadable raw files are surfaced as
 | `memory_audit(limit?, project?)` | Read-only health report for memory review backlog, saved raw captures, risk factors, and next actions. |
 | `memory_profile(limit?, project?)` | Summarize what Link remembers by type, scope, status, recency, preferences, decisions, and project context. |
 | `memory_inbox(limit?, include_archived?)` | List memories that need user review, cleanup, or stronger metadata with primary actions and tool-call hints. |
+| `memory_log(limit?, include_captures?)` | List recent memory lifecycle changes from `wiki/log.md` without raw source or memory bodies. |
+| `memory_wins(limit?, project?)` | Summarize local proof signals for what Link memory is carrying without telemetry. |
 | `review_memory(identifier, note?)` | Mark a confirmed memory as reviewed. |
 | `explain_memory(identifier)` | Explain provenance, lifecycle, graph links, review issues, and recall readiness for one memory. |
 | `recall_memory(query, limit?, include_archived?, project?)` | Search durable local memories for preferences, decisions, and project context. |
-| `remember_memory(memory, title?, memory_type?, scope?, tags?, source?, allow_duplicate?, allow_conflict?, project?)` | Save an explicit user-approved local memory under `wiki/memories/`; strong duplicates and likely conflicts require explicit override. |
+| `remember_memory(memory, title?, memory_type?, scope?, tags?, source?, allow_duplicate?, allow_conflict?, project?, visibility?, review_after?, expires_at?)` | Save an explicit user-approved local memory under `wiki/memories/`; strong duplicates and likely conflicts require explicit override. `visibility` accepts `private`, `project`, or `team` sharing intent. `review_after` accepts `YYYY-MM-DD` for scheduled re-checks; `expires_at` accepts `YYYY-MM-DD` for temporary memories that should leave default recall. |
 | `propose_memories(text, source?, limit?, project?)` | Propose durable memories from chat/session notes without writing them. |
 | `capture_session(text, title?, source?, limit?, project?)` | Save long chat/session notes under `raw/memory-captures/` and return proposal-only memory candidates plus secret-looking content warnings. |
 | `capture_inbox(limit?, project?)` | Review saved raw captures with redacted snippets, secret-warning labels, and accept/redact/delete commands. |
-| `accept_capture(capture, index?, title?, memory_type?, scope?, tags?, project?, allow_duplicate?, allow_conflict?)` | Accept one proposal from a saved raw capture using duplicate/conflict-safe memory writes. |
+| `accept_capture(capture, index?, title?, memory_type?, scope?, visibility?, tags?, project?, allow_duplicate?, allow_conflict?)` | Accept one proposal from a saved raw capture using duplicate/conflict-safe memory writes. |
 | `redact_capture(capture, replacement?)` | Redact secret-looking values from a saved raw capture after user approval. |
 | `delete_capture(capture, confirm?)` | Delete a saved raw capture after explicit confirmation. |
 | `update_memory(identifier, memory, source?, allow_conflict?, project?)` | Merge new information into an existing memory, blocking likely conflicts with other active memories by default. |
+| `set_memory_visibility(identifier, visibility)` | Change a memory's sharing intent between `private`, `project`, and `team` after explicit user approval. |
 | `archive_memory(identifier, reason?)` | Archive stale or wrong memory without deleting the Markdown page. |
 | `restore_memory(identifier)` | Restore archived memory to active status. |
 | `forget_memory(identifier, confirm?)` | Permanently delete a memory only after explicit user confirmation; prefer archive for reversible cleanup. |
@@ -154,7 +168,7 @@ In the local web proposal picker, unreadable raw files are surfaced as
 | `rebuild_index()` | Regenerate `wiki/index.md` from current pages so the human-readable catalog stays complete. |
 | `rebuild_backlinks()` | Rebuild `_backlinks.json` after ingest or lint. |
 
-Use `link_status` when connecting to Link or troubleshooting setup; if status reports pending, failed, or interrupted writes, call `link_operations` before attempting repair. If the user asks what to try after install, call `starter_prompts`. If status reports a missing or old schema marker, call `migrate_wiki` before other writes. Use `ingest_status` when the user drops files into `raw/` or asks what still needs ingest; if it returns `blocked_secrets`, `blocked_raw_access`, `blocked_source_access`, scan warnings, or secret warnings, do not read or ingest flagged raw files until the user redacts them, fixes local file access, or repairs unreadable source pages. Start with `query_link` for substantive questions that may need both local memory and wiki context. Use each item provenance to explain why Link knows something; if `budget_report` says context was truncated, use the returned `follow_up` action before scanning files manually. Use `memory_brief`, passing the user's task as `query` when available, at session start or before personalized/project work. Pass `project` for repo-specific work so Link returns broad user/global memory plus that project's memory, while keeping other explicit projects out of recall and duplicate/conflict checks. After ingesting sources or substantially editing wiki pages, call `rebuild_index`, `rebuild_backlinks`, then `validate_wiki`, before saying the wiki is updated. Use `backup_wiki` before broad repairs or risky local wiki edits; raw sources are excluded unless the user explicitly asks to include them. Use `memory_profile` to inspect the user/project memory shape, `memory_audit` to see review/capture risks, `memory_inbox` to find memories needing human review and the primary action for each item, `explain_memory` to audit why a memory exists, then `recall_memory` for focused preferences, decisions, and project context. Use `capture_session` for long chat/session notes that should be preserved locally before approval; use `propose_memories` when no raw capture is needed. Both return candidates only. Use `capture_inbox` to review saved captures before accepting, redacting, or deleting them. If `capture_session` reports secret warnings, ask before calling `redact_capture`. Use `accept_capture` only after the user approves one captured proposal. Use `delete_capture` only after explicit user confirmation. If `remember_memory` or `accept_capture` returns duplicate candidates, use `update_memory` on the existing memory unless the user confirms a separate memory. If it returns conflict candidates, ask the user whether to update or archive the older memory before forcing a conflict. Use `archive_memory`, not deletion, when a memory is stale or wrong. Use `forget_memory` only when the user explicitly asks for permanent deletion. Use `get_context` when you need the full primary source page after `query_link` shows it is relevant. Use `get_graph_summary` before `get_graph` when the wiki may be large or the agent only needs graph orientation.
+Use `link_status` when connecting to Link or troubleshooting setup; if status reports pending, failed, or interrupted writes, call `link_operations` before attempting repair. If the user asks what to try after install, call `starter_prompts`. If status reports a missing or old schema marker, call `migrate_wiki` before other writes. Use `ingest_status` when the user drops files into `raw/` or asks what still needs ingest; if it returns `blocked_secrets`, `blocked_raw_access`, `blocked_source_access`, scan warnings, or secret warnings, do not read or ingest flagged raw files until the user redacts them, fixes local file access, or repairs unreadable source pages. Start with `query_link` for substantive questions that may need both local memory and wiki context. Use each item provenance to explain why Link knows something; if `budget_report` says context was truncated, use the returned `follow_up` action before scanning files manually. Use `memory_brief`, passing the user's task as `query` when available, at session start or before personalized/project work. Pass `project` for repo-specific work so Link returns broad user/global memory plus that project's memory, while keeping other explicit projects out of recall and duplicate/conflict checks. After ingesting sources or substantially editing wiki pages, call `rebuild_index`, `rebuild_backlinks`, then `validate_wiki`, before saying the wiki is updated. Use `backup_wiki` before broad repairs or risky local wiki edits; raw sources are excluded unless the user explicitly asks to include them. Use `memory_profile` to inspect the user/project memory shape, `memory_audit` to see review/capture risks, `memory_inbox` to find memories needing human review and the primary action for each item, `memory_log` to see recent memory lifecycle changes without raw bodies, `memory_wins` to summarize local proof signals without telemetry, `explain_memory` to audit why a memory exists, then `recall_memory` for focused preferences, decisions, and project context. Use `capture_session` for long chat/session notes that should be preserved locally before approval; use `propose_memories` when no raw capture is needed. Both return candidates only. Use `capture_inbox` to review saved captures before accepting, redacting, or deleting them. If `capture_session` reports secret warnings, ask before calling `redact_capture`. Use `accept_capture` only after the user approves one captured proposal. Use `delete_capture` only after explicit user confirmation. If `remember_memory` or `accept_capture` returns duplicate candidates, use `update_memory` on the existing memory unless the user confirms a separate memory. If it returns conflict candidates, ask the user whether to update or archive the older memory before forcing a conflict. Use `archive_memory`, not deletion, when a memory is stale or wrong. Use `forget_memory` only when the user explicitly asks for permanent deletion. Use `get_context` when you need the full primary source page after `query_link` shows it is relevant. Use `get_graph_summary` before `get_graph` when the wiki may be large or the agent only needs graph orientation.
 Web approval APIs keep the safe path only: duplicate/conflict overrides should
 go through CLI or MCP after explicit human review.
 

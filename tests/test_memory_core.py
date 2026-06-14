@@ -22,12 +22,14 @@ from link_core.memory import (  # noqa: E402
     memory_inbox,
     memory_log_entries,
     memory_profile,
+    memory_review_issues,
     memory_records,
     propose_memories_from_text,
     recall_memories,
     recall_state,
     resolve_memory_page,
     set_memory_status,
+    set_memory_visibility,
     update_memory_page,
     write_memory_page,
 )
@@ -110,6 +112,86 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(recalled[0]["review_issue_count"], 0)
         self.assertEqual(recalled[0]["highest_review_severity"], "none")
         self.assertNotIn("body", recalled[0])
+
+    def test_review_after_marks_memory_due(self):
+        record = {
+            "name": "review-me",
+            "memory_type": "preference",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-01T00:00:00Z",
+            "source": "unit test",
+            "review_status": "reviewed",
+            "review_after": "2026-05-20",
+            "tldr": "Review me later.",
+        }
+
+        issues = memory_review_issues(record, today="2026-05-25")
+        inbox = memory_inbox([record])
+
+        self.assertIn("review_due", [issue["code"] for issue in issues])
+        self.assertEqual(inbox["review_count"], 1)
+        self.assertEqual(inbox["items"][0]["primary_action"]["kind"], "review")
+
+    def test_expires_at_disables_default_recall_and_marks_inbox(self):
+        record = {
+            "name": "expired-context",
+            "memory_type": "project",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-01T00:00:00Z",
+            "source": "unit test",
+            "review_status": "reviewed",
+            "expires_at": "2000-01-01",
+            "tldr": "Temporary launch context.",
+            "snippet": "Temporary launch context.",
+        }
+
+        issues = memory_review_issues(record, today="2026-05-25")
+        inbox = memory_inbox([record])
+        recall = recall_memories([record], "temporary launch")
+        state = recall_state(record, issues)
+
+        self.assertIn("expired", [issue["code"] for issue in issues])
+        self.assertEqual(inbox["review_count"], 1)
+        self.assertEqual(inbox["items"][0]["primary_action"]["kind"], "archive")
+        self.assertEqual(recall, [])
+        self.assertEqual(state["state"], "disabled")
+        self.assertIn("expired", state["reason"])
+
+    def test_review_after_rejects_invalid_dates(self):
+        record = {
+            "name": "bad-review-date",
+            "memory_type": "preference",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-01T00:00:00Z",
+            "source": "unit test",
+            "review_status": "reviewed",
+            "review_after": "tomorrow",
+            "tldr": "Invalid review date.",
+        }
+
+        issues = memory_review_issues(record)
+
+        self.assertIn("invalid_review_after", [issue["code"] for issue in issues])
+
+    def test_expires_at_rejects_invalid_dates(self):
+        record = {
+            "name": "bad-expires-date",
+            "memory_type": "preference",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-01T00:00:00Z",
+            "source": "unit test",
+            "review_status": "reviewed",
+            "expires_at": "later",
+            "tldr": "Invalid expiry date.",
+        }
+
+        issues = memory_review_issues(record)
+
+        self.assertIn("invalid_expires_at", [issue["code"] for issue in issues])
 
     def test_memory_inbox_returns_action_plan(self):
         records = [
@@ -810,6 +892,34 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertNotIn("archive_reason:", restored_text)
         self.assertEqual(logged[-1][1], "restore-memory")
 
+        visibility = set_memory_visibility(
+            wiki,
+            "prefer-focused-commits",
+            "team",
+            timestamp="2026-05-05T05:30:00Z",
+            records=memory_records(wiki),
+            log_writer=log_writer,
+        )
+        visibility_text = memory_path.read_text(encoding="utf-8")
+
+        self.assertTrue(visibility["updated"])
+        self.assertEqual(visibility["previous_visibility"], "project")
+        self.assertEqual(visibility["visibility"], "team")
+        self.assertIn("visibility: team", visibility_text)
+        self.assertEqual(logged[-1][1], "set-memory-visibility")
+
+        unchanged_visibility = set_memory_visibility(
+            wiki,
+            "prefer-focused-commits",
+            "team",
+            timestamp="2026-05-05T05:35:00Z",
+            records=memory_records(wiki),
+            log_writer=log_writer,
+        )
+
+        self.assertFalse(unchanged_visibility["updated"])
+        self.assertEqual(unchanged_visibility["visibility"], "team")
+
         (wiki / "index.md").write_text("### memories\n- [[prefer-focused-commits]] - old entry\n", encoding="utf-8")
         denied = forget_memory_page(
             wiki,
@@ -858,6 +968,8 @@ class MemoryCoreTests(unittest.TestCase):
             tags="git, release",
             source="unit test",
             timestamp="2026-05-05T06:00:00Z",
+            review_after="2026-08-01",
+            expires_at="2026-12-01",
             records=[],
             log_writer=log_writer,
             rebuild_backlinks=lambda: rebuilds.append(True) or True,
@@ -872,7 +984,14 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(rebuilds, [True])
         self.assertIn('title: "Prefer release branches"', memory_text)
         self.assertIn("memory_type: preference", memory_text)
+        self.assertIn("visibility: project", memory_text)
+        self.assertIn('review_after: "2026-08-01"', memory_text)
+        self.assertIn('expires_at: "2026-12-01"', memory_text)
         self.assertIn("tags: [memory, preference, git, release]", memory_text)
+        self.assertEqual(created["review_after"], "2026-08-01")
+        self.assertEqual(created["expires_at"], "2026-12-01")
+        self.assertEqual(created["visibility"], "project")
+        self.assertEqual(memory_records(wiki)[0]["visibility"], "project")
         self.assertIn("## Source\n\nunit test", memory_text)
         self.assertIn("[[prefer-release-branches]]", index_text)
         self.assertEqual(logged[-1][1], "remember")
@@ -892,6 +1011,7 @@ class MemoryCoreTests(unittest.TestCase):
         )
         self.assertFalse(duplicate["created"])
         self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["visibility"], "project")
         self.assertEqual(duplicate["candidates"][0]["name"], "prefer-release-branches")
 
         conflict = write_memory_page(
@@ -940,6 +1060,43 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertTrue(duplicate_override["created"])
         self.assertTrue(duplicate_override["duplicate_override"])
         self.assertEqual(duplicate_override["name"], "prefer-release-branches-2")
+
+    def test_write_memory_page_allows_explicit_team_visibility(self):
+        root = Path(tempfile.mkdtemp(prefix="link-memory-visibility-"))
+        wiki = root / "wiki"
+        wiki.mkdir(parents=True)
+
+        created = write_memory_page(
+            wiki,
+            "Team should share release checklist decisions.",
+            title="Team release checklist",
+            memory_type="decision",
+            scope="project",
+            visibility="team",
+            tags="release",
+            source="unit test",
+            timestamp="2026-05-05T06:00:00Z",
+            records=[],
+        )
+
+        self.assertTrue(created["created"])
+        self.assertEqual(created["visibility"], "team")
+        self.assertIn("visibility: team", (wiki / "memories/team-release-checklist.md").read_text(encoding="utf-8"))
+        self.assertEqual(memory_profile(memory_records(wiki))["by_visibility"], {"team": 1})
+
+        with self.assertRaises(ValueError):
+            write_memory_page(
+                wiki,
+                "Bad visibility.",
+                title="Bad",
+                memory_type="note",
+                scope="user",
+                visibility="public",
+                tags="",
+                source="unit test",
+                timestamp="2026-05-05T06:01:00Z",
+                records=[],
+            )
 
 
 if __name__ == "__main__":

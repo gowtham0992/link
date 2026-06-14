@@ -263,6 +263,7 @@ section:nth-child(2n),
 
 .feature,
 .panel {
+  min-width: 0;
   min-height: 198px;
   padding: 20px;
   border: 3px solid var(--border);
@@ -289,6 +290,39 @@ section:nth-child(2n),
   margin-top: 34px;
 }
 
+.proof-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin-top: 34px;
+}
+
+.proof-column {
+  min-width: 0;
+  padding: 22px;
+  border: 3px solid var(--border);
+  background: var(--paper-2);
+  box-shadow: var(--shadow);
+}
+
+.proof-column.before { background: #ffe1dc; }
+.proof-column.after { background: #dff8ef; }
+
+.proof-column ol {
+  margin: 14px 0 20px;
+  padding-left: 22px;
+}
+
+.proof-column li {
+  margin: 7px 0;
+  font-weight: 650;
+}
+
+.proof-column pre {
+  box-shadow: none;
+  font-size: 13px;
+}
+
 .screenshot-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -304,6 +338,7 @@ section:nth-child(2n),
 }
 
 .media-card {
+  min-width: 0;
   padding: 12px;
   border: 3px solid var(--border);
   background: var(--paper-2);
@@ -337,6 +372,7 @@ section:nth-child(2n),
 }
 
 .screenshot-card {
+  min-width: 0;
   margin: 0;
   padding: 12px;
   border: 3px solid var(--border);
@@ -346,6 +382,7 @@ section:nth-child(2n),
 }
 
 .architecture-card {
+  min-width: 0;
   margin: 34px 0 0;
   padding: 12px;
   border: 3px solid var(--border);
@@ -386,6 +423,7 @@ figcaption {
 
 pre {
   position: relative;
+  max-width: 100%;
   overflow-x: auto;
   margin: 0;
   padding: 20px;
@@ -571,13 +609,14 @@ footer a {
   .grid,
   .grid.two-up,
   .flow,
+  .proof-grid,
   .screenshot-row,
   .media-grid,
   .compare,
   .doc-table,
   .choice-table,
   .choice-table div {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .toc {

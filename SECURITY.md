@@ -49,6 +49,7 @@ working directory.
 
 ## Reporting vulnerabilities
 
-Please report security issues through GitHub issues or private maintainer
-contact channels. Avoid posting secrets, private wiki content, or raw source
-files in public reports.
+Please use a private maintainer contact channel for security issues first. Do
+not post secrets, private wiki content, raw source files, or exploitable details
+in public GitHub issues. If a public issue is the only available path, keep it
+high level and ask for a private follow-up channel.

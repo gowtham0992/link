@@ -6,6 +6,7 @@ import errno
 import html
 import http.server
 import json
+import os
 import re
 import socketserver
 import sys
@@ -53,6 +54,12 @@ from link_core.log import (
     append_log as _core_append_log,
     utc_timestamp as _core_utc_timestamp,
 )
+from link_core.memory_log import (
+    memory_log_payload as _core_memory_log_payload,
+)
+from link_core.memory_wins import (
+    memory_wins_payload as _core_memory_wins_payload,
+)
 from link_core.markdown import (
     markdown_to_html as _core_markdown_to_html,
 )
@@ -74,6 +81,9 @@ from link_core.doctor import (
 from link_core.version import (
     LINK_VERSION,
 )
+from link_core.mcp_verify import (
+    set_link_command_override as _core_set_link_command_override,
+)
 from link_core.web_assets import CSS  # noqa: F401 - kept as serve.CSS for tests and compatibility
 from link_core.web_memory import (
     memory_dashboard_next_actions as _core_memory_dashboard_next_actions,
@@ -85,8 +95,10 @@ from link_core.web_memory_pages import (
     render_captures_page as _core_render_captures_page,
     render_inbox_page as _core_render_inbox_page,
     render_memory_explanation_page as _core_render_memory_explanation_page,
+    render_memory_log_page as _core_render_memory_log_page,
     render_memory_audit_page as _core_render_memory_audit_page,
     render_memory_dashboard_page as _core_render_memory_dashboard_page,
+    render_memory_wins_page as _core_render_memory_wins_page,
     render_profile_page as _core_render_profile_page,
 )
 from link_core.web_layout import (
@@ -563,6 +575,9 @@ def _remember_memory_from_web(payload: dict[str, object]) -> dict[str, object]:
         _clean_text_input(payload.get("source") or "web approval", max_len=500),
         _utc_timestamp(),
         project=_clean_text_input(payload.get("project"), max_len=80) or None,
+        visibility=_clean_text_input(payload.get("visibility"), max_len=30) or None,
+        review_after=_clean_text_input(payload.get("review_after"), max_len=40) or None,
+        expires_at=_clean_text_input(payload.get("expires_at"), max_len=40) or None,
         records=_memory_records(),
         allow_duplicate=False,
         allow_conflict=False,
@@ -763,6 +778,23 @@ def _memory_audit(limit: int = 10, project: str | None = None) -> dict[str, obje
     return payload
 
 
+def _memory_log(limit: int = 50, include_captures: bool = True) -> dict[str, object]:
+    return _core_memory_log_payload(
+        WIKI_DIR,
+        limit=max(1, min(limit, 200)),
+        include_captures=include_captures,
+    )
+
+
+def _memory_wins(limit: int = 6, project: str | None = None) -> dict[str, object]:
+    return _core_memory_wins_payload(
+        WIKI_DIR,
+        limit=max(1, min(limit, 50)),
+        project=project,
+        records=_memory_records(),
+    )
+
+
 def _json_for_script(data) -> str:
     """Serialize JSON for direct embedding inside a <script> tag."""
     return (
@@ -785,12 +817,25 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 def _is_allowed_static_file(path: Path) -> bool:
     root = Path(__file__).parent.resolve()
+    link_root = WIKI_DIR.parent.resolve()
     return _core_is_allowed_static_file(
         path,
         RAW_DIR,
-        (root / "logo.svg", root / "logo.png"),
+        (
+            link_root / "logo.svg",
+            link_root / "logo.png",
+            root / "logo.svg",
+            root / "logo.png",
+        ),
         RAW_STATIC_TYPES,
     )
+
+
+def _brand_file(name: str) -> Path:
+    link_asset = WIKI_DIR.parent / name
+    if link_asset.exists():
+        return link_asset
+    return Path(__file__).parent / name
 
 
 def _resolve_raw_static_path(url_fragment: str) -> tuple[Path | None, str | None]:
@@ -877,6 +922,8 @@ def _render_more():
         ("/inbox", "Inbox", "Confirm, update, archive, or explain memories needing review."),
         ("/captures", "Captures", "Inspect saved raw session captures before accepting them."),
         ("/profile", "Profile", "See what Link remembers by type, scope, status, and recency."),
+        ("/wins", "Wins", "Show local proof signals for what Link memory is carrying."),
+        ("/memory-log", "Memory Log", "See recent memory lifecycle changes without opening raw log text."),
         ("/page/log", "Log", "Read the append-only wiki operation log."),
         ("/all", "All Pages", "Browse grouped wiki pages with filters and pagination."),
     ]
@@ -1059,6 +1106,18 @@ def _render_ingest():
 
 def _render_inbox(project: str | None = None):
     return _core_render_inbox_page(_memory_inbox(limit=50, project=project), page_href=_page_href, layout=_layout)
+
+
+def _render_memory_log():
+    return _core_render_memory_log_page(_memory_log(limit=100), layout=_layout)
+
+
+def _render_memory_wins(project: str | None = None):
+    return _core_render_memory_wins_page(
+        _memory_wins(limit=8, project=project),
+        page_href=_page_href,
+        layout=_layout,
+    )
 
 
 def _render_explain_memory(identifier: str):
@@ -1325,6 +1384,8 @@ def _api_discovery_payload() -> dict[str, object]:
                 "/api/memory-audit",
                 "/api/memory-profile",
                 "/api/memory-inbox",
+                "/api/wins",
+                "/api/memory-log",
                 "/api/capture-inbox",
                 "/api/explain-memory",
                 "/api/validate",
@@ -1503,9 +1564,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
         if path == "/logo.svg":
-            self._file(Path(__file__).parent / "logo.svg", "image/svg+xml")
+            self._file(_brand_file("logo.svg"), "image/svg+xml")
         elif path == "/logo.png":
-            self._file(Path(__file__).parent / "logo.png", "image/png")
+            self._file(_brand_file("logo.png"), "image/png")
         elif path.startswith("/raw/"):
             raw_path, content_type = _resolve_raw_static_path(path[5:])
             if raw_path and content_type:
@@ -1545,6 +1606,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._ok(_render_explain_memory(identifier))
         elif path == "/profile":
             self._ok(_render_profile(project=_query_text(query, "project", max_len=80)))
+        elif path == "/wins":
+            self._ok(_render_memory_wins(project=_query_text(query, "project", max_len=80)))
+        elif path == "/memory-log":
+            self._ok(_render_memory_log())
         elif path == "/all":
             self._ok(_render_all(query))
         elif path == "/graph":
@@ -1632,6 +1697,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/api/query-link",
             "/api/memory-audit",
             "/api/memory-inbox",
+            "/api/wins",
+            "/api/memory-log",
             "/api/capture-inbox",
         }:
             self._handle_memory_api_get(path, query)
@@ -1738,6 +1805,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     include_archived=include_archived,
                     project=_query_text(query, "project", max_len=80),
                 ))
+        elif path == "/api/wins":
+            limit = self._query_limit_or_reply(query, "6")
+            if limit is not None:
+                self._json(_memory_wins(limit=limit, project=_query_text(query, "project", max_len=80)))
+        elif path == "/api/memory-log":
+            limit = self._query_limit_or_reply(query, "50")
+            if limit is not None:
+                include_captures = query.get("include_captures", ["true"])[0].lower() not in {"0", "false", "no"}
+                self._json(_memory_log(limit=limit, include_captures=include_captures))
         elif path == "/api/capture-inbox":
             limit = self._query_limit_or_reply(query, "20")
             if limit is not None:
@@ -1966,6 +2042,10 @@ def _serve_bind_error_message(exc: OSError, port: int) -> str:
 def main():
     global PORT, WIKI_DIR, RAW_DIR
     PORT, root = _parse_serve_args(sys.argv[1:], default_port=PORT, default_root=ROOT)
+    if os.environ.get("LINK_CLI_COMMAND"):
+        _core_set_link_command_override(None)
+    else:
+        _core_set_link_command_override([sys.executable, str(root / "link.py")])
     WIKI_DIR = root / "wiki"
     RAW_DIR = root / "raw"
     try:

@@ -33,7 +33,7 @@ class ToolContractTests(unittest.TestCase):
             shutil.copy2(ROOT / "mcp_package/link_mcp/server.py", tmp / "mcp_package/link_mcp/server.py")
 
             (tmp / "docs").mkdir()
-            cli_reference = "\n".join(f"`link {command}`" for command in sorted(contract.DOCS_CLI_COMMANDS))
+            cli_reference = "\n".join(f"`lnk {command}`" for command in sorted(contract.DOCS_CLI_COMMANDS))
             mcp_reference = "\n".join(
                 tool for tool in sorted(contract.EXPECTED_MCP_TOOLS) if tool != "query_link"
             )

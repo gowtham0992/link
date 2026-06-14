@@ -21,10 +21,13 @@
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
       <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
       <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
       <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
       <a href="api.html" aria-current="page">API</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
@@ -67,6 +70,8 @@ GET /api/memory-brief?q=task&amp;project=slug
 GET /api/memory-audit?project=slug
 GET /api/memory-profile?project=slug
 GET /api/memory-inbox?project=slug
+GET /api/wins?project=slug
+GET /api/memory-log?limit=50
 GET /api/capture-inbox?project=slug
 GET /api/explain-memory?memory=name
 GET /api/query-link?q=query&amp;budget=small|medium|large
@@ -90,6 +95,7 @@ POST /api/restore-memory
 POST /api/rebuild-backlinks
 POST /api/rebuild-index</code></pre>
         <p>Web memory approval APIs intentionally do not honor duplicate/conflict override flags. If Link reports a duplicate or conflict, review the existing memory and use the CLI or MCP tool explicitly after deciding what should coexist.</p>
+        <p><code>POST /api/remember-memory</code> accepts optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled review, and temporary-memory expiry.</p>
 
         <h2 id="large">Large Wiki Endpoints</h2>
         <p>Agents and integrations should prefer bounded endpoints over full dumps:</p>

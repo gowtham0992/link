@@ -21,10 +21,13 @@
     <div class="nav-links">
       <a href="getting-started.html" aria-current="page">Start</a>
       <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
       <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
       <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
       <a href="api.html">API</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
@@ -36,7 +39,7 @@
     <div class="hero-inner">
       <span class="eyebrow">First 10 minutes</span>
       <h1>Turn one local note into agent memory.</h1>
-      <p>Start with the demo, add one real source, save one explicit memory, then ask an MCP-enabled agent to query Link.</p>
+      <p>Start with the demo, add one real source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.</p>
     </div>
   </header>
 
@@ -56,9 +59,9 @@
         <p>The demo is the fastest proof of value. It already has raw sources, wiki pages, memories, backlinks, and graph data.</p>
         <p>macOS with Homebrew:</p>
 <pre><code>brew install gowtham0992/link/link
-link demo
-link next link-demo
-link serve link-demo</code></pre>
+lnk try
+lnk serve link-demo</code></pre>
+        <p>The Homebrew formula is maintained in the public <a href="https://github.com/gowtham0992/homebrew-link">gowtham0992/homebrew-link</a> tap.</p>
         <p>Or from source:</p>
         <pre><code>git clone https://github.com/gowtham0992/link.git
 cd link
@@ -71,16 +74,21 @@ cd link
 py link.py demo
 py link.py next link-demo
 py link.py serve link-demo</code></pre>
+        <p>Use <code>lnk try</code> for the shortest Homebrew proof loop. It creates the demo, checks readiness, runs a compact query and brief, and prints the viewer command plus the first agent prompts. From source, use <code>python3 link.py try</code> or <code>py link.py try</code>.</p>
         <div class="callout">
           <strong>Judge the generated demo</strong>
           The repo's root <code>wiki/</code> is only a scaffold for local development and personal testing. Generated content in <code>wiki/</code>, <code>raw/</code>, and <code>link-demo/</code> is ignored by git so private memory is not published by accident.
         </div>
-        <p>The demo includes one pending memory intentionally, so the review inbox and explain-memory workflow are visible. Run <code>link review-memory prefer-local-personal-memory link-demo</code> if you want memory audit to be fully clear.</p>
+        <div class="callout">
+          <strong>Viewer is optional</strong>
+          <code>lnk serve</code> is only for browsing Link in a local web UI. CLI commands, official skills, and MCP-enabled agents work without it because they read the same local <code>wiki/</code> files directly.
+        </div>
+        <p>The demo includes one pending memory intentionally, so the review inbox and explain-memory workflow are visible. Run <code>lnk review-memory prefer-local-personal-memory link-demo</code> if you want memory audit to be fully clear.</p>
         <p>Open <code>http://127.0.0.1:3000</code>, then inspect <code>/brief</code>, <code>/memory</code>, <code>/ingest</code>, <code>/graph</code>, and <code>/health</code>. Open <strong>more</strong> for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts <code>localhost</code> too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups.</p>
-        <pre><code>link query "why does Link help agents?" link-demo --budget small
-link brief "working on agent memory" link-demo
-link benchmark "agent memory" link-demo
-link health link-demo</code></pre>
+        <pre><code>lnk query "why does Link help agents?" link-demo --budget small
+lnk brief "working on agent memory" link-demo
+lnk benchmark "agent memory" link-demo
+lnk health link-demo</code></pre>
 
         <h2 id="install">2. Install Link For Your Agent</h2>
         <p>From the cloned checkout, run the installer for the agent you use. Re-running the same installer updates code and instructions without replacing existing wiki data.</p>
@@ -92,7 +100,14 @@ bash integrations/copilot/install.sh
 bash integrations/vscode/install.sh
 bash integrations/antigravity/install.sh</code></pre>
         <p>Use <code>--project</code> for a repo-local Link install. Project-scoped memory then stays separate from other project memory while still allowing broad user memory to be recalled.</p>
-        <p>The shell installers target macOS/Linux-style agent config paths. On Windows, run Link from source and use the MCP-only setup in the MCP guide until a Windows-specific installer exists.</p>
+        <p>On Windows PowerShell, use the matching <code>install.ps1</code> script:</p>
+        <pre><code>.\integrations\codex\install.ps1
+.\integrations\kiro\install.ps1
+.\integrations\claude-code\install.ps1
+.\integrations\cursor\install.ps1
+.\integrations\copilot\install.ps1
+.\integrations\vscode\install.ps1
+.\integrations\antigravity\install.ps1</code></pre>
 
         <h2 id="source">3. Add One Source</h2>
         <p>Open the local viewer and use <strong>ingest -> Add Raw Source</strong>, or write a first note directly:</p>
@@ -110,14 +125,14 @@ I am testing Link as local personal memory for agents.
 Raw notes stay local. The agent turns them into source-cited wiki pages.
 EOF</code></pre>
         <p>Check pending work:</p>
-        <pre><code>link ingest-status</code></pre>
+        <pre><code>lnk ingest-status</code></pre>
         <div class="callout">
           <strong>Safety gate</strong>
           Link blocks normal ingest guidance when raw files contain secret-looking values or cannot be read safely. Redact or fix those local files first.
         </div>
         <div class="callout">
           <strong>Existing Link data</strong>
-          If you already have files in <code>~/link/raw/</code>, <code>link ingest-status</code> may point to a different pending file first. If <code>first-memory.md</code> was already ingested and you overwrite it, Link marks that raw file as stale and asks the agent to refresh the existing source page.
+          If you already have files in <code>~/link/raw/</code>, <code>lnk ingest-status</code> may point to a different pending file first. If <code>first-memory.md</code> was already ingested and you overwrite it, Link marks that raw file as stale and asks the agent to refresh the existing source page.
         </div>
 
         <h2 id="memory">4. Save One Direct Memory</h2>
@@ -126,11 +141,11 @@ EOF</code></pre>
 brief me from Link before we continue
 what does Link remember about local personal memory?</code></pre>
         <p>Or use the CLI:</p>
-        <pre><code>link remember "I am testing Link as local personal memory for agents." --type preference --scope user --tags onboarding
-link brief "local personal memory"
-link recall "local personal memory"
-link profile
-link memory-audit</code></pre>
+        <pre><code>lnk remember "I am testing Link as local personal memory for agents." --type preference --scope user --tags onboarding
+lnk brief "local personal memory"
+lnk recall "local personal memory"
+lnk profile
+lnk memory-audit</code></pre>
 
         <h2 id="ingest">5. Ask The Agent To Ingest</h2>
         <p>In your agent chat, ask:</p>
@@ -139,14 +154,14 @@ link memory-audit</code></pre>
         <p>Return to <code>/ingest</code> after the agent finishes. Link shows which raw files are represented and gives follow-up prompts for proposals or retrieval checks.</p>
 
         <h2 id="verify">6. Verify The Loop</h2>
-        <pre><code>link doctor --fix
-link health
-link ingest-status
-link validate
-link memory-audit
-link operations
-link verify-mcp</code></pre>
-        <p><code>link verify-mcp</code> should report <code>Result: ready</code>. Then ask your MCP-enabled agent:</p>
+        <pre><code>lnk doctor --fix
+lnk health
+lnk ingest-status
+lnk validate
+lnk memory-audit
+lnk operations
+lnk verify-mcp</code></pre>
+        <p><code>lnk verify-mcp</code> should report <code>Result: ready</code> when you use MCP. Then ask your agent:</p>
         <pre><code>query Link for first Link memory</code></pre>
         <p>If the answer comes from Link, local agent memory is working.</p>
       </article>

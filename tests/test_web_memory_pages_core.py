@@ -10,8 +10,10 @@ from link_core.web_memory_pages import (  # noqa: E402
     render_captures_page,
     render_inbox_page,
     render_memory_explanation_page,
+    render_memory_log_page,
     render_memory_audit_page,
     render_memory_dashboard_page,
+    render_memory_wins_page,
     render_profile_page,
 )
 
@@ -84,7 +86,7 @@ def test_render_memory_dashboard_page_shows_counts_next_actions_and_sections():
         "archived_count": 0,
         "by_type": {"preference": 2},
         "by_scope": {"project": 1},
-        "next_actions": [{"label": "Review", "detail": "Confirm memory", "command": "link memory-inbox"}],
+        "next_actions": [{"label": "Review", "detail": "Confirm memory", "command": "lnk memory-inbox"}],
         "review": [],
         "captures": [],
         "recent_updates": [],
@@ -100,7 +102,7 @@ def test_render_memory_dashboard_page_shows_counts_next_actions_and_sections():
     assert 'data-copy-text="brief me from Link for project alpha"' in html
     assert 'data-copy-text="audit Link memory for project alpha"' in html
     assert "<strong>Types:</strong> preference: 2" in html
-    assert "link memory-inbox" in html
+    assert "lnk memory-inbox" in html
     assert "No memories need review." in html
 
 
@@ -182,6 +184,31 @@ def test_render_memory_audit_page_reports_risks():
     assert "Review &lt;memory&gt;" in html
 
 
+def test_render_memory_log_page_shows_lifecycle_events():
+    payload = {
+        "count": 1,
+        "total_matching": 1,
+        "privacy_note": "Memory bodies are not included.",
+        "entries": [
+            {
+                "timestamp": "2026-05-25T00:00:00Z",
+                "operation": "remember",
+                "category": "memory",
+                "description": "Prefer local memory",
+                "summary": "Created memory: wiki/memories/prefer-local-memory.md",
+                "memory_paths": ["wiki/memories/prefer-local-memory.md"],
+                "details": ["Created: memories/prefer-local-memory.md"],
+            }
+        ],
+    }
+
+    html = render_memory_log_page(payload, layout=_layout)
+
+    assert "Memory Changelog" in html
+    assert "Prefer local memory" in html
+    assert "Memory bodies are not included" in html
+
+
 def test_render_captures_page_shows_redaction_and_read_warnings():
     payload = {
         "project": "alpha",
@@ -216,7 +243,7 @@ def test_render_inbox_page_lists_review_items_and_actions():
                 "tldr": "Needs review.",
                 "issues": [{"severity": "warning", "code": "pending", "message": "Needs <review>"}],
                 "primary_action": {"label": "Review", "description": "Confirm it"},
-                "actions": [{"label": "Mark reviewed", "command": "link review-memory memory-one"}],
+                "actions": [{"label": "Mark reviewed", "command": "lnk review-memory memory-one"}],
             }
         ],
     }
@@ -228,7 +255,7 @@ def test_render_inbox_page_lists_review_items_and_actions():
     assert "Memory &lt;One&gt;" in html
     assert "Needs &lt;review&gt;" in html
     assert "/explain-memory?memory=memory-one" in html
-    assert "link review-memory memory-one" in html
+    assert "lnk review-memory memory-one" in html
 
 
 def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
@@ -244,7 +271,7 @@ def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
             "issue_count": 1,
             "issues": [{"severity": "warning", "code": "pending", "message": "Needs <review>"}],
             "primary_action": {"label": "Review", "description": "Confirm it"},
-            "actions": [{"label": "Forget", "command": "link forget-memory prefer-reviewable-memory"}],
+            "actions": [{"label": "Forget", "command": "lnk forget-memory prefer-reviewable-memory"}],
         },
         "provenance": {
             "source": "<unit test>",
@@ -263,10 +290,50 @@ def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
     assert "needs_review" in html
     assert "Needs &lt;review&gt;" in html
     assert "Next:</strong> Review" in html
-    assert "link forget-memory prefer-reviewable-memory" in html
+    assert "lnk forget-memory prefer-reviewable-memory" in html
     assert "/graph?focus=prefer-reviewable-memory&amp;depth=2" in html
     assert "Open local graph" in html
     assert "agent-memory" in html
     assert "2026-05-05 remember &lt;memory&gt;" in html
     assert "<p>Trusted body</p>" in html
     assert "<unit test>" not in html
+
+
+def test_render_memory_wins_page_shows_local_proof_signals():
+    payload = {
+        "active_count": 2,
+        "reviewed_active_count": 1,
+        "review_count": 1,
+        "project_count": 1,
+        "honest_note": "These are local wiki signals, not telemetry.",
+        "wins": [
+            {
+                "label": "Reusable <context>",
+                "count": 2,
+                "description": "Active memories can appear in briefs.",
+                "prompt": "brief me from Link before we continue",
+            }
+        ],
+        "recent_memories": [
+            {
+                "name": "alpha",
+                "title": "Alpha <memory>",
+                "memory_type": "project",
+                "scope": "project",
+                "tldr": "Alpha context.",
+            }
+        ],
+        "prompts": ["what does Link remember about me?"],
+        "next_actions": [
+            {"label": "Use memory", "reason": "Try the value loop.", "command": "lnk brief current-task ."}
+        ],
+    }
+
+    html = render_memory_wins_page(payload, page_href=_page_href, layout=_layout)
+
+    assert "Memory Wins" in html
+    assert "not telemetry" in html
+    assert "Reusable &lt;context&gt;" in html
+    assert "Alpha &lt;memory&gt;" in html
+    assert 'data-copy-text="what does Link remember about me?"' in html
+    assert "lnk brief current-task ." in html

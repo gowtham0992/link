@@ -6,6 +6,45 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-14
+
+### Added
+
+- Added official CLI skills under `skills/` so agents can lazy-load Link workflows without MCP setup.
+- Added `lnk try` as a one-command demo proof loop that creates the demo, checks readiness, runs query/brief examples, and prints first agent prompts.
+- Added `lnk connect <agent>` to preview or write MCP client config for Codex, Kiro, Claude Code, Cursor, Antigravity, VS Code, and Copilot.
+- Added Windows PowerShell installers for Codex, Kiro, Claude Code, Cursor, Antigravity, VS Code, and Copilot.
+- Added optional `review_after` dates for durable memories so time-sensitive context can automatically return to the memory inbox for re-checking.
+- Added optional `expires_at` dates for durable memories so temporary context automatically leaves default recall after expiry.
+- Added `lnk import-obsidian <vault>` to copy Obsidian Markdown notes into `raw/obsidian/` with secret scanning before the normal ingest workflow.
+- Added `lnk compliance-export` for redacted readiness, validation, memory-review, operation, and log exports for team or security review.
+- Added `lnk restore-backup` to preview and confirm local backup restores with unsafe-tar checks, raw restore opt-in, and pre-restore safety backups.
+- Added `lnk team-sync` to print a safe Git sharing plan for reviewed team memory without pushing private raw sources automatically.
+- Added `lnk share <page-or-memory>` to print a local viewer permalink and agent prompt for a specific Link page.
+- Added `lnk snapshot` to export a static, read-only HTML snapshot for demos or reviews while excluding raw sources, captures, live state, and memory pages by default.
+- Added memory `visibility` metadata (`private`, `project`, or `team`) so team sharing can rely on explicit user intent instead of inferring privacy from scope alone.
+- Added `lnk set-memory-visibility` and MCP `set_memory_visibility` so existing memories can move between private, project, and team sharing intent after explicit user approval.
+- Added `lnk memory-log`, MCP `memory_log`, `/memory-log`, and `/api/memory-log` for recent memory lifecycle changes without exposing raw source or memory bodies.
+- Added privacy-safe memory-log change summaries so review, status, and visibility transitions are visible without exposing memory bodies.
+- Added `lnk wins`, MCP `memory_wins`, `/wins`, and `/api/wins` for local, non-telemetry proof signals about what Link memory is carrying.
+- Added a team security review docs page covering local deployment, data boundaries, memory approval gates, Git sharing, audit exports, and current limits.
+- Added a memory contract docs page that explains the stable MCP agent loop, tool groups, write rules, budget behavior, and sharing semantics.
+- Added an integration maintainer checklist covering installer invariants, new-agent steps, PowerShell parity, and validation commands.
+- Added a scale model docs page covering bounded defaults, benchmark/health checks, large-wiki habits, and current local limits.
+- Added `python -m link_mcp --version` so MCP package installs can be verified before a wiki exists.
+- Added an Obsidian guide for opening Link's Markdown wiki as a vault and rebuilding indexes after manual edits.
+- Added validation and doctor failures for secret-looking values already present in wiki pages so local UI and MCP context do not quietly serve manually introduced secrets.
+
+### Changed
+
+- Broadened local secret detection for common modern provider tokens and credentials before capture, ingest, Obsidian import, and doctor scans.
+- Changed the installed CLI command from `link` to `lnk` to avoid the POSIX/macOS `link` utility collision while preserving source-checkout `python3 link.py ...` usage.
+- Tightened `lnk team-sync` readiness so unreviewed memories or active `visibility: private` memories block "ready" status before Git sharing.
+- Tightened `lnk snapshot --include-memories` so private memories stay excluded unless `--include-private-memories` is explicitly passed.
+- Broadened Windows CI from a small portability subset to most non-installer/non-server tests.
+- Clarified that the Homebrew formula lives in the separate `gowtham0992/homebrew-link` tap.
+- Tightened security reporting guidance to prefer private maintainer contact before public GitHub issues.
+
 ## [1.3.0] - 2026-05-22
 
 ### Added

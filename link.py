@@ -5,16 +5,23 @@ Usage:
   python link.py init [target]
   python link.py serve [target]
   python link.py demo [target]
+  python link.py try [target]
   python link.py welcome [target]
   python link.py prompts [target]
   python link.py status [target]
   python link.py health [target]
   python link.py operations [target]
   python link.py backup [target]
+  python link.py restore-backup <backup-name-or-path> [target]
+  python link.py compliance-export [target]
+  python link.py team-sync [target]
+  python link.py share <page-or-memory> [target]
+  python link.py snapshot [target]
   python link.py doctor [target]
   python link.py migrate [target]
   python link.py validate [target]
   python link.py ingest-status [target]
+  python link.py import-obsidian <vault> [target]
   python link.py remember "memory text" [target]
   python link.py propose-memories <file-or-text> [target]
   python link.py capture-inbox [target]
@@ -25,20 +32,24 @@ Usage:
   python link.py brief ["task or question"] [target]
   python link.py recall "query" [target]
   python link.py profile [target]
+  python link.py wins [target]
   python link.py memory-audit [target]
   python link.py archive-memory <name-or-title> [target]
   python link.py restore-memory <name-or-title> [target]
   python link.py forget-memory <name-or-title> [target] --confirm
   python link.py memory-inbox [target]
+  python link.py memory-log [target]
   python link.py review-memory <name-or-title> [target]
   python link.py explain-memory <name-or-title> [target]
   python link.py rebuild-index [target]
   python link.py rebuild-backlinks [target]
   python link.py verify-mcp [target]
+  python link.py connect <agent> [target]
 """
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -116,14 +127,40 @@ from link_core.memory import (
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
+    set_memory_visibility as _core_set_memory_visibility,
     top_tags as _core_top_tags,
     update_memory_page as _core_update_memory_page,
     write_memory_page as _core_write_memory_page,
 )
 from link_core.backup import (
     BackupError as _CoreBackupError,
+    RestoreError as _CoreRestoreError,
     create_backup as _core_create_backup,
     list_backups as _core_list_backups,
+    restore_backup as _core_restore_backup,
+)
+from link_core.audit_export import (
+    build_compliance_export as _core_build_compliance_export,
+    render_compliance_export_text as _core_render_compliance_export_text,
+    write_compliance_export as _core_write_compliance_export,
+)
+from link_core.memory_log import (
+    memory_log_payload as _core_memory_log_payload,
+)
+from link_core.memory_wins import (
+    memory_wins_payload as _core_memory_wins_payload,
+)
+from link_core.team_sync import (
+    build_team_sync_payload as _core_build_team_sync_payload,
+    render_team_sync_text as _core_render_team_sync_text,
+)
+from link_core.share import (
+    render_share_text as _core_render_share_text,
+    share_page_payload as _core_share_page_payload,
+)
+from link_core.snapshot import (
+    export_snapshot as _core_export_snapshot,
+    render_snapshot_text as _core_render_snapshot_text,
 )
 from link_core.benchmark import (
     build_benchmark_payload as _core_build_benchmark_payload,
@@ -147,6 +184,7 @@ from link_core.cli_parser import (
 from link_core.cli_admin import (
     render_backup_created_text as _core_render_backup_created_text,
     render_backup_list_text as _core_render_backup_list_text,
+    render_backup_restore_text as _core_render_backup_restore_text,
     render_migrate_text as _core_render_migrate_text,
     render_rebuild_backlinks_text as _core_render_rebuild_backlinks_text,
     render_rebuild_index_text as _core_render_rebuild_index_text,
@@ -159,12 +197,15 @@ from link_core.cli_memory import (
     render_forget_memory_text as _core_render_forget_memory_text,
     render_memory_audit_text as _core_render_memory_audit_text,
     render_memory_inbox_text as _core_render_memory_inbox_text,
+    render_memory_log_text as _core_render_memory_log_text,
     render_memory_status_text as _core_render_memory_status_text,
+    render_memory_wins_text as _core_render_memory_wins_text,
     render_profile_text as _core_render_profile_text,
     render_propose_memories_text as _core_render_propose_memories_text,
     render_recall_text as _core_render_recall_text,
     render_review_memory_text as _core_render_review_memory_text,
     render_remember_text as _core_render_remember_text,
+    render_set_memory_visibility_text as _core_render_set_memory_visibility_text,
     render_update_memory_text as _core_render_update_memory_text,
 )
 from link_core.capture import (
@@ -200,6 +241,14 @@ from link_core.mcp_verify import (
     check_link_mcp_import as _core_check_link_mcp_import,
     display_command as _core_display_command,
     render_mcp_verify_text as _core_render_mcp_verify_text,
+    set_link_command_override as _core_set_link_command_override,
+)
+from link_core.mcp_connect import (
+    build_mcp_connect_payload as _core_build_mcp_connect_payload,
+)
+from link_core.obsidian import (
+    import_obsidian_vault as _core_import_obsidian_vault,
+    render_import_obsidian_text as _core_render_import_obsidian_text,
 )
 from link_core.operations import (
     operation_report as _core_operation_report,
@@ -221,7 +270,9 @@ from link_core.cli_query import (
 from link_core.cli_runtime import (
     render_demo_text as _core_render_demo_text,
     render_init_text as _core_render_init_text,
+    render_mcp_connect_text as _core_render_mcp_connect_text,
     render_starter_prompts_text as _core_render_starter_prompts_text,
+    render_try_text as _core_render_try_text,
     render_welcome_text as _core_render_welcome_text,
 )
 from link_core.prompts import (
@@ -492,6 +543,23 @@ def _set_memory_status(
     )
 
 
+def _set_memory_visibility(
+    target: Path,
+    identifier: str,
+    visibility: str,
+    timestamp: str | None = None,
+) -> dict[str, object]:
+    wiki_dir, records = _memory_runtime(target)
+    return _core_set_memory_visibility(
+        wiki_dir,
+        identifier,
+        visibility,
+        timestamp=timestamp or _utc_timestamp(),
+        records=records,
+        log_writer=_log_writer_for(wiki_dir),
+    )
+
+
 def _mark_memory_reviewed(
     target: Path,
     identifier: str,
@@ -536,14 +604,19 @@ def _write_memory_page(
     tags: str | None = None, source: str = "manual",
     timestamp: str | None = None, allow_duplicate: bool = False,
     allow_conflict: bool = False, project: str | None = None,
+    visibility: str | None = None,
+    review_after: str | None = None,
+    expires_at: str | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
     options = _memory_mutation_options(wiki_dir, records, timestamp, project)
-
     return _core_write_memory_page(
         wiki_dir, clean_text, title=title, memory_type=memory_type,
         scope=scope, tags=tags, source=source,
+        visibility=visibility,
+        review_after=review_after,
+        expires_at=expires_at,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -735,6 +808,116 @@ def backup(
     return code
 
 
+def restore_backup(
+    target: Path,
+    backup: str,
+    *,
+    include_raw: bool = False,
+    confirm: bool = False,
+    safety_backup: bool = True,
+    json_output: bool = False,
+) -> int:
+    target = _resolve_link_root(target)
+    try:
+        payload = _core_restore_backup(
+            target,
+            backup,
+            include_raw=include_raw,
+            confirm=confirm,
+            safety_backup=safety_backup,
+        )
+    except (FileNotFoundError, _CoreBackupError, _CoreRestoreError) as exc:
+        if json_output:
+            print(json.dumps({"restored": False, "error": str(exc)}, indent=2))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0 if payload.get("restored") or payload.get("confirmation_required") else 1
+
+    code, text = _core_render_backup_restore_text(payload, target=target)
+    print(text)
+    return code
+
+
+def compliance_export(
+    target: Path,
+    output: str | None = None,
+    project: str | None = None,
+    limit: int = 100,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    payload = _core_build_compliance_export(
+        wiki_dir,
+        version=LINK_VERSION,
+        project=project or _default_project(target),
+        limit=limit,
+    )
+    if output:
+        output_path = Path(output).expanduser()
+        _core_write_compliance_export(output_path, payload)
+        if json_output:
+            print(json.dumps({"wrote": str(output_path), "export": payload}, indent=2))
+            return 0
+        code, text = _core_render_compliance_export_text(payload, output=str(output_path))
+        print(text)
+        return code
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def team_sync(target: Path, remote: str | None = None, json_output: bool = False) -> int:
+    target = target.expanduser().resolve()
+    payload = _core_build_team_sync_payload(target, remote=remote)
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    code, text = _core_render_team_sync_text(payload)
+    print(text)
+    return code
+
+
+def share(target: Path, identifier: str, port: int = 3000, host: str = "127.0.0.1", json_output: bool = False) -> int:
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    payload = _core_share_page_payload(wiki_dir, identifier, host=host, port=port)
+    return _emit_json_or_text(payload, json_output, _core_render_share_text, json_code=0 if payload.get("found") else 1)
+
+
+def snapshot(
+    target: Path,
+    output: str = "link-snapshot",
+    include_memories: bool = False,
+    include_private_memories: bool = False,
+    allow_sensitive: bool = False,
+    force: bool = False,
+    title: str = "Link",
+    json_output: bool = False,
+) -> int:
+    wiki_dir = _resolve_wiki_dir(target)
+    payload = _core_export_snapshot(
+        wiki_dir,
+        Path(output),
+        include_memories=include_memories,
+        include_private_memories=include_private_memories,
+        allow_sensitive=allow_sensitive,
+        force=force,
+        title=title,
+    )
+    return _emit_json_or_text(
+        payload,
+        json_output,
+        _core_render_snapshot_text,
+        json_code=0 if payload.get("created") else 1,
+    )
+
+
 def ingest_status(target: Path, json_output: bool = False) -> int:
     target = target.expanduser().resolve()
     status = _collect_ingest_status(target)
@@ -745,6 +928,31 @@ def ingest_status(target: Path, json_output: bool = False) -> int:
 
     print(_core_render_ingest_status_text(str(target), status))
     return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
+
+
+def import_obsidian(
+    target: Path,
+    vault: Path,
+    overwrite: bool = False,
+    dry_run: bool = False,
+    limit: int | None = None,
+    json_output: bool = False,
+) -> int:
+    try:
+        payload = _core_import_obsidian_vault(
+            target,
+            vault,
+            overwrite=overwrite,
+            dry_run=dry_run,
+            limit=limit,
+        )
+    except ValueError as exc:
+        if json_output:
+            print(json.dumps({"status": "error", "error": str(exc)}, indent=2))
+        else:
+            print(f"Could not import Obsidian vault: {exc}", file=sys.stderr)
+        return 1
+    return _emit_json_or_text(payload, json_output, _core_render_import_obsidian_text)
 
 
 def rebuild_backlinks(target: Path) -> int:
@@ -796,6 +1004,9 @@ def remember(
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     project: str | None = None,
+    visibility: str | None = None,
+    review_after: str | None = None,
+    expires_at: str | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -813,6 +1024,9 @@ def remember(
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
             project=project or _default_project(target),
+            visibility=visibility,
+            review_after=review_after,
+            expires_at=expires_at,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
@@ -1003,6 +1217,7 @@ def accept_capture(
     scope: str | None = None,
     tags: str | None = None,
     project: str | None = None,
+    visibility: str | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     json_output: bool = False,
@@ -1048,6 +1263,7 @@ def accept_capture(
         title=title,
         memory_type=memory_type,
         scope=scope,
+        visibility=visibility,
         tags=tags,
     )
     result = _write_memory_page(
@@ -1056,6 +1272,7 @@ def accept_capture(
         title=str(memory_args["title"]),
         memory_type=str(memory_args["memory_type"]),
         scope=str(memory_args["scope"]),
+        visibility=str(memory_args["visibility"] or "") or None,
         tags=memory_args["tags"] if isinstance(memory_args["tags"], str) else None,
         source=str(memory_args["source"]),
         allow_duplicate=allow_duplicate,
@@ -1199,6 +1416,25 @@ def update_memory(
     )
 
 
+def set_memory_visibility(
+    target: Path,
+    identifier: str,
+    visibility: str,
+    json_output: bool = False,
+) -> int:
+    try:
+        result = _set_memory_visibility(target, identifier, visibility)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Could not set memory visibility: {exc}", file=sys.stderr)
+        return 1
+
+    return _emit_json_or_text(
+        result,
+        json_output,
+        lambda payload: _core_render_set_memory_visibility_text(payload, target=target),
+    )
+
+
 def recall(
     target: Path,
     query: str,
@@ -1331,6 +1567,34 @@ def memory_inbox(
             target=target,
             include_archived=include_archived,
         ),
+    )
+
+
+def memory_log(target: Path, limit: int = 50, include_captures: bool = True, json_output: bool = False) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    payload = _core_memory_log_payload(wiki_dir, limit=limit, include_captures=include_captures)
+    return _emit_json_or_text(
+        payload,
+        json_output,
+        lambda data: _core_render_memory_log_text(data, target=target),
+    )
+
+
+def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_output: bool = False) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    payload = _core_memory_wins_payload(wiki_dir, limit=limit, project=project)
+    return _emit_json_or_text(
+        payload,
+        json_output,
+        lambda data: _core_render_memory_wins_text(data, target=target),
     )
 
 
@@ -1535,6 +1799,13 @@ def _display_command(parts: list[str]) -> str:
     return _core_display_command(parts)
 
 
+def _configure_link_command_display() -> None:
+    if os.environ.get("LINK_CLI_COMMAND"):
+        _core_set_link_command_override(None)
+    else:
+        _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
+
+
 def verify_mcp(
     target: Path,
     json_output: bool = False,
@@ -1558,6 +1829,39 @@ def verify_mcp(
         return 0 if status["ready"] else 1
 
     code, text = _core_render_mcp_verify_text(status)
+    print(text)
+    return code
+
+
+def connect_mcp(
+    target: Path,
+    agent: str,
+    *,
+    write: bool = False,
+    config_path: str | None = None,
+    python_cmd: str | None = None,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    payload = _core_build_mcp_connect_payload(
+        target=target,
+        wiki_dir=wiki_dir,
+        agent=agent,
+        expected_version=LINK_VERSION,
+        init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+        python_cmd=python_cmd,
+        default_python=sys.executable,
+        config_path=config_path,
+        write=write,
+    )
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
+        return 0 if not write or bool(write_status.get("ok")) else 1
+
+    code, text = _core_render_mcp_connect_text(payload)
     print(text)
     return code
 
@@ -1662,24 +1966,115 @@ def create_demo(target: Path, force: bool = False) -> int:
     return code
 
 
+def _try_summary_from_query(payload: dict[str, object]) -> str:
+    wiki = payload.get("wiki") if isinstance(payload.get("wiki"), dict) else {}
+    memory = payload.get("memory") if isinstance(payload.get("memory"), dict) else {}
+    primary = wiki.get("primary") or "no primary page"
+    memory_items = memory.get("items") if isinstance(memory.get("items"), list) else []
+    page_count = len(payload.get("context_packet") or []) if isinstance(payload.get("context_packet"), list) else 0
+    return f"{primary} · {len(memory_items)} memories · {page_count} context items"
+
+
+def _try_summary_from_brief(payload: dict[str, object]) -> str:
+    memories = payload.get("relevant_memories") if isinstance(payload.get("relevant_memories"), list) else []
+    review = payload.get("review") if isinstance(payload.get("review"), dict) else {}
+    review_count = review.get("count", 0)
+    return f"{len(memories)} relevant memories · {review_count} review items"
+
+
+def try_link(
+    target: Path,
+    *,
+    force: bool = False,
+    serve: bool = False,
+    port: int = 3000,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    created = False
+    if force or not (target / "wiki").exists():
+        try:
+            _core_create_demo_workspace(target, source_root=ROOT, force=force)
+        except _CoreDemoError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        created = True
+
+    wiki_dir = _resolve_wiki_dir(target)
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    query_payload = _query_link(wiki_dir, "why does Link help agents?", budget="small")
+    brief_payload = _memory_brief(wiki_dir, "working on agent memory", limit=6)
+    payload = {
+        "target": str(target),
+        "created": created,
+        "ready": bool(status_payload.get("ready")),
+        "status": status_payload,
+        "query": query_payload,
+        "brief": brief_payload,
+        "commands": {
+            "serve": _display_command(["link", "serve", str(target), "--port", str(port)]),
+            "next": _display_command(["link", "next", str(target)]),
+            "health": _display_command(["link", "health", str(target)]),
+            "query": _display_command(["link", "query", "why does Link help agents?", str(target), "--budget", "small"]),
+            "brief": _display_command(["link", "brief", "working on agent memory", str(target)]),
+            "benchmark": _display_command(["link", "benchmark", "agent memory", str(target)]),
+        },
+        "url": f"http://127.0.0.1:{port}",
+    }
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        if serve:
+            return serve_wiki(target, port=port)
+        return 0 if payload["ready"] else 1
+
+    code, text = _core_render_try_text(
+        target=target,
+        ready=payload["ready"],
+        page_count=status_payload.get("page_count", 0),
+        memory_count=status_payload.get("memory_count", 0),
+        search_backend=status_payload.get("search_backend", "unknown"),
+        query_summary=_try_summary_from_query(query_payload),
+        brief_summary=_try_summary_from_brief(brief_payload),
+        serve_command=payload["commands"]["serve"],
+        next_command=payload["commands"]["next"],
+        health_command=payload["commands"]["health"],
+        query_command=payload["commands"]["query"],
+        brief_command=payload["commands"]["brief"],
+        benchmark_command=payload["commands"]["benchmark"],
+        url=payload["url"],
+    )
+    print(text)
+    if serve:
+        return serve_wiki(target, port=port)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR)
     args = parser.parse_args(argv)
+    _configure_link_command_display()
     try:
         return _core_dispatch_cli_command(args, {
             "init": init_wiki,
             "serve": serve_wiki,
             "demo": create_demo,
+            "try": try_link,
             "welcome": welcome,
             "prompts": starter_prompts,
             "status": status,
             "health": health,
             "operations": operations,
             "backup": backup,
+            "restore-backup": restore_backup,
+            "compliance-export": compliance_export,
+            "team-sync": team_sync,
+            "share": share,
+            "snapshot": snapshot,
             "doctor": doctor,
             "migrate": migrate,
             "validate": validate,
             "ingest-status": ingest_status,
+            "import-obsidian": import_obsidian,
             "remember": remember,
             "propose-memories": propose_memories,
             "capture-session": capture_session,
@@ -1688,27 +2083,33 @@ def main(argv: list[str] | None = None) -> int:
             "redact-capture": redact_capture,
             "delete-capture": delete_capture,
             "update-memory": update_memory,
+            "set-memory-visibility": set_memory_visibility,
             "recall": recall,
             "query": query,
             "graph-summary": graph_summary,
             "benchmark": benchmark,
             "brief": brief,
             "profile": profile,
+            "wins": memory_wins,
             "memory-audit": memory_audit,
             "archive-memory": archive_memory,
             "restore-memory": restore_memory,
             "forget-memory": forget_memory,
             "memory-inbox": memory_inbox,
+            "memory-log": memory_log,
             "review-memory": review_memory,
             "explain-memory": explain_memory,
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
             "verify-mcp": verify_mcp,
+            "connect": connect_mcp,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,
         })
     except ValueError as exc:
         parser.error(str(exc))
         return 2
+    finally:
+        _core_set_link_command_override(None)
 
 
 if __name__ == "__main__":

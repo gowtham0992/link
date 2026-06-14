@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Use Link with Obsidian: open the local Markdown wiki, inspect memories, and keep Link indexes current after edits.">
+  <title>Link - Obsidian</title>
+  <link rel="stylesheet" href="assets/site.css">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/logo-512.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Link">
+  <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
+  <script src="assets/site.js" defer></script>
+</head>
+<body>
+  <nav class="site-nav" aria-label="Main">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
+    <div class="nav-links">
+      <a href="getting-started.html">Start</a>
+      <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
+      <a href="ui.html">UI</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
+      <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
+      <a href="api.html">API</a>
+      <a href="security.html">Security</a>
+      <a href="contributing.html">Contribute</a>
+      <a href="https://github.com/gowtham0992/link">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="hero-inner">
+      <span class="eyebrow">Plain Markdown</span>
+      <h1>Open Link in Obsidian when you want a richer notes UI.</h1>
+      <p>Link owns the memory lifecycle. Obsidian can be a comfortable editor and graph viewer for the same local Markdown files.</p>
+    </div>
+  </header>
+
+  <main class="doc-section">
+    <div class="section-inner doc-grid">
+      <aside class="toc">
+        <strong>On this page</strong>
+        <a href="#import">Import a vault</a>
+        <a href="#open">Open the wiki</a>
+        <a href="#edit">Edit safely</a>
+        <a href="#sync">Keep indexes current</a>
+      </aside>
+      <article class="doc-content">
+        <h2 id="import">Import An Existing Obsidian Vault</h2>
+        <p>Use <code>lnk import-obsidian</code> when you already have project notes in Obsidian and want Link agents to ingest them as source-backed knowledge. Link copies Markdown notes into <code>raw/obsidian/&lt;vault&gt;/</code>, skips Obsidian plugin state, and blocks notes with secret-looking values before writing them.</p>
+        <pre><code>lnk init ~/link
+lnk import-obsidian ~/Documents/ObsidianVault ~/link
+lnk ingest-status ~/link</code></pre>
+        <p>The import does not silently create durable memories. It stages raw source notes, then the normal ingest and proposal workflow decides what becomes wiki knowledge or reviewed memory.</p>
+
+        <h2 id="open">Open The Link Wiki</h2>
+        <p>In Obsidian, choose <strong>Open folder as vault</strong> and select your Link wiki folder:</p>
+        <pre><code>~/link/wiki</code></pre>
+        <p>For a project-local install, open that project's <code>wiki/</code> folder instead. Link uses regular Markdown files, YAML frontmatter, and <code>[[wikilinks]]</code>, so Obsidian can read the pages directly.</p>
+
+        <h2 id="edit">Edit Safely</h2>
+        <p>Prefer editing prose, titles, aliases, tags, summaries, and source notes. Be careful with lifecycle fields on memory pages, such as <code>status</code>, <code>review_status</code>, <code>scope</code>, <code>project</code>, and <code>source</code>, because agents use those fields to decide what is safe to recall.</p>
+        <div class="callout">
+          <strong>Memory rule</strong>
+          Use Link commands or MCP tools for durable memory writes when possible. They check duplicates, conflicts, review state, and audit logs.
+        </div>
+
+        <h2 id="sync">Keep Link Indexes Current</h2>
+        <p>After manual Obsidian edits, rebuild derived indexes and validate the wiki before asking agents to rely on the new content:</p>
+        <pre><code>lnk rebuild-index ~/link
+lnk rebuild-backlinks ~/link
+lnk validate ~/link
+lnk health ~/link</code></pre>
+        <p>The local web viewer is still useful for Link-specific views like health, ingest, memory review, captures, and MCP-ready query context. Obsidian is an editor/viewer for the same underlying files, not a replacement for Link's validation and memory lifecycle.</p>
+      </article>
+    </div>
+  </main>
+
+  <footer>
+    <div class="section-inner"><a href="concepts.html">Concepts</a> · <a href="cli.html">CLI reference</a> · <a href="security.html">Security</a> · If Link helps your agents remember better, <a href="https://github.com/gowtham0992/link">star it on GitHub</a>.</div>
+    <p class="analytics-note">The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest.</p>
+  </footer>
+</body>
+</html>

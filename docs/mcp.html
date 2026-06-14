@@ -21,10 +21,13 @@
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
       <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
       <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
       <a href="mcp.html" aria-current="page">MCP</a>
+      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
       <a href="api.html">API</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
@@ -57,6 +60,15 @@
           <img src="assets/link-mcp-agent-chat.gif" alt="Animated Link MCP agent walkthrough">
           <figcaption>Agents use natural prompts, then call Link tools for readiness, briefs, query packets, and reviewed memory writes.</figcaption>
         </figure>
+        <div class="callout">
+          <strong>MCP does not need <code>serve.py</code></strong>
+          The local web viewer is only for humans. MCP clients start <code>python -m link_mcp --wiki ...</code> over stdio and read the same Markdown wiki directly.
+        </div>
+        <div class="callout">
+          <strong>Prefer no MCP?</strong>
+          Use the official <a href="skills.html">Link skills</a> when an agent can run local CLI commands and you want a lazy-loaded workflow instead of MCP configuration.
+        </div>
+        <p>For agent builders, the stable read/write behavior is summarized in the <a href="memory-contract.html">Link memory contract</a>.</p>
 
         <h2 id="installers">Agent Installers</h2>
         <p>Use the installer for the agent you use most. Installers create or update <code>~/link</code>, install <code>link-mcp</code>, write short agent instructions, and preserve existing wiki data.</p>
@@ -68,9 +80,26 @@ bash integrations/copilot/install.sh
 bash integrations/vscode/install.sh
 bash integrations/antigravity/install.sh</code></pre>
         <p>Use <code>--project</code> from a repo when memory should be project-scoped.</p>
+        <p>On Windows PowerShell, use <code>.\integrations\AGENT\install.ps1</code> instead:</p>
+        <pre><code>.\integrations\codex\install.ps1
+.\integrations\kiro\install.ps1
+.\integrations\claude-code\install.ps1
+.\integrations\cursor\install.ps1
+.\integrations\copilot\install.ps1
+.\integrations\vscode\install.ps1
+.\integrations\antigravity\install.ps1</code></pre>
+        <p>If you already have agent instructions and only need the MCP config, use <code>lnk connect</code>. It previews the target file and config snippet first; add <code>--write</code> for an explicit update.</p>
+        <pre><code>lnk connect codex ~/link
+lnk connect codex ~/link --write
+lnk connect kiro ~/link --write
+lnk connect claude-code ~/link --write
+lnk connect cursor ~/link --write
+lnk connect antigravity ~/link --write
+lnk verify-mcp ~/link</code></pre>
 
         <h2 id="mcp-only">MCP Only</h2>
-        <pre><code>python3 -m pip install --upgrade link-mcp</code></pre>
+        <pre><code>python3 -m pip install --upgrade link-mcp
+python3 -m link_mcp --version</code></pre>
         <pre><code>{
   "mcpServers": {
     "link": {
@@ -88,8 +117,8 @@ bash integrations/antigravity/install.sh</code></pre>
         <pre><code>{
   "mcpServers": {
     "link": {
-      "command": "/Users/YOU/.link-mcp-venv/bin/python",
-      "args": ["-m", "link_mcp", "--wiki", "/Users/YOU/link/wiki"]
+      "command": "C:\\Users\\YOU\\.link-mcp-venv\\Scripts\\python.exe",
+      "args": ["-m", "link_mcp", "--wiki", "C:\\Users\\YOU\\link\\wiki"]
     }
   }
 }</code></pre>
@@ -121,6 +150,8 @@ memory_brief
 memory_audit
 memory_profile
 memory_inbox
+memory_log
+memory_wins
 review_memory
 explain_memory
 search_wiki
@@ -133,6 +164,7 @@ accept_capture
 redact_capture
 delete_capture
 update_memory
+set_memory_visibility
 archive_memory
 restore_memory
 forget_memory
@@ -143,14 +175,14 @@ get_graph_summary
 get_graph
 rebuild_index
 rebuild_backlinks</code></pre>
-        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page.</p>
+        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page. <code>remember_memory</code> also accepts optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled re-checks, and temporary memories.</p>
         <p>Project-aware tools accept an optional <code>project</code> argument. When set, Link returns broad user/global memory plus memories for that project, while excluding memories from other explicit projects.</p>
 
 <h2 id="verify">Verify Setup</h2>
-        <pre><code>link verify-mcp
-link health
-link next</code></pre>
-        <p><code>link verify-mcp --json</code> is useful when an agent or script should read structured issues and next actions.</p>
+        <pre><code>lnk verify-mcp
+lnk health
+lnk next</code></pre>
+        <p><code>lnk verify-mcp --json</code> is useful when an agent or script should read structured issues and next actions.</p>
         <div class="callout">
           <strong>Natural prompts to try</strong>
           <p><code>is Link ready?</code></p>

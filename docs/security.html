@@ -21,10 +21,13 @@
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
       <a href="why-link.html">Why</a>
+      <a href="scale.html">Scale</a>
       <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
       <a href="mcp.html">MCP</a>
+      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
+      <a href="skills.html">Skills</a>
       <a href="api.html">API</a>
       <a href="security.html" aria-current="page">Security</a>
       <a href="contributing.html">Contribute</a>
@@ -48,7 +51,9 @@
         <a href="#secrets">Secret handling</a>
         <a href="#http">HTTP boundary</a>
         <a href="#backups">Backups</a>
+        <a href="#team">Team review</a>
         <a href="#share">Before sharing</a>
+        <a href="#reporting">Reporting</a>
       </aside>
       <article class="doc-content">
         <h2 id="privacy">Privacy Model</h2>
@@ -62,10 +67,12 @@
         <p>The public GitHub Pages documentation may use lightweight analytics to understand install interest. It does not run inside Link, read local wiki data, or capture source/memory content.</p>
 
         <h2 id="secrets">Secret Handling</h2>
-        <p>Link scans raw sources, captures, release files, and public artifacts for secret-looking values. It detects common API keys and token formats, warns without logging secret values, and refuses normal ingest guidance when raw safety cannot be established.</p>
-        <pre><code>link ingest-status
-link capture-inbox
-link redact-capture raw/memory-captures/&lt;capture&gt;.md
+        <p>Link scans raw sources, captures, wiki pages, release files, and public artifacts for secret-looking values. It detects common API keys, provider tokens, JWTs, private key blocks, and registry credentials, warns without logging secret values, and refuses normal ingest guidance when raw safety cannot be established. Validation and doctor checks also fail if a secret-looking value is already present in a wiki page before the local UI or MCP tools can serve it as context.</p>
+        <pre><code>lnk ingest-status
+lnk capture-inbox
+lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
+lnk validate
+lnk doctor
 python3 scripts/check_release_hygiene.py</code></pre>
         <div class="callout">
           <strong>Rule</strong>
@@ -77,11 +84,15 @@ python3 scripts/check_release_hygiene.py</code></pre>
         <p>HTTP write actions require <code>X-Link-Local-Action: true</code>. Responses include <code>X-Link-API-Version</code>. Proposal analysis does not write pages.</p>
 
         <h2 id="backups">Backups</h2>
-        <p><code>link backup</code> and MCP <code>backup_wiki</code> write local <code>.link-backups/</code> archives. Raw sources are excluded unless explicitly requested.</p>
-        <pre><code>link backup
-link backup --include-raw
-link doctor --fix</code></pre>
+        <p><code>lnk backup</code> and MCP <code>backup_wiki</code> write local <code>.link-backups/</code> archives. Raw sources are excluded unless explicitly requested.</p>
+        <pre><code>lnk backup
+lnk backup --include-raw
+lnk doctor --fix</code></pre>
         <p>Run a backup before broad repair work or large generated changes.</p>
+
+        <h2 id="team">Team Review</h2>
+        <p>For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed <code>wiki/</code> pages can be shared through Git when the team explicitly wants shared memory.</p>
+        <p><a class="button" href="team-security.html">Open the team security checklist</a></p>
 
         <h2 id="share">Before Sharing A Repo Or Wiki</h2>
         <pre><code>python3 link.py doctor
@@ -89,7 +100,9 @@ python3 link.py validate
 python3 scripts/check_release_hygiene.py
 git diff --check</code></pre>
         <p>Use <code>git push</code>, <code>git archive</code>, or clean build artifacts for public sharing. Do not zip a whole working directory; ignored local files, <code>.git/</code>, caches, raw sources, and build outputs can be included by accident.</p>
-        <p>See <a href="https://github.com/gowtham0992/link/blob/main/SECURITY.md">SECURITY.md</a> for vulnerability reporting.</p>
+        <h2 id="reporting">Reporting Security Issues</h2>
+        <p>Use a private maintainer contact channel first. Do not post secrets, private wiki content, raw source files, or exploitable details in public GitHub issues. If a public issue is the only available path, keep it high level and ask for a private follow-up channel.</p>
+        <p>See <a href="https://github.com/gowtham0992/link/blob/main/SECURITY.md">SECURITY.md</a> for the current reporting policy.</p>
       </article>
     </div>
   </main>
