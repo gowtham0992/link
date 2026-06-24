@@ -38,7 +38,10 @@ def _file_lock(path: Path, *, timeout: float = 10.0, stale_after: float = 120.0)
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(fd, str(os.getpid()).encode("utf-8"))
-        except FileExistsError:
+        except (FileExistsError, PermissionError):
+            # POSIX signals a contended lock with FileExistsError; Windows can
+            # raise PermissionError when the lock file exists or is mid-unlink
+            # by another holder. Treat both as "locked" and retry until timeout.
             try:
                 if time.time() - lock_path.stat().st_mtime >= stale_after:
                     os.unlink(lock_path)
