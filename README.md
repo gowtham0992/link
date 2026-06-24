@@ -29,6 +29,12 @@
   <a href="https://pypi.org/project/link-mcp/"><img src="https://img.shields.io/pypi/v/link-mcp" alt="PyPI"></a>
 </p>
 
+<p align="center">
+  <a href="https://gowtham0992.github.io/link/">
+    <img src="docs/assets/link-site.png" alt="Link — local, source-backed memory for AI agents" width="840">
+  </a>
+</p>
+
 ## What Is Link?
 
 Link is an open-source memory layer for local AI agents. Raw sources become an
@@ -181,22 +187,25 @@ when the web viewer is not running.
 <table>
   <tr>
     <td width="33%">
-      <strong>Web UI</strong><br>
-      Read the local wiki, then review memory, ingest, graph, audits, captures, and explanations.<br><br>
-      <a href="https://gowtham0992.github.io/link/ui.html"><img src="docs/assets/link-ui-tour.gif" alt="Link web UI walkthrough" width="270"></a>
+      <strong><a href="https://gowtham0992.github.io/link/ui.html">Web UI</a></strong><br>
+      Read the local wiki, then review memory, ingest, graph, audits, captures, and explanations.
     </td>
     <td width="33%">
-      <strong>CLI</strong><br>
-      Script readiness, query packets, briefs, validation, backup, benchmark, and repair.<br><br>
-      <a href="https://gowtham0992.github.io/link/cli.html"><img src="docs/assets/link-cli-tour.gif" alt="Link CLI walkthrough" width="270"></a>
+      <strong><a href="https://gowtham0992.github.io/link/cli.html">CLI</a></strong><br>
+      Script readiness, query packets, briefs, validation, backup, benchmark, and repair.
     </td>
     <td width="33%">
-      <strong>MCP</strong><br>
-      Let Codex, Claude, Cursor, Kiro, VS Code, Copilot, and other agents recall memory.<br><br>
-      <a href="https://gowtham0992.github.io/link/mcp.html"><img src="docs/assets/link-mcp-agent-chat.gif" alt="Link MCP agent walkthrough" width="270"></a>
+      <strong><a href="https://gowtham0992.github.io/link/mcp.html">MCP</a></strong><br>
+      Let Codex, Claude, Cursor, Kiro, VS Code, Copilot, and other agents recall memory.
     </td>
   </tr>
 </table>
+
+<p align="center">
+  <img src="docs/assets/link-web-ui.png" alt="Link local web viewer — home" width="49%">
+  <img src="docs/assets/link-graph.png" alt="Link knowledge graph view" width="49%">
+</p>
+<p align="center"><em>The local web viewer: browse source-backed memory and explore the knowledge graph — all on <code>127.0.0.1</code>, no accounts, no backend.</em></p>
 
 Prefer skills instead of MCP? Link ships small, lazy-loadable CLI skills under
 `skills/`. They let an agent use `lnk health`, `lnk query`, `lnk ingest-status`,

@@ -1,71 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
   <title id="title">Link logo</title>
-  <desc id="desc">A local memory graph mark formed from connected nodes in the shape of an L.</desc>
-
-  <defs>
-    <linearGradient id="bg" x1="24" y1="20" x2="176" y2="184" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#10251f"/>
-      <stop offset="0.48" stop-color="#0c1518"/>
-      <stop offset="1" stop-color="#17111f"/>
-    </linearGradient>
-
-    <linearGradient id="memory" x1="58" y1="42" x2="158" y2="158" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7fffd4"/>
-      <stop offset="0.55" stop-color="#27d6b4"/>
-      <stop offset="1" stop-color="#ffd166"/>
-    </linearGradient>
-
-    <linearGradient id="recall" x1="82" y1="44" x2="156" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f7f0ff"/>
-      <stop offset="1" stop-color="#a78bfa"/>
-    </linearGradient>
-
-    <filter id="soft-shadow" x="-25%" y="-25%" width="150%" height="150%">
-      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000000" flood-opacity="0.35"/>
-    </filter>
-
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-
-  <rect x="10" y="10" width="180" height="180" rx="40" fill="url(#bg)" filter="url(#soft-shadow)"/>
-  <rect x="24" y="24" width="152" height="152" rx="30" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
-
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M67 43 V123 C67 140 80 153 97 153 H156"
-          stroke="#031411" stroke-width="22" stroke-opacity="0.55"/>
-    <path d="M67 43 V123 C67 140 80 153 97 153 H156"
-          stroke="url(#memory)" stroke-width="13" filter="url(#glow)"/>
-
-    <path d="M88 62 C105 43 136 47 150 69 C165 94 149 125 119 128"
-          stroke="#031411" stroke-width="15" stroke-opacity="0.45"/>
-    <path d="M88 62 C105 43 136 47 150 69 C165 94 149 125 119 128"
-          stroke="url(#recall)" stroke-width="8" stroke-opacity="0.95"/>
-
-    <path d="M82 91 L116 76 L144 96"
-          stroke="#ffffff" stroke-width="3" stroke-opacity="0.22"/>
-    <path d="M82 119 L116 132 L144 112"
-          stroke="#ffffff" stroke-width="3" stroke-opacity="0.18"/>
+  <desc id="desc">A local memory graph mark: connected nodes forming an L, with a rust accent node at the end.</desc>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14" fill="#faf9f5" stroke="#221c12" stroke-opacity="0.10" stroke-width="1.5"/>
+  <g transform="translate(12.8 12.8) scale(1.6)">
+    <g stroke="#221c12" stroke-width="1.7" stroke-linecap="round">
+      <line x1="6.5" y1="5" x2="6.5" y2="18.5"/>
+      <line x1="6.5" y1="18.5" x2="18.5" y2="18.5"/>
+    </g>
+    <circle cx="6.5" cy="5" r="2.3" fill="#faf9f5" stroke="#221c12" stroke-width="1.6"/>
+    <circle cx="6.5" cy="12" r="1.7" fill="#221c12"/>
+    <circle cx="6.5" cy="18.5" r="2.6" fill="#221c12"/>
+    <circle cx="12.5" cy="18.5" r="1.7" fill="#221c12"/>
+    <circle cx="18.5" cy="18.5" r="2.6" fill="#a8492f"/>
   </g>
-
-  <g filter="url(#glow)">
-    <circle cx="67" cy="43" r="10" fill="#7fffd4"/>
-    <circle cx="67" cy="91" r="6" fill="#3ee8c0"/>
-    <circle cx="67" cy="123" r="8" fill="#27d6b4"/>
-    <circle cx="97" cy="153" r="7" fill="#71e7b2"/>
-    <circle cx="156" cy="153" r="10" fill="#ffd166"/>
-
-    <circle cx="88" cy="62" r="6" fill="#f7f0ff"/>
-    <circle cx="116" cy="76" r="5" fill="#ded3ff"/>
-    <circle cx="144" cy="96" r="6" fill="#bca7ff"/>
-    <circle cx="119" cy="128" r="7" fill="#a78bfa"/>
-  </g>
-
-  <circle cx="67" cy="43" r="3" fill="#09211c" opacity="0.9"/>
-  <circle cx="156" cy="153" r="3" fill="#3a2600" opacity="0.85"/>
 </svg>
