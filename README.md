@@ -13,10 +13,11 @@
 
 <p align="center">
   <a href="https://gowtham0992.github.io/link/">Website</a> ·
-  <a href="https://gowtham0992.github.io/link/getting-started.html">Quick start</a> ·
-  <a href="https://gowtham0992.github.io/link/mcp.html">MCP setup</a> ·
-  <a href="https://gowtham0992.github.io/link/skills.html">Skills</a> ·
-  <a href="https://gowtham0992.github.io/link/cli.html">CLI</a> ·
+  <a href="https://gowtham0992.github.io/link/#how">How it works</a> ·
+  <a href="https://gowtham0992.github.io/link/#memory">Memory</a> ·
+  <a href="https://gowtham0992.github.io/link/#tools">Tools &amp; CLI</a> ·
+  <a href="https://gowtham0992.github.io/link/#setup">Setup</a> ·
+  <a href="https://gowtham0992.github.io/link/getting-started.html">Docs</a> ·
   <a href="https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink">MCP Registry</a> ·
   <a href="https://pypi.org/project/link-mcp/">PyPI</a> ·
   <a href="https://github.com/gowtham0992/homebrew-link">Homebrew</a>
