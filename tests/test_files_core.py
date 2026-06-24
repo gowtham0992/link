@@ -61,6 +61,30 @@ class FilesCoreTests(unittest.TestCase):
         self.assertEqual(path.read_text(encoding="utf-8"), "new\n")
         self.assertFalse(lock.exists())
 
+    def test_lock_retries_on_transient_permission_error(self):
+        # Windows raises PermissionError (not FileExistsError) for a contended
+        # O_EXCL lock file; the lock must retry instead of propagating it.
+        root = Path(tempfile.mkdtemp(prefix="link-files-core-"))
+        path = root / "wiki/index.md"
+
+        real_open = os.open
+        calls = {"excl": 0}
+
+        def flaky_open(*args, **kwargs):
+            flags = args[1] if len(args) > 1 else kwargs.get("flags", 0)
+            if flags & os.O_EXCL:
+                calls["excl"] += 1
+                if calls["excl"] <= 2:
+                    raise PermissionError(13, "Permission denied")
+            return real_open(*args, **kwargs)
+
+        with patch.object(os, "open", side_effect=flaky_open):
+            atomic_write_text(path, "locked-write\n")
+
+        self.assertEqual(path.read_text(encoding="utf-8"), "locked-write\n")
+        self.assertGreaterEqual(calls["excl"], 3)
+        self.assertEqual(list(path.parent.glob(".*.lock")), [])
+
     def test_append_text_initializes_and_serializes_audit_log(self):
         root = Path(tempfile.mkdtemp(prefix="link-files-core-"))
         path = root / "wiki/log.md"
