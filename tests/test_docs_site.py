@@ -23,7 +23,7 @@ class DocsSiteTests(unittest.TestCase):
                 self.assertTrue((ROOT / "docs" / local_page).exists(), f"{page.name} -> {local_page}")
 
         index_html = (ROOT / "docs/index.html").read_text(encoding="utf-8")
-        self.assertIn("Link gives every agent the same memory.", index_html)
+        self.assertIn("Give your agents", index_html)
         self.assertIn("MCP Registry", index_html)
         self.assertIn("scale.html", index_html)
         self.assertGreaterEqual(len(all_refs), 10)
@@ -36,13 +36,25 @@ class DocsSiteTests(unittest.TestCase):
         self.assertIn("Current Limits", scale_html)
 
     def test_github_pages_site_has_no_external_runtime_dependencies(self):
+        index = ROOT / "docs/index.html"
         for page in self.docs_pages():
             html = page.read_text(encoding="utf-8")
+            lower = html.lower()
 
-            self.assertIn('<script src="assets/site.js" defer></script>', html)
-            self.assertNotIn("<script>", html.lower())
+            # The home page is a self-contained, pre-rendered landing bundle: it
+            # ships its own inline runtime instead of the shared site.js template,
+            # so the template-uniformity checks only apply to the other pages.
+            if page != index:
+                self.assertIn('<script src="assets/site.js" defer></script>', html)
+                self.assertNotIn("<script>", lower)
+
+            # The local-first / no-external-call guarantee holds for every page,
+            # including the landing bundle (fonts are inlined, not fetched).
             self.assertNotIn("fonts.googleapis.com", html)
+            self.assertNotIn("fonts.gstatic.com", html)
             self.assertNotIn("../logo.svg", html)
+            self.assertNotIn('<script src="http', lower)
+            self.assertNotIn('<link rel="stylesheet" href="http', lower)
 
     def test_github_pages_analytics_is_docs_only_and_manual(self):
         site_js = (ROOT / "docs/assets/site.js").read_text(encoding="utf-8")
