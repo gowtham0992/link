@@ -3,19 +3,19 @@
   <desc id="desc">Raw local sources become wiki pages, explicit remember requests become reviewed memory, and agents retrieve compact MCP context.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" orient="auto">
-      <path d="M0 0 10 5 0 10Z" fill="#16130f"/>
+      <path d="M0 0 10 5 0 10Z" fill="#a8492f"/>
     </marker>
     <style>
-      .bg { fill: #fff7cf; }
-      .panel { fill: #fffdf3; stroke: #16130f; stroke-width: 3; }
-      .raw { fill: #ddf7ee; }
-      .wiki { fill: #e8edff; }
-      .memory { fill: #ffe4df; }
-      .agent { fill: #ffd94a; }
-      .ink { fill: #16130f; }
-      .muted { fill: #5c5548; }
-      .arrow { fill: none; stroke: #16130f; stroke-width: 4; stroke-linecap: round; marker-end: url(#arrow); }
-      text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #16130f; letter-spacing: 0; }
+      .bg { fill: #faf9f5; }
+      .panel { fill: #fffdf8; stroke: #e0d9cb; stroke-width: 1.5; }
+      .raw { fill: #fbf7ed; }
+      .wiki { fill: #fbf7ed; }
+      .memory { fill: #fbf7ed; }
+      .agent { fill: #f5e7e0; }
+      .ink { fill: #221c12; }
+      .muted { fill: #5f574a; }
+      .arrow { fill: none; stroke: #a8492f; stroke-width: 3; stroke-linecap: round; marker-end: url(#arrow); }
+      text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #221c12; letter-spacing: 0; }
       .title { font-size: 24px; font-weight: 800; }
       .body { font-size: 17px; font-weight: 600; }
       .small { font-size: 14px; font-weight: 700; }
