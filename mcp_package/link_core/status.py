@@ -59,6 +59,12 @@ def link_status(
         "reused_records": 0,
         "total_records": 0,
     }
+    fts_index: dict[str, object] = {
+        "available": False,
+        "persistent": False,
+        "reused": False,
+        "path": "",
+    }
     if wiki_dir.exists():
         stale_operations: list[Mapping[str, object]] = []
         fresh_operations: list[Mapping[str, object]] = []
@@ -110,6 +116,14 @@ def link_status(
                 wiki_cache = cache
             pages = list(wiki_cache.get("pages", []))
             search_backend = str(wiki_cache.get("search_backend") or "token-index")
+            fts_info = wiki_cache.get("fts_index_info")
+            if isinstance(fts_info, Mapping):
+                fts_index = {
+                    "available": bool(fts_info.get("available")),
+                    "persistent": bool(fts_info.get("persistent")),
+                    "reused": bool(fts_info.get("reused")),
+                    "path": str(fts_info.get("path") or ""),
+                }
             cache_info = wiki_cache.get("persistent_cache")
             if isinstance(cache_info, Mapping):
                 persistent_cache = {
@@ -229,6 +243,7 @@ def link_status(
         "active_memory_count": active_memory_count,
         "needs_review_count": needs_review_count,
         "search_backend": search_backend,
+        "fts_index": fts_index,
         "persistent_cache": persistent_cache,
         "schema": schema,
         "validation": validation_summary,

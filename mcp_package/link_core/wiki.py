@@ -90,6 +90,10 @@ def _persistent_cache_path(wiki_dir: Path) -> Path:
     return wiki_dir.parent / ".link-cache" / f"wiki-cache-v{PERSISTENT_CACHE_SCHEMA_VERSION}.json"
 
 
+def _persistent_fts_path(wiki_dir: Path) -> Path:
+    return wiki_dir.parent / ".link-cache" / "page-fts-v1.sqlite"
+
+
 def _page_signatures(wiki_dir: Path, page_paths: list[Path]) -> list[dict[str, Any]]:
     signatures: list[dict[str, Any]] = []
     for path in page_paths:
@@ -316,7 +320,17 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
             seen_targets.add(target)
             forward_links_index.setdefault(source_name, []).append(target)
 
-    fts_index = build_fts_index(pages, fulltext)
+    persistent_fts_path = _persistent_fts_path(wiki_dir)
+    fts_index = build_fts_index(
+        pages,
+        fulltext,
+        db_path=persistent_fts_path if use_persistent_cache else None,
+        signatures=signatures,
+    )
+    fts_info = {"available": False, "persistent": False, "reused": False, "path": str(persistent_fts_path)}
+    info = getattr(fts_index, "info", None)
+    if callable(info):
+        fts_info = dict(info())
     return {
         "mtime": wiki_mtime(wiki_dir),
         "pages": pages,
@@ -333,6 +347,7 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
         "page_map": {page["name"].lower(): page for page in pages},
         "forward_links_index": forward_links_index,
         "fts_index": fts_index,
+        "fts_index_info": fts_info,
         "search_backend": "sqlite-fts" if fts_index is not None else "token-index",
         "read_warning_count": len(read_warnings),
         "read_warnings": read_warnings,

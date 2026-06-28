@@ -57,17 +57,17 @@
         <h2 id="promise">Practical Promise</h2>
         <p>Link is local personal memory software. The expected sweet spot is a real user's working wiki: hundreds to thousands of Markdown pages, raw sources, durable memories, and graph links. The product is designed so agents do not need to enumerate that whole corpus for normal work.</p>
         <div class="grid two-up">
-          <article class="panel"><h3>Search</h3><p>SQLite FTS5 is used when Python provides it. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend in status and benchmark output.</p></article>
-          <article class="panel"><h3>Cache reuse</h3><p>Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command.</p></article>
+          <article class="panel"><h3>Search</h3><p>SQLite FTS5 is used when Python provides it. Link stores a derived FTS sidecar under <code>.link-cache/</code> so unchanged wikis can reuse the search table across process starts.</p></article>
+          <article class="panel"><h3>Cache reuse</h3><p>Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend in status and benchmark output.</p></article>
           <article class="panel"><h3>Graph</h3><p>Large graphs open as a bounded high-signal overview first. Users can search, filter, focus neighborhoods, or explicitly load more when they need it.</p></article>
-          <article class="panel"><h3>Agent context</h3><p>MCP and CLI query packets use small, medium, and large budgets with follow-up actions instead of dumping every page into the model.</p></article>
+          <article class="panel"><h3>Agent context</h3><p>MCP and CLI query packets use micro, small, medium, and large budgets. Agents read the recall capsule first, then follow-up actions instead of dumping every page into the model.</p></article>
         </div>
 
         <h2 id="bounded">Bounded Surfaces</h2>
         <p>The important scale behavior is not "can Link list every page?" It is "does the default agent and UI path stay bounded?"</p>
         <div class="choice-table">
           <div><strong>Surface</strong><strong>Default behavior</strong><strong>Expansion path</strong></div>
-          <div><span><code>query_link</code></span><span>Returns a budgeted context packet with why each item was selected.</span><span>Use follow-up actions for more memory, search, context, or graph detail.</span></div>
+          <div><span><code>query_link</code></span><span>Returns a budgeted context packet plus a tiny hybrid-ranked recall capsule.</span><span>Use follow-up actions for more memory, search, context, or graph detail.</span></div>
           <div><span><code>get_graph_summary</code></span><span>Returns a bounded topic or high-degree graph neighborhood.</span><span>Increase limit/depth or request the full graph only when needed.</span></div>
           <div><span>Local graph UI</span><span>Starts capped with sparse labels and motion limits for large wikis.</span><span>Use type filters, node search, focused neighborhoods, fullscreen, and explicit all-data loading.</span></div>
           <div><span>All pages</span><span>Lists a bounded window grouped by page type.</span><span>Use paging, search, and type filters instead of scrolling the whole wiki.</span></div>

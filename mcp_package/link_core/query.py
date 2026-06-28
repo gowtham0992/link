@@ -7,6 +7,7 @@ agent can read before answering.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -19,12 +20,23 @@ from .wiki import context_for_topic, search_pages
 
 
 BUDGETS: dict[str, dict[str, int]] = {
+    "micro": {
+        "memories": 1,
+        "search_results": 2,
+        "context_pages": 1,
+        "primary_chars": 650,
+        "neighbor_chars": 220,
+        "capsule_items": 3,
+        "capsule_chars": 420,
+    },
     "small": {
         "memories": 3,
         "search_results": 4,
         "context_pages": 3,
         "primary_chars": 1200,
         "neighbor_chars": 450,
+        "capsule_items": 5,
+        "capsule_chars": 550,
     },
     "medium": {
         "memories": 6,
@@ -32,6 +44,8 @@ BUDGETS: dict[str, dict[str, int]] = {
         "context_pages": 5,
         "primary_chars": 2400,
         "neighbor_chars": 700,
+        "capsule_items": 7,
+        "capsule_chars": 750,
     },
     "large": {
         "memories": 10,
@@ -39,12 +53,16 @@ BUDGETS: dict[str, dict[str, int]] = {
         "context_pages": 8,
         "primary_chars": 5000,
         "neighbor_chars": 1200,
+        "capsule_items": 10,
+        "capsule_chars": 950,
     },
 }
 
 
 def normalize_budget(value: object | None) -> str:
     budget = str(value if value is not None else "medium").strip().lower()[:20]
+    if budget in {"tiny", "capsule"}:
+        return "micro"
     return budget if budget in BUDGETS else "medium"
 
 
@@ -161,6 +179,116 @@ def _compact_search_result(page: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _slug_key(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    name = Path(text).stem if "/" in text or "\\" in text else text
+    return re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+
+
+def _memory_source_keys(memory: Mapping[str, object]) -> set[str]:
+    keys = {
+        _slug_key(memory.get("name")),
+        _slug_key(memory.get("source")),
+        _slug_key(memory.get("provenance", {}).get("source") if isinstance(memory.get("provenance"), Mapping) else ""),
+    }
+    provenance = memory.get("provenance")
+    if isinstance(provenance, Mapping):
+        keys.add(_slug_key(provenance.get("path")))
+    return {key for key in keys if key}
+
+
+def _hybrid_ranked_items(
+    memories: list[dict[str, object]],
+    pages: list[dict[str, object]],
+    search_results: list[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Fuse memory, search, and graph signals into one token-safe ranking."""
+    search_rank = {_slug_key(page.get("name")): index for index, page in enumerate(search_results)}
+    search_score = {
+        _slug_key(page.get("name")): int(page.get("score") or 0)
+        for page in search_results
+    }
+    page_keys = {_slug_key(page.get("name")) for page in pages}
+    ranked: list[tuple[float, int, dict[str, object]]] = []
+
+    for index, memory in enumerate(memories):
+        score = float(memory.get("rank_score") or memory.get("score") or 0)
+        signals = ["memory-match"]
+        recall = memory.get("recall")
+        if isinstance(recall, Mapping) and recall.get("state") == "ready":
+            score += 12
+            signals.append("recall-ready")
+        if str(memory.get("review_status") or "").lower() == "reviewed":
+            score += 8
+            signals.append("reviewed")
+        if memory.get("project"):
+            score += 4
+            signals.append("project-scoped")
+        issue_count = int(memory.get("review_issue_count") or 0)
+        if issue_count:
+            score -= min(issue_count * 3, 12)
+            signals.append("review-needed")
+        if _memory_source_keys(memory) & page_keys:
+            score += 10
+            signals.append("source-linked-to-graph-context")
+        ranked.append((score, index, {**memory, "hybrid_rank": round(score, 3), "rank_signals": signals}))
+
+    offset = len(memories)
+    for index, page in enumerate(pages):
+        key = _slug_key(page.get("name"))
+        score = float(search_score.get(key, 0))
+        signals = ["graph-context"]
+        relationship = str(page.get("relationship") or "")
+        if relationship == "primary":
+            score += 34
+            signals.append("primary-topic")
+        elif relationship in {"inbound", "forward"}:
+            score += 14
+            signals.append(f"{relationship}-link")
+        if key in search_rank:
+            score += 30 / (search_rank[key] + 1)
+            signals.append("fts-ranked")
+        ranked.append((score, offset + index, {**page, "hybrid_rank": round(score, 3), "rank_signals": signals}))
+
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [item for _, _, item in ranked]
+
+
+def _capsule_item(item: Mapping[str, object], max_chars: int) -> dict[str, object]:
+    content = item.get("summary") or item.get("content") or item.get("snippet") or ""
+    return _drop_empty({
+        "kind": item.get("kind", ""),
+        "name": item.get("name", ""),
+        "title": item.get("title", ""),
+        "summary": _trim_text(content, max_chars),
+        "why_selected": item.get("why_selected", ""),
+        "rank_signals": item.get("rank_signals", []),
+        "hybrid_rank": item.get("hybrid_rank", 0),
+        "provenance": item.get("provenance", {}),
+    })
+
+
+def _recall_capsule(
+    ranked_items: list[dict[str, object]],
+    limits: Mapping[str, int],
+) -> dict[str, object]:
+    items = [
+        _capsule_item(item, limits["capsule_chars"])
+        for item in ranked_items[: limits["capsule_items"]]
+    ]
+    chars = _estimated_json_chars(items)
+    return {
+        "purpose": "read this first; it is the smallest fused memory/wiki packet",
+        "ranking": "hybrid memory score + review state + recency + FTS + graph proximity",
+        "count": len(items),
+        "estimated_chars": chars,
+        "estimated_tokens": _estimated_tokens(chars),
+        "items": items,
+    }
+
+
 def _compact_review(review: object, limit: int) -> dict[str, object]:
     if not isinstance(review, Mapping):
         return {"count": 0, "counts_by_severity": {}, "items": []}
@@ -189,7 +317,7 @@ def _compact_review(review: object, limit: int) -> dict[str, object]:
 
 
 def _next_budget(current: str) -> str:
-    order = ["small", "medium", "large"]
+    order = ["micro", "small", "medium", "large"]
     try:
         index = order.index(current)
     except ValueError:
@@ -316,7 +444,9 @@ def query_link(
         _compact_page(page, limits["primary_chars"], limits["neighbor_chars"])
         for page in raw_context_pages[: limits["context_pages"]]
     ]
-    packet = [*memories, *pages]
+    ranked_packet = _hybrid_ranked_items(memories, pages, search_results)
+    packet = ranked_packet
+    capsule = _recall_capsule(ranked_packet, limits)
     mode_parts = []
     if memories:
         mode_parts.append("memory")
@@ -325,7 +455,7 @@ def query_link(
     mode = "+".join(mode_parts) if mode_parts else "none"
 
     guidance = [
-        "Use this packet before answering; do not read the whole wiki unless this packet is insufficient.",
+        "Read recall_capsule first; do not read the whole wiki unless the capsule and packet are insufficient.",
         "Prefer recall-ready reviewed memories for personalization and source-backed wiki pages for factual claims.",
         "Use provenance.path/source/date fields to explain why Link knows something.",
         "If important context appears missing, rerun query_link with a larger budget or call get_context on the primary page.",
@@ -350,10 +480,11 @@ def query_link(
         "found": bool(packet or search_results),
         "strategy": {
             "mode": mode,
-            "selection": "budgeted memory + ranked wiki + graph neighborhood",
+            "selection": "hybrid-ranked memory + FTS wiki + graph neighborhood",
             "limits": limits,
         },
         "budget_report": budget_report,
+        "recall_capsule": capsule,
         "follow_up": _follow_up_actions(
             q,
             budget_name,

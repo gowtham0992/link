@@ -13,9 +13,9 @@ Use bounded CLI commands so the agent does not dump the whole wiki into context.
    ```
 2. For most questions, use a compact query packet:
    ```bash
-   lnk query "<question or task>" [link-root] --budget small
+   lnk query "<question or task>" [link-root] --budget micro
    ```
-   Increase to `--budget medium` or `--budget large` only when the packet says more context is needed.
+   Read `recall_capsule` first. Increase to `--budget small`, `--budget medium`, or `--budget large` only when the packet says more context is needed.
 3. Before longer work, prime from memory:
    ```bash
    lnk brief "<current task>" [link-root]
@@ -29,4 +29,4 @@ Use bounded CLI commands so the agent does not dump the whole wiki into context.
    lnk benchmark "<topic>" [link-root] --budget small
    ```
 
-Do not enumerate every page or request the full graph unless the user explicitly asks for an export or exhaustive audit.
+Do not enumerate every page, grep raw files, or request the full graph unless the user explicitly asks for an export or exhaustive audit, or the compact packet is insufficient and tells you which follow-up to use.

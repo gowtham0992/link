@@ -222,7 +222,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     query_cmd = sub.add_parser("query", aliases=["query-link"], help="build a compact answer-ready Link context packet")
     query_cmd.add_argument("query", help="task or question to retrieve memory and wiki context for")
     query_cmd.add_argument("target", nargs="?", default=".")
-    query_cmd.add_argument("--budget", choices=("small", "medium", "large"), default="medium")
+    query_cmd.add_argument("--budget", choices=("micro", "small", "medium", "large"), default="medium")
     query_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     query_cmd.add_argument("--json", action="store_true", help="print machine-readable context packet")
 
@@ -237,7 +237,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     benchmark_cmd = sub.add_parser("benchmark", help="measure local search, query, and graph performance")
     benchmark_cmd.add_argument("query", nargs="?", default="agent memory", help="query to benchmark")
     benchmark_cmd.add_argument("target", nargs="?", default=".")
-    benchmark_cmd.add_argument("--budget", choices=("small", "medium", "large"), default="small")
+    benchmark_cmd.add_argument("--budget", choices=("micro", "small", "medium", "large"), default="small")
     benchmark_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     benchmark_cmd.add_argument("--json", action="store_true", help="print machine-readable benchmark data")
 

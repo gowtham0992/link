@@ -15,6 +15,7 @@ from link_core.wiki import (  # noqa: E402
     build_index_markdown,
     build_backlinks,
     build_wiki_cache,
+    close_wiki_cache,
     context_for_topic,
     graph_data,
     graph_summary,
@@ -141,6 +142,11 @@ class WikiCoreTests(unittest.TestCase):
         self.assertEqual(first["persistent_cache"]["reused_records"], 0)
         self.assertTrue(first["persistent_cache"]["written"])
         self.assertTrue((wiki.parent / ".link-cache/wiki-cache-v2.json").exists())
+        if first["search_backend"] == "sqlite-fts":
+            self.assertTrue(first["fts_index_info"]["persistent"])
+            self.assertFalse(first["fts_index_info"]["reused"])
+            self.assertTrue((wiki.parent / ".link-cache/page-fts-v1.sqlite").exists())
+        close_wiki_cache(first)
 
         original_read_text = Path.read_text
 
@@ -157,6 +163,10 @@ class WikiCoreTests(unittest.TestCase):
         self.assertEqual(second["persistent_cache"]["reused_records"], second["persistent_cache"]["total_records"])
         self.assertIn("agent-memory", second["page_map"])
         self.assertIn("durable", second["fulltext"]["agent-memory"])
+        if second["search_backend"] == "sqlite-fts":
+            self.assertTrue(second["fts_index_info"]["persistent"])
+            self.assertTrue(second["fts_index_info"]["reused"])
+        close_wiki_cache(second)
 
     def test_build_wiki_cache_reuses_unchanged_persistent_records_after_page_edit(self):
         wiki = self.make_wiki()

@@ -119,6 +119,9 @@ def build_benchmark_payload(
         persistent_cache_info = cache.get("persistent_cache")
         if not isinstance(persistent_cache_info, Mapping):
             persistent_cache_info = {}
+        fts_index_info = cache.get("fts_index_info")
+        if not isinstance(fts_index_info, Mapping):
+            fts_index_info = {}
         payload = {
             "target": str(target),
             "wiki": str(wiki_dir),
@@ -145,6 +148,12 @@ def build_benchmark_payload(
                 "total_edges": graph_initial_info.get("total_edge_count", 0),
             },
             "search_backend": str(cache.get("search_backend") or "token-index"),
+            "fts_index": {
+                "available": bool(fts_index_info.get("available")),
+                "persistent": bool(fts_index_info.get("persistent")),
+                "reused": bool(fts_index_info.get("reused")),
+                "path": str(fts_index_info.get("path") or ""),
+            },
             "persistent_cache": {
                 "enabled": bool(persistent_cache_info.get("enabled")),
                 "hit": bool(persistent_cache_info.get("hit")),
@@ -255,6 +264,13 @@ def render_benchmark_text(payload: Mapping[str, object]) -> str:
         f"{payload.get('edges', 0)} edges"
     )
     lines.append(f"Search backend: {payload.get('search_backend', 'unknown')}")
+    fts_index = payload.get("fts_index")
+    if isinstance(fts_index, Mapping) and fts_index.get("available"):
+        lines.append(
+            "FTS sidecar: "
+            f"{'persistent' if fts_index.get('persistent') else 'memory'} · "
+            f"reused={bool(fts_index.get('reused'))}"
+        )
     persistent_cache = payload.get("persistent_cache")
     if isinstance(persistent_cache, Mapping):
         lines.append(

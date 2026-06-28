@@ -7,7 +7,7 @@ import shlex
 import subprocess
 import urllib.parse
 from collections.abc import Callable, Iterable, Mapping
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .files import atomic_write_text
@@ -101,6 +101,16 @@ CONFLICT_GROUP_CONTEXT = {
     "install_method": {"install", "installer", "mcp", "package", "pip", "python", "setup"},
     "release_channel": {"package", "publish", "registry", "release", "version"},
 }
+MEMORY_QUERY_EQUIVALENTS = (
+    {"auth", "authentication", "authorization", "login", "signin", "sign-in", "oauth", "sso"},
+    {"setup", "install", "installation", "configure", "configuration", "onboarding", "bootstrap"},
+    {"release", "publish", "publishing", "version", "tag", "pypi", "registry"},
+    {"branch", "branches", "pr", "pull", "merge", "develop", "main"},
+    {"agent", "assistant", "llm", "model", "copilot", "codex", "claude", "cursor"},
+    {"memory", "remember", "recall", "preference", "context", "profile"},
+    {"ui", "ux", "interface", "web", "viewer", "dashboard"},
+    {"fast", "speed", "latency", "performance", "quick", "responsive"},
+)
 MemoryLogWriter = Callable[[str, str, str, list[str]], None]
 BacklinkRebuilder = Callable[[], bool]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -170,6 +180,20 @@ def significant_memory_tokens(value: str) -> set[str]:
         for token in memory_tokens(value)
         if token not in MEMORY_STOPWORDS
     }
+
+
+def expanded_memory_query_tokens(value: str) -> set[str]:
+    """Return query tokens plus small local synonyms for agent-memory recall.
+
+    This is intentionally tiny and deterministic. It catches common developer
+    paraphrases without adding embeddings, model calls, or external services.
+    """
+    tokens = significant_memory_tokens(value)
+    expanded = set(tokens)
+    for group in MEMORY_QUERY_EQUIVALENTS:
+        if tokens & group:
+            expanded.update(group)
+    return expanded
 
 
 def has_negation(value: str) -> bool:
@@ -1806,10 +1830,16 @@ def memory_brief(
 def score_memory(record: Mapping[str, object], query: str) -> int:
     q = query.lower().strip()
     tokens = [token for token in re.split(r"\W+", q) if len(token) >= 3]
+    significant_tokens = significant_memory_tokens(q)
+    expanded_tokens = expanded_memory_query_tokens(q)
     title = str(record.get("title", "")).lower()
     tldr = str(record.get("tldr", "")).lower()
     body = str(record.get("body", "")).lower()
     tags = " ".join(str(tag).lower() for tag in record.get("tags", []))
+    title_tokens = memory_tokens(title)
+    tldr_tokens = memory_tokens(tldr)
+    body_tokens = memory_tokens(body)
+    tags_tokens = memory_tokens(tags)
     score = 0
     if q and q in title:
         score += 20
@@ -1828,7 +1858,68 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
             score += 3
         if token in body:
             score += 1
+    if significant_tokens:
+        searchable = title_tokens | tldr_tokens | tags_tokens | body_tokens
+        if significant_tokens <= searchable:
+            score += 8
+        if significant_tokens <= (title_tokens | tldr_tokens | tags_tokens):
+            score += 10
+    for token in expanded_tokens - set(tokens):
+        if token in title_tokens:
+            score += 4
+        if token in tldr_tokens:
+            score += 3
+        if token in tags_tokens:
+            score += 2
+        if token in body_tokens:
+            score += 1
     return score
+
+
+def _memory_date(value: object) -> datetime | None:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(f"{text}T00:00:00+00:00")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def memory_temporal_boost(record: Mapping[str, object]) -> int:
+    """Score current, reviewed memories above old or stale memories."""
+    boost = 0
+    if str(record.get("review_status") or "").lower() == "reviewed":
+        boost += 3
+    if str(record.get("review_status") or "").lower() == "needs_update":
+        boost -= 6
+    if not is_active_memory(record):
+        boost -= 12
+    parsed = (
+        _memory_date(record.get("updated_at"))
+        or _memory_date(record.get("reviewed_at"))
+        or _memory_date(record.get("date_captured"))
+    )
+    if parsed is not None:
+        age_days = (datetime.now(timezone.utc) - parsed).days
+        if age_days <= 30:
+            boost += 4
+        elif age_days <= 180:
+            boost += 2
+        elif age_days > 730:
+            boost -= 2
+    memory_type = str(record.get("memory_type") or "").lower()
+    if memory_type in {"preference", "decision", "project"}:
+        boost += 1
+    return boost
 
 
 def memory_rank_score(record: Mapping[str, object], match_score: int, project: str | None = None) -> int:
@@ -1838,12 +1929,7 @@ def memory_rank_score(record: Mapping[str, object], match_score: int, project: s
     record_project = normalize_project(str(record.get("project") or ""))
     if project_name and record_scope == "project" and record_project == project_name:
         rank_score += 6
-    if str(record.get("review_status") or "").lower() == "reviewed":
-        rank_score += 3
-    if str(record.get("review_status") or "").lower() == "needs_update":
-        rank_score -= 3
-    if not is_active_memory(record):
-        rank_score -= 10
+    rank_score += memory_temporal_boost(record)
     return max(1, rank_score)
 
 

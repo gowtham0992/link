@@ -348,8 +348,9 @@ creating a duplicate.
 When an agent uses Link through MCP, these are the stable tools it receives.
 CLI and skill workflows call the same core behavior through `lnk`.
 
-- `query_link`: an answer-ready packet with relevant memories, pages, graph
-  neighborhood, reasons for selection, budget limits, and follow-up actions.
+- `query_link`: an answer-ready packet with a tiny `recall_capsule`,
+  relevant memories, pages, graph neighborhood, reasons for selection, budget
+  limits, and follow-up actions.
 - `memory_brief`: a compact pre-work brief with user/project preferences,
   active context, review warnings, and safe memory-use rules.
 - `ingest_status`: exact next steps for raw files, including source safety,
@@ -436,7 +437,7 @@ For MCP clients, agents should use Link in this order:
 1. `link_status` to check readiness and safe next actions.
 2. `starter_prompts` when the user asks what to try first.
 3. `ingest_status` before touching raw sources.
-4. `query_link` for compact answer-ready context.
+4. `query_link` for compact answer-ready context; read `recall_capsule` first.
 5. `memory_brief` before longer work.
 6. `get_graph_summary` when graph context is useful but the full graph would be noisy.
 7. `backup_wiki` before broad repair or migration work.

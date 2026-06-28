@@ -10,7 +10,7 @@ If status reports a missing or old schema marker, use MCP `migrate_wiki` when av
 
 When the user asks to ingest or drops files into `raw/`, use MCP `ingest_status` when available, or run `lnk ingest-status`, then follow its guided plan before deciding what to process. If it reports `blocked_secrets` or secret warnings, do not read or ingest flagged raw files until the user redacts them.
 
-When answering a substantive question that may need local memory or wiki context, start with MCP `query_link` when available, or run `lnk query "<task or question>"`.
+When answering a substantive question that may need local memory or wiki context, start with MCP `query_link` when available, or run `lnk query "<task or question>" --budget micro`. Read the returned capsule first. Do this before broad file reads, grep/search, or asking the user to repeat project context.
 
 When you only need graph orientation, especially for a large wiki, prefer MCP `get_graph_summary` or `lnk graph-summary "<topic>"` before requesting the full graph.
 

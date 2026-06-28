@@ -113,6 +113,43 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(recalled[0]["highest_review_severity"], "none")
         self.assertNotIn("body", recalled[0])
 
+    def test_recall_matches_common_developer_paraphrases(self):
+        records = [
+            {
+                "name": "login-flow",
+                "path": "wiki/memories/login-flow.md",
+                "title": "Login flow",
+                "memory_type": "project",
+                "scope": "project",
+                "project": "link",
+                "status": "active",
+                "date_captured": "2026-05-05T00:00:00Z",
+                "review_status": "reviewed",
+                "tags": ["authentication"],
+                "tldr": "Use OAuth login configuration for the project.",
+                "body": "Use OAuth login configuration for the project.",
+            },
+            {
+                "name": "release-flow",
+                "path": "wiki/memories/release-flow.md",
+                "title": "Release flow",
+                "memory_type": "project",
+                "scope": "project",
+                "project": "link",
+                "status": "active",
+                "date_captured": "2026-05-05T00:00:00Z",
+                "review_status": "reviewed",
+                "tags": ["release"],
+                "tldr": "Use tags for package publishing.",
+                "body": "Use tags for package publishing.",
+            },
+        ]
+
+        recalled = recall_memories(records, "auth setup", project="link")
+
+        self.assertEqual(recalled[0]["name"], "login-flow")
+        self.assertGreater(recalled[0]["score"], 0)
+
     def test_review_after_marks_memory_due(self):
         record = {
             "name": "review-me",

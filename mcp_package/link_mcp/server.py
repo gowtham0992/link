@@ -82,7 +82,9 @@ def _instructions(surface: str) -> str:
             "connecting to Link or troubleshooting readiness. Use recall for "
             "substantive questions, session-start briefs, user preferences, "
             "project decisions, wiki search, and graph context; prefer small "
-            "or medium budgets before asking for more. Use remember only when "
+            "or micro budgets before asking for more. Before broad file reads, "
+            "grep/search, or asking the user to repeat project context, call "
+            "recall first and read recall_capsule before the rest of the packet. Use remember only when "
             "the user explicitly asks or approves durable memory. Use ingest "
             "when the user drops files into raw/ or asks what needs ingest. "
             "Use review for memory inbox, explain, archive, restore, forget, "
@@ -97,7 +99,8 @@ def _instructions(surface: str) -> str:
         "migrate_wiki if link_status reports a missing or old schema marker. "
         "Use starter_prompts when the user asks what to try after install. "
         "Use ingest_status to check pending raw files, the guided ingest plan, and the next ingest prompt. "
-        "query_link when the user asks a substantive question that may need "
+        "Use query_link before broad file reads, grep/search, or asking the user "
+        "to repeat project context when the user asks a substantive question that may need "
         "both memory and wiki context. Use memory_brief at "
         "session start or before personalized/project work; pass the user's "
         "task as the query when available. Use recall_memory for focused user "
@@ -999,7 +1002,7 @@ def status(include_validation: bool = False) -> str:
 @_slim_tool()
 def recall(
     query: str = "",
-    budget: str = "medium",
+    budget: str = "small",
     project: str = "",
     mode: str = "auto",
     limit: int = 6,
@@ -1320,7 +1323,7 @@ def query_link(query: str, budget: str = "medium", project: str = "") -> str:
     wiki knowledge, or both. It returns budgeted memories, ranked wiki results,
     graph-neighborhood context, and why each item was selected so the agent does
     not waste context by reading the whole wiki.
-    budget: small, medium, or large.
+    budget: micro, small, medium, or large.
     """
     return json.dumps(_query_link(query=query, budget=budget, project=project), ensure_ascii=False)
 

@@ -95,6 +95,19 @@ def _render_persistent_cache_item(status: Mapping[str, object]) -> str:
     )
 
 
+def _render_fts_item(status: Mapping[str, object]) -> str:
+    fts_index = status.get("fts_index")
+    if not isinstance(fts_index, Mapping) or not fts_index.get("available"):
+        return ""
+    state = "persistent" if fts_index.get("persistent") else "memory"
+    detail = f"reused={bool(fts_index.get('reused'))}"
+    return (
+        "<li><strong>FTS index</strong>"
+        f"<span>{html.escape(state)}</span>"
+        f"<small>{html.escape(detail)}</small></li>"
+    )
+
+
 def _command_for_action(action: Mapping[str, object], command_target: str) -> str:
     command = str(action.get("command") or "").strip()
     if command:
@@ -275,6 +288,7 @@ def render_health_page(
         "<section><h2>Readiness</h2>"
         '<ul class="page-list">'
         f"<li><strong>Search backend</strong><span>{html.escape(str(status.get('search_backend') or 'unknown'))}</span></li>"
+        f"{_render_fts_item(status)}"
         f"{_render_persistent_cache_item(status)}"
         f"<li><strong>Schema</strong><span>{html.escape(str(schema.get('status') or 'unknown'))}</span></li>"
         f"<li><strong>Active memories</strong><span>{html.escape(str(status.get('active_memory_count') or 0))}</span></li>"
