@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import re
-import os
-import shlex
-import subprocess
 from pathlib import Path
 from collections.abc import Callable, Mapping
 
 from .files import atomic_write_text
 from .frontmatter import frontmatter_string, parse_frontmatter
 from .log import utc_timestamp
+from .mcp_verify import display_command
 from .memory import normalize_project, slugify
 from .security import redact_secret_values, secret_value_warnings
 
@@ -23,9 +21,9 @@ def _shell_words(*parts: object) -> str:
     words = [str(part) for part in parts if str(part) != ""]
     if not words:
         return ""
-    if os.name == "nt":
-        return subprocess.list2cmdline(words)
-    return shlex.join(words)
+    if len(words) >= 2 and words[0].startswith("python") and words[1] == "link.py":
+        return display_command(["link", *words[2:]])
+    return display_command(words)
 
 
 def capture_title(

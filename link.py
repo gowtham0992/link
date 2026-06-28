@@ -6,6 +6,7 @@ Usage:
   python link.py serve [target]
   python link.py demo [target]
   python link.py try [target]
+  python link.py onboard [target]
   python link.py welcome [target]
   python link.py prompts [target]
   python link.py status [target]
@@ -245,6 +246,7 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    supported_agents as _core_supported_agents,
 )
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
@@ -271,6 +273,7 @@ from link_core.cli_runtime import (
     render_demo_text as _core_render_demo_text,
     render_init_text as _core_render_init_text,
     render_mcp_connect_text as _core_render_mcp_connect_text,
+    render_onboard_text as _core_render_onboard_text,
     render_starter_prompts_text as _core_render_starter_prompts_text,
     render_try_text as _core_render_try_text,
     render_welcome_text as _core_render_welcome_text,
@@ -1881,6 +1884,124 @@ def init_wiki(target: Path) -> int:
     return code
 
 
+def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str]:
+    requested: list[str] = list(_core_supported_agents()) if all_agents else []
+    requested.extend(agents or [])
+    return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
+
+
+def onboard(
+    target: Path,
+    *,
+    agents: list[str] | None = None,
+    all_agents: bool = False,
+    write: bool = False,
+    first_memory: str | None = None,
+    project: str | None = None,
+    port: int = 3000,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    if port < 1 or port > 65535:
+        print("--port must be between 1 and 65535")
+        return 1
+
+    created = not (target / "wiki").exists()
+    target.mkdir(parents=True, exist_ok=True)
+    _copy_runtime_files(target)
+    fixes = _apply_doctor_fixes(target)
+    wiki_dir = _resolve_wiki_dir(target)
+
+    memory_result: dict[str, object] | None = None
+    if first_memory and first_memory.strip():
+        try:
+            memory_result = _write_memory_page(
+                target,
+                first_memory,
+                memory_type="preference",
+                scope="project" if project else "user",
+                tags="onboarding",
+                source="onboard",
+                project=project,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            memory_result = {
+                "created": False,
+                "message": str(exc),
+            }
+
+    connections: list[dict[str, object]] = []
+    for agent in _onboard_agent_names(agents, all_agents):
+        try:
+            connections.append(_core_build_mcp_connect_payload(
+                target=target,
+                wiki_dir=wiki_dir,
+                agent=agent,
+                expected_version=LINK_VERSION,
+                init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+                default_python=sys.executable,
+                write=write,
+            ))
+        except ValueError as exc:
+            connections.append({
+                "agent": agent,
+                "display_name": agent,
+                "config_path": "",
+                "write": {"requested": write, "ok": False, "message": str(exc)},
+                "next_actions": [],
+            })
+
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    starter_payload = _core_starter_prompt_payload(target, project=project)
+    prompts = starter_payload.get("prompts", [])
+    if first_memory and isinstance(prompts, list):
+        prompts = [
+            {
+                **item,
+                "prompt": f"remember that {first_memory.strip()}",
+            }
+            if isinstance(item, dict) and item.get("label") == "Save explicit memory"
+            else item
+            for item in prompts
+        ]
+    commands = {
+        "health": _display_command(["link", "health", str(target)]),
+        "serve": _display_command(["link", "serve", str(target), "--port", str(port)]),
+        "memory_inbox": _display_command(["link", "memory-inbox", str(target)]),
+        "ingest_status": _display_command(["link", "ingest-status", str(target)]),
+        "brief": _display_command(["link", "brief", "working with Link", str(target)]),
+    }
+    payload: dict[str, object] = {
+        "target": str(target),
+        "created": created,
+        "fixes": fixes,
+        "status": status_payload,
+        "first_memory": memory_result,
+        "connections": connections,
+        "prompts": prompts,
+        "commands": commands,
+        "agent_examples": [
+            _display_command(["link", "onboard", str(target), "--agent", agent])
+            for agent in ("codex", "claude-code", "cursor")
+        ],
+        "url": f"http://127.0.0.1:{port}",
+    }
+
+    if json_output:
+        print(json.dumps(payload, indent=2, default=str))
+        failed = any(
+            isinstance(connection.get("write"), dict)
+            and connection["write"].get("requested")
+            and not connection["write"].get("ok")
+            for connection in connections
+        )
+        return 0 if status_payload.get("ready") and not failed else 1
+
+    code, text = _core_render_onboard_text(payload)
+    print(text)
+    return code
+
+
 def starter_prompts(target: Path, project: str | None = None, json_output: bool = False) -> int:
     payload = _core_starter_prompt_payload(target, project=project)
     if json_output:
@@ -2059,6 +2180,7 @@ def main(argv: list[str] | None = None) -> int:
             "serve": serve_wiki,
             "demo": create_demo,
             "try": try_link,
+            "onboard": onboard,
             "welcome": welcome,
             "prompts": starter_prompts,
             "status": status,

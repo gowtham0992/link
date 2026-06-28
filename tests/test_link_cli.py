@@ -117,6 +117,28 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
         self.assertIn("what this project remembers", payload["prompts"][3]["prompt"])
 
+    def test_onboard_json_seeds_memory_and_personalizes_prompt(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
+        target = tmp / "my-link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(
+                target,
+                first_memory="I prefer concise release notes",
+                json_output=True,
+            )
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertTrue(payload["first_memory"]["created"])
+        self.assertEqual(payload["status"]["memory_count"], 1)
+        self.assertIn(
+            "remember that I prefer concise release notes",
+            [item["prompt"] for item in payload["prompts"]],
+        )
+
     def test_welcome_prints_short_first_use_path(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-welcome-test-"))
         target = tmp / "my-link"

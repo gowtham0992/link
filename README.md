@@ -113,6 +113,20 @@ Use `lnk try` for the shortest Homebrew proof loop. It creates the demo,
 checks readiness, runs a compact query/brief proof, and prints the agent prompts
 and viewer command. From source, use `python3 link.py try`.
 
+When you are ready to use Link for real memory, run one guided command:
+
+```bash
+lnk onboard
+lnk onboard --first-memory "I prefer concise release notes"
+lnk onboard --agent codex
+lnk onboard --agent codex --write
+```
+
+`lnk onboard` creates or repairs `~/link`, checks health, prints the exact agent
+prompts to try, and previews MCP wiring for Codex, Claude Code, Cursor, Kiro,
+VS Code, Copilot, Antigravity, and other supported clients. It only writes an
+agent config when you pass `--write`.
+
 The Homebrew formula is maintained in the public
 [`gowtham0992/homebrew-link`](https://github.com/gowtham0992/homebrew-link) tap.
 
@@ -262,11 +276,14 @@ query Link for the release process
 what does Link remember about local personal memory?
 ```
 
-If your agent already has instructions and you only need MCP wiring, use the
-connection helper. It previews the exact config first; add `--write` when you
-want Link to update the agent config file.
+If you want one guided setup for a real workspace and an agent, use
+`lnk onboard --agent AGENT`. If your agent already has instructions and you only
+need MCP wiring, use the lower-level connection helper. Both preview the exact
+config first; add `--write` when you want Link to update the agent config file.
 
 ```bash
+lnk onboard --agent codex
+lnk onboard --agent codex --write
 lnk connect codex ~/link
 lnk connect codex ~/link --write
 lnk connect kiro ~/link --write

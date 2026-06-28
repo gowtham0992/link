@@ -39,7 +39,7 @@
     <div class="hero-inner">
       <span class="eyebrow">First 10 minutes</span>
       <h1>Turn one local note into agent memory.</h1>
-      <p>Start with the demo, add one real source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.</p>
+      <p>Start with the demo, onboard a real local workspace, add one source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.</p>
     </div>
   </header>
 
@@ -48,6 +48,7 @@
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#demo">Run the demo</a>
+        <a href="#onboard">Onboard a real workspace</a>
         <a href="#install">Install for an agent</a>
         <a href="#source">Add one source</a>
         <a href="#memory">Save one memory</a>
@@ -90,7 +91,15 @@ lnk brief "working on agent memory" link-demo
 lnk benchmark "agent memory" link-demo
 lnk health link-demo</code></pre>
 
-        <h2 id="install">2. Install Link For Your Agent</h2>
+        <h2 id="onboard">2. Onboard A Real Workspace</h2>
+        <p>Use <code>lnk onboard</code> when you are ready to create or repair your real <code>~/link</code> memory workspace. It checks health, prints the first agent prompts, and previews MCP wiring without changing agent config files unless you pass <code>--write</code>.</p>
+        <pre><code>lnk onboard
+lnk onboard --first-memory "I prefer concise release notes"
+lnk onboard --agent codex
+lnk onboard --agent codex --write</code></pre>
+        <p>From source, use <code>python3 link.py onboard</code> on macOS/Linux or <code>py link.py onboard</code> on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs.</p>
+
+        <h2 id="install">3. Install Link For Your Agent</h2>
         <p>From the cloned checkout, run the installer for the agent you use. Re-running the same installer updates code and instructions without replacing existing wiki data.</p>
         <pre><code>bash integrations/codex/install.sh
 bash integrations/kiro/install.sh
@@ -109,7 +118,7 @@ bash integrations/antigravity/install.sh</code></pre>
 .\integrations\vscode\install.ps1
 .\integrations\antigravity\install.ps1</code></pre>
 
-        <h2 id="source">3. Add One Source</h2>
+        <h2 id="source">4. Add One Source</h2>
         <p>Open the local viewer and use <strong>ingest -> Add Raw Source</strong>, or write a first note directly:</p>
         <pre><code>mkdir -p ~/link/raw
 cat &gt; ~/link/raw/first-memory.md &lt;&lt;'EOF'
@@ -135,7 +144,7 @@ EOF</code></pre>
           If you already have files in <code>~/link/raw/</code>, <code>lnk ingest-status</code> may point to a different pending file first. If <code>first-memory.md</code> was already ingested and you overwrite it, Link marks that raw file as stale and asks the agent to refresh the existing source page.
         </div>
 
-        <h2 id="memory">4. Save One Direct Memory</h2>
+        <h2 id="memory">5. Save One Direct Memory</h2>
         <p>Use natural language with an agent:</p>
         <pre><code>remember that I am testing Link as local personal memory for agents
 brief me from Link before we continue
@@ -147,13 +156,13 @@ lnk recall "local personal memory"
 lnk profile
 lnk memory-audit</code></pre>
 
-        <h2 id="ingest">5. Ask The Agent To Ingest</h2>
+        <h2 id="ingest">6. Ask The Agent To Ingest</h2>
         <p>In your agent chat, ask:</p>
         <pre><code>ingest raw/first-memory.md into Link</code></pre>
         <p>The agent reads <code>~/link/LINK.md</code>, creates a source page, updates concepts/entities when useful, updates the index and log, rebuilds backlinks, and validates generated pages.</p>
         <p>Return to <code>/ingest</code> after the agent finishes. Link shows which raw files are represented and gives follow-up prompts for proposals or retrieval checks.</p>
 
-        <h2 id="verify">6. Verify The Loop</h2>
+        <h2 id="verify">7. Verify The Loop</h2>
         <pre><code>lnk doctor --fix
 lnk health
 lnk ingest-status

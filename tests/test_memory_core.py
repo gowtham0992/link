@@ -150,6 +150,23 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(recalled[0]["name"], "login-flow")
         self.assertGreater(recalled[0]["score"], 0)
 
+    def test_recall_ignores_weak_generic_body_matches(self):
+        records = [{
+            "name": "prefer-local-personal-memory",
+            "path": "wiki/memories/prefer-local-personal-memory.md",
+            "title": "Prefer local personal memory",
+            "memory_type": "preference",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-05T00:00:00Z",
+            "review_status": "pending",
+            "tags": ["memory"],
+            "tldr": "The user wants local personal memory for agents.",
+            "body": "The user wants local personal memory for agents.",
+        }]
+
+        self.assertEqual(recall_memories(records, "auth setup"), [])
+
     def test_review_after_marks_memory_due(self):
         record = {
             "name": "review-me",

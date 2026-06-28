@@ -204,9 +204,9 @@ class DemoSnapshotTests(unittest.TestCase):
         self.assertIn("Next actions", html)
         self.assertIn("Review needed", html)
         self.assertIn("Prefer local personal memory", html)
-        self.assertIn("python3 link.py review-memory", html)
-        self.assertIn("python3 link.py update-memory", html)
-        self.assertIn("python3 link.py archive-memory", html)
+        self.assertIn("review-memory", html)
+        self.assertIn("update-memory", html)
+        self.assertIn("archive-memory", html)
 
     def test_demo_memory_dashboard_shows_recent_updates(self):
         target = self.make_demo()

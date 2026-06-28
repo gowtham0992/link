@@ -42,6 +42,35 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.port, 3456)
         self.assertTrue(args.json)
 
+    def test_onboard_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "onboard",
+            "/tmp/link",
+            "--agent",
+            "codex",
+            "--agent",
+            "cursor",
+            "--write",
+            "--first-memory",
+            "I prefer concise updates",
+            "--project",
+            "link",
+            "--port",
+            "3456",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "onboard")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.agent, ["codex", "cursor"])
+        self.assertTrue(args.write)
+        self.assertEqual(args.first_memory, "I prefer concise updates")
+        self.assertEqual(args.project, "link")
+        self.assertEqual(args.port, 3456)
+        self.assertTrue(args.json)
+
     def test_operations_limit_and_json_options(self):
         parser = build_cli_parser()
 
@@ -337,6 +366,41 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][0], Path("/tmp/link-demo"))
         self.assertTrue(calls[0][1]["force"])
         self.assertTrue(calls[0][1]["serve"])
+        self.assertEqual(calls[0][1]["port"], 3456)
+        self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_onboard_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "onboard",
+            "/tmp/link",
+            "--agent",
+            "codex",
+            "--all-agents",
+            "--write",
+            "--first-memory",
+            "I prefer concise updates",
+            "--project",
+            "alpha",
+            "--port",
+            "3456",
+            "--json",
+        ])
+        calls = []
+
+        def onboard_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 2
+
+        code = dispatch_cli_command(args, {"onboard": onboard_handler})
+
+        self.assertEqual(code, 2)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1]["agents"], ["codex"])
+        self.assertTrue(calls[0][1]["all_agents"])
+        self.assertTrue(calls[0][1]["write"])
+        self.assertEqual(calls[0][1]["first_memory"], "I prefer concise updates")
+        self.assertEqual(calls[0][1]["project"], "alpha")
         self.assertEqual(calls[0][1]["port"], 3456)
         self.assertTrue(calls[0][1]["json_output"])
 

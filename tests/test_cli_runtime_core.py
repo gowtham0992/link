@@ -4,6 +4,7 @@ from mcp_package.link_core.cli_runtime import (
     render_demo_text,
     render_init_text,
     render_mcp_connect_text,
+    render_onboard_text,
     render_starter_prompts_text,
     render_try_text,
     render_welcome_text,
@@ -104,6 +105,52 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Query proof:", text)
         self.assertIn("Ask an agent:", text)
         self.assertIn("lnk next /tmp/link-demo", text)
+
+    def test_render_onboard_text_preview(self):
+        code, text = render_onboard_text({
+            "target": "/tmp/link",
+            "created": True,
+            "fixes": ["created wiki/index.md"],
+            "status": {
+                "ready": True,
+                "content_page_count": 0,
+                "memory_count": 1,
+            },
+            "first_memory": {
+                "created": True,
+                "path": "wiki/memories/prefer-local-memory.md",
+            },
+            "connections": [{
+                "display_name": "Codex",
+                "config_path": "/tmp/config.toml",
+                "write": {"requested": False, "ok": False},
+                "next_actions": [{
+                    "label": "write config",
+                    "command_text": "lnk connect codex /tmp/link --write",
+                }],
+            }],
+            "prompts": [
+                {"prompt": "is Link ready?"},
+                {"prompt": "brief me from Link before we continue"},
+            ],
+            "commands": {
+                "health": "lnk health /tmp/link",
+                "serve": "lnk serve /tmp/link --port 3000",
+                "memory_inbox": "lnk memory-inbox /tmp/link",
+                "ingest_status": "lnk ingest-status /tmp/link",
+            },
+            "agent_examples": [],
+            "url": "http://127.0.0.1:3000",
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Link onboard: /tmp/link", text)
+        self.assertIn("Workspace", text)
+        self.assertIn("saved for review", text)
+        self.assertIn("Codex: preview", text)
+        self.assertIn("Write when ready: lnk connect codex /tmp/link --write", text)
+        self.assertIn("is Link ready?", text)
+        self.assertIn("lnk serve /tmp/link --port 3000", text)
 
     def test_render_mcp_connect_text_preview(self):
         code, text = render_mcp_connect_text({

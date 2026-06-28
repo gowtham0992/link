@@ -88,7 +88,11 @@ bash integrations/antigravity/install.sh</code></pre>
 .\integrations\copilot\install.ps1
 .\integrations\vscode\install.ps1
 .\integrations\antigravity\install.ps1</code></pre>
-        <p>If you already have agent instructions and only need the MCP config, use <code>lnk connect</code>. It previews the target file and config snippet first; add <code>--write</code> for an explicit update.</p>
+        <p>If you want a guided setup that also checks the wiki and prints first-run prompts, use <code>lnk onboard --agent AGENT</code>. It previews the target config first; add <code>--write</code> for an explicit update.</p>
+        <pre><code>lnk onboard --agent codex
+lnk onboard --agent codex --write
+lnk onboard --agent cursor --write</code></pre>
+        <p>If you already have agent instructions and only need MCP wiring, use <code>lnk connect</code> directly.</p>
         <pre><code>lnk connect codex ~/link
 lnk connect codex ~/link --write
 lnk connect kiro ~/link --write

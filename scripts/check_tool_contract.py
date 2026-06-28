@@ -34,6 +34,7 @@ EXPECTED_CLI_COMMANDS = {
     "wins",
     "migrate",
     "next",
+    "onboard",
     "operations",
     "profile",
     "prompts",

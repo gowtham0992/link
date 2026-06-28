@@ -40,6 +40,16 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     try_cmd.add_argument("--port", type=int, default=3000)
     try_cmd.add_argument("--json", action="store_true", help="print machine-readable try data")
 
+    onboard_cmd = sub.add_parser("onboard", help="set up a real Link workspace and print the agent-first next steps")
+    onboard_cmd.add_argument("target", nargs="?", default="~/link")
+    onboard_cmd.add_argument("--agent", action="append", default=[], help="agent config to preview or write; repeatable")
+    onboard_cmd.add_argument("--all-agents", action="store_true", help="preview or write all supported agent configs")
+    onboard_cmd.add_argument("--write", action="store_true", help="update selected agent config files")
+    onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
+    onboard_cmd.add_argument("--project", default=None, help="project slug for prompts and first memory")
+    onboard_cmd.add_argument("--port", type=int, default=3000, help="local viewer port to print")
+    onboard_cmd.add_argument("--json", action="store_true", help="print machine-readable onboarding data")
+
     welcome_cmd = sub.add_parser("welcome", help="print the shortest first-use path for Link")
     welcome_cmd.add_argument("target", nargs="?", default=".")
     welcome_cmd.add_argument("--project", default=None, help="project slug for project-scoped prompt examples")
@@ -345,6 +355,17 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             Path(args.target),
             force=args.force,
             serve=args.serve,
+            port=args.port,
+            json_output=args.json,
+        )
+    if command == "onboard":
+        return handlers["onboard"](
+            Path(args.target),
+            agents=args.agent,
+            all_agents=args.all_agents,
+            write=args.write,
+            first_memory=args.first_memory,
+            project=args.project,
             port=args.port,
             json_output=args.json,
         )

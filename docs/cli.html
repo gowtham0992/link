@@ -62,9 +62,11 @@
         </figure>
         <p>The CLI is independent of the web viewer. Use <code>lnk query</code>, <code>lnk brief</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
         <p>Use <code>lnk try</code> when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command.</p>
+        <p>Use <code>lnk onboard</code> when you want to set up a real <code>~/link</code> workspace: safe repair, health check, optional first memory, first prompts, and optional agent MCP wiring in one guided command.</p>
 
         <h2 id="daily">Daily Loop</h2>
-        <pre><code>lnk serve
+<pre><code>lnk serve
+lnk onboard
 lnk welcome
 lnk next
 lnk health
@@ -126,6 +128,7 @@ lnk verify-mcp ~/link</code></pre>
 lnk version
 lnk init [dir]
 lnk serve [dir] [--port 3000]
+lnk onboard [dir] [--agent codex] [--write] [--first-memory "..."]
 lnk try [dir] [--force] [--serve] [--port 3000]
 lnk welcome [dir] [--project slug]
 lnk prompts [dir] [--project slug]

@@ -143,6 +143,92 @@ def render_try_text(
     ])
 
 
+def _first_mapping_items(value: object, limit: int) -> list[Mapping[str, object]]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    return [item for item in value[:limit] if isinstance(item, Mapping)]
+
+
+def _connection_state(connection: Mapping[str, object]) -> str:
+    write_status = connection.get("write") if isinstance(connection.get("write"), Mapping) else {}
+    if write_status.get("requested"):
+        return "updated" if write_status.get("ok") else "failed"
+    return "preview"
+
+
+def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render the guided first-run path for a normal Link workspace."""
+    status = payload.get("status") if isinstance(payload.get("status"), Mapping) else {}
+    memory = payload.get("first_memory") if isinstance(payload.get("first_memory"), Mapping) else None
+    commands = payload.get("commands") if isinstance(payload.get("commands"), Mapping) else {}
+    ready = bool(status.get("ready"))
+    connections = _first_mapping_items(payload.get("connections"), 12)
+    connection_failed = any(_connection_state(connection) == "failed" for connection in connections)
+    code = 0 if ready and not connection_failed and not payload.get("error") else 1
+
+    lines = [
+        f"Link onboard: {payload.get('target')}",
+        "",
+        "Workspace",
+        f"- {'created or repaired' if payload.get('created') or payload.get('fixes') else 'already present'}",
+        f"- health: {'ready' if ready else 'needs attention'}",
+        f"- pages: {status.get('content_page_count', 0)} content · memories: {status.get('memory_count', 0)}",
+    ]
+    fixes = payload.get("fixes")
+    if isinstance(fixes, Sequence) and not isinstance(fixes, (str, bytes)) and fixes:
+        lines.append("- safe repairs:")
+        lines.extend(f"  - {item}" for item in fixes)
+
+    lines.extend(["", "First memory"])
+    if memory:
+        if memory.get("created"):
+            lines.append(f"- saved for review: {memory.get('path')}")
+        else:
+            lines.append(f"- not written: {memory.get('message') or memory.get('reason') or 'needs review'}")
+    else:
+        lines.append("- none yet. Add one when the agent learns a durable preference or decision.")
+
+    lines.extend(["", "Agent connection"])
+    if connections:
+        for connection in connections:
+            state = _connection_state(connection)
+            label = connection.get("display_name") or connection.get("agent") or "agent"
+            config_path = connection.get("config_path") or ""
+            lines.append(f"- {label}: {state} · {config_path}")
+            if state == "preview":
+                actions = _first_mapping_items(connection.get("next_actions"), 4)
+                for action in actions:
+                    if action.get("label") == "write config":
+                        lines.append(f"  Write when ready: {action.get('command_text')}")
+                        break
+            elif state == "failed":
+                write_status = connection.get("write") if isinstance(connection.get("write"), Mapping) else {}
+                lines.append(f"  Error: {write_status.get('message') or 'could not write config'}")
+    else:
+        lines.append("- not connected yet. Preview an agent config with:")
+        for command in payload.get("agent_examples", []):
+            lines.append(f"  {command}")
+
+    prompts = _first_mapping_items(payload.get("prompts"), 4)
+    lines.extend(["", "Ask your agent"])
+    for item in prompts:
+        lines.append(f"- {item.get('prompt')}")
+    if commands.get("health"):
+        lines.extend(["", "Check"])
+        lines.append(f"  {commands.get('health')}")
+    if commands.get("serve"):
+        lines.extend(["", "Open UI"])
+        lines.append(f"  {commands.get('serve')}")
+        lines.append(f"  {payload.get('url')}")
+    if commands.get("memory_inbox") or commands.get("ingest_status"):
+        lines.extend(["", "When there is work to review"])
+        for key in ("memory_inbox", "ingest_status"):
+            if commands.get(key):
+                lines.append(f"  {commands.get(key)}")
+
+    return code, "\n".join(lines)
+
+
 def render_mcp_connect_text(payload: Mapping[str, object]) -> tuple[int, str]:
     """Render a safe MCP connection plan for a local agent."""
     write_status = payload.get("write") if isinstance(payload.get("write"), Mapping) else {}

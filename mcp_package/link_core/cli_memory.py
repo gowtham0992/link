@@ -1,19 +1,18 @@
 """Text rendering helpers for Link memory CLI commands."""
 from __future__ import annotations
 
-import os
-import shlex
-import subprocess
 from collections.abc import Mapping, Sequence
+
+from .mcp_verify import display_command
 
 
 def _shell_words(*parts: object) -> str:
     words = [str(part) for part in parts if str(part) != ""]
     if not words:
         return ""
-    if os.name == "nt":
-        return subprocess.list2cmdline(words)
-    return shlex.join(words)
+    if len(words) >= 2 and words[0].startswith("python") and words[1] == "link.py":
+        return display_command(["link", *words[2:]])
+    return display_command(words)
 
 
 def _candidate_lines(candidates: object, *, include_reasons: bool = False) -> list[str]:

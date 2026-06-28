@@ -1,10 +1,7 @@
 """Shared memory logic for Link CLI, HTTP, and MCP runtimes."""
 from __future__ import annotations
 
-import os
 import re
-import shlex
-import subprocess
 import urllib.parse
 from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timezone
@@ -20,6 +17,7 @@ from .frontmatter import (
     update_frontmatter_fields,
     yaml_list,
 )
+from .mcp_verify import display_command
 from .operations import operation_journal
 from .wiki import (
     WIKILINK_RE,
@@ -33,6 +31,7 @@ MEMORY_SCOPES = ("user", "project", "global")
 MEMORY_VISIBILITIES = ("private", "project", "team")
 MEMORY_REVIEW_STATUSES = ("pending", "reviewed", "needs_update")
 MEMORY_PROPOSAL_MIN_SCORE = 70
+MEMORY_RECALL_MIN_SCORE = 2
 MEMORY_CONFLICT_TYPES = {"preference", "decision", "project"}
 MEMORY_STOPWORDS = {
     "about",
@@ -1952,7 +1951,7 @@ def recall_memories(
         if not include_archived and not is_active_memory(record):
             continue
         score = score_memory(record, q)
-        if score > 0:
+        if score >= MEMORY_RECALL_MIN_SCORE:
             rank_score = memory_rank_score(record, score, project=project_name)
             issues = memory_review_issues(record)
             slim = slim_memory(record)
@@ -2203,9 +2202,9 @@ def _shell_words(*parts: object) -> str:
     words = [str(part) for part in parts if str(part) != ""]
     if not words:
         return ""
-    if os.name == "nt":
-        return subprocess.list2cmdline(words)
-    return shlex.join(words)
+    if len(words) >= 2 and words[0].startswith("python") and words[1] == "link.py":
+        return display_command(["link", *words[2:]])
+    return display_command(words)
 
 
 def memory_proposal_action(proposal: Mapping[str, object], *, command_target: str | Path = ".") -> dict[str, object]:

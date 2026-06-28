@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+from .mcp_verify import display_command
 from .memory import (
     is_active_memory,
     memory_records,
@@ -12,6 +13,13 @@ from .memory import (
     normalize_project,
     slim_memory,
 )
+
+
+def _link_command(*parts: object, project: str = "") -> str:
+    command = ["link", *(str(part) for part in parts if str(part) != "")]
+    if project:
+        command.extend(["--project", project])
+    return display_command(command)
 
 
 def memory_wins_payload(
@@ -205,18 +213,17 @@ def _next_actions(
     project: str,
 ) -> list[dict[str, object]]:
     target = "<link-root>"
-    project_arg = f" --project {project}" if project else ""
     if not memory_count:
         return [
             {
                 "label": "Create first memory",
                 "reason": "A wins report becomes useful after Link has at least one durable memory.",
-                "command": f'lnk remember "I prefer ..." {target} --type preference --scope user',
+                "command": _link_command("remember", "I prefer ...", target, "--type", "preference", "--scope", "user"),
             },
             {
                 "label": "Propose from sources",
                 "reason": "Use source-backed proposals when raw notes contain preferences or decisions.",
-                "command": f"lnk propose-memories raw/<source>.md {target}",
+                "command": _link_command("propose-memories", "raw/<source>.md", target),
             },
         ]
     if review_count:
@@ -224,7 +231,7 @@ def _next_actions(
             {
                 "label": "Review memory inbox",
                 "reason": "Reviewed memory is safer to reuse across agents.",
-                "command": f"lnk memory-inbox {target}{project_arg}",
+                "command": _link_command("memory-inbox", target, project=project),
             }
         ]
     if active_count:
@@ -232,13 +239,13 @@ def _next_actions(
             {
                 "label": "Use the memory",
                 "reason": "Ask an agent for a brief before work to see the value loop.",
-                "command": f"lnk brief \"current task\" {target}{project_arg}",
+                "command": _link_command("brief", "current task", target, project=project),
             }
         ]
     return [
         {
             "label": "Restore or create memory",
             "reason": "No active memories are currently available for default recall.",
-            "command": f"lnk profile {target}{project_arg}",
+            "command": _link_command("profile", target, project=project),
         }
     ]
