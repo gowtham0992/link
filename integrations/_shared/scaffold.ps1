@@ -207,7 +207,7 @@ if ($installed) {
     Write-Host "    `"mcpServers`": {"
     Write-Host "      `"link`": {"
     Write-Host "        `"command`": `"$mcpPython`","
-    Write-Host "        `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$TargetDir\wiki`"]"
+    Write-Host "        `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$TargetDir\wiki`", `"--surface`", `"slim`"]"
     Write-Host "      }"
     Write-Host "    }"
     Write-Host "  }"

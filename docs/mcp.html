@@ -62,7 +62,7 @@
         </figure>
         <div class="callout">
           <strong>MCP does not need <code>serve.py</code></strong>
-          The local web viewer is only for humans. MCP clients start <code>python -m link_mcp --wiki ...</code> over stdio and read the same Markdown wiki directly.
+          The local web viewer is only for humans. MCP clients start <code>python -m link_mcp --wiki ... --surface slim</code> over stdio and read the same Markdown wiki directly.
         </div>
         <div class="callout">
           <strong>Prefer no MCP?</strong>
@@ -104,7 +104,7 @@ python3 -m link_mcp --version</code></pre>
   "mcpServers": {
     "link": {
       "command": "python3",
-      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki", "--surface", "slim"]
     }
   }
 }</code></pre>
@@ -118,26 +118,42 @@ python3 -m link_mcp --version</code></pre>
   "mcpServers": {
     "link": {
       "command": "C:\\Users\\YOU\\.link-mcp-venv\\Scripts\\python.exe",
-      "args": ["-m", "link_mcp", "--wiki", "C:\\Users\\YOU\\link\\wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "C:\\Users\\YOU\\link\\wiki", "--surface", "slim"]
     }
   }
 }</code></pre>
 
         <h2 id="workflow">Predictable Agent Workflow</h2>
-        <p>Agents should use Link in this order:</p>
+        <p>New MCP configs use the slim surface by default so agents see one obvious read tool and one obvious write tool instead of a long menu of overlapping helpers. The full compatibility surface remains available with <code>--surface full</code>.</p>
+        <p>Slim agents should use Link in this order:</p>
         <ol>
-          <li>Call <code>link_status</code> when connecting or troubleshooting.</li>
-          <li>Call <code>starter_prompts</code> when the user asks what to try next.</li>
-          <li>Call <code>ingest_status</code> before ingesting raw files.</li>
-          <li>Call <code>query_link</code> first for most answers.</li>
-          <li>Call <code>memory_brief</code> before longer work.</li>
-          <li>Call <code>get_graph_summary</code> when graph context is needed.</li>
-          <li>Call <code>backup_wiki</code> before broad repair work.</li>
-          <li>Call <code>validate_wiki</code> after ingest or substantial page edits.</li>
+          <li>Call <code>status</code> when connecting or troubleshooting.</li>
+          <li>Call <code>recall</code> before answering, planning, or personalized work.</li>
+          <li>Call <code>ingest</code> when the user drops files into <code>raw/</code>.</li>
+          <li>Call <code>remember</code> only after the user explicitly approves durable memory.</li>
+          <li>Call <code>review</code> for memory inbox, profile, audit, explain, archive, restore, forget, and visibility workflows.</li>
+          <li>Call <code>admin</code> for backup, migrate, validate, rebuild, graph export, pages, captures, and advanced updates.</li>
         </ol>
 
         <h2 id="tools">MCP Tools</h2>
-        <p>Full tool set:</p>
+        <p>Recommended slim tool set:</p>
+        <pre><code>status
+recall
+remember
+ingest
+review
+admin</code></pre>
+        <p>MCP prompts exposed by Link:</p>
+        <pre><code>link_brief
+link_remember
+link_ingest
+link_review</code></pre>
+        <p>MCP resources exposed by Link:</p>
+        <pre><code>link://health
+link://brief
+link://profile
+link://project</code></pre>
+        <p>Full compatibility tool set available with <code>--surface full</code>:</p>
         <pre><code>link_status
 link_operations
 starter_prompts

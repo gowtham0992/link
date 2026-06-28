@@ -26,7 +26,19 @@ class FakeFastMCP:
         self.args = args
         self.kwargs = kwargs
 
-    def tool(self):
+    def tool(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    def prompt(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    def resource(self, *args, **kwargs):
         def decorator(fn):
             return fn
 
@@ -67,12 +79,12 @@ def create_demo_quiet(target: Path) -> None:
         link_cli.create_demo(target, force=False)
 
 
-def import_mcp_server(wiki_dir: Path):
+def import_mcp_server(wiki_dir: Path, surface: str = "full"):
     previous_modules = install_mcp_stub()
     previous_argv = sys.argv[:]
-    module_name = f"link_mcp_server_contract_{id(wiki_dir)}"
+    module_name = f"link_mcp_server_contract_{surface}_{id(wiki_dir)}"
     try:
-        sys.argv = ["link_mcp.server", "--wiki", str(wiki_dir)]
+        sys.argv = ["link_mcp.server", "--wiki", str(wiki_dir), "--surface", surface]
         spec = importlib.util.spec_from_file_location(module_name, ROOT / "mcp_package/link_mcp/server.py")
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
@@ -199,6 +211,61 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["prompts"][0]["prompt"], "is Link ready?")
         self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
         self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
+
+    def test_slim_surface_contract(self):
+        slim, previous_modules, previous_argv, module_name = import_mcp_server(self.target / "wiki", surface="slim")
+        try:
+            self.assertEqual(slim.MCP_SURFACE, "slim")
+            status = json.loads(slim.status(include_validation=True))
+            self.assertTrue(status["ready"])
+            self.assertTrue(status["validation"]["passed"])
+
+            brief = json.loads(slim.recall(mode="brief"))
+            self.assertEqual(brief["surface"], "slim")
+            self.assertEqual(brief["tool"], "recall")
+            self.assertEqual(brief["mode"], "brief")
+            self.assertGreaterEqual(brief["brief"]["relevant_count"], 1)
+
+            packet = json.loads(slim.recall("agent memory", budget="small"))
+            self.assertTrue(packet["found"])
+            self.assertEqual(packet["surface"], "slim")
+            self.assertEqual(packet["tool"], "recall")
+            self.assertEqual(packet["wiki"]["primary"], "agent-memory")
+
+            ingest = json.loads(slim.ingest())
+            self.assertEqual(ingest["surface"], "slim")
+            self.assertEqual(ingest["tool"], "ingest")
+            self.assertEqual(ingest["pending_count"], 0)
+
+            review = json.loads(slim.review(action="profile"))
+            self.assertEqual(review["surface"], "slim")
+            self.assertEqual(review["tool"], "review")
+            self.assertGreaterEqual(review["memory_count"], 1)
+
+            admin = json.loads(slim.admin("validate", '{"strict": true}'))
+            self.assertTrue(admin["passed"])
+        finally:
+            if hasattr(slim, "_clear_cache"):
+                slim._clear_cache()
+            sys.modules.pop(module_name, None)
+            restore_mcp_modules(previous_modules)
+            sys.argv = previous_argv
+
+    def test_mcp_prompts_and_resources_contract(self):
+        self.assertIn("recall(query=", self.server.link_brief_prompt("release work"))
+        self.assertIn("remember", self.server.link_remember_prompt("I prefer short notes"))
+        self.assertIn("ingest(action='status')", self.server.link_ingest_prompt("raw/notes.md"))
+        self.assertIn("review(action='inbox')", self.server.link_review_prompt())
+
+        health = json.loads(self.server.link_health_resource())
+        brief = json.loads(self.server.link_brief_resource())
+        profile = json.loads(self.server.link_profile_resource())
+        project = json.loads(self.server.link_project_resource())
+
+        self.assertTrue(health["ready"])
+        self.assertIn("relevant_memories", brief)
+        self.assertGreaterEqual(profile["memory_count"], 1)
+        self.assertIn("prompts", project)
 
     def test_missing_wiki_message_points_to_current_setup_paths(self):
         previous_argv = sys.argv[:]

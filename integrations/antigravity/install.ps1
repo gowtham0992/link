@@ -28,7 +28,7 @@ if (-not $Project -and (Test-Path $settings)) {
 } else {
     Write-Host ""
     Write-Host "  MCP: add to ${settings}:"
-    Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`"] } } }"
+    Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`", `"--surface`", `"slim`"] } } }"
 }
 
 Link-PrintNextSteps $mode

@@ -286,11 +286,15 @@ python3 -m link_mcp --version
   "mcpServers": {
     "link": {
       "command": "python3",
-      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki", "--surface", "slim"]
     }
   }
 }
 ```
+
+`--surface slim` is the recommended MCP surface for agents: six obvious tools
+for recall, remember, ingest, review, status, and admin escape hatches. The full
+compatibility surface is still available with `--surface full`.
 
 On macOS/Homebrew Python, if pip reports `externally-managed-environment`, use a
 dedicated venv:

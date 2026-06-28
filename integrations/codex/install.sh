@@ -53,7 +53,7 @@ wiki_path = os.environ["LINK_WIKI_PATH"]
 block = (
     "[mcp_servers.link]\n"
     f"command = {json.dumps(mcp_python)}\n"
-    f"args = [\"-m\", \"link_mcp\", \"--wiki\", {json.dumps(wiki_path)}]\n"
+    f"args = [\"-m\", \"link_mcp\", \"--wiki\", {json.dumps(wiki_path)}, \"--surface\", \"slim\"]\n"
 )
 text = path.read_text(encoding="utf-8", errors="replace")
 pattern = re.compile(r"(?ms)^\[mcp_servers\.link\]\n.*?(?=^\[|\Z)")
@@ -70,7 +70,7 @@ elif [ ! -f "$CODEX_CONFIG" ]; then
     echo "  MCP config: add to ~/.codex/config.toml:"
     echo "  [mcp_servers.link]"
     echo "  command = \"$MCP_PYTHON\""
-    echo "  args = [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\"]"
+    echo "  args = [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"]"
 fi
 
 link_print_next_steps "$MODE"

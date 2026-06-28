@@ -90,7 +90,7 @@ function Link-UpsertMcpJson {
             }
         } catch {
             Write-Host "  · Could not parse $Path; leaving it unchanged."
-            Write-Host "    Add manually: $Command -m link_mcp --wiki $WikiPath"
+            Write-Host "    Add manually: $Command -m link_mcp --wiki $WikiPath --surface slim"
             return
         }
     }
@@ -101,7 +101,7 @@ function Link-UpsertMcpJson {
 
     $server = @{
         command = $Command
-        args = @("-m", "link_mcp", "--wiki", $WikiPath)
+        args = @("-m", "link_mcp", "--wiki", $WikiPath, "--surface", "slim")
     }
     if ($IncludeType) {
         $server["type"] = "stdio"

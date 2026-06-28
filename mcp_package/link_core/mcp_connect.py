@@ -106,7 +106,7 @@ def _config_path(default_config: str, override: str | None) -> Path:
 def _server_config(config: AgentMcpConfig, python_cmd: str, wiki_dir: Path) -> dict[str, object]:
     server: dict[str, object] = {
         "command": python_cmd,
-        "args": ["-m", "link_mcp", "--wiki", str(wiki_dir)],
+        "args": ["-m", "link_mcp", "--wiki", str(wiki_dir), "--surface", "slim"],
     }
     if config.include_type:
         server["type"] = "stdio"
@@ -127,7 +127,7 @@ def _codex_toml_snippet(python_cmd: str, wiki_dir: Path) -> str:
     return "\n".join([
         "[mcp_servers.link]",
         f"command = {json.dumps(python_cmd)}",
-        f'args = ["-m", "link_mcp", "--wiki", {json.dumps(str(wiki_dir))}]',
+        f'args = ["-m", "link_mcp", "--wiki", {json.dumps(str(wiki_dir))}, "--surface", "slim"]',
     ])
 
 

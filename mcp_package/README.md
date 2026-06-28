@@ -70,7 +70,7 @@ Then add the server to your MCP client config. Use an absolute wiki path:
   "mcpServers": {
     "link": {
       "command": "python3",
-      "args": ["-m", "link_mcp", "--wiki", "/Users/YOU/link/wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "/Users/YOU/link/wiki", "--surface", "slim"]
     }
   }
 }
@@ -83,16 +83,39 @@ If you installed into the venv, use the venv Python:
   "mcpServers": {
     "link": {
       "command": "/Users/YOU/.link-mcp-venv/bin/python",
-      "args": ["-m", "link_mcp", "--wiki", "/Users/YOU/link/wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "/Users/YOU/link/wiki", "--surface", "slim"]
     }
   }
 }
 ```
 
 Replace `/Users/YOU` with your absolute home path. The default wiki is
-`~/link/wiki/`; override with `--wiki /path/to/wiki`.
+`~/link/wiki/`; override with `--wiki /path/to/wiki`. `--surface slim` is the
+recommended LLM-native surface for most agents. Use `--surface full` only when
+an older integration or a power-user workflow needs every individual tool.
 
 ## Agent Workflow
+
+### Slim Surface
+
+New MCP configs should expose Link through six model-facing tools:
+
+1. `status(include_validation?)` checks readiness and safe next actions.
+2. `recall(query, budget?, project?, mode?, limit?)` is the one read tool for
+   briefs, answer-ready context packets, wiki search, and graph context.
+3. `remember(text, ...)` writes only explicit user-approved durable memories.
+4. `ingest(action?, strict?)` checks or validates raw-source ingest work.
+5. `review(action?, ...)` handles memory inbox, profile, audit, log, explain,
+   archive, restore, forget, and visibility review workflows.
+6. `admin(action, arguments?)` is the escape hatch for backup, migrate,
+   validate, graph export, pages, captures, rebuilds, and advanced updates.
+
+Link also exposes MCP prompts `link_brief`, `link_remember`, `link_ingest`, and
+`link_review`, plus resources `link://health`, `link://brief`,
+`link://profile`, and `link://project` for clients that support prompt/resource
+attachment.
+
+### Full Compatibility Surface
 
 Most agents should call:
 

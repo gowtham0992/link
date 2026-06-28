@@ -105,7 +105,7 @@ def mcp_config(python_cmd: str, wiki_dir: Path) -> dict[str, object]:
         "mcpServers": {
             "link": {
                 "command": python_cmd,
-                "args": ["-m", "link_mcp", "--wiki", str(wiki_dir)],
+                "args": ["-m", "link_mcp", "--wiki", str(wiki_dir), "--surface", "slim"],
             }
         }
     }

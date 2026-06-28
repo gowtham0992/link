@@ -32,7 +32,7 @@ if (-not $Project) {
         Link-UpsertMcpJson -Path $mcpConfig -Command $mcpPython -WikiPath $wikiPath
     } else {
         Write-Host "  Add to ${mcpConfig}:"
-        Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`"] } } }"
+        Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`", `"--surface`", `"slim`"] } } }"
     }
 }
 

@@ -168,3 +168,4 @@ jobs:
         run: |
           python link.py demo /tmp/link-mcp-smoke --force
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki
+          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki --surface slim
