@@ -35,6 +35,11 @@ class DocsSiteTests(unittest.TestCase):
         self.assertIn("python3 scripts/smoke_large_wiki.py --pages 10000", scale_html)
         self.assertIn("Current Limits", scale_html)
 
+        ui_html = (ROOT / "docs/ui.html").read_text(encoding="utf-8")
+        self.assertIn("http://127.0.0.1:3000/onboard", ui_html)
+        self.assertIn("browser version of <code>lnk onboard</code>", ui_html)
+        self.assertIn("MCP clients keep working after you close the browser", ui_html)
+
     def test_github_pages_site_has_no_external_runtime_dependencies(self):
         index = ROOT / "docs/index.html"
         for page in self.docs_pages():
