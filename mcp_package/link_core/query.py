@@ -366,19 +366,19 @@ def _follow_up_actions(
                 args["project"] = project
             actions.append({
                 "when": "packet is relevant but too thin",
-                "tool": "query_link",
+                "tool": "recall",
                 "arguments": args,
             })
     if primary:
         actions.append({
             "when": "need the full source-backed topic neighborhood",
-            "tool": "get_context",
-            "arguments": {"topic": primary},
+            "tool": "admin",
+            "arguments": {"action": "context", "topic": primary},
         })
     actions.append({
         "when": "need a different angle or exact page candidates",
-        "tool": "search_wiki",
-        "arguments": {"query": query, "limit": 10},
+        "tool": "admin",
+        "arguments": {"action": "search", "query": query, "limit": 10},
     })
     return actions
 
@@ -458,7 +458,7 @@ def query_link(
         "Read recall_capsule first; do not read the whole wiki unless the capsule and packet are insufficient.",
         "Prefer recall-ready reviewed memories for personalization and source-backed wiki pages for factual claims.",
         "Use provenance.path/source/date fields to explain why Link knows something.",
-        "If important context appears missing, rerun query_link with a larger budget or call get_context on the primary page.",
+        "If important context appears missing, call recall with a larger budget or admin(action='context') on the primary page.",
         "Do not create or update memory from this packet unless the user explicitly asks.",
     ]
     review = _compact_review(brief.get("review", {}), limit=limits["memories"])

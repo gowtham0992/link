@@ -67,7 +67,7 @@
         <p>Link is useful when it changes the start and end of real agent sessions.</p>
         <div class="choice-table">
           <div><strong>Moment</strong><strong>Without Link</strong><strong>With Link</strong></div>
-          <div><span>Starting work</span><span>You retype project state and preferences.</span><span>The agent asks for a brief or calls <code>memory_brief</code>/<code>query_link</code> for compact local context.</span></div>
+          <div><span>Starting work</span><span>You retype project state and preferences.</span><span>The agent calls <code>recall</code> for a compact local brief or task packet.</span></div>
           <div><span>Switching agents</span><span>Each tool has its own memory gap.</span><span>Codex, Claude, Cursor, Kiro, VS Code, and Antigravity can point at the same wiki.</span></div>
           <div><span>Saving a decision</span><span>The note disappears into chat history.</span><span>An explicit remember becomes a reviewable Markdown memory.</span></div>
           <div><span>Trusting memory</span><span>You cannot see why the agent knows something.</span><span>You can inspect sources, graph links, review state, and lifecycle history.</span></div>
@@ -87,7 +87,7 @@
         <p>Link deliberately avoids hidden memory. A durable memory is a Markdown page with scope, status, review state, source/provenance, graph links, and a local audit trail. Agents can recall it, but humans can inspect, edit, archive, restore, or forget it.</p>
         <pre><code>raw/file.md -> wiki/sources/file.md -> linked concepts
 remember "preference" -> wiki/memories/preference.md
-query_link -> recall_capsule + why_selected + follow_up actions</code></pre>
+recall -> recall_capsule + why_selected + follow_up actions</code></pre>
 
         <h2 id="boundaries">Boundaries</h2>
         <ul>

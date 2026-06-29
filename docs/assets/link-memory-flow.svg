@@ -59,9 +59,9 @@
 
   <g transform="translate(990 130)">
     <rect class="panel agent" width="150" height="145" rx="14"/>
-    <text class="title" x="22" y="42">4. Query</text>
-    <text class="mono small" x="22" y="78">query_link</text>
-    <text class="mono small" x="22" y="104">memory_brief</text>
+    <text class="title" x="22" y="42">4. Recall</text>
+    <text class="mono small" x="22" y="78">recall</text>
+    <text class="mono small" x="22" y="104">admin</text>
     <text class="small muted" x="22" y="132">compact context</text>
   </g>
 

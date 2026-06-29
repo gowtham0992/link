@@ -324,16 +324,16 @@ async def _run_smoke(wiki_dir: Path, python: str, surface: str) -> None:
         if not env.get("PYTHONPATH")
         else local_package + os.pathsep + str(env["PYTHONPATH"])
     )
-    server = StdioServerParameters(
-        command=python,
-        args=["-m", "link_mcp", "--wiki", str(wiki_dir), "--surface", surface],
-        env=env,
-    )
+    server_args = ["-m", "link_mcp", "--wiki", str(wiki_dir)]
+    expected_surface = "slim" if surface == "default" else surface
+    if surface != "default":
+        server_args.extend(["--surface", surface])
+    server = StdioServerParameters(command=python, args=server_args, env=env)
     async with stdio_client(server) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             await _assert_prompt_and_resource_contract(session)
-            if surface == "slim":
+            if expected_surface == "slim":
                 await _run_slim_smoke(session)
             else:
                 await _run_full_smoke(session)
@@ -343,7 +343,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke test Link MCP over stdio.")
     parser.add_argument("wiki", help="path to a Link wiki directory")
     parser.add_argument("--python", default=sys.executable, help="Python executable used to run -m link_mcp")
-    parser.add_argument("--surface", choices=("full", "slim"), default="full")
+    parser.add_argument("--surface", choices=("default", "full", "slim"), default="default")
     args = parser.parse_args()
 
     wiki_dir = Path(args.wiki).expanduser().resolve()

@@ -572,7 +572,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Search backend:", out.getvalue())
         self.assertIn("Persistent cache: enabled", out.getvalue())
         self.assertIn("Validation: passed", out.getvalue())
-        self.assertIn("query_link", out.getvalue())
+        self.assertIn("recall", out.getvalue())
 
         json_out = StringIO()
         with redirect_stdout(json_out):
@@ -596,8 +596,8 @@ class LinkCliTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Ready: yes", text)
         self.assertIn("Content pages: 0", text)
-        self.assertIn("ingest_status", text)
-        self.assertIn("starter_prompts", text)
+        self.assertIn("ingest", text)
+        self.assertIn("admin", text)
 
         json_out = StringIO()
         with redirect_stdout(json_out):
@@ -605,8 +605,10 @@ class LinkCliTests(unittest.TestCase):
         payload = json.loads(json_out.getvalue())
         self.assertEqual(json_code, 0)
         self.assertEqual(payload["content_page_count"], 0)
-        self.assertEqual(payload["next_actions"][0]["tool"], "ingest_status")
-        self.assertEqual(payload["next_actions"][1]["tool"], "starter_prompts")
+        self.assertEqual(payload["next_actions"][0]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"action": "status"})
+        self.assertEqual(payload["next_actions"][1]["tool"], "admin")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "prompts"})
 
     def test_health_combines_status_and_operations(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-health-test-"))

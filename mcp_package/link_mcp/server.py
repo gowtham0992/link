@@ -50,7 +50,7 @@ if args.wiki:
 else:
     WIKI_DIR = Path.home() / "link" / "wiki"
 
-MCP_SURFACE = (args.surface or os.environ.get("LINK_MCP_SURFACE") or "full").strip().lower()
+MCP_SURFACE = (args.surface or os.environ.get("LINK_MCP_SURFACE") or "slim").strip().lower()
 if MCP_SURFACE not in {"full", "slim"}:
     print(
         f"[link-mcp] Invalid surface {MCP_SURFACE!r}. Use --surface full or --surface slim.",

@@ -157,7 +157,8 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["schema"]["status"], "current")
         self.assertTrue(payload["validation"]["passed"])
         self.assertEqual(payload["warnings"], [])
-        self.assertEqual(payload["next_actions"][0]["tool"], "query_link")
+        self.assertEqual(payload["next_actions"][0]["tool"], "recall")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"query": "<user task>", "budget": "micro"})
 
     def test_mcp_cache_throttles_repeated_mtime_scans(self):
         self.server._clear_cache()

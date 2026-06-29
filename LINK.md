@@ -291,24 +291,24 @@ Rules:
 - Use `scope: user` for broad personal preferences, `project` for the current project, and `global` for agent-wide principles.
 - Use `visibility: private` for personal memory, `project` for project-team sharing, and `team` only when the human explicitly wants the memory shared across a team workspace. If omitted, Link treats user/global memories as private and project memories as project-visible.
 - For `scope: project`, include a project key when you know it. `link.py` infers this from repo-local installs; otherwise pass `--project <slug>` or MCP `project`.
-- At the start of a session or substantial task, run `python3 link.py brief "<task or question>" .` or MCP `memory_brief` when available. Treat this as the default way to prime yourself with local memory, review warnings, and saved raw capture status.
-- For long chat/session notes, prefer `python3 link.py capture-session "<file-or-text>" .` or MCP `capture_session`; it stores the raw note locally and returns proposal-only memory candidates. If you do not need to keep the raw note, run `python3 link.py propose-memories "<file-or-text>" .` or MCP `propose_memories` instead. Do not write proposals until the human confirms.
-- Use `python3 link.py capture-inbox .` or MCP `capture_inbox` to review saved raw captures, secret warnings, and the exact accept/redact/delete commands before changing capture state.
-- When the human approves a captured proposal, run `python3 link.py accept-capture "<raw-capture-path>" . --index <n>` or MCP `accept_capture`. If it reports a duplicate or conflict, stop and ask whether to update/archive the existing memory instead.
-- If capture results report `secret_warnings`, ask the human whether to redact the raw capture. Use `python3 link.py redact-capture "<raw-capture-path>" .` or MCP `redact_capture`; it replaces secret-looking values and logs labels/counts only.
-- If the human asks to remove a raw capture, run `python3 link.py delete-capture "<raw-capture-path>" . --confirm` or MCP `delete_capture` with `confirm: true`. Never delete captures without explicit confirmation.
+- At the first substantive turn of a session or substantial task, run `python3 link.py brief "<task or question>" .` or MCP `recall` with an empty query when available. Treat this as the default way to prime yourself with local memory, review warnings, and saved raw capture status.
+- For long chat/session notes, prefer `python3 link.py capture-session "<file-or-text>" .` or MCP `admin` action `capture_session`; it stores the raw note locally and returns proposal-only memory candidates. If you do not need to keep the raw note, run `python3 link.py propose-memories "<file-or-text>" .` or MCP `admin` action `propose_memories` instead. Do not write proposals until the human confirms.
+- Use `python3 link.py capture-inbox .` or MCP `admin` action `capture_inbox` to review saved raw captures, secret warnings, and the exact accept/redact/delete commands before changing capture state.
+- When the human approves a captured proposal, run `python3 link.py accept-capture "<raw-capture-path>" . --index <n>` or MCP `admin` action `accept_capture`. If it reports a duplicate or conflict, stop and ask whether to update/archive the existing memory instead.
+- If capture results report `secret_warnings`, ask the human whether to redact the raw capture. Use `python3 link.py redact-capture "<raw-capture-path>" .` or MCP `admin` action `redact_capture`; it replaces secret-looking values and logs labels/counts only.
+- If the human asks to remove a raw capture, run `python3 link.py delete-capture "<raw-capture-path>" . --confirm` or MCP `admin` action `delete_capture` with `confirm: true`. Never delete captures without explicit confirmation.
 - Run `python3 link.py recall "<query>" .` before answering questions that might depend on remembered preferences or project decisions.
-- Run `python3 link.py memory-audit .` or MCP `memory_audit` when the human asks what needs attention in Link memory.
+- Run `python3 link.py memory-audit .` or MCP `review` action `audit` when the human asks what needs attention in Link memory.
 - Run `python3 link.py profile .` when the human asks what Link knows or when you need a quick overview of remembered preferences, decisions, and project context.
-- Run `python3 link.py memory-inbox .` or MCP `memory_inbox` to find pending, stale, invalid, or underspecified memories and follow each item's primary action. Pass `--project <slug>` or MCP `project` when reviewing a specific project.
+- Run `python3 link.py memory-inbox .` or MCP `review` action `inbox` to find pending, stale, invalid, or underspecified memories and follow each item's primary action. Pass `--project <slug>` or MCP `project` when reviewing a specific project.
 - If `remember` reports a duplicate candidate, inspect it with `python3 link.py explain-memory "<name-or-title>" .` and merge new information with `python3 link.py update-memory "<name-or-title>" "new detail" .` instead of creating another one. Use `--allow-duplicate` only when the human confirms it should be separate.
 - If `remember`, `update-memory`, or `propose-memories` reports conflict candidates, stop and ask the human whether the older memory should be updated, archived, or allowed to coexist. Use `--allow-conflict` only when the human confirms both memories are true in different contexts.
 - After updating a memory, review it again with the human because `update-memory` resets `review_status` to `pending`.
 - After the human confirms a memory is accurate, run `python3 link.py review-memory "<name-or-title>" .`.
 - Run `python3 link.py explain-memory "<name-or-title>" .` when the human asks why an agent knows something or whether a memory is safe to use.
 - If a memory is stale or wrong, archive it with `python3 link.py archive-memory "<name-or-title>" . --reason "why"`. Do not delete memory pages unless the human explicitly asks for permanent removal.
-- Before broad repair work or risky local wiki edits, create a local backup with `python3 link.py backup .` or MCP `backup_wiki`. Do not include `raw/` unless the human explicitly asks because raw sources and captures can contain sensitive material.
-- If the human explicitly asks Link to permanently forget a memory, use `python3 link.py forget-memory "<name-or-title>" . --confirm` or MCP `forget_memory` with `confirm: true`. Prefer archive when reversible cleanup is enough, and do not create a backup that preserves the memory unless the human explicitly asks for one.
+- Before broad repair work or risky local wiki edits, create a local backup with `python3 link.py backup .` or MCP `admin` action `backup`. Do not include `raw/` unless the human explicitly asks because raw sources and captures can contain sensitive material.
+- If the human explicitly asks Link to permanently forget a memory, use `python3 link.py forget-memory "<name-or-title>" . --confirm` or MCP `review` action `forget` with `confirm: true`. Prefer archive when reversible cleanup is enough, and do not create a backup that preserves the memory unless the human explicitly asks for one.
 - Restore an archived memory with `python3 link.py restore-memory "<name-or-title>" .`.
 
 ### 2. Ingest
@@ -335,7 +335,7 @@ When the human adds a new source to `raw/` and asks you to process it:
 - Watch for page bloat: if a sub-topic is growing past 2-3 paragraphs within an article, it likely deserves its own page. Split proactively.
 - Conversely, a new page must have enough substance to stand alone. If you cannot write at least a meaningful TLDR + Overview, fold the information into an existing page instead.
 - After ingest completes, rebuild `wiki/index.md` and `wiki/_backlinks.json` so both the human catalog and graph index match the pages.
-- After rebuilding index/backlinks, run MCP `validate_wiki`, `python3 link.py validate .`, or `GET /api/validate` when available. Treat validation errors as blockers before reporting ingest complete.
+- After rebuilding index/backlinks, run MCP `ingest` action `validate`, `python3 link.py validate .`, or `GET /api/validate` when available. Treat validation errors as blockers before reporting ingest complete.
 
 **Image ingest rules:**
 - Images in `raw/` (png, jpg, webp, gif, svg) are valid sources. Use vision to understand what the image IS.
@@ -352,20 +352,21 @@ When the human adds a new source to `raw/` and asks you to process it:
 
 When the human asks a question:
 
-1. If you are connecting to Link for the first time or troubleshooting setup, call MCP `link_status`, run `python3 link.py status . --validate`, or call `GET /api/status?validate=true`.
-2. If the human asks what to try after installing Link, call MCP `starter_prompts`, run `python3 link.py prompts .`, or call `GET /api/prompts`.
-3. If status reports a missing or old schema marker, run MCP `migrate_wiki` when available or `python3 link.py migrate .` before other writes.
-4. If the user asks to ingest or says they dropped files into `raw/`, use MCP `ingest_status`, `python3 link.py ingest-status .`, or `GET /api/ingest-status` to get pending files, the guided ingest plan, and the next prompt/checks. If the state is `blocked_secrets`, do not read or ingest flagged raw files until the human redacts them.
-5. Start with the smart query path when available: MCP `query_link`, `python3 link.py query "<question>" .`, or `GET /api/query-link?q=<question>`. This returns a compact context packet with relevant memory, ranked wiki results, graph context, provenance, selection reasons, budget reports, and follow-up tool actions. Use provenance fields to explain why Link knows something. Do not read the whole wiki unless the packet is insufficient; if it is budget-limited, use the returned `follow_up` action first.
-6. If the question only needs session priming or personal/project preferences, use `python3 link.py brief "<question>" .` or MCP `memory_brief`. Use `profile`/`memory_profile` and `recall`/`recall_memory` afterward only when you need deeper detail.
-7. **If you need full source-backed context for one topic:** call `GET /api/context?topic=<question>` or MCP `get_context` — returns the best matching page plus related pages via graph traversal.
-8. **If you need graph orientation on a large wiki:** use `python3 link.py graph-summary "<topic>" .`, `GET /api/graph-summary?topic=<topic>`, or MCP `get_graph_summary` before requesting the full graph.
-9. **If server/MCP is not available:** read `wiki/index.md` to find relevant pages (check `also:` aliases for matches), then check `wiki/_backlinks.json` for pages that reference the topic.
-10. Read only the relevant pages or packet items and synthesize an answer.
-11. Cite your sources with [[wiki-links]].
-12. Ask the human: "Want me to file this?" Answers that are comparisons should file as comparison pages, not explorations. Match the result to the right page type.
-13. If yes, create a page in the appropriate directory following its template.
-14. Append to `wiki/log.md`.
+1. If you are connecting to Link for the first time or troubleshooting setup, call MCP `status`, run `python3 link.py status . --validate`, or call `GET /api/status?validate=true`.
+2. At the first substantive turn of a session, call MCP `recall` with an empty query or run `python3 link.py brief "session start" .`. This is cheap and prevents asking the user to repeat durable context.
+3. If the human asks what to try after installing Link, call MCP `admin` action `prompts`, run `python3 link.py prompts .`, or call `GET /api/prompts`.
+4. If status reports a missing or old schema marker, run MCP `admin` action `migrate` when available or `python3 link.py migrate .` before other writes.
+5. If the user asks to ingest or says they dropped files into `raw/`, use MCP `ingest`, `python3 link.py ingest-status .`, or `GET /api/ingest-status` to get pending files, the guided ingest plan, and the next prompt/checks. If the state is `blocked_secrets`, do not read or ingest flagged raw files until the human redacts them.
+6. Start with the smart query path when available: MCP `recall`, `python3 link.py query "<question>" .`, or `GET /api/query-link?q=<question>`. This returns a compact context packet with relevant memory, ranked wiki results, graph context, provenance, selection reasons, budget reports, and follow-up tool actions. Use provenance fields to explain why Link knows something. Do not read the whole wiki unless the packet is insufficient; if it is budget-limited, use the returned `follow_up` action first.
+7. If the question only needs session priming or personal/project preferences, use `python3 link.py brief "<question>" .` or MCP `recall` with `mode=brief`. Use `profile`/`review(action="profile")` and `recall` afterward only when you need deeper detail.
+8. **If you need full source-backed context for one topic:** call `GET /api/context?topic=<question>` or MCP `admin` action `context` — returns the best matching page plus related pages via graph traversal.
+9. **If you need graph orientation on a large wiki:** use `python3 link.py graph-summary "<topic>" .`, `GET /api/graph-summary?topic=<topic>`, or MCP `admin` action `graph_summary` before requesting the full graph.
+10. **If server/MCP is not available:** read `wiki/index.md` to find relevant pages (check `also:` aliases for matches), then check `wiki/_backlinks.json` for pages that reference the topic.
+11. Read only the relevant pages or packet items and synthesize an answer.
+12. Cite your sources with [[wiki-links]].
+13. Ask the human: "Want me to file this?" Answers that are comparisons should file as comparison pages, not explorations. Match the result to the right page type.
+14. If yes, create a page in the appropriate directory following its template.
+15. Append to `wiki/log.md`.
 
 ### 4. Lint
 
@@ -400,7 +401,7 @@ Run these checks and report findings:
 
 For each finding, suggest a specific action. Then ask the human which ones to execute.
 
-Create a local backup before broad repairs with `python3 link.py backup .` or MCP `backup_wiki`. Rebuild `wiki/index.md` and `wiki/_backlinks.json` after executing fixes. Prefer `python3 link.py rebuild-index .` and `python3 link.py rebuild-backlinks .` when `link.py` is available; otherwise call `POST /api/rebuild-index` and `POST /api/rebuild-backlinks` with JSON `{}` on the local server or rebuild manually. Append lint results to `wiki/log.md`.
+Create a local backup before broad repairs with `python3 link.py backup .` or MCP `admin` action `backup`. Rebuild `wiki/index.md` and `wiki/_backlinks.json` after executing fixes. Prefer `python3 link.py rebuild-index .` and `python3 link.py rebuild-backlinks .` when `link.py` is available, or MCP `ingest` action `rebuild` when using the slim surface; otherwise call `POST /api/rebuild-index` and `POST /api/rebuild-backlinks` with JSON `{}` on the local server or rebuild manually. Append lint results to `wiki/log.md`.
 
 
 ### 5. Research

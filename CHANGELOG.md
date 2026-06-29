@@ -19,6 +19,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 ### Changed
 
 - Updated agent installers and MCP config writers to prefer the slim MCP surface by default, reducing tool-list noise while keeping advanced tools available.
+- Made the slim MCP surface the default server surface and aligned README, LINK.md, installed agent instructions, MCP docs, status actions, and query follow-ups around the canonical `status`, `recall`, `remember`, `ingest`, `review`, and `admin` vocabulary.
 - Improved query/search ranking for token-efficient recall, including stronger exact/phrase matching, better budget accounting, and clearer recall metadata in query packets, benchmark output, status, and health views.
 - Tightened `lnk onboard --write` guidance so config-writing is explicit, repeatable, and clear about which agent files are affected.
 - Improved `lnk serve` startup guidance so the terminal points new users to `/onboard`, `/health`, `/graph`, and clearly states that MCP and CLI work without the viewer running.

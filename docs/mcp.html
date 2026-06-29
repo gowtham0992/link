@@ -57,8 +57,8 @@
       <article class="doc-content">
         <h2 id="tour">MCP Tour</h2>
         <figure class="screenshot-card media-wide">
-          <img src="assets/link-mcp.png" alt="An agent calling Link's memory_brief MCP tool">
-          <figcaption>Agents use natural prompts, then call Link tools for readiness, briefs, query packets, and reviewed memory writes.</figcaption>
+          <img src="assets/link-mcp.png" alt="An agent calling Link's recall MCP tool">
+          <figcaption>Agents use natural prompts, then call Link tools for readiness, recall packets, ingest plans, and reviewed memory writes.</figcaption>
         </figure>
         <div class="callout">
           <strong>MCP does not need <code>serve.py</code></strong>
@@ -132,7 +132,8 @@ python3 -m link_mcp --version</code></pre>
         <p>Slim agents should use Link in this order:</p>
         <ol>
           <li>Call <code>status</code> when connecting or troubleshooting.</li>
-          <li>Call <code>recall</code> before answering, planning, or personalized work.</li>
+          <li>Call <code>recall</code> with an empty query once at the first substantive turn of a session.</li>
+          <li>Call <code>recall(query, budget="micro")</code> before broad file reads or asking the user to repeat durable context.</li>
           <li>Call <code>ingest</code> when the user drops files into <code>raw/</code>.</li>
           <li>Call <code>remember</code> only after the user explicitly approves durable memory.</li>
           <li>Call <code>review</code> for memory inbox, profile, audit, explain, archive, restore, forget, and visibility workflows.</li>
@@ -195,7 +196,7 @@ get_graph_summary
 get_graph
 rebuild_index
 rebuild_backlinks</code></pre>
-        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page. <code>remember_memory</code> also accepts optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled re-checks, and temporary memories.</p>
+        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page. The slim <code>remember</code> tool and full <code>remember_memory</code> compatibility tool both accept optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled re-checks, and temporary memories.</p>
         <p>Project-aware tools accept an optional <code>project</code> argument. When set, Link returns broad user/global memory plus memories for that project, while excluding memories from other explicit projects.</p>
 
 <h2 id="verify">Verify Setup</h2>

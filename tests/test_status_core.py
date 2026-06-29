@@ -68,7 +68,8 @@ class StatusCoreTests(unittest.TestCase):
         self.assertEqual(payload["persistent_cache"]["total_records"], 3)
         self.assertEqual(payload["schema"]["status"], "current")
         self.assertTrue(payload["validation"]["passed"])
-        self.assertEqual(payload["next_actions"][0]["tool"], "query_link")
+        self.assertEqual(payload["next_actions"][0]["tool"], "recall")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"query": "<user task>", "budget": "micro"})
 
     def test_link_status_reports_missing_structure(self):
         wiki = Path(tempfile.mkdtemp(prefix="link-status-core-")) / "wiki"
@@ -97,8 +98,10 @@ class StatusCoreTests(unittest.TestCase):
         self.assertTrue(payload["ready"])
         self.assertEqual(payload["page_count"], 2)
         self.assertEqual(payload["content_page_count"], 0)
-        self.assertEqual(payload["next_actions"][0]["tool"], "ingest_status")
-        self.assertEqual(payload["next_actions"][1]["tool"], "starter_prompts")
+        self.assertEqual(payload["next_actions"][0]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"action": "status"})
+        self.assertEqual(payload["next_actions"][1]["tool"], "admin")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "prompts"})
 
     def test_link_status_surfaces_cache_and_memory_warnings(self):
         wiki = self.make_wiki()
@@ -139,7 +142,8 @@ class StatusCoreTests(unittest.TestCase):
         self.assertFalse(payload["ready"])
         self.assertIn("stale_operations", [warning["code"] for warning in payload["warnings"]])
         self.assertEqual(payload["next_actions"][0]["tool"], "doctor")
-        self.assertEqual(payload["next_actions"][1]["tool"], "validate_wiki")
+        self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "validate"})
 
     def test_link_status_points_validation_shape_errors_to_doctor_fix(self):
         wiki = self.make_wiki()
@@ -158,8 +162,9 @@ class StatusCoreTests(unittest.TestCase):
         self.assertIn("missing_required_section", payload["validation"]["error_codes"])
         self.assertEqual(payload["next_actions"][0]["tool"], "doctor")
         self.assertEqual(payload["next_actions"][0]["arguments"], {"fix": True})
-        self.assertEqual(payload["next_actions"][1]["tool"], "validate_wiki")
-        self.assertNotIn("rebuild_backlinks", [action["tool"] for action in payload["next_actions"]])
+        self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "validate"})
+        self.assertNotIn({"tool": "ingest", "arguments": {"action": "rebuild"}}, payload["next_actions"])
 
     def test_link_status_points_stale_backlinks_to_rebuild(self):
         wiki = self.make_wiki()
@@ -178,8 +183,10 @@ class StatusCoreTests(unittest.TestCase):
 
         self.assertFalse(payload["ready"])
         self.assertIn("stale_backlinks", payload["validation"]["error_codes"])
-        self.assertEqual(payload["next_actions"][0]["tool"], "rebuild_backlinks")
-        self.assertEqual(payload["next_actions"][1]["tool"], "validate_wiki")
+        self.assertEqual(payload["next_actions"][0]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"action": "rebuild"})
+        self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "validate"})
 
 
 if __name__ == "__main__":

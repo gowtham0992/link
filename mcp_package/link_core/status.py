@@ -208,7 +208,7 @@ def link_status(
     if missing:
         next_actions.append(_action("repair or scaffold Link structure", "doctor", {"fix": True}))
     if schema.get("status") in {"missing", "old"}:
-        next_actions.append(_action("write current Link wiki schema marker", "migrate_wiki"))
+        next_actions.append(_action("write current Link wiki schema marker", "admin", {"action": "migrate"}))
     elif schema.get("status") == "invalid":
         next_actions.append(_action("inspect invalid Link wiki schema marker", "doctor"))
     elif schema.get("status") == "newer":
@@ -216,21 +216,21 @@ def link_status(
     if include_validation and validation_summary.get("checked") and not validation_summary.get("passed"):
         error_codes = set(validation_summary.get("error_codes") or [])
         if error_codes & {"stale_backlinks", "invalid_backlinks"}:
-            next_actions.append(_action("rebuild graph index", "rebuild_backlinks"))
+            next_actions.append(_action("rebuild graph index", "ingest", {"action": "rebuild"}))
         if error_codes - {"stale_backlinks", "invalid_backlinks"}:
             next_actions.append(_action("repair validation findings", "doctor", {"fix": True}))
-        next_actions.append(_action("rerun validation gate", "validate_wiki"))
+        next_actions.append(_action("rerun validation gate", "ingest", {"action": "validate"}))
     if stale_operation_degraded:
         next_actions.append(_action("inspect interrupted Link operation markers", "doctor"))
-        next_actions.append(_action("validate wiki after interrupted operation", "validate_wiki"))
+        next_actions.append(_action("validate wiki after interrupted operation", "ingest", {"action": "validate"}))
     if ready and content_page_count:
-        next_actions.append(_action("answer with compact local context", "query_link", {"query": "<user task>"}))
-        next_actions.append(_action("prime agent memory before work", "memory_brief", {"query": "<user task>"}))
+        next_actions.append(_action("answer with compact local context", "recall", {"query": "<user task>", "budget": "micro"}))
+        next_actions.append(_action("prime agent memory before work", "recall", {"query": "", "mode": "brief"}))
     elif ready:
-        next_actions.append(_action("add raw sources or inspect ingest readiness", "ingest_status"))
-        next_actions.append(_action("show first-run prompts", "starter_prompts"))
+        next_actions.append(_action("add raw sources or inspect ingest readiness", "ingest", {"action": "status"}))
+        next_actions.append(_action("show first-run prompts", "admin", {"action": "prompts"}))
     elif not missing:
-        next_actions.append(_action("inspect wiki health", "validate_wiki"))
+        next_actions.append(_action("inspect wiki health", "ingest", {"action": "validate"}))
 
     return {
         "ready": ready,

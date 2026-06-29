@@ -53,9 +53,9 @@ query Link for what you know about this project
 6. Prints next prompts and verification commands for your install mode.
 
 The instruction file is intentionally small. It tells the agent to check
-`link_status`, use `query_link` for compact context, use `memory_brief` before
-personalized/project work, validate after ingest, and read `LINK.md` only when it
-needs the full local protocol.
+`status`, call `recall` once at the first substantive turn, use `recall` for
+compact task context, use `ingest` for raw-source work, use `remember` only after
+explicit approval, and read `LINK.md` only when it needs the full local protocol.
 
 ## Uninstall
 

@@ -1109,7 +1109,8 @@ class ServeTests(unittest.TestCase):
         self.assertIn(payload["search_backend"], {"sqlite-fts", "token-index"})
         self.assertTrue(payload["validation"]["passed"])
         self.assertEqual(payload["warnings"], [])
-        self.assertEqual(payload["next_actions"][0]["tool"], "query_link")
+        self.assertEqual(payload["next_actions"][0]["tool"], "recall")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"query": "<user task>", "budget": "micro"})
 
     def test_status_api_reports_cache_warnings(self):
         wiki = self.make_wiki()

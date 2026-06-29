@@ -114,7 +114,8 @@ class QueryCoreTests(unittest.TestCase):
         self.assertIn("budget_report", payload)
         self.assertGreater(payload["budget_report"]["context_packet"]["estimated_chars"], 0)
         self.assertGreater(payload["budget_report"]["context_packet"]["estimated_tokens"], 0)
-        self.assertEqual(payload["follow_up"][0]["tool"], "get_context")
+        self.assertEqual(payload["follow_up"][0]["tool"], "admin")
+        self.assertEqual(payload["follow_up"][0]["arguments"], {"action": "context", "topic": "agent-memory"})
 
     def test_micro_budget_returns_tiny_recall_capsule(self):
         root = Path(tempfile.mkdtemp(prefix="link-query-core-"))
@@ -224,7 +225,7 @@ class QueryCoreTests(unittest.TestCase):
         self.assertTrue(payload["budget_report"]["wiki_search"]["has_more"])
         self.assertLessEqual(payload["budget_report"]["memories"]["selected"], 3)
         self.assertLess(payload["budget_report"]["context_packet"]["estimated_tokens"], 2000)
-        self.assertEqual(payload["follow_up"][0]["tool"], "query_link")
+        self.assertEqual(payload["follow_up"][0]["tool"], "recall")
         self.assertEqual(payload["follow_up"][0]["arguments"]["budget"], "medium")
         self.assertIn("budget-limited", payload["agent_guidance"][1])
 
@@ -260,11 +261,12 @@ class QueryCoreTests(unittest.TestCase):
         self.assertTrue(payload["budget_report"]["wiki_search"]["has_more"])
         self.assertFalse(
             any(
-                action["tool"] == "query_link" and action.get("arguments", {}).get("budget") == "large"
+                action["tool"] == "recall" and action.get("arguments", {}).get("budget") == "large"
                 for action in payload["follow_up"]
             )
         )
-        self.assertEqual(payload["follow_up"][0]["tool"], "get_context")
+        self.assertEqual(payload["follow_up"][0]["tool"], "admin")
+        self.assertEqual(payload["follow_up"][0]["arguments"], {"action": "context", "topic": "agent-memory-0"})
 
 
 if __name__ == "__main__":

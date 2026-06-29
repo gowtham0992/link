@@ -365,27 +365,23 @@ creating a duplicate.
 
 ## What Agents Get
 
-When an agent uses Link through MCP, these are the stable tools it receives.
-CLI and skill workflows call the same core behavior through `lnk`.
+When an agent uses Link through the recommended MCP surface, it gets six
+model-facing tools. CLI and skill workflows call the same core behavior through
+`lnk`.
 
-- `query_link`: an answer-ready packet with a tiny `recall_capsule`,
-  relevant memories, pages, graph neighborhood, reasons for selection, budget
-  limits, and follow-up actions.
-- `memory_brief`: a compact pre-work brief with user/project preferences,
-  active context, review warnings, and safe memory-use rules.
-- `ingest_status`: exact next steps for raw files, including source safety,
-  stale ingest detection, validation, and memory proposal guidance.
-- `remember_memory`: durable local memory with duplicate/conflict checks,
-  `visibility` sharing intent, review state, optional `review_after` re-check
-  dates, optional `expires_at` expiry dates, provenance, and audit logging.
-- `set_memory_visibility`: explicit post-review sharing changes between
-  `private`, `project`, and `team` visibility without editing Markdown by hand.
-- `explain_memory`: why a memory exists, what it links to, whether it is ready
-  for recall, and what needs review.
-- `memory_log`: recent memory lifecycle changes from `wiki/log.md`, without
-  raw source or memory bodies.
-- `memory_wins`: local proof signals for what Link memory is carrying, based
-  on wiki metadata rather than telemetry.
+- `status`: readiness, schema state, validation, interrupted writes, and safe
+  next actions.
+- `recall`: the one read path for startup briefs, answer-ready query packets,
+  wiki search, graph context, token budgets, and follow-up actions.
+- `remember`: durable local memory only after explicit user approval, with
+  duplicate/conflict checks, provenance, review state, visibility, optional
+  `review_after`, and optional `expires_at`.
+- `ingest`: exact next steps for raw files, source safety, stale ingest
+  detection, validation, and rebuild checks.
+- `review`: memory inbox, profile, audit, log, explain, archive, restore,
+  forget, and lifecycle review workflows.
+- `admin`: the escape hatch for backup, migrate, validate, graph export, pages,
+  captures, rebuilds, compatibility actions, and advanced updates.
 
 The stable agent-facing loop is documented at
 [Link Memory Contract](https://gowtham0992.github.io/link/memory-contract.html):
@@ -454,14 +450,13 @@ lnk snapshot ~/link --output personal-snapshot --include-memories --include-priv
 
 For MCP clients, agents should use Link in this order:
 
-1. `link_status` to check readiness and safe next actions.
-2. `starter_prompts` when the user asks what to try first.
-3. `ingest_status` before touching raw sources.
-4. `query_link` for compact answer-ready context; read `recall_capsule` first.
-5. `memory_brief` before longer work.
-6. `get_graph_summary` when graph context is useful but the full graph would be noisy.
-7. `backup_wiki` before broad repair or migration work.
-8. `validate_wiki` after ingest or broad wiki edits.
+1. `status` to check readiness and safe next actions.
+2. `recall` with an empty query once at the first substantive turn of a session.
+3. `recall(query, budget="micro"|"small")` before broad file reads or asking the user to repeat durable context.
+4. `ingest` before touching raw sources and after source edits for validation/rebuild checks.
+5. `remember` only when the user explicitly asks Link to remember something or approves a proposed memory.
+6. `review` for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows.
+7. `admin` for backup, migration, graph export, captures, rebuilds, compatibility actions, and advanced maintenance.
 
 Full MCP tool list: [MCP setup](https://gowtham0992.github.io/link/mcp.html).
 

@@ -106,21 +106,18 @@ class ReleaseHygieneTests(unittest.TestCase):
         good = tmp / "good.md"
         bad = tmp / "bad.md"
         required_terms = (
-            "link_status",
-            "starter_prompts",
-            "ingest_status",
-            "query_link",
-            "memory_brief",
-            "get_graph_summary",
-            "backup_wiki",
-            "validate_wiki",
+            "status",
+            "recall",
+            "remember",
+            "ingest",
+            "review",
+            "admin",
         )
         good.write_text(
-            "Use link_status, starter_prompts, ingest_status, query_link, "
-            "memory_brief, get_graph_summary, backup_wiki, and validate_wiki.\n",
+            "Use status, recall, remember, ingest, review, and admin.\n",
             encoding="utf-8",
         )
-        bad.write_text("Use query_link only.\n", encoding="utf-8")
+        bad.write_text("Use recall only.\n", encoding="utf-8")
         findings: list[str] = []
 
         release_hygiene.check_agent_contract(
@@ -128,19 +125,17 @@ class ReleaseHygieneTests(unittest.TestCase):
             {
                 good: required_terms,
                 bad: required_terms,
-                tmp / "missing.md": ("query_link",),
+                tmp / "missing.md": ("recall",),
             },
         )
 
         bad_path = bad.as_posix()
         missing_path = (tmp / "missing.md").as_posix()
-        self.assertIn(f"agent contract missing 'link_status' in {bad_path}", findings)
-        self.assertIn(f"agent contract missing 'starter_prompts' in {bad_path}", findings)
-        self.assertIn(f"agent contract missing 'ingest_status' in {bad_path}", findings)
-        self.assertIn(f"agent contract missing 'get_graph_summary' in {bad_path}", findings)
-        self.assertIn(f"agent contract missing 'backup_wiki' in {bad_path}", findings)
-        self.assertIn(f"agent contract missing 'validate_wiki' in {bad_path}", findings)
-        self.assertIn(f"agent contract missing 'memory_brief' in {bad_path}", findings)
+        self.assertIn(f"agent contract missing 'status' in {bad_path}", findings)
+        self.assertIn(f"agent contract missing 'remember' in {bad_path}", findings)
+        self.assertIn(f"agent contract missing 'ingest' in {bad_path}", findings)
+        self.assertIn(f"agent contract missing 'review' in {bad_path}", findings)
+        self.assertIn(f"agent contract missing 'admin' in {bad_path}", findings)
         self.assertIn(f"agent contract file missing: {missing_path}", findings)
 
     def test_tracked_path_hygiene_blocks_build_artifacts_and_secret_names(self):

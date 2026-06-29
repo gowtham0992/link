@@ -115,22 +115,20 @@ Link also exposes MCP prompts `link_brief`, `link_remember`, `link_ingest`, and
 `link://profile`, and `link://project` for clients that support prompt/resource
 attachment.
 
-### Full Compatibility Surface
+Slim agents should call:
 
-Most agents should call:
+1. `status(include_validation=true)` when connecting or troubleshooting.
+2. `recall(query="", mode="brief")` once at the first substantive turn of a session.
+3. `recall(query="<question>", budget="micro"|"small")` before broad file reads or asking the user to repeat durable context.
+4. `ingest(action="status")` when the user drops files into `raw/`.
+5. `remember(...)` only when the user explicitly approves saving durable memory.
+6. `review(action="inbox"|"audit"|"profile"|"explain"|...)` for memory lifecycle review.
+7. `admin(action, arguments)` for backup, migrate, validate, graph export, captures, rebuilds, and compatibility actions.
 
-1. `link_status(include_validation=true)` when connecting or troubleshooting.
-2. `link_operations()` if status reports pending, failed, or interrupted writes.
-3. `starter_prompts()` when the user asks what to try after install.
-4. `memory_brief(query="<current task>")` before personalized or project work.
-5. `query_link(query="<question>", budget="small")` for compact answer-ready context.
-6. `ingest_status()` when the user drops files into `raw/`.
-7. `validate_wiki(strict=true)` after ingest or large edits.
-
-Use `remember_memory` only when the user explicitly approves saving durable
-memory. Add `review_after` for memories that should return to the review inbox
-after a date, or `expires_at` for temporary context that should leave default
-recall after a date. Use `propose_memories` or `capture_session` for proposal-only review.
+Add `review_after` for memories that should return to the review inbox after a
+date, or `expires_at` for temporary context that should leave default recall
+after a date. Use `admin(action="propose_memories")` or
+`admin(action="capture_session")` for proposal-only review.
 For local CLI setup checks, `link verify-mcp --json` returns structured
 `issues` and `next_actions` that agents and scripts can consume without parsing
 terminal text.
@@ -141,15 +139,27 @@ In the local web proposal picker, unreadable raw files are surfaced as
 
 - Local-first: `link-mcp` reads the wiki path you configure and does not call
   external APIs, send telemetry, or require API keys.
-- Bounded by default: `query_link`, `get_pages`, `get_backlinks`, and
-  `get_graph_summary` are designed for agent context budgets so large wikis do
-  not have to be dumped into a chat.
+- Bounded by default: slim `recall` and `admin` graph/page actions are designed
+  for agent context budgets so large wikis do not have to be dumped into a chat.
 - Large-wiki search uses in-memory SQLite FTS when Python provides it, with a
   token-index fallback when FTS is unavailable.
-- Use `get_graph_summary` before `get_graph` unless the user explicitly needs a
-  full graph export.
+- Use `admin(action="graph_summary")` before full graph export unless the user
+  explicitly needs every node and edge.
 
 ## Tools
+
+Recommended slim tool set:
+
+| Tool | Description |
+|------|-------------|
+| `status(include_validation?)` | Readiness summary with package version, wiki path, content/page/memory counts, optional validation summary, warnings, and safe next actions. |
+| `recall(query?, budget?, project?, mode?, limit?)` | One read tool for startup briefs, focused memory recall, answer-ready context packets, wiki search, graph context, token budgets, and follow-up actions. |
+| `remember(text, ...)` | Save explicit user-approved local memory with duplicate/conflict checks, provenance, review state, visibility, optional `review_after`, and optional `expires_at`. |
+| `ingest(action?, strict?)` | Inspect pending raw sources, run validation, or rebuild ingest indexes/backlinks after source edits. |
+| `review(action?, ...)` | Memory inbox, profile, audit, log, wins, explain, reviewed, archive, restore, and forget workflows. |
+| `admin(action, arguments?)` | Escape hatch for backup, migrate, validate, operations, search, context, pages, graph, captures, rebuilds, proposals, updates, and compatibility actions. |
+
+Full compatibility tool set available with `--surface full`:
 
 | Tool | Description |
 |------|-------------|
@@ -191,7 +201,7 @@ In the local web proposal picker, unreadable raw files are surfaced as
 | `rebuild_index()` | Regenerate `wiki/index.md` from current pages so the human-readable catalog stays complete. |
 | `rebuild_backlinks()` | Rebuild `_backlinks.json` after ingest or lint. |
 
-Use `link_status` when connecting to Link or troubleshooting setup; if status reports pending, failed, or interrupted writes, call `link_operations` before attempting repair. If the user asks what to try after install, call `starter_prompts`. If status reports a missing or old schema marker, call `migrate_wiki` before other writes. Use `ingest_status` when the user drops files into `raw/` or asks what still needs ingest; if it returns `blocked_secrets`, `blocked_raw_access`, `blocked_source_access`, scan warnings, or secret warnings, do not read or ingest flagged raw files until the user redacts them, fixes local file access, or repairs unreadable source pages. Start with `query_link` for substantive questions that may need both local memory and wiki context. Use each item provenance to explain why Link knows something; if `budget_report` says context was truncated, use the returned `follow_up` action before scanning files manually. Use `memory_brief`, passing the user's task as `query` when available, at session start or before personalized/project work. Pass `project` for repo-specific work so Link returns broad user/global memory plus that project's memory, while keeping other explicit projects out of recall and duplicate/conflict checks. After ingesting sources or substantially editing wiki pages, call `rebuild_index`, `rebuild_backlinks`, then `validate_wiki`, before saying the wiki is updated. Use `backup_wiki` before broad repairs or risky local wiki edits; raw sources are excluded unless the user explicitly asks to include them. Use `memory_profile` to inspect the user/project memory shape, `memory_audit` to see review/capture risks, `memory_inbox` to find memories needing human review and the primary action for each item, `memory_log` to see recent memory lifecycle changes without raw bodies, `memory_wins` to summarize local proof signals without telemetry, `explain_memory` to audit why a memory exists, then `recall_memory` for focused preferences, decisions, and project context. Use `capture_session` for long chat/session notes that should be preserved locally before approval; use `propose_memories` when no raw capture is needed. Both return candidates only. Use `capture_inbox` to review saved captures before accepting, redacting, or deleting them. If `capture_session` reports secret warnings, ask before calling `redact_capture`. Use `accept_capture` only after the user approves one captured proposal. Use `delete_capture` only after explicit user confirmation. If `remember_memory` or `accept_capture` returns duplicate candidates, use `update_memory` on the existing memory unless the user confirms a separate memory. If it returns conflict candidates, ask the user whether to update or archive the older memory before forcing a conflict. Use `archive_memory`, not deletion, when a memory is stale or wrong. Use `forget_memory` only when the user explicitly asks for permanent deletion. Use `get_context` when you need the full primary source page after `query_link` shows it is relevant. Use `get_graph_summary` before `get_graph` when the wiki may be large or the agent only needs graph orientation.
+Use the full compatibility surface only for older integrations or power-user workflows that need individual tools. New agents should prefer the slim six-tool surface above.
 Web approval APIs keep the safe path only: duplicate/conflict overrides should
 go through CLI or MCP after explicit human review.
 
