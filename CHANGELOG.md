@@ -8,12 +8,28 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Added
 
-- Added `lnk onboard` to create or repair a real `~/link` workspace, check health, optionally seed a first memory, preview or write agent MCP config, and print the first prompts in one guided flow.
+- Added a slim MCP surface for LLM-native clients so agents can rely on a smaller default set of high-signal tools while the full tool surface remains available for compatibility.
+- Added MCP prompt and resource coverage so clients can expose Link recall, remember, ingest, and review workflows as native agent actions instead of requiring users to memorize tool names.
+- Added token-efficient recall capsules with a `micro` budget, rank signals, estimated token counts, and follow-up guidance so agents can retrieve the right memory before expanding context.
+- Added `scripts/smoke_recall_quality.py` to exercise recall quality and token-budget behavior across representative memory queries.
+- Added `lnk onboard` to create or repair a real `~/link` workspace, check health, optionally seed a first memory, preview or write agent MCP config, and print first prompts in one guided flow.
 - Added a local `/onboard` viewer page that turns health, first memory, agent wiring, and starter prompts into one copyable setup checklist.
+- Added `/onboard` links to first-run output, starter prompts, the local home page, the health page, HTTP viewer smoke coverage, and large-wiki smoke guidance.
 
 ### Changed
 
+- Updated agent installers and MCP config writers to prefer the slim MCP surface by default, reducing tool-list noise while keeping advanced tools available.
+- Improved query/search ranking for token-efficient recall, including stronger exact/phrase matching, better budget accounting, and clearer recall metadata in query packets, benchmark output, status, and health views.
+- Tightened `lnk onboard --write` guidance so config-writing is explicit, repeatable, and clear about which agent files are affected.
+- Improved `lnk serve` startup guidance so the terminal points new users to `/onboard`, `/health`, `/graph`, and clearly states that MCP and CLI work without the viewer running.
 - Clarified public UI docs around the `/onboard` checklist and viewer-independent CLI, skills, and MCP usage.
+- Redesigned the GitHub Pages landing page and refreshed the product brand, logo assets, README header links, and public docs styling around the newer product positioning.
+- Replaced older synthetic docs GIFs with real, on-brand product screenshots and figures for UI, CLI, MCP, health, home, and graph flows.
+
+### Fixed
+
+- Fixed a flaky Windows write-lock path by retrying file-lock acquisition on transient `PermissionError`.
+- Fixed docs-site validation so the self-contained landing bundle is allowed while the rest of the public docs keep the local-first/no-external-runtime guarantee.
 
 ## [1.4.0] - 2026-06-14
 
