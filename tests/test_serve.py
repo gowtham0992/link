@@ -188,6 +188,15 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(serve.ThreadingLocalTCPServer.daemon_threads)
         self.assertTrue(serve.ThreadingLocalTCPServer.allow_reuse_address)
 
+    def test_serve_startup_banner_points_to_onboarding(self):
+        text = "\n".join(serve._serve_startup_lines(3456))
+
+        self.assertIn("http://127.0.0.1:3456/onboard", text)
+        self.assertIn("first-run checklist", text)
+        self.assertIn("http://127.0.0.1:3456/health", text)
+        self.assertIn("http://127.0.0.1:3456/graph", text)
+        self.assertIn("MCP and CLI work without this viewer running.", text)
+
     def test_http_handler_sets_request_timeout(self):
         class FakeSocket:
             def __init__(self):

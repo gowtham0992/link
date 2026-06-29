@@ -2059,6 +2059,20 @@ def _serve_bind_error_message(exc: OSError, port: int) -> str:
     return f"Link could not start local server on 127.0.0.1:{port}: {exc}"
 
 
+def _serve_startup_lines(port: int) -> list[str]:
+    base_url = f"http://127.0.0.1:{port}"
+    return [
+        f"  Link -> {base_url}",
+        "  Open:",
+        f"    {base_url}/onboard  first-run checklist",
+        f"    {base_url}/health   readiness and repair",
+        f"    {base_url}/graph    knowledge graph",
+        "  Local-only: bound to 127.0.0.1; no public host mode.",
+        "  No auth: do not expose this server without your own authentication layer.",
+        "  MCP and CLI work without this viewer running.",
+    ]
+
+
 def main():
     global PORT, WIKI_DIR, RAW_DIR
     PORT, root = _parse_serve_args(sys.argv[1:], default_port=PORT, default_root=ROOT)
@@ -2070,9 +2084,8 @@ def main():
     RAW_DIR = root / "raw"
     try:
         with ThreadingLocalTCPServer(("127.0.0.1", PORT), Handler) as s:
-            print(f"  Link → http://127.0.0.1:{PORT}")
-            print("  Local-only: bound to 127.0.0.1; no public host mode.")
-            print("  No auth: do not expose this server without your own authentication layer.")
+            for line in _serve_startup_lines(PORT):
+                print(line)
             try: s.serve_forever()
             except KeyboardInterrupt: print("\n  stopped.")
     except OSError as exc:
