@@ -63,6 +63,7 @@ def test_render_health_page_shows_readiness_operations_and_commands(tmp_path):
     assert "remember-1.json" in html
     assert "Operation Next Actions" in html
     assert str(tmp_path) in html
+    assert "lnk onboard" in html
     assert "lnk operations" in html
     assert "lnk benchmark" in html
     assert "agent memory" in html

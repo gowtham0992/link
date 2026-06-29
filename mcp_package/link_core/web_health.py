@@ -273,6 +273,7 @@ def render_health_page(
     command_target = _command_target(status, operations)
     commands = [
         _link_command(command_target, "status", "--validate"),
+        _link_command(command_target, "onboard"),
         _link_command(command_target, "operations"),
         _link_command(command_target, "doctor", "--fix"),
         _link_command(command_target, "validate"),
