@@ -65,6 +65,7 @@ class PromptsCoreTests(unittest.TestCase):
         self.assertIn("Agent can find Link", payload["steps"][0]["proves"])
         self.assertTrue(any(command.startswith("lnk serve ") for command in payload["commands"]))
         self.assertTrue(any(str(root.resolve()) in command for command in payload["commands"]))
+        self.assertIn("http://127.0.0.1:3000/onboard", payload["urls"])
         self.assertIn("http://127.0.0.1:3000/health", payload["urls"])
 
 

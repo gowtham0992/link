@@ -107,6 +107,7 @@ def welcome_payload(target: Path, project: str | None = None) -> dict[str, objec
         ],
         "urls": [
             "http://127.0.0.1:3000",
+            "http://127.0.0.1:3000/onboard",
             "http://127.0.0.1:3000/health",
             "http://127.0.0.1:3000/graph",
         ],

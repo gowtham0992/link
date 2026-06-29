@@ -19,7 +19,9 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Link wiki ready at /tmp/link", text)
         self.assertIn("Initialized:", text)
         self.assertIn("lnk health /tmp/link", text)
+        self.assertIn("lnk onboard /tmp/link", text)
         self.assertIn("lnk serve /tmp/link", text)
+        self.assertIn("http://127.0.0.1:3000/onboard", text)
 
     def test_render_starter_prompts_text(self):
         code, text = render_starter_prompts_text({
@@ -79,6 +81,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("python3 link.py next /tmp/link-demo", text)
         self.assertIn("Try the value loop:", text)
         self.assertIn("/tmp/link-demo/START_HERE.md", text)
+        self.assertIn("http://127.0.0.1:3000/onboard", text)
         self.assertIn("http://127.0.0.1:3000/graph", text)
 
     def test_render_try_text(self):
@@ -104,6 +107,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Demo: ready", text)
         self.assertIn("Query proof:", text)
         self.assertIn("Ask an agent:", text)
+        self.assertIn("http://127.0.0.1:3000/onboard", text)
         self.assertIn("lnk next /tmp/link-demo", text)
 
     def test_render_onboard_text_preview(self):

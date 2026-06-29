@@ -16,7 +16,9 @@ def render_init_text(*, target: object, fixes: Sequence[str]) -> tuple[int, str]
         "",
         "Next:",
         f"  {display_command(['link', 'health', command_target])}",
+        f"  {display_command(['link', 'onboard', command_target])}",
         f"  {display_command(['link', 'serve', command_target])}",
+        "  Open http://127.0.0.1:3000/onboard for the browser checklist",
         "  Drop sources into raw/ and ask your agent: ingest raw/<file> into Link",
     ])
     return 0, "\n".join(lines)
@@ -94,6 +96,7 @@ def render_demo_text(
         "",
         "Then open:",
         "  http://127.0.0.1:3000",
+        "  http://127.0.0.1:3000/onboard",
         "  http://127.0.0.1:3000/graph",
     ])
 
@@ -126,6 +129,7 @@ def render_try_text(
         "Open the local viewer:",
         f"  {serve_command}",
         f"  {url}",
+        f"  {url}/onboard",
         "",
         "Ask an agent:",
         "  is Link ready?",

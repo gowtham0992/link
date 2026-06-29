@@ -153,6 +153,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("1. is Link ready?", text)
         self.assertIn("Proves: Agent can find Link", text)
         self.assertIn("lnk health", text)
+        self.assertIn("http://127.0.0.1:3000/onboard", text)
         self.assertIn("http://127.0.0.1:3000/health", text)
 
     def test_welcome_json_supports_project_examples(self):

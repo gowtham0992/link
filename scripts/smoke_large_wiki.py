@@ -236,6 +236,7 @@ def run_smoke(work_dir: Path, page_count: int, max_seconds: dict[str, float] | N
         "viewer": {
             "serve_command": f"python3 link.py serve {work_dir}",
             "home_url": "http://127.0.0.1:3000",
+            "onboard_url": "http://127.0.0.1:3000/onboard",
             "graph_url": "http://127.0.0.1:3000/graph",
             "health_url": "http://127.0.0.1:3000/health",
         },
