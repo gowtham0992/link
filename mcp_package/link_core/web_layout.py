@@ -97,6 +97,7 @@ def render_header_html() -> str:
   </div>
   <nav aria-label="Link sections">
     <a href="/">home</a>
+    <a href="/onboard">onboard</a>
     <a href="/brief">brief</a>
     <a href="/memory">memory</a>
     <a href="/ingest">ingest</a>

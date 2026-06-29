@@ -9,6 +9,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 ### Added
 
 - Added `lnk onboard` to create or repair a real `~/link` workspace, check health, optionally seed a first memory, preview or write agent MCP config, and print the first prompts in one guided flow.
+- Added a local `/onboard` viewer page that turns health, first memory, agent wiring, and starter prompts into one copyable setup checklist.
 
 ## [1.4.0] - 2026-06-14
 

@@ -72,6 +72,9 @@ from link_core.query import (
 from link_core.prompts import (
     starter_prompt_payload as _core_starter_prompt_payload,
 )
+from link_core.mcp_connect import (
+    supported_agents as _core_supported_agents,
+)
 from link_core.validation import (
     validate_wiki as _core_validate_wiki,
 )
@@ -124,6 +127,9 @@ from link_core.web_home import (
 )
 from link_core.web_health import (
     render_health_page as _core_render_health_page,
+)
+from link_core.web_onboard import (
+    render_onboard_page as _core_render_onboard_page,
 )
 from link_core.web_ingest import (
     render_ingest_page as _core_render_ingest_page,
@@ -916,6 +922,7 @@ def _render_prompts(project: str | None = None):
 
 def _render_more():
     links = [
+        ("/onboard", "Onboard", "First-run checklist for health, first memory, agent wiring, and prompts."),
         ("/prompts", "Prompts", "Starter prompts and copyable next-step commands."),
         ("/propose", "Propose", "Turn notes into review-only memory candidates."),
         ("/audit", "Audit", "Review memory health, backlog, captures, and safe next actions."),
@@ -1420,6 +1427,17 @@ def _render_health():
     )
 
 
+def _render_onboard(project: str | None = None):
+    return _core_render_onboard_page(
+        _link_status_payload(include_validation=True),
+        _operations_payload(),
+        _starter_prompts_payload(project=project),
+        target=str(WIKI_DIR.parent),
+        agents=_core_supported_agents(),
+        layout=_layout,
+    )
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -1575,6 +1593,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._err("file")
         elif path in ("/", ""):
             self._ok(_render_home())
+        elif path == "/onboard":
+            self._ok(_render_onboard(project=_query_text(query, "project", max_len=80)))
         elif path == "/health":
             self._ok(_render_health())
         elif path == "/ingest":

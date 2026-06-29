@@ -85,7 +85,7 @@ py link.py serve link-demo</code></pre>
           <code>lnk serve</code> is only for browsing Link in a local web UI. CLI commands, official skills, and MCP-enabled agents work without it because they read the same local <code>wiki/</code> files directly.
         </div>
         <p>The demo includes one pending memory intentionally, so the review inbox and explain-memory workflow are visible. Run <code>lnk review-memory prefer-local-personal-memory link-demo</code> if you want memory audit to be fully clear.</p>
-        <p>Open <code>http://127.0.0.1:3000</code>, then inspect <code>/brief</code>, <code>/memory</code>, <code>/ingest</code>, <code>/graph</code>, and <code>/health</code>. Open <strong>more</strong> for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts <code>localhost</code> too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups.</p>
+        <p>Open <code>http://127.0.0.1:3000</code>, then inspect <code>/onboard</code>, <code>/brief</code>, <code>/memory</code>, <code>/ingest</code>, <code>/graph</code>, and <code>/health</code>. Open <strong>more</strong> for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts <code>localhost</code> too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups.</p>
         <pre><code>lnk query "why does Link help agents?" link-demo --budget small
 lnk brief "working on agent memory" link-demo
 lnk benchmark "agent memory" link-demo
@@ -97,7 +97,7 @@ lnk health link-demo</code></pre>
 lnk onboard --first-memory "I prefer concise release notes"
 lnk onboard --agent codex
 lnk onboard --agent codex --write</code></pre>
-        <p>From source, use <code>python3 link.py onboard</code> on macOS/Linux or <code>py link.py onboard</code> on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs.</p>
+        <p>From source, use <code>python3 link.py onboard</code> on macOS/Linux or <code>py link.py onboard</code> on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs. If the local viewer is running, <code>http://127.0.0.1:3000/onboard</code> shows the same setup loop with copy buttons.</p>
 
         <h2 id="install">3. Install Link For Your Agent</h2>
         <p>From the cloned checkout, run the installer for the agent you use. Re-running the same installer updates code and instructions without replacing existing wiki data.</p>

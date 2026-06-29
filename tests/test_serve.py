@@ -176,6 +176,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn("data-copy-text", html)
         self.assertIn("data-raw-source-form", html)
         self.assertIn("/api/raw-source", html)
+        self.assertIn('<a href="/onboard">onboard</a>', html)
         self.assertIn('<a href="/ingest">ingest</a>', html)
         self.assertIn('<a href="/brief">brief</a>', html)
         self.assertIn('<a href="/propose">propose</a>', html)
@@ -219,6 +220,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn(".raw-source-controls { grid-template-columns: minmax(0, 1fr); }", serve.CSS)
         self.assertIn(".memory-grid { grid-template-columns: minmax(0, 1fr); }", serve.CSS)
         self.assertIn(".memory-actions code, .memory-next code { word-break: break-word; }", serve.CSS)
+        self.assertIn(".onboard-steps { display: grid;", serve.CSS)
 
     def test_all_pages_is_paginated_for_large_wikis(self):
         wiki = self.make_wiki()
@@ -356,6 +358,7 @@ class ServeTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertIn(b"More Tools", body)
+        self.assertIn(b"/onboard", body)
         self.assertIn(b"/prompts", body)
         self.assertIn(b"/propose", body)
         self.assertIn(b"/captures", body)
@@ -525,6 +528,7 @@ class ServeTests(unittest.TestCase):
 
         html = serve._render_home()
 
+        self.assertIn('href="/onboard"', html)
         self.assertIn('<a href="/prompts">prompts</a>', html)
         self.assertIn("Try These Prompts", html)
         self.assertIn("is Link ready?", html)
@@ -549,6 +553,24 @@ class ServeTests(unittest.TestCase):
         self.assertIn("Local Checks", html)
         self.assertIn("Project examples are scoped to <code>client-launch</code>", html)
         self.assertIn("lnk health", html)
+
+    def test_onboard_page_shows_agent_setup_loop(self):
+        self.make_wiki()
+
+        html = serve._render_onboard()
+        status, body, _ = run_handler_raw("GET", "/onboard")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Onboard", html)
+        self.assertIn("One local checklist", html)
+        self.assertIn("MCP and CLI work without the viewer running", html)
+        self.assertIn("lnk health", html)
+        self.assertIn("lnk onboard", html)
+        self.assertIn("--first-memory", html)
+        self.assertIn("--agent codex", html)
+        self.assertIn("is Link ready?", html)
+        self.assertIn(b"Onboard", body)
+        self.assertIn(b"--agent codex", body)
 
     def test_css_has_explicit_black_dark_theme(self):
         self.assertIn(':root[data-theme="dark"]', serve.CSS)

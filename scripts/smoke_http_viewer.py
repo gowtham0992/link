@@ -149,6 +149,14 @@ def run_smoke(work_dir: Path, python: str) -> None:
             "health page did not include operation inspection guidance",
         )
 
+        status, _, body = request(base_url, "/onboard")
+        onboard_html = body.decode("utf-8", errors="replace")
+        require(status == 200, "onboard page did not return 200")
+        require("Onboard" in onboard_html, "onboard page did not render")
+        require("Check readiness" in onboard_html, "onboard page did not include readiness step")
+        require("health" in onboard_html, "onboard page did not include readiness command")
+        require("Ask Your Agent First" in onboard_html, "onboard page did not include starter prompts")
+
         status, headers, status_payload = request_json(base_url, "/api/status?validate=true")
         require(status == 200, "status API did not return 200")
         require(status_payload.get("ready") is True, "status API did not report ready")
