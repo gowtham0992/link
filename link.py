@@ -1978,6 +1978,7 @@ def onboard(
         "status": status_payload,
         "first_memory": memory_result,
         "connections": connections,
+        "write_requested": write,
         "prompts": prompts,
         "commands": commands,
         "agent_examples": [

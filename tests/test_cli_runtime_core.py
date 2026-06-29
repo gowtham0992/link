@@ -123,6 +123,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
             "connections": [{
                 "display_name": "Codex",
                 "config_path": "/tmp/config.toml",
+                "restart_hint": "Restart Codex, then ask: is Link ready?",
                 "write": {"requested": False, "ok": False},
                 "next_actions": [{
                     "label": "write config",
@@ -149,8 +150,29 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("saved for review", text)
         self.assertIn("Codex: preview", text)
         self.assertIn("Write when ready: lnk connect codex /tmp/link --write", text)
+        self.assertIn("After writing: Restart Codex", text)
         self.assertIn("is Link ready?", text)
         self.assertIn("lnk serve /tmp/link --port 3000", text)
+
+    def test_render_onboard_write_without_agent_is_actionable_error(self):
+        code, text = render_onboard_text({
+            "target": "/tmp/link",
+            "created": False,
+            "status": {
+                "ready": True,
+                "content_page_count": 0,
+                "memory_count": 0,
+            },
+            "write_requested": True,
+            "connections": [],
+            "prompts": [],
+            "commands": {},
+            "agent_examples": ["lnk onboard /tmp/link --agent codex"],
+        })
+
+        self.assertEqual(code, 1)
+        self.assertIn("no agent selected", text)
+        self.assertIn("--agent codex", text)
 
     def test_render_mcp_connect_text_preview(self):
         code, text = render_mcp_connect_text({

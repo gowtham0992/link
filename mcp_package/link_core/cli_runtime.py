@@ -164,7 +164,8 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
     ready = bool(status.get("ready"))
     connections = _first_mapping_items(payload.get("connections"), 12)
     connection_failed = any(_connection_state(connection) == "failed" for connection in connections)
-    code = 0 if ready and not connection_failed and not payload.get("error") else 1
+    write_requested_without_agent = bool(payload.get("write_requested")) and not connections
+    code = 0 if ready and not connection_failed and not write_requested_without_agent and not payload.get("error") else 1
 
     lines = [
         f"Link onboard: {payload.get('target')}",
@@ -195,19 +196,28 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
             label = connection.get("display_name") or connection.get("agent") or "agent"
             config_path = connection.get("config_path") or ""
             lines.append(f"- {label}: {state} · {config_path}")
+            restart_hint = connection.get("restart_hint")
             if state == "preview":
                 actions = _first_mapping_items(connection.get("next_actions"), 4)
                 for action in actions:
                     if action.get("label") == "write config":
                         lines.append(f"  Write when ready: {action.get('command_text')}")
                         break
+                if restart_hint:
+                    lines.append(f"  After writing: {restart_hint}")
+            elif state == "updated":
+                if restart_hint:
+                    lines.append(f"  Restart: {restart_hint}")
             elif state == "failed":
                 write_status = connection.get("write") if isinstance(connection.get("write"), Mapping) else {}
                 lines.append(f"  Error: {write_status.get('message') or 'could not write config'}")
     else:
-        lines.append("- not connected yet. Preview an agent config with:")
-        for command in payload.get("agent_examples", []):
-            lines.append(f"  {command}")
+        if write_requested_without_agent:
+            lines.append("- no agent selected; nothing was written. Add --agent codex or --all-agents.")
+        else:
+            lines.append("- not connected yet. Preview an agent config with:")
+            for command in payload.get("agent_examples", []):
+                lines.append(f"  {command}")
 
     prompts = _first_mapping_items(payload.get("prompts"), 4)
     lines.extend(["", "Ask your agent"])
