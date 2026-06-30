@@ -110,10 +110,12 @@ New MCP configs should expose Link through six model-facing tools:
 6. `admin(action, arguments?)` is the escape hatch for backup, migrate,
    validate, graph export, pages, captures, rebuilds, and advanced updates.
 
-Link also exposes MCP prompts `link_brief`, `link_remember`, `link_ingest`, and
-`link_review`, plus resources `link://health`, `link://brief`,
-`link://profile`, and `link://project` for clients that support prompt/resource
-attachment.
+Link also exposes MCP prompts `link_start`, `link_brief`, `link_remember`,
+`link_ingest`, and `link_review`, plus resources `link://instructions`,
+`link://health`, `link://brief`, `link://profile`, and `link://project` for
+clients that support prompt/resource attachment. `link_start` and
+`link://instructions` are the portable startup loop: check readiness, run a
+brief recall once, then use bounded recall before broad context reads.
 
 Slim agents should call:
 

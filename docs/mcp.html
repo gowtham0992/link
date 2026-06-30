@@ -149,15 +149,18 @@ ingest
 review
 admin</code></pre>
         <p>MCP prompts exposed by Link:</p>
-        <pre><code>link_brief
+        <pre><code>link_start
+link_brief
 link_remember
 link_ingest
 link_review</code></pre>
         <p>MCP resources exposed by Link:</p>
-        <pre><code>link://health
+        <pre><code>link://instructions
+link://health
 link://brief
 link://profile
 link://project</code></pre>
+        <p><code>link_start</code> and <code>link://instructions</code> carry the portable startup loop for clients that support native prompts or resource attachment: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads.</p>
         <p>Full compatibility tool set available with <code>--surface full</code>:</p>
         <pre><code>link_status
 link_operations

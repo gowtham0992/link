@@ -10,6 +10,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 - Added a slim MCP surface for LLM-native clients so agents can rely on a smaller default set of high-signal tools while the full tool surface remains available for compatibility.
 - Added MCP prompt and resource coverage so clients can expose Link recall, remember, ingest, and review workflows as native agent actions instead of requiring users to memorize tool names.
+- Added MCP `link_start` and `link://instructions` so clients can attach the portable startup loop: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads.
 - Added token-efficient recall capsules with a `micro` budget, rank signals, estimated token counts, and follow-up guidance so agents can retrieve the right memory before expanding context.
 - Added `scripts/smoke_recall_quality.py` to exercise recall quality and token-budget behavior across representative memory queries.
 - Added `lnk onboard` to create or repair a real `~/link` workspace, check health, optionally seed a first memory, preview or write agent MCP config, and print first prompts in one guided flow.

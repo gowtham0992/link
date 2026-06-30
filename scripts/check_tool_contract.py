@@ -117,11 +117,13 @@ EXPECTED_MCP_PROMPTS = {
     "link_ingest",
     "link_remember",
     "link_review",
+    "link_start",
 }
 
 EXPECTED_MCP_RESOURCES = {
     "link://brief",
     "link://health",
+    "link://instructions",
     "link://profile",
     "link://project",
 }

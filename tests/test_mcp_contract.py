@@ -253,16 +253,21 @@ class McpContractTests(unittest.TestCase):
             sys.argv = previous_argv
 
     def test_mcp_prompts_and_resources_contract(self):
+        self.assertIn("recall(query='', mode='brief'", self.server.link_start_prompt("release work"))
+        self.assertIn("recall_capsule", self.server.link_start_prompt("release work"))
         self.assertIn("recall(query=", self.server.link_brief_prompt("release work"))
         self.assertIn("remember", self.server.link_remember_prompt("I prefer short notes"))
         self.assertIn("ingest(action='status')", self.server.link_ingest_prompt("raw/notes.md"))
         self.assertIn("review(action='inbox')", self.server.link_review_prompt())
 
+        instructions = self.server.link_instructions_resource()
         health = json.loads(self.server.link_health_resource())
         brief = json.loads(self.server.link_brief_resource())
         profile = json.loads(self.server.link_profile_resource())
         project = json.loads(self.server.link_project_resource())
 
+        self.assertIn("recall(query=\"\", mode=\"brief\"", instructions)
+        self.assertIn("Never silently save durable memory", instructions)
         self.assertTrue(health["ready"])
         self.assertIn("relevant_memories", brief)
         self.assertGreaterEqual(profile["memory_count"], 1)

@@ -856,6 +856,29 @@ def _write_mcp_memory_page(
 # ── MCP resources and prompts ─────────────────────────────────────────
 
 @mcp.resource(
+    "link://instructions",
+    name="Link agent instructions",
+    description="Short, portable instructions for using Link memory safely in any MCP client.",
+    mime_type="text/markdown",
+)
+def link_instructions_resource() -> str:
+    return (
+        "# Link Agent Instructions\n\n"
+        "Use Link as local, source-backed agent memory.\n\n"
+        "1. If readiness is unknown, call `status(include_validation=true)`.\n"
+        "2. At the first substantive turn of a session, call `recall(query=\"\", mode=\"brief\", limit=6)`.\n"
+        "3. Before broad file reads or asking the user to repeat durable context, call "
+        "`recall(query=\"<task>\", budget=\"micro\")` and read `recall_capsule` first.\n"
+        "4. Use `ingest(action=\"status\")` when the user adds files to `raw/`.\n"
+        "5. Use `remember` only when the user explicitly asks or approves durable memory.\n"
+        "6. Use `review` for inbox, explain, archive, restore, forget, profile, audit, and log workflows.\n"
+        "7. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "Never silently save durable memory. Prefer reviewed memories and source-backed wiki pages, and cite "
+        "provenance when explaining why Link knows something.\n"
+    )
+
+
+@mcp.resource(
     "link://health",
     name="Link health",
     description="Current Link readiness, validation, schema, and safe next actions.",
@@ -894,6 +917,22 @@ def link_profile_resource() -> str:
 def link_project_resource() -> str:
     project = _core_default_project_for_target(WIKI_DIR.parent)
     return json.dumps(_starter_prompts(project=project), ensure_ascii=False)
+
+
+@mcp.prompt(
+    name="link_start",
+    title="Link: start a session",
+    description="Begin work with Link's safe readiness and recall loop.",
+)
+def link_start_prompt(task: str = "") -> str:
+    task_text = task.strip() or "<current task>"
+    return (
+        "Start this session with Link. If readiness is unknown, call status(include_validation=true). "
+        "Then call recall(query='', mode='brief', limit=6) once to prime local memory. "
+        f"If {task_text!r} may depend on user preferences, project decisions, or prior context, call "
+        f"recall(query={task_text!r}, budget='micro') and read recall_capsule before broad file reads. "
+        "Do not write durable memory unless the user explicitly asks or approves it."
+    )
 
 
 @mcp.prompt(

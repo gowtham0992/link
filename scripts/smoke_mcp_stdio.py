@@ -45,11 +45,13 @@ EXPECTED_PROMPTS = {
     "link_ingest",
     "link_remember",
     "link_review",
+    "link_start",
 }
 
 EXPECTED_RESOURCES = {
     "link://brief",
     "link://health",
+    "link://instructions",
     "link://profile",
     "link://project",
 }
@@ -86,6 +88,10 @@ async def _assert_prompt_and_resource_contract(session: Any) -> None:
     prompt_text = getattr(prompt.messages[0].content, "text", "") if prompt.messages else ""
     if "recall(query='agent memory'" not in prompt_text:
         raise RuntimeError("link_brief prompt did not render recall guidance")
+    start_prompt = await session.get_prompt("link_start", {"task": "release work"})
+    start_text = getattr(start_prompt.messages[0].content, "text", "") if start_prompt.messages else ""
+    if "recall(query='', mode='brief'" not in start_text or "recall_capsule" not in start_text:
+        raise RuntimeError("link_start prompt did not render startup recall guidance")
 
     resources = await session.list_resources()
     resource_uris = {str(resource.uri) for resource in resources.resources}
@@ -101,6 +107,10 @@ async def _assert_prompt_and_resource_contract(session: Any) -> None:
         raise RuntimeError(f"link://health returned invalid JSON: {exc}") from exc
     if health.get("ready") is not True:
         raise RuntimeError("link://health did not report a ready demo wiki")
+    instructions = await session.read_resource(AnyUrl("link://instructions"))
+    instructions_text = getattr(instructions.contents[0], "text", "") if instructions.contents else ""
+    if "recall(query=\"\", mode=\"brief\"" not in instructions_text or "Never silently save durable memory" not in instructions_text:
+        raise RuntimeError("link://instructions did not render the portable agent loop")
 
 
 async def _run_full_smoke(session: Any) -> None:
