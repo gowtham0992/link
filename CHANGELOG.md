@@ -19,6 +19,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Changed
 
+- Added `lnk start`, a CLI startup loop that combines readiness, validation state, and a local memory brief for agents using skills or shell instead of MCP.
 - Updated agent installers and MCP config writers to prefer the slim MCP surface by default, reducing tool-list noise while keeping advanced tools available.
 - Made the slim MCP surface the default server surface and aligned README, LINK.md, installed agent instructions, MCP docs, status actions, and query follow-ups around the canonical `status`, `recall`, `remember`, `ingest`, `review`, and `admin` vocabulary.
 - Reworded starter prompts around the clearer `start with Link before we continue` flow so first-run users ask for the same startup recall loop exposed by MCP `link_start`.

@@ -53,6 +53,7 @@ EXPECTED_CLI_COMMANDS = {
     "set-memory-visibility",
     "share",
     "snapshot",
+    "start",
     "status",
     "team-sync",
     "try",

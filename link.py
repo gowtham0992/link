@@ -274,6 +274,7 @@ from link_core.cli_runtime import (
     render_init_text as _core_render_init_text,
     render_mcp_connect_text as _core_render_mcp_connect_text,
     render_onboard_text as _core_render_onboard_text,
+    render_start_text as _core_render_start_text,
     render_starter_prompts_text as _core_render_starter_prompts_text,
     render_try_text as _core_render_try_text,
     render_welcome_text as _core_render_welcome_text,
@@ -1746,6 +1747,58 @@ def brief(
     return code
 
 
+def start(
+    target: Path,
+    task: str = "",
+    limit: int = 6,
+    project: str | None = None,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    task = _clean_text_input(task, max_len=500)
+    project_name = project or _default_project(target)
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    brief_payload = _memory_brief(wiki_dir, query=task, limit=limit, project=project_name)
+    brief_payload = _core_add_capture_review_to_brief(
+        brief_payload,
+        _capture_review_summary(target, project=project_name),
+    )
+    query_text = task or "your current task"
+    payload = {
+        "target": str(target),
+        "wiki": str(wiki_dir),
+        "task": task,
+        "project": project_name,
+        "status": status_payload,
+        "brief": brief_payload,
+        "commands": {
+            "health": _display_command(["link", "health", str(target)]),
+            "query": _display_command(["link", "query", query_text, str(target), "--budget", "micro"]),
+            "brief": _display_command(["link", "brief", query_text, str(target)]),
+            "remember": _display_command(["link", "remember", "<approved memory>", str(target)]),
+            "review": _display_command(["link", "memory-inbox", str(target)]),
+        },
+        "agent_loop": [
+            "Use this brief before asking the user to repeat durable context.",
+            "Use query for task-specific context when this brief is not enough.",
+            "Save memory only after explicit user approval.",
+        ],
+    }
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0 if status_payload["ready"] else 1
+
+    _, brief_text = _core_render_brief_text(brief_payload, query=task, project=project_name)
+    text_payload = {**payload, "brief_text": brief_text}
+    code, text = _core_render_start_text(text_payload)
+    print(text)
+    return code
+
+
 def profile(target: Path, limit: int = 10, project: str | None = None, json_output: bool = False) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
@@ -2066,6 +2119,14 @@ def create_demo(target: Path, force: bool = False) -> int:
         guide_path=target / "START_HERE.md",
         serve_command=_display_command(["python3", str(target / "link.py"), "serve", str(target)]),
         next_command=_display_command(["python3", str(target / "link.py"), "next", str(target)]),
+        start_command=_display_command([
+            "python3",
+            str(target / "link.py"),
+            "start",
+            str(target),
+            "--task",
+            "working on agent memory",
+        ]),
         query_command=_display_command([
             "python3",
             str(target / "link.py"),
@@ -2212,6 +2273,7 @@ def main(argv: list[str] | None = None) -> int:
             "graph-summary": graph_summary,
             "benchmark": benchmark,
             "brief": brief,
+            "start": start,
             "profile": profile,
             "wins": memory_wins,
             "memory-audit": memory_audit,

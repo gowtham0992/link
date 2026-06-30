@@ -258,6 +258,13 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     brief_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     brief_cmd.add_argument("--json", action="store_true", help="print machine-readable memory brief")
 
+    start_cmd = sub.add_parser("start", help="start a session with Link readiness and a memory brief")
+    start_cmd.add_argument("target", nargs="?", default=".")
+    start_cmd.add_argument("--task", default="", help="optional task or question to retrieve memory for")
+    start_cmd.add_argument("--limit", type=int, default=6)
+    start_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
+    start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
+
     profile_cmd = sub.add_parser("profile", help="show what Link remembers")
     profile_cmd.add_argument("target", nargs="?", default=".")
     profile_cmd.add_argument("--limit", type=int, default=10)
@@ -565,6 +572,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         )
     if command == "brief":
         return handlers["brief"](Path(args.target), query=args.query, limit=args.limit, project=args.project, json_output=args.json)
+    if command == "start":
+        return handlers["start"](
+            Path(args.target),
+            task=args.task,
+            limit=args.limit,
+            project=args.project,
+            json_output=args.json,
+        )
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":

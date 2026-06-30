@@ -5,6 +5,7 @@ from mcp_package.link_core.cli_runtime import (
     render_init_text,
     render_mcp_connect_text,
     render_onboard_text,
+    render_start_text,
     render_starter_prompts_text,
     render_try_text,
     render_welcome_text,
@@ -64,12 +65,40 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("- lnk health", text)
         self.assertIn("- http://127.0.0.1:3000/health", text)
 
+    def test_render_start_text(self):
+        code, text = render_start_text({
+            "target": "/tmp/link",
+            "task": "release work",
+            "status": {
+                "ready": True,
+                "content_page_count": 12,
+                "page_count": 14,
+                "active_memory_count": 2,
+                "needs_review_count": 1,
+                "search_backend": "sqlite-fts",
+                "validation": {"checked": True, "passed": True},
+            },
+            "brief_text": "Link memory brief: release work\n- Prefer short release notes",
+            "commands": {
+                "query": "lnk query 'release work' /tmp/link --budget micro",
+                "review": "lnk memory-inbox /tmp/link",
+            },
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Link start: /tmp/link", text)
+        self.assertIn("Ready: yes", text)
+        self.assertIn("Pages: 12 content", text)
+        self.assertIn("Link memory brief: release work", text)
+        self.assertIn("lnk query", text)
+
     def test_render_demo_text(self):
         code, text = render_demo_text(
             target="/tmp/link-demo",
             guide_path="/tmp/link-demo/START_HERE.md",
             serve_command="python3 link.py serve /tmp/link-demo",
             next_command="python3 link.py next /tmp/link-demo",
+            start_command="python3 link.py start /tmp/link-demo --task 'working on agent memory'",
             query_command="python3 link.py query 'why does Link help agents?' /tmp/link-demo --budget small",
             brief_command="python3 link.py brief 'working on agent memory' /tmp/link-demo",
             audit_command="python3 link.py memory-audit /tmp/link-demo",
@@ -80,6 +109,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Ask an agent what to try next:", text)
         self.assertIn("python3 link.py next /tmp/link-demo", text)
         self.assertIn("Try the value loop:", text)
+        self.assertIn("python3 link.py start /tmp/link-demo", text)
         self.assertIn("/tmp/link-demo/START_HERE.md", text)
         self.assertIn("http://127.0.0.1:3000/onboard", text)
         self.assertIn("http://127.0.0.1:3000/graph", text)

@@ -40,6 +40,12 @@ start with Link before we continue
 query Link for what you know about this project
 ```
 
+CLI-first agents and Link skills can run the same startup loop directly:
+
+```bash
+lnk start ~/link --task "working on Link release"
+```
+
 ## MCP-Only Install
 
 Use this when you already have a Link wiki and only need the MCP package.

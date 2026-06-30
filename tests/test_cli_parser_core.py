@@ -90,6 +90,28 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.target, "/tmp/link")
         self.assertTrue(args.json)
 
+    def test_start_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "start",
+            "/tmp/link",
+            "--task",
+            "release work",
+            "--limit",
+            "4",
+            "--project",
+            "link",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "start")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.task, "release work")
+        self.assertEqual(args.limit, 4)
+        self.assertEqual(args.project, "link")
+        self.assertTrue(args.json)
+
     def test_connect_command_options(self):
         parser = build_cli_parser()
 
@@ -350,6 +372,34 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][1], "agent memory")
         self.assertEqual(calls[0][2]["budget"], "small")
         self.assertTrue(calls[0][2]["json_output"])
+
+    def test_dispatch_routes_start_to_start_handler(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "start",
+            "/tmp/link",
+            "--task",
+            "release work",
+            "--limit",
+            "4",
+            "--project",
+            "link",
+            "--json",
+        ])
+        calls = []
+
+        def start_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 8
+
+        code = dispatch_cli_command(args, {"start": start_handler})
+
+        self.assertEqual(code, 8)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1]["task"], "release work")
+        self.assertEqual(calls[0][1]["limit"], 4)
+        self.assertEqual(calls[0][1]["project"], "link")
+        self.assertTrue(calls[0][1]["json_output"])
 
     def test_dispatch_routes_try_arguments(self):
         parser = build_cli_parser()

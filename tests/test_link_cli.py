@@ -1282,6 +1282,39 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(payload["relevant_memories"][0]["name"], "prefer-local-personal-memory")
         self.assertNotIn("body", payload["relevant_memories"][0])
 
+    def test_start_combines_readiness_and_brief(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="local personal memory")
+
+        self.assertEqual(code, 0)
+        self.assertIn("Link start:", out.getvalue())
+        self.assertIn("Ready: yes", out.getvalue())
+        self.assertIn("Link memory brief: local personal memory", out.getvalue())
+        self.assertIn("Prefer local personal memory", out.getvalue())
+        self.assertIn("Need more context:", out.getvalue())
+
+    def test_start_json(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="local personal memory", json_output=True)
+
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertEqual(payload["task"], "local personal memory")
+        self.assertEqual(payload["brief"]["relevant_memories"][0]["name"], "prefer-local-personal-memory")
+        self.assertIn("query", payload["commands"])
+        self.assertIn("agent_loop", payload)
+
     def test_query_builds_context_packet(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-query-test-"))
         target = tmp / "demo"

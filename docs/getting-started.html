@@ -86,7 +86,8 @@ py link.py serve link-demo</code></pre>
         </div>
         <p>The demo includes one pending memory intentionally, so the review inbox and explain-memory workflow are visible. Run <code>lnk review-memory prefer-local-personal-memory link-demo</code> if you want memory audit to be fully clear.</p>
         <p>Open <code>http://127.0.0.1:3000</code>, then inspect <code>/onboard</code>, <code>/brief</code>, <code>/memory</code>, <code>/ingest</code>, <code>/graph</code>, and <code>/health</code>. Open <strong>more</strong> for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts <code>localhost</code> too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups.</p>
-        <pre><code>lnk query "why does Link help agents?" link-demo --budget small
+        <pre><code>lnk start link-demo --task "working on agent memory"
+lnk query "why does Link help agents?" link-demo --budget small
 lnk brief "working on agent memory" link-demo
 lnk benchmark "agent memory" link-demo
 lnk health link-demo</code></pre>
@@ -149,6 +150,8 @@ EOF</code></pre>
         <pre><code>remember that I am testing Link as local personal memory for agents
 start with Link before we continue
 what does Link remember about local personal memory?</code></pre>
+        <p>CLI-first agents or Link skills can run the same startup loop directly:</p>
+        <pre><code>lnk start ~/link --task "working on Link release"</code></pre>
         <p>Or use the CLI:</p>
         <pre><code>lnk remember "I am testing Link as local personal memory for agents." --type preference --scope user --tags onboarding
 lnk brief "local personal memory"

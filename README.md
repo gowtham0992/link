@@ -150,6 +150,7 @@ For the shortest guided proof path, run `lnk welcome link-demo`.
 Try the value loop:
 
 ```bash
+lnk start link-demo --task "working on agent memory"
 lnk query "why does Link help agents?" link-demo --budget small
 lnk brief "working on agent memory" link-demo
 lnk benchmark "agent memory" link-demo
@@ -277,6 +278,12 @@ ingest raw/notes.md into Link
 remember that I prefer short release notes
 query Link for the release process
 what does Link remember about local personal memory?
+```
+
+For CLI-first agents or Link skills, use the same startup loop directly:
+
+```bash
+lnk start ~/link --task "working on Link release"
 ```
 
 If you want one guided setup for a real workspace and an agent, use

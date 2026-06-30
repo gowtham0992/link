@@ -60,7 +60,7 @@
           <img src="assets/link-cli.png" alt="Link CLI — status and query packet output">
           <figcaption>Status, query, brief, and benchmark are the core terminal loop.</figcaption>
         </figure>
-        <p>The CLI is independent of the web viewer. Use <code>lnk query</code>, <code>lnk brief</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
+        <p>The CLI is independent of the web viewer. Use <code>lnk start</code>, <code>lnk query</code>, <code>lnk brief</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
         <p>Use <code>lnk try</code> when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command.</p>
         <p>Use <code>lnk onboard</code> when you want to set up a real <code>~/link</code> workspace: safe repair, health check, optional first memory, first prompts, and optional agent MCP wiring in one guided command. If the local viewer is running, <code>/onboard</code> mirrors that flow with copy buttons.</p>
 
@@ -69,6 +69,7 @@
 lnk onboard
 lnk welcome
 lnk next
+lnk start ~/link --task "working on Link release"
 lnk health
 lnk ingest-status
 lnk remember "User prefers feature branches for Link work." --type preference --scope project --project link --visibility project --review-after 2026-08-01
@@ -153,6 +154,7 @@ lnk delete-capture &lt;capture&gt; --confirm
 lnk query "task" [--budget micro|small|medium|large] [--project slug]
 lnk graph-summary ["topic"] [--limit 40] [--depth 1]
 lnk benchmark ["query"] [--budget micro|small|medium|large] [--project slug]
+lnk start [dir] [--task "task"] [--project slug]
 lnk brief "task" [--project slug]
 lnk memory-audit [--project slug]
 lnk recall "query" [--project slug]

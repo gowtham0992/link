@@ -43,6 +43,60 @@ def render_starter_prompts_text(payload: Mapping[str, object]) -> tuple[int, str
     return 0, "\n".join(lines)
 
 
+def render_start_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render the compact session-start packet for CLI and skill users."""
+    status = payload.get("status")
+    if not isinstance(status, Mapping):
+        raise ValueError("Invalid Link start payload")
+    target = payload.get("target")
+    task = str(payload.get("task") or "").strip()
+    validation = status.get("validation") if isinstance(status.get("validation"), Mapping) else {}
+    validation_text = "not checked"
+    if isinstance(validation, Mapping) and validation.get("checked"):
+        validation_text = "passed" if validation.get("passed") else (
+            f"failed ({validation.get('error_count', 0)} errors, {validation.get('warning_count', 0)} warnings)"
+        )
+    lines = [
+        f"Link start: {target}",
+        "",
+        f"Ready: {'yes' if status.get('ready') else 'no'} · validation {validation_text}",
+        (
+            f"Pages: {status.get('content_page_count', status.get('page_count', 0))} content · "
+            f"Memories: {status.get('active_memory_count', 0)} active · "
+            f"Review: {status.get('needs_review_count', 0)}"
+        ),
+        f"Search backend: {status.get('search_backend', 'unknown')}",
+    ]
+    if task:
+        lines.append(f"Task: {task}")
+
+    brief_text = str(payload.get("brief_text") or "").strip()
+    if brief_text:
+        lines.extend(["", brief_text])
+
+    commands = payload.get("commands") if isinstance(payload.get("commands"), Mapping) else {}
+    if not status.get("ready"):
+        lines.extend(["", "Needs attention"])
+        next_actions = status.get("next_actions")
+        if isinstance(next_actions, Sequence) and not isinstance(next_actions, (str, bytes)):
+            for item in next_actions[:3]:
+                if isinstance(item, Mapping):
+                    lines.append(f"- {item.get('label', item.get('tool', 'inspect Link'))}")
+        if isinstance(commands, Mapping) and commands.get("health"):
+            lines.append(f"- {commands['health']}")
+    else:
+        lines.extend([
+            "",
+            "Next",
+        ])
+        if isinstance(commands, Mapping) and commands.get("query"):
+            lines.append(f"- Need more context: {commands['query']}")
+        if isinstance(commands, Mapping) and commands.get("review"):
+            lines.append(f"- Review pending memory: {commands['review']}")
+        lines.append("- Save memory only after explicit user approval.")
+    return 0 if status.get("ready") else 1, "\n".join(lines)
+
+
 def render_welcome_text(payload: Mapping[str, object]) -> tuple[int, str]:
     """Render a short first-use guide for humans trying Link with an agent."""
     lines = [f"Link welcome: {payload['target']}"]
@@ -73,6 +127,7 @@ def render_demo_text(
     guide_path: object,
     serve_command: str,
     next_command: str,
+    start_command: str,
     query_command: str,
     brief_command: str,
     audit_command: str,
@@ -87,6 +142,7 @@ def render_demo_text(
         f"  {next_command}",
         "",
         "Try the value loop:",
+        f"  {start_command}",
         f"  {query_command}",
         f"  {brief_command}",
         f"  {audit_command}",

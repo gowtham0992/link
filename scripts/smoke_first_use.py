@@ -92,6 +92,7 @@ def run_smoke(work_dir: Path, python: str = sys.executable) -> None:
 
     demo_result = run_link("demo", str(demo_target), "--force", python=python)
     require("Try the value loop:" in demo_result.stdout, "demo output did not show the value loop")
+    require(" start " in demo_result.stdout, "demo output did not show the start proof command")
     require(
         "query 'why does Link help agents?'" in demo_result.stdout
         or 'query "why does Link help agents?"' in demo_result.stdout,

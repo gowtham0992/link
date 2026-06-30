@@ -90,7 +90,7 @@ remember that I prefer short release notes</code></pre>
         <h2 id="rules">Rules For Agents</h2>
         <ul>
           <li>Prefer <code>lnk health</code> when readiness is unclear.</li>
-          <li>Prefer <code>lnk query</code>, <code>lnk brief</code>, and <code>lnk graph-summary</code> over reading the whole wiki.</li>
+          <li>Start with <code>lnk start</code> for readiness plus memory context, then prefer <code>lnk query</code>, <code>lnk brief</code>, and <code>lnk graph-summary</code> over reading the whole wiki.</li>
           <li>Use <code>lnk ingest-status</code> before touching raw sources.</li>
           <li>Do not silently create durable memory; use <code>lnk remember</code> only when the user asks or approves a proposal.</li>
           <li>Run <code>lnk validate</code> and <code>lnk health</code> after ingest or broad wiki edits.</li>
