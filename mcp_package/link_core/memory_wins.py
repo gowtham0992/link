@@ -82,7 +82,7 @@ def memory_wins_payload(
             "Reusable local context",
             len(active_records),
             "Active memories can appear in briefs, recall, and query packets without scanning the whole wiki.",
-            "brief me from Link before we continue",
+            "start with Link before we continue",
         ),
         _win(
             "reviewed_memory",
@@ -143,7 +143,7 @@ def memory_wins_payload(
         "wins": wins,
         "recent_memories": recent,
         "prompts": [
-            "brief me from Link before we continue",
+            "start with Link before we continue",
             "what does Link remember about me?",
             "what changed in Link memory recently?",
             "review Link memory inbox",

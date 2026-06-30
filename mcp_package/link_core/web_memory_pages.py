@@ -99,7 +99,7 @@ def _brief_prompt(query: str, project: str = "") -> str:
         return f"brief me from Link about {task}"
     if project_name:
         return f"brief me from Link for project {project_name}"
-    return "brief me from Link before we continue"
+    return "start with Link before we continue"
 
 
 def _copy_actions(actions: list[tuple[str, str]]) -> str:

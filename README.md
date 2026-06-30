@@ -272,7 +272,7 @@ Then ask your agent:
 
 ```text
 is Link ready?
-brief me from Link before we continue
+start with Link before we continue
 ingest raw/notes.md into Link
 remember that I prefer short release notes
 query Link for the release process

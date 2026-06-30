@@ -208,7 +208,7 @@ class IngestCoreTests(unittest.TestCase):
         self.assertEqual(payload["completion"]["items"][0]["raw"], "raw/source.md")
         self.assertEqual(payload["completion"]["items"][0]["source_pages"][0]["path"], "wiki/sources/source.md")
         self.assertEqual(payload["completion"]["items"][0]["memory_prompt"], "propose memories from raw/source.md")
-        self.assertEqual(payload["completion"]["next_prompt"], "brief me from Link before we continue")
+        self.assertEqual(payload["completion"]["next_prompt"], "start with Link before we continue")
 
     def test_collect_ingest_status_reports_stale_represented_raw(self):
         root = Path(tempfile.mkdtemp(prefix="link-ingest-core-"))

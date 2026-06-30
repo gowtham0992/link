@@ -287,7 +287,7 @@ def _make_mcp_tour() -> None:
         ),
         _mcp_chat_frame(
             "2 / brief",
-            "brief me from Link before we continue",
+            "start with Link before we continue",
             "memory_brief",
             '{"query": "current task", "project": "link"}',
             "2 memories · 4 pages · 1 review warning",

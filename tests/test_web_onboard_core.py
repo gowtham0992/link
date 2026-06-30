@@ -27,7 +27,7 @@ def test_render_onboard_page_shows_first_run_loop(tmp_path):
         {
             "prompts": [
                 {"label": "Check readiness", "prompt": "is Link ready?", "when": "before work"},
-                {"label": "Prime memory", "prompt": "brief me from Link before we continue", "when": "session start"},
+                {"label": "Start with Link", "prompt": "start with Link before we continue", "when": "session start"},
             ]
         },
         target=str(tmp_path),
@@ -49,7 +49,7 @@ def test_render_onboard_page_shows_first_run_loop(tmp_path):
     assert "--agent cursor" in html
     assert "--write" in html
     assert "is Link ready?" in html
-    assert "brief me from Link before we continue" in html
+    assert "start with Link before we continue" in html
 
 
 def test_render_onboard_page_escapes_prompt_text(tmp_path):

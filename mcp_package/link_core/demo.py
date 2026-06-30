@@ -119,7 +119,7 @@ agent memory, backlinks, graph context, and a compact query packet.
 ```text
 is Link ready?
 query Link for why Link helps agents
-brief me from Link before we continue
+start with Link before we continue
 what does Link remember about local personal memory?
 explain why Link remembers local personal memory
 ```

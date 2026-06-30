@@ -97,9 +97,9 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Link starter prompts:", out.getvalue())
         self.assertIn("is Link ready?", out.getvalue())
-        self.assertIn("brief me from Link before we continue", out.getvalue())
+        self.assertIn("start with Link before we continue", out.getvalue())
         self.assertIn("remember that I prefer local-first agent memory", out.getvalue())
-        self.assertIn("query Link for what you know about me", out.getvalue())
+        self.assertIn("what does Link know about me?", out.getvalue())
         self.assertIn("propose memories from raw/<file>", out.getvalue())
         self.assertIn("lnk health", out.getvalue())
 
@@ -115,7 +115,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["project"], "client-launch")
         self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
-        self.assertIn("what this project remembers", payload["prompts"][3]["prompt"])
+        self.assertEqual(payload["prompts"][3]["prompt"], "what does Link remember about this project?")
 
     def test_onboard_json_seeds_memory_and_personalizes_prompt(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
@@ -419,7 +419,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("raw/agent-memory-session.md -> wiki/sources/agent-memory-session.md", text)
         self.assertIn("Memory review: propose memories from raw/agent-memory-session.md", text)
         self.assertIn("Retrieval check: query Link for agent memory session", text)
-        self.assertIn("Next check: brief me from Link before we continue", text)
+        self.assertIn("Next check: start with Link before we continue", text)
 
     def test_ingest_status_reports_stale_represented_raw_file(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-ingest-test-"))

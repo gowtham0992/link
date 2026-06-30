@@ -36,7 +36,7 @@ After install, ask your agent:
 
 ```text
 is Link ready?
-brief me from Link before we continue
+start with Link before we continue
 query Link for what you know about this project
 ```
 

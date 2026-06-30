@@ -133,7 +133,7 @@ def test_render_profile_page_lists_memory_sections_and_explain_links():
 
     assert "Memory Profile" in html
     assert 'data-copy-text="what does Link remember about me?"' in html
-    assert 'data-copy-text="brief me from Link before we continue"' in html
+    assert 'data-copy-text="start with Link before we continue"' in html
     assert "/page/prefer-short-notes" in html
     assert "/explain-memory?memory=prefer-short-notes" in html
     assert "Keep release notes short." in html
@@ -311,7 +311,7 @@ def test_render_memory_wins_page_shows_local_proof_signals():
                 "label": "Reusable <context>",
                 "count": 2,
                 "description": "Active memories can appear in briefs.",
-                "prompt": "brief me from Link before we continue",
+                "prompt": "start with Link before we continue",
             }
         ],
         "recent_memories": [

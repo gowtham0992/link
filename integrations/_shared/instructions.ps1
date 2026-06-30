@@ -141,9 +141,9 @@ function Link-PrintNextSteps {
         Write-Host "  Print starter prompts: py link.py next"
         Write-Host "  Try in your agent:"
         Write-Host "    is Link ready?"
-        Write-Host "    brief me from Link before we continue"
+        Write-Host "    start with Link before we continue"
         Write-Host "    remember that this project uses Link for local agent memory"
-        Write-Host "    query Link for what this project remembers"
+        Write-Host "    what does Link remember about this project?"
         Write-Host "    ingest raw/<file> into Link"
     } else {
         Write-Host "  Drop sources into ~/link/raw/."
@@ -151,9 +151,9 @@ function Link-PrintNextSteps {
         Write-Host "  Print starter prompts: lnk next"
         Write-Host "  Try in your agent:"
         Write-Host "    is Link ready?"
-        Write-Host "    brief me from Link before we continue"
+        Write-Host "    start with Link before we continue"
         Write-Host "    remember that I prefer local-first agent memory"
-        Write-Host "    query Link for what you know about me"
+        Write-Host "    what does Link know about me?"
         Write-Host "    ingest raw/<file> into Link"
     }
 }

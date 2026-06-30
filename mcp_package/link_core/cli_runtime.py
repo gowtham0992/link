@@ -133,7 +133,7 @@ def render_try_text(
         "",
         "Ask an agent:",
         "  is Link ready?",
-        "  brief me from Link before we continue",
+        "  start with Link before we continue",
         "  what does Link remember about local personal memory?",
         "",
         "Run the value loop:",

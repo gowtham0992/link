@@ -136,7 +136,7 @@ class CliRuntimeCoreTests(unittest.TestCase):
             }],
             "prompts": [
                 {"prompt": "is Link ready?"},
-                {"prompt": "brief me from Link before we continue"},
+                {"prompt": "start with Link before we continue"},
             ],
             "commands": {
                 "health": "lnk health /tmp/link",

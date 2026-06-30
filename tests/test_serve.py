@@ -541,9 +541,9 @@ class ServeTests(unittest.TestCase):
         self.assertIn('<a href="/prompts">prompts</a>', html)
         self.assertIn("Try These Prompts", html)
         self.assertIn("is Link ready?", html)
-        self.assertIn("brief me from Link before we continue", html)
+        self.assertIn("start with Link before we continue", html)
         self.assertIn("ingest raw/&lt;file&gt; into Link", html)
-        self.assertIn("query Link for what you know about me", html)
+        self.assertIn("what does Link know about me?", html)
         self.assertIn("propose memories from raw/&lt;file&gt;", html)
         self.assertIn("Open starter prompts", html)
 
@@ -2004,7 +2004,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn('/propose?source=raw/represented-source.md', html)
         self.assertIn('data-copy-text="propose memories from raw/represented-source.md"', html)
         self.assertIn('data-copy-text="query Link for represented source"', html)
-        self.assertIn("brief me from Link before we continue", html)
+        self.assertIn("start with Link before we continue", html)
 
     def test_ingest_page_marks_stale_represented_raw(self):
         wiki = self.make_wiki()

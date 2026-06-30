@@ -24,9 +24,9 @@ def starter_prompt_payload(target: Path, project: str | None = None) -> dict[str
         else "remember that I prefer local-first agent memory"
     )
     query_prompt = (
-        "query Link for what this project remembers"
+        "what does Link remember about this project?"
         if project_name
-        else "query Link for what you know about me"
+        else "what does Link know about me?"
     )
     prompts = [
         {
@@ -35,8 +35,8 @@ def starter_prompt_payload(target: Path, project: str | None = None) -> dict[str
             "when": "right after install or before troubleshooting",
         },
         {
-            "label": "Prime memory",
-            "prompt": "brief me from Link before we continue",
+            "label": "Start with Link",
+            "prompt": "start with Link before we continue",
             "when": "at the start of a session or task",
         },
         {
