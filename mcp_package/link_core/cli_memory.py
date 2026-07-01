@@ -228,11 +228,23 @@ def render_recall_text(
         lines.append(f"- {record['title']} ({record['memory_type']} · {record['scope']})")
         lines.append(f"  {record['path']}")
         recall = record.get("recall") if isinstance(record.get("recall"), Mapping) else {}
+        confidence = str(record.get("confidence") or "")
         if recall.get("state"):
-            lines.append(f"  Recall: {recall['state']}")
+            state_line = f"  Recall: {recall['state']}"
+            if confidence:
+                state_line += f" · match: {confidence}"
+            lines.append(state_line)
+        elif confidence:
+            lines.append(f"  Match: {confidence}")
         summary = record.get("tldr") or record.get("snippet")
         if summary:
             lines.append(f"  {summary}")
+    if results and all(str(record.get("confidence") or "") == "weak" for record in results):
+        lines.extend([
+            "",
+            "All matches are weak (shared words only). Verify with the user "
+            "before relying on them.",
+        ])
     return 0, "\n".join(lines)
 
 

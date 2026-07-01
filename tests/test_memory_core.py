@@ -167,6 +167,86 @@ class MemoryCoreTests(unittest.TestCase):
 
         self.assertEqual(recall_memories(records, "auth setup"), [])
 
+    def test_recall_labels_incidental_word_matches_as_weak(self):
+        # A single shared word ("format" in "storage format") must not read
+        # like a known preference about response formatting.
+        records = [{
+            "name": "prefer-local-personal-memory",
+            "path": "wiki/memories/prefer-local-personal-memory.md",
+            "title": "Prefer local personal memory",
+            "memory_type": "preference",
+            "scope": "user",
+            "status": "active",
+            "date_captured": "2026-05-05T00:00:00Z",
+            "review_status": "pending",
+            "tags": ["memory"],
+            "tldr": "The user wants the wiki as the inspectable storage format.",
+            "body": "The user wants the wiki as the inspectable storage format.",
+        }]
+
+        recalled = recall_memories(records, "how should I format my responses")
+
+        self.assertTrue(all(item["confidence"] == "weak" for item in recalled))
+
+    def test_recall_confidence_strong_for_head_coverage(self):
+        records = [{
+            "name": "staging-db-port",
+            "path": "wiki/memories/staging-db-port.md",
+            "title": "The staging database lives on port 5433",
+            "memory_type": "fact",
+            "scope": "project",
+            "status": "active",
+            "date_captured": "2026-05-05T00:00:00Z",
+            "review_status": "reviewed",
+            "tags": ["database"],
+            "tldr": "The staging database lives on port 5433, not the default.",
+            "body": "The staging database lives on port 5433, not the default.",
+        }]
+
+        recalled = recall_memories(records, "staging database port")
+
+        self.assertEqual(recalled[0]["confidence"], "strong")
+
+    def test_recall_confidence_moderate_for_title_token_match(self):
+        records = [{
+            "name": "run-checks-before-committing",
+            "path": "wiki/memories/run-checks-before-committing.md",
+            "title": "Always run ruff and pytest before committing",
+            "memory_type": "preference",
+            "scope": "project",
+            "status": "active",
+            "date_captured": "2026-05-05T00:00:00Z",
+            "review_status": "reviewed",
+            "tags": ["workflow"],
+            "tldr": "Always run ruff and pytest before committing python changes.",
+            "body": "Always run ruff and pytest before committing python changes.",
+        }]
+
+        recalled = recall_memories(records, "checks before committing code")
+
+        self.assertEqual(recalled[0]["confidence"], "moderate")
+
+    def test_recall_stemming_matches_close_paraphrases(self):
+        # "commits" should still find a memory phrased with "committing".
+        records = [{
+            "name": "run-checks-before-committing",
+            "path": "wiki/memories/run-checks-before-committing.md",
+            "title": "Always run ruff and pytest before committing",
+            "memory_type": "preference",
+            "scope": "project",
+            "status": "active",
+            "date_captured": "2026-05-05T00:00:00Z",
+            "review_status": "reviewed",
+            "tags": ["workflow"],
+            "tldr": "Always run ruff and pytest before committing python changes.",
+            "body": "Always run ruff and pytest before committing python changes.",
+        }]
+
+        recalled = recall_memories(records, "rules for commits")
+
+        self.assertEqual(len(recalled), 1)
+        self.assertEqual(recalled[0]["name"], "run-checks-before-committing")
+
     def test_review_after_marks_memory_due(self):
         record = {
             "name": "review-me",

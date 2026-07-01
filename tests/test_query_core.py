@@ -117,6 +117,47 @@ class QueryCoreTests(unittest.TestCase):
         self.assertEqual(payload["follow_up"][0]["tool"], "admin")
         self.assertEqual(payload["follow_up"][0]["arguments"], {"action": "context", "topic": "agent-memory"})
 
+    def test_query_link_flags_weak_only_memory_matches(self):
+        root = Path(tempfile.mkdtemp(prefix="link-query-weak-"))
+        wiki = root / "wiki"
+        wiki.mkdir()
+        write_page(wiki, "index.md", "# Index\n")
+        write_page(wiki, "log.md", "# Log\n")
+        write_page(
+            wiki,
+            "memories/prefer-local-memory.md",
+            "---\n"
+            "type: memory\n"
+            "title: Prefer local memory\n"
+            "memory_type: preference\n"
+            "scope: user\n"
+            "status: active\n"
+            "date_captured: \"2026-05-05T00:00:00Z\"\n"
+            "source: unit-test\n"
+            "review_status: reviewed\n"
+            "tags: [memory]\n"
+            "---\n\n"
+            "# Prefer local memory\n\n"
+            "> **TLDR:** The wiki is the inspectable storage format.\n\n"
+            "## Memory\n\nThe wiki is the inspectable storage format.\n",
+        )
+        (wiki / "_backlinks.json").write_text(json.dumps(build_backlinks(wiki)), encoding="utf-8")
+
+        payload = query_link(
+            wiki,
+            "how should I format my responses",
+            build_wiki_cache(wiki),
+            memory_records(wiki),
+            budget="small",
+        )
+
+        memories = payload["memory"]["items"]
+        self.assertTrue(memories)
+        self.assertTrue(all(item["confidence"] == "weak" for item in memories))
+        self.assertTrue(
+            any("Memory matches are weak" in line for line in payload["agent_guidance"])
+        )
+
     def test_micro_budget_returns_tiny_recall_capsule(self):
         root = Path(tempfile.mkdtemp(prefix="link-query-core-"))
         wiki = root / "wiki"
