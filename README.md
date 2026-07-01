@@ -75,33 +75,42 @@ compound over time.
 
 ## Quick Start
 
-Run the demo first. It creates a complete local wiki with raw sources, wiki
-pages, one starter memory, graph data, and query packets ready to inspect.
+Start with the memory proof. It creates a clean local workspace, writes one
+reviewed memory, and proves that the same memory can be recalled through CLI,
+official skills, and MCP. No web server is required for the proof.
 
 ```bash
 brew install gowtham0992/link/link
-lnk try
-lnk serve link-demo
+lnk proof
 ```
 
 The installed command is `lnk` because `link` is already a POSIX/macOS system
 utility. From a source checkout, use `python3 link.py ...` instead.
 
-Use `lnk try` for the shortest proof loop. It creates the demo, checks
-readiness, runs a compact query/brief proof, and prints the agent prompts and
-viewer command. Windows, source checkout, MCP-only, and skill-first setup live
-in the [First 10 Minutes guide](https://gowtham0992.github.io/link/getting-started.html).
+You should see:
 
-Want the cross-agent aha without a full demo wiki?
-
-```bash
-lnk proof
+```text
+Cross-agent memory continuity works
+Memory: created and reviewed: Cross-agent Link proof
+Recall: found through the same bounded recall path used by CLI, skills, and MCP.
+Result: proof passed
 ```
 
-`lnk proof` creates a clean local proof workspace, writes one reviewed memory,
-then recalls it through the same bounded path used by the CLI, official skills,
-and MCP. It is the fastest way to see that one local memory can be reused by
-multiple agents without the web viewer running.
+That is the core promise: one local memory, reusable by different agents,
+without a hidden cloud profile.
+
+Then run the richer demo when you want the UI, graph, source pages, and query
+packets:
+
+```bash
+lnk try
+lnk serve link-demo
+```
+
+`lnk try` creates the demo, checks readiness, runs compact query/brief examples,
+and prints the first agent prompts. Windows, source checkout, MCP-only, and
+skill-first setup live in the
+[First 10 Minutes guide](https://gowtham0992.github.io/link/getting-started.html).
 
 When you are ready to use Link for real memory, run one guided command:
 
@@ -157,6 +166,32 @@ The generated demo is the public proof wiki. The repo's root `wiki/` directory
 is only a scaffold for local development and personal testing. Generated content
 inside `wiki/`, `raw/`, and `link-demo/` is ignored by git so personal memory is
 not published by accident.
+
+## Killer Demo: One Memory, Two Agents
+
+This is the moment Link is built for:
+
+1. In one agent, say:
+
+   ```text
+   remember that I prefer local, source-backed memory for AI agents
+   ```
+
+2. In another agent connected to the same `~/link` workspace, say:
+
+   ```text
+   start with Link before we continue
+   what does Link remember about local agent memory?
+   ```
+
+3. The second agent should recall the reviewed memory from local Markdown
+   instead of asking you to repeat yourself.
+
+For a clean automated version of the same idea, run:
+
+```bash
+lnk proof
+```
 
 For local scale checks from a source checkout, run:
 

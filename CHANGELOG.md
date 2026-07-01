@@ -37,6 +37,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Redesigned the GitHub Pages landing page and refreshed the product brand, logo assets, README header links, and public docs styling around the newer product positioning.
 - Replaced older synthetic docs GIFs with real, on-brand product screenshots and figures for UI, CLI, MCP, health, home, and graph flows.
 - Reworked the README and docs landing page around one canonical proof path instead of multiple competing quick starts.
+- Tightened README and public docs onboarding around a proof-first flow: `lnk proof` for the core memory aha, `lnk try` for the richer demo, and `lnk onboard` for real setup.
 - Improved `lnk try` human-readable output so the first-run proof reads like a product moment instead of a debug checklist.
 - Updated doctor backlink and isolated-page checks to reuse cached page records instead of rereading the whole wiki independently during health checks.
 - Updated team-sync to keep `wiki/log.md` local so Git-based team sharing does not create false audit hash-chain tamper alarms.

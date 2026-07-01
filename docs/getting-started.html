@@ -38,8 +38,8 @@
   <header class="page-hero">
     <div class="hero-inner">
       <span class="eyebrow">First 10 minutes</span>
-      <h1>Turn one local note into agent memory.</h1>
-      <p>Start with the demo, onboard a real local workspace, add one source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.</p>
+      <h1>Prove that your agent can remember.</h1>
+      <p>Run the cross-agent proof, explore the demo, onboard a real local workspace, add one source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.</p>
     </div>
   </header>
 
@@ -47,7 +47,7 @@
     <div class="section-inner doc-grid">
       <aside class="toc">
         <strong>On this page</strong>
-        <a href="#demo">Run the demo</a>
+        <a href="#demo">Prove the loop</a>
         <a href="#onboard">Onboard a real workspace</a>
         <a href="#install">Install for an agent</a>
         <a href="#source">Add one source</a>
@@ -56,29 +56,31 @@
         <a href="#verify">Verify the loop</a>
       </aside>
       <article class="doc-content">
-        <h2 id="demo">1. Run The Demo</h2>
-        <p>The demo is the fastest proof of value. It already has raw sources, wiki pages, memories, backlinks, and graph data.</p>
+        <h2 id="demo">1. Prove The Memory Loop</h2>
+        <p>Start with <code>lnk proof</code>. It creates a clean local workspace, writes one reviewed memory, then recalls it through the same bounded path used by CLI, skills, and MCP. This proves the core product before you configure an agent or open the web viewer.</p>
         <p>macOS with Homebrew:</p>
 <pre><code>brew install gowtham0992/link/link
-lnk try
+lnk proof</code></pre>
+        <p>You should see <code>Cross-agent memory continuity works</code> and <code>Result: proof passed</code>.</p>
+        <p>The richer demo is next. It already has raw sources, wiki pages, memories, backlinks, graph data, and a local viewer to inspect:</p>
+<pre><code>lnk try
 lnk serve link-demo</code></pre>
         <p>The Homebrew formula is maintained in the public <a href="https://github.com/gowtham0992/homebrew-link">gowtham0992/homebrew-link</a> tap.</p>
         <p>Or from source:</p>
         <pre><code>git clone https://github.com/gowtham0992/link.git
 cd link
+python3 link.py proof
 python3 link.py demo
 python3 link.py next link-demo
 python3 link.py serve link-demo</code></pre>
         <p>On Windows from source, use the Python launcher:</p>
         <pre><code>git clone https://github.com/gowtham0992/link.git
 cd link
+py link.py proof
 py link.py demo
 py link.py next link-demo
 py link.py serve link-demo</code></pre>
-        <p>Use <code>lnk try</code> for the shortest Homebrew proof loop. It creates the demo, checks readiness, runs a compact query and brief, and prints the viewer command plus the first agent prompts. From source, use <code>python3 link.py try</code> or <code>py link.py try</code>.</p>
-        <p>Use <code>lnk proof</code> when you want the focused cross-agent continuity check instead of a full demo wiki. It creates a clean local proof workspace, writes one reviewed memory, then recalls it through the same bounded path used by CLI, skills, and MCP.</p>
-        <pre><code>lnk proof
-lnk proof --serve</code></pre>
+        <p><code>lnk try</code> creates the demo, checks readiness, runs a compact query and brief, and prints the viewer command plus the first agent prompts. From source, use <code>python3 link.py try</code> or <code>py link.py try</code>.</p>
         <div class="callout">
           <strong>Judge the generated demo</strong>
           The repo's root <code>wiki/</code> is only a scaffold for local development and personal testing. Generated content in <code>wiki/</code>, <code>raw/</code>, and <code>link-demo/</code> is ignored by git so private memory is not published by accident.
