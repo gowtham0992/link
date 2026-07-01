@@ -178,7 +178,11 @@ def render_try_text(
     return 0 if ready else 1, "\n".join([
         f"Link try: {target}",
         "",
-        f"Demo: {status_text} · {page_count} pages · {memory_count} memories · {search_backend}",
+        "60-second proof",
+        f"- Demo: {status_text} · {page_count} pages · {memory_count} memories · {search_backend}",
+        "- Storage: local Markdown wiki + reviewed memory pages",
+        "- Agent path: CLI now, MCP or skills when you connect an agent",
+        "",
         f"Query proof: {query_summary}",
         f"Brief proof: {brief_summary}",
         "",
