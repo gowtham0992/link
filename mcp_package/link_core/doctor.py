@@ -10,7 +10,7 @@ from .capture import capture_records
 from .files import atomic_write_json, atomic_write_text
 from .frontmatter import parse_frontmatter
 from .ingest import collect_ingest_status, raw_ingest_findings
-from .log import write_default_log
+from .log import verify_log_integrity, write_default_log
 from .memory import memory_inbox, memory_records
 from .operations import pending_operations
 from .schema import migrate_wiki
@@ -457,6 +457,21 @@ def build_doctor_report(
             report.add_warning("Link operation in progress: " + ", ".join(details))
         else:
             report.add_ok("OK no interrupted Link operations")
+
+        log_integrity = verify_log_integrity(wiki_dir)
+        if log_integrity.get("passed"):
+            hashed_count = int(log_integrity.get("hashed_entries") or 0)
+            if hashed_count:
+                report.add_ok(f"OK audit log hash chain ({hashed_count} entries)")
+            else:
+                report.add_ok("OK audit log readable")
+        else:
+            findings = [
+                str(item)
+                for item in log_integrity.get("findings", [])
+                if item
+            ]
+            report.add_error(join_limited("audit log hash chain broken: ", findings))
 
         missing_summaries = find_pages_missing_summaries(wiki_dir)
         if missing_summaries:
