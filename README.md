@@ -155,17 +155,13 @@ lnk health link-demo
 ```
 
 The `/health` page mirrors the readiness loop in the browser: validation state,
-interrupted writes, memory review status, and copyable repair commands.
-The viewer itself stays document-first: common paths are in the top nav, deeper
-tools live under `more`, and structured wiki pages get a local contents outline
-plus related-page links from the graph.
-Home shows recently updated pages, while `/all` and search group results by page
-type with chips for narrowing larger wikis.
+interrupted writes, memory review status, and copyable repair commands. The
+viewer stays document-first — common paths in the top nav, deeper tools under
+`more`, and a contents outline plus graph-related links on structured pages.
 
-The generated demo is the public proof wiki. The repo's root `wiki/` directory
-is only a scaffold for local development and personal testing. Generated content
-inside `wiki/`, `raw/`, and `link-demo/` is ignored by git so personal memory is
-not published by accident.
+The generated demo is the public proof wiki. Generated content inside `wiki/`,
+`raw/`, and `link-demo/` is ignored by git so personal memory is not published
+by accident.
 
 ## Killer Demo: One Memory, Two Agents
 
@@ -192,20 +188,6 @@ For a clean automated version of the same idea, run:
 ```bash
 lnk proof
 ```
-
-For local scale checks from a source checkout, run:
-
-```bash
-python3 scripts/smoke_large_wiki.py --pages 10000
-```
-
-This generates a temporary synthetic wiki, verifies bounded graph/query payloads,
-and reports cache timing, persistent-cache reuse, search, query, graph, and
-health signals without touching your real Link wiki.
-The public scale model is documented at
-[Link Scale](https://gowtham0992.github.io/link/scale.html): what stays
-bounded by default, how to measure your own wiki, and where the current local
-limits are.
 
 ## Ways To Use Link
 
@@ -393,7 +375,9 @@ model-facing tools. CLI and skill workflows call the same core behavior through
 - `status`: readiness, schema state, validation, interrupted writes, and safe
   next actions.
 - `recall`: the one read path for startup briefs, answer-ready query packets,
-  wiki search, graph context, token budgets, and follow-up actions.
+  wiki search, graph context, token budgets, and follow-up actions. Every
+  recalled memory carries a `confidence` label (`strong`, `moderate`, `weak`),
+  so agents verify weak lexical matches with the user instead of trusting them.
 - `remember`: durable local memory only after explicit user approval, with
   duplicate/conflict checks, provenance, review state, visibility, optional
   `review_after`, and optional `expires_at`.
@@ -526,6 +510,7 @@ More detail: [Security guide](https://gowtham0992.github.io/link/security.html).
 | Use Link without MCP setup | [Official skills](https://gowtham0992.github.io/link/skills.html) |
 | Use local HTTP endpoints | [HTTP API](https://gowtham0992.github.io/link/api.html) |
 | Review security boundaries | [Security model](https://gowtham0992.github.io/link/security.html) |
+| Check scale limits and measure your wiki | [Link Scale](https://gowtham0992.github.io/link/scale.html) — or run `python3 scripts/smoke_large_wiki.py --pages 10000` from a source checkout |
 | Evaluate Link for a small team | [Team security review](https://gowtham0992.github.io/link/team-security.html) |
 | Fix setup issues | [Troubleshooting](https://gowtham0992.github.io/link/troubleshooting.html) |
 

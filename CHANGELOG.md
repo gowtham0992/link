@@ -30,6 +30,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Changed
 
+- Restored the designed animated landing page on GitHub Pages (live memory-graph hero) and refreshed its content for the slim MCP surface: canonical six tools, `lnk proof`/`lnk try`/`lnk start`/`lnk onboard` commands, and recall confidence labels.
+- Tightened the README quick start and moved scale checks into the documentation table; documented recall confidence labels in the agent-facing tool list.
+
 - Seeded the generated demo with four realistic memories (three reviewed, one pending) so the first recall, brief, and viewer walkthrough show a believable memory system and the review loop at the same time.
 
 - Added `lnk start`, a CLI startup loop that combines readiness, validation state, and a local memory brief for agents using skills or shell instead of MCP.

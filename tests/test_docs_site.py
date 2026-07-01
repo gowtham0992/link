@@ -53,12 +53,10 @@ class DocsSiteTests(unittest.TestCase):
         self.assertIn("assets/link-mcp-agent-chat.gif", mcp_html)
 
     def test_github_pages_site_has_no_external_runtime_dependencies(self):
+        index = ROOT / "docs/index.html"
         for page in self.docs_pages():
             html = page.read_text(encoding="utf-8")
             lower = html.lower()
-
-            self.assertIn('<script src="assets/site.js" defer></script>', html)
-            self.assertNotIn("<script>", lower)
 
             # The local-first / no-external-call guarantee holds for every page,
             # including the landing page.
@@ -67,6 +65,15 @@ class DocsSiteTests(unittest.TestCase):
             self.assertNotIn("../logo.svg", html)
             self.assertNotIn('<script src="http', lower)
             self.assertNotIn('<link rel="stylesheet" href="http', lower)
+
+            # The landing page is a self-contained pre-rendered bundle with its
+            # own inline runtime; the template-uniformity checks below apply to
+            # the other pages.
+            if page == index:
+                continue
+
+            self.assertIn('<script src="assets/site.js" defer></script>', html)
+            self.assertNotIn("<script>", lower)
 
     def test_github_pages_analytics_is_docs_only_and_manual(self):
         site_js = (ROOT / "docs/assets/site.js").read_text(encoding="utf-8")
