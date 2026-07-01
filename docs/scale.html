@@ -71,7 +71,7 @@
           <div><span><code>admin(action="graph_summary")</code></span><span>Returns a bounded topic or high-degree graph neighborhood.</span><span>Increase limit/depth or request the full graph only when needed.</span></div>
           <div><span>Local graph UI</span><span>Starts capped with sparse labels and motion limits for large wikis.</span><span>Use type filters, node search, focused neighborhoods, fullscreen, and explicit all-data loading.</span></div>
           <div><span>All pages</span><span>Lists a bounded window grouped by page type.</span><span>Use paging, search, and type filters instead of scrolling the whole wiki.</span></div>
-          <div><span>Health</span><span>Shows readiness, validation, interrupted writes, backend, and cache reuse.</span><span>Run repair commands only when health points to a specific issue.</span></div>
+          <div><span>Health</span><span>Shows readiness, validation, interrupted writes, backend, and cache reuse.</span><span>Run repair commands only when health points to a specific issue; doctor uses the parsed page cache for backlink checks.</span></div>
         </div>
 
         <h2 id="measure">Measure Locally</h2>
@@ -89,7 +89,7 @@ lnk status --validate</code></pre>
           <li>Use page-type filters and search before opening full graph data.</li>
           <li>Run <code>lnk health</code> after ingest or broad manual edits.</li>
           <li>Run <code>lnk doctor --fix</code> only when health or validation points to a repairable issue.</li>
-          <li>Keep private raw sources out of Git; use <code>snapshot</code>, <code>team-sync</code>, and <code>compliance-export</code> for reviewable sharing paths.</li>
+          <li>Keep private raw sources and local <code>wiki/log.md</code> out of Git; use <code>snapshot</code>, <code>team-sync</code>, and <code>compliance-export</code> for reviewable sharing paths.</li>
         </ul>
 
         <h2 id="limits">Current Limits</h2>

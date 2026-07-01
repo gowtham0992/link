@@ -19,6 +19,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added TTY-only CLI styling for human output while keeping JSON and non-TTY output plain for agents and scripts.
 - Added audit-log hash-chain entries and doctor verification so silent edits to the local audit trail are detectable.
 - Added rollback snapshots for write operations so interrupted multi-file memory/index updates can restore touched files or remove newly created files.
+- Added `lnk operations --recover <marker> --confirm` so leftover crash snapshots from interrupted writes can be previewed and applied instead of becoming dead local state.
 - Added cross-agent continuity coverage proving a memory written through the CLI can be recalled through the slim MCP surface from the same local wiki.
 - Added cache-backed backlink rebuild logic so rebuilds reuse parsed page data while preserving existing body-only/full-link behavior.
 
@@ -36,6 +37,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Replaced older synthetic docs GIFs with real, on-brand product screenshots and figures for UI, CLI, MCP, health, home, and graph flows.
 - Reworked the README and docs landing page around one canonical proof path instead of multiple competing quick starts.
 - Improved `lnk try` human-readable output so the first-run proof reads like a product moment instead of a debug checklist.
+- Updated doctor backlink and isolated-page checks to reuse cached page records instead of rereading the whole wiki independently during health checks.
+- Updated team-sync to keep `wiki/log.md` local so Git-based team sharing does not create false audit hash-chain tamper alarms.
+- Regenerated dark-mode docs screenshots from deterministic source images before rebuilding the checked-in product GIFs.
 - Tightened official skill trigger wording so skill-only agents can proactively retrieve context and propose memory after important user-approved decisions without silently writing.
 
 ### Fixed

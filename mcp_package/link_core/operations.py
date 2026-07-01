@@ -141,6 +141,106 @@ def _rollback_snapshots(marker: Path) -> dict[str, object]:
     return {"attempted": True, "restored": restored, "removed": removed, "errors": errors}
 
 
+def _snapshot_preview(marker: Path) -> dict[str, object]:
+    snapshot_dir = _snapshot_dir(marker)
+    manifest_path = snapshot_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {"available": False, "restore": [], "remove": [], "errors": ["snapshot manifest is missing"]}
+    import json
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"available": False, "restore": [], "remove": [], "errors": [f"could not read snapshot manifest: {exc}"]}
+    restore: list[str] = []
+    remove: list[str] = []
+    errors: list[str] = []
+    for item in manifest.get("paths", []):
+        if not isinstance(item, dict) or not item.get("valid"):
+            continue
+        raw_path = str(item.get("path") or item.get("target") or "")
+        if item.get("kind") == "file" and item.get("snapshot"):
+            restore.append(raw_path)
+        elif not item.get("existed"):
+            remove.append(raw_path)
+        elif item.get("kind") == "unsupported":
+            errors.append(f"{raw_path}: snapshots only restore files")
+    return {"available": True, "restore": restore, "remove": remove, "errors": errors}
+
+
+def _operation_marker(wiki_dir: Path, marker_name: str) -> Path:
+    name = str(marker_name or "").strip()
+    if not name or "/" in name or "\\" in name or name in {".", ".."}:
+        raise ValueError("operation marker must be a marker filename")
+    if not name.endswith(".json"):
+        name += ".json"
+    marker = operation_dir(wiki_dir) / name
+    try:
+        resolved = marker.resolve()
+        root = operation_dir(wiki_dir).resolve()
+    except OSError:
+        raise ValueError("operation marker is invalid") from None
+    if root != resolved.parent:
+        raise ValueError("operation marker must stay inside wiki/.link-operations")
+    if not marker.exists():
+        raise FileNotFoundError(f"operation marker not found: {name}")
+    return marker
+
+
+def recover_operation(
+    wiki_dir: Path,
+    marker_name: str,
+    *,
+    confirm: bool = False,
+) -> dict[str, object]:
+    """Recover an interrupted write by applying its pre-write snapshot."""
+    wiki_dir = wiki_dir.expanduser().resolve()
+    try:
+        marker = _operation_marker(wiki_dir, marker_name)
+        payload = _read_marker(marker)
+    except (OSError, ValueError, FileNotFoundError) as exc:
+        return {
+            "recovered": False,
+            "error": str(exc),
+            "marker": str(marker_name or ""),
+            "requires_confirm": False,
+        }
+
+    preview = _snapshot_preview(marker)
+    result: dict[str, object] = {
+        "recovered": False,
+        "marker": marker.name,
+        "path": str(marker),
+        "operation": str(payload.get("operation") or "unknown"),
+        "status": str(payload.get("status") or "unknown"),
+        "description": str(payload.get("description") or ""),
+        "started_at": str(payload.get("started_at") or ""),
+        "snapshot": preview,
+        "requires_confirm": not confirm,
+    }
+    if not preview.get("available"):
+        result["error"] = "; ".join(str(item) for item in preview.get("errors", []) if item)
+        return result
+    if not confirm:
+        return result
+
+    rollback = _rollback_snapshots(marker)
+    result["rollback"] = rollback
+    errors = [
+        str(item)
+        for item in rollback.get("errors", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if errors:
+        fail_operation(marker, RuntimeError("; ".join(errors)), rollback=rollback)
+        result["error"] = "; ".join(errors)
+        return result
+    finish_operation(marker)
+    result["recovered"] = True
+    result["requires_confirm"] = False
+    return result
+
+
 def finish_operation(marker: Path) -> None:
     """Clear a pending marker after a mutation fully completes."""
     try:
@@ -275,29 +375,49 @@ def operation_report(
     command_target = str(wiki_dir.parent if wiki_dir.name == "wiki" else wiki_dir)
     next_actions: list[dict[str, object]] = []
     if stale_count:
+        first_stale = next((item for item in operations if item.get("stale")), None)
+        first_stale_path_text = str(first_stale.get("path") or "") if isinstance(first_stale, Mapping) else ""
+        first_stale_path = Path(first_stale_path_text) if first_stale_path_text else None
+        first_stale_snapshot = _snapshot_preview(first_stale_path) if first_stale_path else {}
+        if (
+            isinstance(first_stale, Mapping)
+            and first_stale.get("marker")
+            and first_stale_snapshot.get("available")
+        ):
+            next_actions.append({
+                "label": "recover the interrupted write from its pre-write snapshot",
+                "command": display_command([
+                    "lnk",
+                    "operations",
+                    command_target,
+                    "--recover",
+                    str(first_stale.get("marker")),
+                    "--confirm",
+                ]),
+            })
         next_actions.extend([
             {
                 "label": "inspect operation marker files before deleting them",
-                "command": display_command(["link", "operations", command_target]),
+                "command": display_command(["lnk", "operations", command_target]),
             },
             {
                 "label": "validate wiki structure after reviewing interrupted writes",
-                "command": display_command(["link", "validate", command_target]),
+                "command": display_command(["lnk", "validate", command_target]),
             },
             {
                 "label": "repair generated indexes if validation reports stale graph data",
-                "command": display_command(["link", "doctor", "--fix", command_target]),
+                "command": display_command(["lnk", "doctor", "--fix", command_target]),
             },
         ])
     elif active_count:
         next_actions.append({
             "label": "wait for the active Link write to finish, then rerun this command",
-            "command": display_command(["link", "operations", command_target]),
+            "command": display_command(["lnk", "operations", command_target]),
         })
     else:
         next_actions.append({
             "label": "continue using Link normally",
-            "command": display_command(["link", "status", "--validate", command_target]),
+            "command": display_command(["lnk", "status", "--validate", command_target]),
         })
     return {
         "wiki": str(wiki_dir),
@@ -309,6 +429,55 @@ def operation_report(
         "operations": operations,
         "next_actions": next_actions,
     }
+
+
+def render_operation_recovery_text(payload: dict[str, object], *, target: object = ".") -> tuple[int, str]:
+    """Render interrupted operation recovery output for the CLI."""
+    lines = [f"Link operation recovery: {payload.get('marker') or 'unknown'}", ""]
+    if payload.get("error"):
+        lines.append(f"Error: {payload.get('error')}")
+        lines.append("")
+        lines.append("Result: needs attention")
+        return 1, "\n".join(lines)
+    lines.append(f"Operation: {payload.get('operation') or 'unknown'}")
+    description = str(payload.get("description") or "").strip()
+    if description:
+        lines.append(f"Description: {description}")
+    started_at = str(payload.get("started_at") or "").strip()
+    if started_at:
+        lines.append(f"Started: {started_at}")
+    snapshot = payload.get("snapshot") if isinstance(payload.get("snapshot"), Mapping) else {}
+    restore = [
+        str(item)
+        for item in snapshot.get("restore", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    remove = [
+        str(item)
+        for item in snapshot.get("remove", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if restore:
+        lines.append("Will restore: " + ", ".join(restore[:8]))
+    if remove:
+        lines.append("Will remove newly-created files: " + ", ".join(remove[:8]))
+    if payload.get("requires_confirm"):
+        lines.extend([
+            "",
+            "No files changed. Rerun with --confirm to apply the snapshot rollback:",
+            f"  {display_command(['lnk', 'operations', str(target), '--recover', str(payload.get('marker') or ''), '--confirm'])}",
+            "",
+            "Result: preview",
+        ])
+        return 1, "\n".join(lines)
+    rollback = payload.get("rollback") if isinstance(payload.get("rollback"), Mapping) else {}
+    if rollback:
+        restored = ", ".join(str(item) for item in rollback.get("restored", []) if isinstance(item, str)) or "none"
+        removed = ", ".join(str(item) for item in rollback.get("removed", []) if isinstance(item, str)) or "none"
+        lines.append(f"Restored: {restored}")
+        lines.append(f"Removed: {removed}")
+    lines.extend(["", "Result: recovered" if payload.get("recovered") else "Result: needs attention"])
+    return (0 if payload.get("recovered") else 1), "\n".join(lines)
 
 
 def render_operations_text(payload: dict[str, object]) -> tuple[int, str]:

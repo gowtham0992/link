@@ -72,6 +72,8 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     operations_cmd = sub.add_parser("operations", help="inspect interrupted or active Link write operations")
     operations_cmd.add_argument("target", nargs="?", default=".")
     operations_cmd.add_argument("--limit", type=int, default=20, help="maximum operation markers to show")
+    operations_cmd.add_argument("--recover", metavar="MARKER", help="recover an interrupted operation from its snapshot")
+    operations_cmd.add_argument("--confirm", action="store_true", help="required to apply an operation recovery snapshot")
     operations_cmd.add_argument("--json", action="store_true", help="print machine-readable operation status")
 
     backup_cmd = sub.add_parser("backup", help="create or list local wiki backup archives")
@@ -385,7 +387,13 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "health":
         return handlers["health"](Path(args.target), json_output=args.json)
     if command == "operations":
-        return handlers["operations"](Path(args.target), limit=args.limit, json_output=args.json)
+        return handlers["operations"](
+            Path(args.target),
+            limit=args.limit,
+            recover=args.recover,
+            confirm=args.confirm,
+            json_output=args.json,
+        )
     if command == "backup":
         return handlers["backup"](
             Path(args.target),

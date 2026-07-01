@@ -114,7 +114,8 @@ lnk rebuild-backlinks
 lnk validate
 lnk verify-mcp</code></pre>
         <p>Use <code>lnk backup</code> before broad repair work. Use <code>lnk benchmark</code> when a wiki starts to feel slow. <code>lnk status --validate</code> and <code>lnk benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
-        <p>Use <code>lnk team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, checks whether review or <code>visibility: private</code> memories would make sharing unsafe, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
+        <p>Use <code>lnk operations</code> when health reports an interrupted write. If a marker has a rollback snapshot, run <code>lnk operations ~/link --recover &lt;marker&gt;</code> to preview the recovery and add <code>--confirm</code> only after reviewing the plan.</p>
+        <p>Use <code>lnk team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, checks whether review or <code>visibility: private</code> memories would make sharing unsafe, keeps <code>wiki/log.md</code> local to preserve each machine's audit hash chain, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
         <p>Use <code>lnk snapshot</code> when you need a static, read-only HTML export for a teammate, maintainer, security reviewer, or demo. It excludes <code>raw/</code>, captures, local operation state, and memory pages by default. With <code>--include-memories</code>, it still excludes <code>visibility: private</code> memories unless <code>--include-private-memories</code> is explicitly passed.</p>
         <p>Use <code>lnk connect &lt;agent&gt;</code> when an agent already has Link instructions but still needs MCP wiring. It previews the config before writing.</p>
         <pre><code>lnk connect codex ~/link
@@ -136,7 +137,7 @@ lnk prompts [dir] [--project slug]
 lnk next [dir] [--project slug]
 lnk health [dir] [--json]
 lnk status [--validate]
-lnk operations [--limit 20]
+lnk operations [--limit 20] [--recover marker.json] [--confirm]
 lnk backup [--label name] [--include-raw]
 lnk compliance-export [dir] [--output audit.json] [--project slug]
 lnk team-sync [dir] [--remote git-url]

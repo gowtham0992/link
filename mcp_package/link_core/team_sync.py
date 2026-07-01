@@ -67,6 +67,31 @@ def _action(label: str, command: list[str]) -> dict[str, str]:
     }
 
 
+def _shared_git_paths(root: Path, *, absolute: bool) -> list[str]:
+    """Return share-safe Link paths for Git commands.
+
+    ``wiki/log.md`` is intentionally local. It is an append-only hash chain for
+    one workspace, so merging multiple contributors' logs would look like
+    tampering even when the Git merge is legitimate.
+    """
+    paths = [
+        "wiki/index.md",
+        "wiki/_backlinks.json",
+        "wiki/_link_schema.json",
+        "wiki/sources",
+        "wiki/concepts",
+        "wiki/entities",
+        "wiki/memories",
+        "wiki/comparisons",
+        "wiki/explorations",
+        "LINK.md",
+        ".gitignore",
+    ]
+    if not absolute:
+        return paths
+    return [str(root / path) for path in paths]
+
+
 def _memory_share_status(wiki_dir: Path) -> dict[str, object]:
     if not wiki_dir.exists():
         return {
@@ -168,7 +193,7 @@ def build_team_sync_payload(target: Path, *, remote: str | None = None) -> dict[
     if git_root is None:
         setup_actions.extend([
             _action("initialize Git", ["git", "-C", str(root), "init"]),
-            _action("stage shared memory files", ["git", "-C", str(root), "add", "wiki", "LINK.md", ".gitignore"]),
+            _action("stage shared memory files", ["git", "-C", str(root), "add", *_shared_git_paths(root, absolute=False)]),
             _action("commit shared memory baseline", ["git", "-C", str(root), "commit", "-m", "Initialize Link shared memory"]),
         ])
         if remote_clean:
@@ -178,7 +203,7 @@ def build_team_sync_payload(target: Path, *, remote: str | None = None) -> dict[
         sync_actions.extend([
             _action("inspect changes", ["git", "-C", str(git_root), "status", "--short"]),
             _action("pull first", ["git", "-C", str(git_root), "pull", "--ff-only"]),
-            _action("stage shared memory files", ["git", "-C", str(git_root), "add", str(root / "wiki"), str(root / "LINK.md"), str(root / ".gitignore")]),
+            _action("stage shared memory files", ["git", "-C", str(git_root), "add", *_shared_git_paths(root, absolute=True)]),
             _action("commit reviewed memory updates", ["git", "-C", str(git_root), "commit", "-m", "Update Link shared memory"]),
         ])
         if remotes or remote_clean:
@@ -206,6 +231,7 @@ def build_team_sync_payload(target: Path, *, remote: str | None = None) -> dict[
         "sync_actions": sync_actions,
         "notes": [
             "Share wiki/ and LINK.md for team agent memory.",
+            "Keep wiki/log.md local; each workspace has its own tamper-evident audit chain.",
             "Keep raw/ private unless every source is approved for the team.",
             "Keep visibility: private memories out of team Git until the user intentionally converts or archives them.",
             "Review memory inbox and validation before pushing shared memory updates.",

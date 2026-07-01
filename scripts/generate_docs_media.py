@@ -123,6 +123,140 @@ def _open_asset_image(*names: str) -> Image.Image:
     raise FileNotFoundError(f"missing docs media source: {joined}")
 
 
+def _draw_link_header(draw: ImageDraw.ImageDraw, active: str) -> None:
+    draw.rectangle((0, 0, SIZE[0], 88), fill="#020403")
+    draw.rounded_rectangle((42, 26, 67, 51), radius=4, fill="#101827", outline="#54c79d", width=2)
+    draw.text((76, 23), "Link", font=FONT_TITLE, fill=COLORS["ink"])
+    draw.text((137, 35), "agent memory", font=FONT_MONO_SMALL, fill="#9ca3af")
+    nav = ["home", "brief", "memory", "ingest", "graph", "health", "more"]
+    x = 42
+    for item in nav:
+        color = COLORS["yellow"] if item == active else "#93c5fd"
+        draw.text((x, 62), item, font=FONT_MONO_SMALL, fill=color)
+        x += 70 if item != "memory" else 78
+    draw.rounded_rectangle((640, 38, 812, 62), radius=5, fill="#111111", outline="#333333")
+    draw.text((654, 43), "search... (/)", font=FONT_MONO_SMALL, fill="#9ca3af")
+    draw.line((42, 86, 812, 86), fill="#2b2b2b", width=1)
+
+
+def _draw_card(draw: ImageDraw.ImageDraw, xy: tuple[int, int], title: str, body: str, width: int = 230) -> None:
+    x, y = xy
+    draw.rounded_rectangle((x, y, x + width, y + 108), radius=8, fill="#101310", outline="#305b3f", width=2)
+    draw.text((x + 16, y + 14), title, font=FONT_MONO_BOLD, fill="#d8f7d0")
+    _draw_text_block(draw, (x + 16, y + 42), body, FONT_SUBTITLE, "#d1d5db", width - 32, line_gap=4)
+
+
+def _dark_page_screenshot(name: str, active: str, crumb: str, heading: str, subtitle: str, cards: list[tuple[str, str]]) -> None:
+    image = Image.new("RGB", SIZE, "#050607")
+    draw = ImageDraw.Draw(image)
+    _draw_link_header(draw, active)
+    draw.text((42, 116), f"Link / {crumb}", font=FONT_MONO_SMALL, fill="#93c5fd")
+    draw.text((42, 150), heading, font=FONT_TITLE, fill=COLORS["ink"])
+    _draw_text_block(draw, (42, 185), subtitle, FONT_SUBTITLE, "#d1d5db", 720, line_gap=5)
+    x = 42
+    y = 250
+    for index, (title, body) in enumerate(cards[:6]):
+        _draw_card(draw, (x, y), title, body)
+        x += 258
+        if (index + 1) % 3 == 0:
+            x = 42
+            y += 132
+    image.save(ASSETS / name)
+
+
+def _make_dark_source_screenshots() -> None:
+    _dark_page_screenshot(
+        "link-home-dark.png",
+        "home",
+        "home",
+        "First 10 Minutes",
+        "Start with prompts, query source-backed memory, then keep the local loop healthy.",
+        [
+            ("Ready", "One health check for validation, operations, and next action."),
+            ("Start", "Prime an agent with compact memory before work."),
+            ("Query", "Ask for answer-ready context without dumping the whole wiki."),
+            ("Ingest", "Drop raw notes locally and let the agent compile sources."),
+            ("Review", "Approve, archive, or forget durable memories."),
+            ("Graph", "Explore bounded neighborhoods before full graph loading."),
+        ],
+    )
+    _dark_page_screenshot(
+        "link-ingest-dark.png",
+        "ingest",
+        "ingest",
+        "Ingest",
+        "Raw files are scanned, represented in wiki/sources, and validated before recall.",
+        [
+            ("Raw", "Paste notes, docs, transcripts, or project context."),
+            ("Safety", "Secret-looking values block normal ingest guidance."),
+            ("Source page", "Every raw file maps to inspectable Markdown."),
+            ("Proposal", "Memories stay review-gated until approved."),
+            ("Backlinks", "Index and graph repairs are explicit."),
+            ("Validate", "The ingest gate proves the wiki is healthy."),
+        ],
+    )
+    _dark_page_screenshot(
+        "link-brief-dark.png",
+        "brief",
+        "brief",
+        "Brief",
+        "Give agents a compact session-start packet with only relevant memories and pages.",
+        [
+            ("Memories", "Reviewed preferences, decisions, and project context."),
+            ("Pages", "Source-backed wiki context selected by budget."),
+            ("Review", "Pending memories are surfaced before default trust."),
+            ("Budget", "micro, small, medium, and large packets."),
+            ("Why", "Each item explains why it was selected."),
+            ("Follow up", "Agents get precise next tool actions."),
+        ],
+    )
+    _dark_page_screenshot(
+        "link-memory-dashboard-dark.png",
+        "memory",
+        "memory",
+        "Memory",
+        "Durable memory is inspectable Markdown with lifecycle controls and provenance.",
+        [
+            ("Inbox", "Review pending memories before trusting them."),
+            ("Explain", "See source and reason for each memory."),
+            ("Visibility", "Private, project, or team sharing intent."),
+            ("Archive", "Soft-delete stale memory without losing audit trail."),
+            ("Forget", "Hard-delete only after explicit confirmation."),
+            ("Audit", "Track local writes without sending telemetry."),
+        ],
+    )
+    _dark_page_screenshot(
+        "link-explain-memory-dark.png",
+        "memory",
+        "memory / explain",
+        "Explain Memory",
+        "Inspect why a memory exists, where it came from, and how it can be changed.",
+        [
+            ("Source", "Raw path or source-backed page provenance."),
+            ("Status", "Active, archived, stale, or pending review."),
+            ("Scope", "User, project, or global memory intent."),
+            ("Actions", "Review, update, archive, restore, or forget."),
+            ("Audit", "Write lifecycle appears in local log entries."),
+            ("Trust", "Nothing is hidden in a cloud profile."),
+        ],
+    )
+    _dark_page_screenshot(
+        "link-graph-dark.png",
+        "graph",
+        "graph",
+        "Knowledge Graph",
+        "Large wikis open as bounded overviews with filters, search, and explicit full loading.",
+        [
+            ("Overview", "High-signal nodes first for fast load."),
+            ("Search", "Highlight nodes by title or topic."),
+            ("Filters", "Type, size, label density, and neighborhood depth."),
+            ("Fullscreen", "Inspect larger graphs without page clutter."),
+            ("Motion", "Simulation is capped for large wikis."),
+            ("Agent", "MCP graph summaries stay token-safe."),
+        ],
+    )
+
+
 def _window_frame(title: str, subtitle: str = "") -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGB", SIZE, COLORS["paper"])
     draw = ImageDraw.Draw(image)
@@ -323,6 +457,7 @@ def _make_mcp_tour() -> None:
 
 
 def main() -> None:
+    _make_dark_source_screenshots()
     _make_ui_tour()
     _make_cli_tour()
     _make_mcp_tour()

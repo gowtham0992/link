@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 
@@ -12,6 +13,8 @@ from link_core.operations import (  # noqa: E402
     operation_journal,
     operation_report,
     pending_operations,
+    recover_operation,
+    render_operation_recovery_text,
     render_operations_text,
 )
 
@@ -125,6 +128,75 @@ class OperationsCoreTests(unittest.TestCase):
         self.assertIn("lnk validate", text)
         self.assertIn(str(wiki.parent.resolve()), text)
         self.assertIn("Result: needs attention", text)
+        self.assertNotIn("--recover", text)
+
+    def test_recover_operation_previews_and_applies_crash_snapshot(self):
+        wiki = Path(tempfile.mkdtemp(prefix="link-operations-core-")) / "wiki"
+        (wiki / "memories").mkdir(parents=True)
+        index_path = wiki / "index.md"
+        new_page = wiki / "memories" / "new-memory.md"
+        index_path.write_text("# Index\n\nold\n", encoding="utf-8")
+        marker = begin_operation(
+            wiki,
+            "remember",
+            "Saved memory",
+            timestamp="2026-05-17T00:00:00Z",
+            paths=["wiki/index.md", "wiki/memories/new-memory.md"],
+        )
+        snapshot_dir = marker.with_suffix("")
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "0000.snapshot").write_text("# Index\n\nold\n", encoding="utf-8")
+        (snapshot_dir / "manifest.json").write_text(
+            json.dumps({
+                "paths": [
+                    {
+                        "path": "wiki/index.md",
+                        "target": str(index_path.resolve()),
+                        "valid": True,
+                        "existed": True,
+                        "snapshot": "0000.snapshot",
+                        "kind": "file",
+                    },
+                    {
+                        "path": "wiki/memories/new-memory.md",
+                        "target": str(new_page.resolve()),
+                        "valid": True,
+                        "existed": False,
+                        "snapshot": "",
+                        "kind": "missing",
+                    },
+                ]
+            }),
+            encoding="utf-8",
+        )
+        index_path.write_text("# Index\n\nchanged\n", encoding="utf-8")
+        new_page.write_text("# New memory\n", encoding="utf-8")
+
+        report = operation_report(wiki, now=2_000_000_000, stale_after_seconds=60)
+        _, report_text = render_operations_text(report)
+        self.assertIn("--recover", report_text)
+        self.assertIn("--confirm", report_text)
+
+        preview = recover_operation(wiki, marker.name)
+        preview_code, preview_text = render_operation_recovery_text(preview, target=wiki.parent)
+
+        self.assertEqual(preview_code, 1)
+        self.assertFalse(preview["recovered"])
+        self.assertTrue(preview["requires_confirm"])
+        self.assertIn("No files changed", preview_text)
+        self.assertEqual(index_path.read_text(encoding="utf-8"), "# Index\n\nchanged\n")
+        self.assertTrue(new_page.exists())
+
+        recovered = recover_operation(wiki, marker.name, confirm=True)
+        recovered_code, recovered_text = render_operation_recovery_text(recovered, target=wiki.parent)
+
+        self.assertEqual(recovered_code, 0)
+        self.assertTrue(recovered["recovered"])
+        self.assertEqual(index_path.read_text(encoding="utf-8"), "# Index\n\nold\n")
+        self.assertFalse(new_page.exists())
+        self.assertFalse(marker.exists())
+        self.assertFalse(snapshot_dir.exists())
+        self.assertIn("Result: recovered", recovered_text)
 
 
 if __name__ == "__main__":

@@ -254,6 +254,8 @@ from link_core.obsidian import (
 )
 from link_core.operations import (
     operation_report as _core_operation_report,
+    recover_operation as _core_recover_operation,
+    render_operation_recovery_text as _core_render_operation_recovery_text,
     render_operations_text as _core_render_operations_text,
 )
 from link_core.schema import (
@@ -775,9 +777,23 @@ def health(target: Path, json_output: bool = False) -> int:
     return code
 
 
-def operations(target: Path, limit: int = 20, json_output: bool = False) -> int:
+def operations(
+    target: Path,
+    limit: int = 20,
+    recover: str | None = None,
+    confirm: bool = False,
+    json_output: bool = False,
+) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
+    if recover:
+        payload = _core_recover_operation(wiki_dir, recover, confirm=confirm)
+        code, text = _core_render_operation_recovery_text(payload, target=target)
+        if json_output:
+            print(json.dumps(payload, indent=2))
+            return code
+        _print_text(text)
+        return code
     payload = _core_operation_report(wiki_dir, limit=limit)
     code, text = _core_render_operations_text(payload)
     if json_output:
@@ -2166,14 +2182,20 @@ def _try_summary_from_query(payload: dict[str, object]) -> str:
     primary = wiki.get("primary") or "no primary page"
     memory_items = memory.get("items") if isinstance(memory.get("items"), list) else []
     page_count = len(payload.get("context_packet") or []) if isinstance(payload.get("context_packet"), list) else 0
-    return f"{primary} · {len(memory_items)} memories · {page_count} context items"
+    memory_count = len(memory_items)
+    memory_label = "memory" if memory_count == 1 else "memories"
+    context_label = "item" if page_count == 1 else "items"
+    return f"{primary} · {memory_count} {memory_label} · {page_count} context {context_label}"
 
 
 def _try_summary_from_brief(payload: dict[str, object]) -> str:
     memories = payload.get("relevant_memories") if isinstance(payload.get("relevant_memories"), list) else []
     review = payload.get("review") if isinstance(payload.get("review"), dict) else {}
     review_count = review.get("count", 0)
-    return f"{len(memories)} relevant memories · {review_count} review items"
+    memory_count = len(memories)
+    memory_label = "memory" if memory_count == 1 else "memories"
+    review_label = "item" if review_count == 1 else "items"
+    return f"{memory_count} relevant {memory_label} · {review_count} review {review_label}"
 
 
 def try_link(

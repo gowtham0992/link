@@ -385,7 +385,10 @@ captures.
 For recovery, `lnk backup ~/link` creates a local archive and `lnk
 restore-backup <archive> ~/link` previews what would be restored. Passing
 `--confirm` replaces local files after creating a safety backup when possible;
-`raw/` is still excluded unless `--include-raw` is explicit.
+`raw/` is still excluded unless `--include-raw` is explicit. If a multi-file
+write is interrupted, `lnk operations ~/link` shows the marker and any rollback
+snapshot; `lnk operations ~/link --recover <marker> --confirm` restores the
+snapshot after you review it.
 
 For local proof of value, `lnk wins ~/link` shows reusable memories, reviewed
 memory, provenance, project continuity, freshness guardrails, and copyable
@@ -393,9 +396,11 @@ prompts without tracking user behavior.
 
 For Git-backed team memory, `lnk team-sync ~/link` checks whether the workspace
 is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,
-and local MCP Python markers private by default. It also blocks "ready" status
-when the memory inbox is not clear or active `visibility: private` memories
-would be included by a broad `git add wiki`.
+local MCP Python markers, and `wiki/log.md` private by default. The audit log is
+local because it has a single-machine hash chain; merging multiple users' logs
+would create false tamper alarms. Team sync also blocks "ready" status when the
+memory inbox is not clear or active `visibility: private` memories would be
+included by a broad `git add wiki`.
 
 ```bash
 lnk team-sync ~/link --remote git@example.com:team/link-memory.git

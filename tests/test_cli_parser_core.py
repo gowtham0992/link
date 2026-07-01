@@ -74,11 +74,22 @@ class CliParserCoreTests(unittest.TestCase):
     def test_operations_limit_and_json_options(self):
         parser = build_cli_parser()
 
-        args = parser.parse_args(["operations", "/tmp/link", "--limit", "5", "--json"])
+        args = parser.parse_args([
+            "operations",
+            "/tmp/link",
+            "--limit",
+            "5",
+            "--recover",
+            "remember-1.json",
+            "--confirm",
+            "--json",
+        ])
 
         self.assertEqual(args.command, "operations")
         self.assertEqual(args.target, "/tmp/link")
         self.assertEqual(args.limit, 5)
+        self.assertEqual(args.recover, "remember-1.json")
+        self.assertTrue(args.confirm)
         self.assertTrue(args.json)
 
     def test_health_json_option(self):
@@ -456,7 +467,7 @@ class CliParserCoreTests(unittest.TestCase):
 
     def test_dispatch_routes_operations_arguments(self):
         parser = build_cli_parser()
-        args = parser.parse_args(["operations", "/tmp/link", "--limit", "5", "--json"])
+        args = parser.parse_args(["operations", "/tmp/link", "--limit", "5", "--recover", "remember-1.json", "--confirm", "--json"])
         calls = []
 
         def operations_handler(target, **kwargs):
@@ -468,6 +479,8 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(code, 9)
         self.assertEqual(calls[0][0], Path("/tmp/link"))
         self.assertEqual(calls[0][1]["limit"], 5)
+        self.assertEqual(calls[0][1]["recover"], "remember-1.json")
+        self.assertTrue(calls[0][1]["confirm"])
         self.assertTrue(calls[0][1]["json_output"])
 
     def test_dispatch_routes_health_arguments(self):

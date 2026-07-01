@@ -121,8 +121,8 @@ class CliRuntimeCoreTests(unittest.TestCase):
             page_count=13,
             memory_count=1,
             search_backend="sqlite-fts",
-            query_summary="agent-memory · 1 memories · 3 context items",
-            brief_summary="1 relevant memories · 1 review items",
+            query_summary="agent-memory · 1 memory · 3 context items",
+            brief_summary="1 relevant memory · 1 review item",
             serve_command="lnk serve /tmp/link-demo",
             next_command="lnk next /tmp/link-demo",
             health_command="lnk health /tmp/link-demo",
@@ -134,8 +134,14 @@ class CliRuntimeCoreTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Link try: /tmp/link-demo", text)
+        self.assertIn("60-second proof complete", text)
+        self.assertIn("Status", text)
         self.assertIn("Demo: ready", text)
+        self.assertIn("13 pages · 1 memory", text)
+        self.assertIn("Privacy: no cloud account", text)
+        self.assertIn("What Link proved", text)
         self.assertIn("Query proof:", text)
+        self.assertIn("Agent path: CLI works now", text)
         self.assertIn("Ask an agent:", text)
         self.assertIn("http://127.0.0.1:3000/onboard", text)
         self.assertIn("lnk next /tmp/link-demo", text)

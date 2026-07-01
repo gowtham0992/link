@@ -175,16 +175,27 @@ def render_try_text(
     url: str,
 ) -> tuple[int, str]:
     status_text = "ready" if ready else "needs attention"
+    try:
+        memory_total = int(memory_count)
+    except (TypeError, ValueError):
+        memory_total = 0
+    memory_label = "memory" if memory_total == 1 else "memories"
     return 0 if ready else 1, "\n".join([
         f"Link try: {target}",
         "",
-        "60-second proof",
-        f"- Demo: {status_text} · {page_count} pages · {memory_count} memories · {search_backend}",
-        "- Storage: local Markdown wiki + reviewed memory pages",
-        "- Agent path: CLI now, MCP or skills when you connect an agent",
+        "60-second proof complete" if ready else "60-second proof needs attention",
         "",
-        f"Query proof: {query_summary}",
-        f"Brief proof: {brief_summary}",
+        "Status",
+        f"- Demo: {status_text}",
+        f"- Corpus: {page_count} pages · {memory_count} {memory_label}",
+        f"- Search: {search_backend}",
+        "- Storage: local Markdown wiki + reviewed memory pages",
+        "- Privacy: no cloud account, no hosted memory profile, no telemetry",
+        "",
+        "What Link proved",
+        f"1. Query proof: {query_summary}",
+        f"2. Brief proof: {brief_summary}",
+        "3. Agent path: CLI works now; MCP and skills can use the same local wiki.",
         "",
         "Open the local viewer:",
         f"  {serve_command}",

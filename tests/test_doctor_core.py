@@ -2,11 +2,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
+import link_core.doctor as doctor_module  # noqa: E402
 from link_core.doctor import (  # noqa: E402
     DoctorReport,
     apply_doctor_fixes,
@@ -119,6 +121,20 @@ class DoctorCoreTests(unittest.TestCase):
         self.assertIn("OK backlinks are current", report.ok)
         self.assertIn("OK no interrupted Link operations", report.ok)
         self.assertIn("OK no sensitive-looking filenames", report.ok)
+
+    def test_build_doctor_report_uses_cache_backed_backlinks(self):
+        root = Path(tempfile.mkdtemp(prefix="link-doctor-report-cache-"))
+        apply_doctor_fixes(root)
+
+        with patch.object(
+            doctor_module,
+            "build_backlinks_from_cache",
+            wraps=doctor_module.build_backlinks_from_cache,
+        ) as cached_backlinks:
+            report = build_doctor_report(root)
+
+        self.assertTrue(report.healthy)
+        self.assertGreaterEqual(cached_backlinks.call_count, 2)
 
     def test_build_doctor_report_fails_on_stale_operation_marker(self):
         root = Path(tempfile.mkdtemp(prefix="link-doctor-report-"))

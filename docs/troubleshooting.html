@@ -76,9 +76,10 @@ python3 -m pip index versions link-mcp</code></pre>
 
         <h2 id="operations">Interrupted Writes</h2>
         <pre><code>lnk operations
+lnk operations ~/link --recover remember-2026-06-30.json --confirm
 lnk validate
 lnk doctor --fix</code></pre>
-        <p>If a memory write was interrupted, Link leaves a marker under <code>wiki/.link-operations/</code>. Inspect it before deleting anything manually, then validate the wiki and repair generated indexes if needed.</p>
+        <p>If a memory write was interrupted, Link leaves a marker under <code>wiki/.link-operations/</code>. Inspect it before deleting anything manually. When the marker includes a rollback snapshot, <code>lnk operations --recover &lt;marker&gt;</code> previews the restore plan and <code>--confirm</code> applies it. Then validate the wiki and repair generated indexes if needed.</p>
 
         <h2 id="graph">Graph Is Stale</h2>
         <pre><code>lnk rebuild-index
