@@ -42,6 +42,18 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.port, 3456)
         self.assertTrue(args.json)
 
+    def test_proof_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args(["proof", "/tmp/proof", "--force", "--serve", "--port", "3456", "--json"])
+
+        self.assertEqual(args.command, "proof")
+        self.assertEqual(args.target, "/tmp/proof")
+        self.assertTrue(args.force)
+        self.assertTrue(args.serve)
+        self.assertEqual(args.port, 3456)
+        self.assertTrue(args.json)
+
     def test_onboard_command_options(self):
         parser = build_cli_parser()
 
@@ -425,6 +437,24 @@ class CliParserCoreTests(unittest.TestCase):
 
         self.assertEqual(code, 5)
         self.assertEqual(calls[0][0], Path("/tmp/link-demo"))
+        self.assertTrue(calls[0][1]["force"])
+        self.assertTrue(calls[0][1]["serve"])
+        self.assertEqual(calls[0][1]["port"], 3456)
+        self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_proof_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args(["proof", "/tmp/proof", "--force", "--serve", "--port", "3456", "--json"])
+        calls = []
+
+        def proof_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 9
+
+        code = dispatch_cli_command(args, {"proof": proof_handler})
+
+        self.assertEqual(code, 9)
+        self.assertEqual(calls[0][0], Path("/tmp/proof"))
         self.assertTrue(calls[0][1]["force"])
         self.assertTrue(calls[0][1]["serve"])
         self.assertEqual(calls[0][1]["port"], 3456)

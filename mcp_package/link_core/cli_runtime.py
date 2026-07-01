@@ -218,6 +218,52 @@ def render_try_text(
     ])
 
 
+def render_proof_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render the cross-agent continuity proof for humans."""
+    target = payload.get("target")
+    ready = bool(payload.get("ready"))
+    created = bool(payload.get("created"))
+    memory = payload.get("memory") if isinstance(payload.get("memory"), Mapping) else {}
+    recall = payload.get("recall") if isinstance(payload.get("recall"), Mapping) else {}
+    commands = payload.get("commands") if isinstance(payload.get("commands"), Mapping) else {}
+    prompts = payload.get("prompts") if isinstance(payload.get("prompts"), Mapping) else {}
+    title = str(memory.get("title") or "Cross-agent proof memory")
+    memory_status = "created" if memory.get("created") else "already existed"
+    if memory.get("reviewed"):
+        memory_status += " and reviewed"
+    recall_status = "found" if recall.get("found") else "not found"
+    lines = [
+        f"Link proof: {target}",
+        "",
+        "Cross-agent memory continuity works" if ready else "Cross-agent memory proof needs attention",
+        "",
+        "What happened",
+        f"1. Workspace: {'created' if created else 'reused'} local Markdown wiki.",
+        f"2. Memory: {memory_status}: {title}",
+        f"3. Recall: {recall_status} through the same bounded recall path used by CLI, skills, and MCP.",
+        "",
+        "Try it with two agents",
+        f"Agent A: {prompts.get('agent_a', 'remember that this project uses Link')}",
+        f"Agent B: {prompts.get('agent_b', 'start with Link before we continue')}",
+        "",
+        "No viewer required",
+        "- CLI, skills, and MCP read the same local wiki files.",
+        "- The web viewer is optional inspection UI.",
+        "- No cloud account, no hosted memory profile, no telemetry.",
+        "",
+        "Copy these checks",
+    ]
+    for key in ("start", "recall", "mcp", "serve"):
+        command = commands.get(key) if isinstance(commands, Mapping) else None
+        if command:
+            lines.append(f"- {command}")
+    if not ready:
+        lines.extend(["", "Result: needs attention"])
+        return 1, "\n".join(lines)
+    lines.extend(["", "Result: proof passed"])
+    return 0, "\n".join(lines)
+
+
 def _first_mapping_items(value: object, limit: int) -> list[Mapping[str, object]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         return []

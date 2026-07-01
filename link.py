@@ -6,6 +6,7 @@ Usage:
   python link.py serve [target]
   python link.py demo [target]
   python link.py try [target]
+  python link.py proof [target]
   python link.py onboard [target]
   python link.py welcome [target]
   python link.py prompts [target]
@@ -51,6 +52,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -59,6 +61,13 @@ from typing import Callable
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DEMO_DIR = "link-demo"
+DEFAULT_PROOF_DIR = "link-proof"
+PROOF_MARKER = ".link-proof"
+PROOF_MEMORY_TITLE = "Cross-agent Link proof"
+PROOF_MEMORY_TEXT = (
+    "For the Link cross-agent proof, remember that local agent memory should be "
+    "available to every connected agent through the same local Markdown wiki."
+)
 SECRET_NAME_PATTERNS = (
     ".env",
     ".env.*",
@@ -228,6 +237,7 @@ from link_core.capture import (
 )
 from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
+    atomic_write_text as _core_atomic_write_text,
 )
 from link_core.ingest import (
     collect_ingest_status as _core_collect_ingest_status,
@@ -276,6 +286,7 @@ from link_core.cli_runtime import (
     render_init_text as _core_render_init_text,
     render_mcp_connect_text as _core_render_mcp_connect_text,
     render_onboard_text as _core_render_onboard_text,
+    render_proof_text as _core_render_proof_text,
     render_start_text as _core_render_start_text,
     render_starter_prompts_text as _core_render_starter_prompts_text,
     render_try_text as _core_render_try_text,
@@ -2198,6 +2209,121 @@ def _try_summary_from_brief(payload: dict[str, object]) -> str:
     return f"{memory_count} relevant {memory_label} · {review_count} review {review_label}"
 
 
+def _proof_recall_found(payload: dict[str, object], title: str) -> bool:
+    title_lc = title.lower()
+    memory = payload.get("memory") if isinstance(payload.get("memory"), dict) else {}
+    items = memory.get("items") if isinstance(memory.get("items"), list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        haystack = " ".join(
+            str(item.get(key) or "")
+            for key in ("title", "name", "summary", "why_selected", "text")
+        ).lower()
+        if title_lc in haystack or "cross-agent" in haystack:
+            return True
+    return title_lc in json.dumps(payload, ensure_ascii=False).lower()
+
+
+def proof(
+    target: Path,
+    *,
+    force: bool = False,
+    serve: bool = False,
+    port: int = 3000,
+    json_output: bool = False,
+) -> int:
+    """Create a concrete cross-agent continuity proof workspace."""
+    target = target.expanduser().resolve()
+    created = not (target / "wiki").exists()
+    if target.exists() and any(target.iterdir()) and (force or created):
+        marker = target / PROOF_MARKER
+        if not marker.exists():
+            print(f"{target} does not look like a Link proof directory; refusing to overwrite it.", file=sys.stderr)
+            return 1
+        if force:
+            shutil.rmtree(target)
+            created = True
+    target.mkdir(parents=True, exist_ok=True)
+    _core_atomic_write_text(target / PROOF_MARKER, "Link proof directory\n")
+    _copy_runtime_files(target)
+    _apply_doctor_fixes(target)
+
+    wiki_dir = _resolve_wiki_dir(target)
+    try:
+        memory_result = _write_memory_page(
+            target,
+            PROOF_MEMORY_TEXT,
+            title=PROOF_MEMORY_TITLE,
+            memory_type="note",
+            scope="user",
+            tags="proof,cross-agent",
+            source="lnk proof",
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Could not create proof memory: {exc}", file=sys.stderr)
+        return 1
+
+    reviewed = False
+    if memory_result.get("created") and memory_result.get("name"):
+        try:
+            review_result = _mark_memory_reviewed(
+                target,
+                str(memory_result["name"]),
+                note="Reviewed automatically because the user explicitly ran lnk proof.",
+            )
+            reviewed = str(review_result.get("review_status") or "").lower() == "reviewed"
+        except (FileNotFoundError, ValueError):
+            reviewed = False
+    memory_result = {**memory_result, "reviewed": reviewed}
+    _core_rebuild_index(wiki_dir)
+    backlinks = _build_backlinks(wiki_dir)
+    _core_atomic_write_json(wiki_dir / "_backlinks.json", backlinks)
+
+    query_text = "cross-agent proof local memory"
+    recall_payload = _query_link(wiki_dir, query_text, budget="micro")
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    recall_found = _proof_recall_found(recall_payload, PROOF_MEMORY_TITLE)
+    ready = bool(status_payload.get("ready")) and recall_found
+    command_target = str(target)
+    payload = {
+        "target": command_target,
+        "created": created,
+        "ready": ready,
+        "status": status_payload,
+        "memory": memory_result,
+        "recall": {
+            "query": query_text,
+            "found": recall_found,
+            "budget": "micro",
+            "estimated_tokens": recall_payload.get("estimated_tokens"),
+            "recall_capsule": recall_payload.get("recall_capsule"),
+        },
+        "prompts": {
+            "agent_a": "remember that I want Link memory shared across my local agents",
+            "agent_b": "start with Link before we continue, then tell me what Link remembers about cross-agent proof",
+        },
+        "commands": {
+            "start": _display_command(["link", "start", command_target, "--task", "cross-agent proof"]),
+            "recall": _display_command(["link", "query", query_text, command_target, "--budget", "micro"]),
+            "mcp": _display_command(["link", "connect", "codex", command_target]),
+            "serve": _display_command(["link", "serve", command_target, "--port", str(port)]),
+        },
+        "url": f"http://127.0.0.1:{port}",
+    }
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        if serve:
+            return serve_wiki(target, port=port)
+        return 0 if ready else 1
+
+    code, text = _core_render_proof_text(payload)
+    _print_text(text)
+    if serve:
+        return serve_wiki(target, port=port)
+    return code
+
+
 def try_link(
     target: Path,
     *,
@@ -2266,7 +2392,7 @@ def try_link(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR)
+    parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
     _configure_link_command_display()
     try:
@@ -2275,6 +2401,7 @@ def main(argv: list[str] | None = None) -> int:
             "serve": serve_wiki,
             "demo": create_demo,
             "try": try_link,
+            "proof": proof,
             "onboard": onboard,
             "welcome": welcome,
             "prompts": starter_prompts,

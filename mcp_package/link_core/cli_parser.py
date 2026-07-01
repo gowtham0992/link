@@ -11,10 +11,14 @@ from .version import LINK_VERSION
 
 
 DEFAULT_DEMO_DIR = "link-demo"
+DEFAULT_PROOF_DIR = "link-proof"
 CliHandler = Callable[..., int]
 
 
-def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.ArgumentParser:
+def build_cli_parser(
+    default_demo_dir: str = DEFAULT_DEMO_DIR,
+    default_proof_dir: str = DEFAULT_PROOF_DIR,
+) -> argparse.ArgumentParser:
     """Build the Link CLI argument parser."""
     parser = argparse.ArgumentParser(prog="link.py", description="Link command runner")
     parser.add_argument("--version", action="version", version=f"Link {LINK_VERSION}")
@@ -39,6 +43,13 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     try_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof loop")
     try_cmd.add_argument("--port", type=int, default=3000)
     try_cmd.add_argument("--json", action="store_true", help="print machine-readable try data")
+
+    proof_cmd = sub.add_parser("proof", help="prove cross-agent memory continuity in a local demo workspace")
+    proof_cmd.add_argument("target", nargs="?", default=default_proof_dir)
+    proof_cmd.add_argument("--force", action="store_true", help="replace an existing Link proof workspace")
+    proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
+    proof_cmd.add_argument("--port", type=int, default=3000)
+    proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
 
     onboard_cmd = sub.add_parser("onboard", help="set up a real Link workspace and print the agent-first next steps")
     onboard_cmd.add_argument("target", nargs="?", default="~/link")
@@ -361,6 +372,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["demo"](Path(args.target), force=args.force)
     if command == "try":
         return handlers["try"](
+            Path(args.target),
+            force=args.force,
+            serve=args.serve,
+            port=args.port,
+            json_output=args.json,
+        )
+    if command == "proof":
+        return handlers["proof"](
             Path(args.target),
             force=args.force,
             serve=args.serve,

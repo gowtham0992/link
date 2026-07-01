@@ -117,6 +117,28 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
         self.assertEqual(payload["prompts"][3]["prompt"], "what does Link remember about this project?")
 
+    def test_proof_creates_and_recalls_cross_agent_memory(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-proof-test-"))
+        target = tmp / "link-proof"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.proof(target, force=True, json_output=True)
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ready"])
+        self.assertTrue(payload["created"])
+        self.assertTrue(payload["memory"]["created"])
+        self.assertTrue(payload["memory"]["reviewed"])
+        self.assertTrue(payload["recall"]["found"])
+        self.assertEqual(payload["recall"]["budget"], "micro")
+        self.assertEqual(payload["status"]["memory_count"], 1)
+        self.assertEqual(payload["status"]["needs_review_count"], 0)
+        self.assertIn("Cross-agent Link proof", payload["memory"]["title"])
+        self.assertTrue((target / "wiki/memories").is_dir())
+        self.assertIn("start with Link", payload["prompts"]["agent_b"])
+
     def test_onboard_json_seeds_memory_and_personalizes_prompt(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
         target = tmp / "my-link"

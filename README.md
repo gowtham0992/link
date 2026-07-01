@@ -92,6 +92,17 @@ readiness, runs a compact query/brief proof, and prints the agent prompts and
 viewer command. Windows, source checkout, MCP-only, and skill-first setup live
 in the [First 10 Minutes guide](https://gowtham0992.github.io/link/getting-started.html).
 
+Want the cross-agent aha without a full demo wiki?
+
+```bash
+lnk proof
+```
+
+`lnk proof` creates a clean local proof workspace, writes one reviewed memory,
+then recalls it through the same bounded path used by the CLI, official skills,
+and MCP. It is the fastest way to see that one local memory can be reused by
+multiple agents without the web viewer running.
+
 When you are ready to use Link for real memory, run one guided command:
 
 ```bash

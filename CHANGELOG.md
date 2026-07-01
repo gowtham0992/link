@@ -14,6 +14,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added token-efficient recall capsules with a `micro` budget, rank signals, estimated token counts, and follow-up guidance so agents can retrieve the right memory before expanding context.
 - Added `scripts/smoke_recall_quality.py` to exercise recall quality and token-budget behavior across representative memory queries.
 - Added `lnk onboard` to create or repair a real `~/link` workspace, check health, optionally seed a first memory, preview or write agent MCP config, and print first prompts in one guided flow.
+- Added `lnk proof`, a clean cross-agent continuity demo that creates a local proof workspace, writes one reviewed memory, and recalls it through the same bounded path used by CLI, skills, and MCP.
 - Added a local `/onboard` viewer page that turns health, first memory, agent wiring, and starter prompts into one copyable setup checklist.
 - Added `/onboard` links to first-run output, starter prompts, the local home page, the health page, HTTP viewer smoke coverage, and large-wiki smoke guidance.
 - Added TTY-only CLI styling for human output while keeping JSON and non-TTY output plain for agents and scripts.

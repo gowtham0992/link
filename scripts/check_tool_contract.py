@@ -37,6 +37,7 @@ EXPECTED_CLI_COMMANDS = {
     "onboard",
     "operations",
     "profile",
+    "proof",
     "prompts",
     "propose-memories",
     "query",

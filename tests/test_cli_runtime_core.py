@@ -5,6 +5,7 @@ from mcp_package.link_core.cli_runtime import (
     render_init_text,
     render_mcp_connect_text,
     render_onboard_text,
+    render_proof_text,
     render_start_text,
     render_starter_prompts_text,
     render_try_text,
@@ -145,6 +146,38 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Ask an agent:", text)
         self.assertIn("http://127.0.0.1:3000/onboard", text)
         self.assertIn("lnk next /tmp/link-demo", text)
+
+    def test_render_proof_text(self):
+        code, text = render_proof_text({
+            "target": "/tmp/link-proof",
+            "created": True,
+            "ready": True,
+            "memory": {
+                "created": True,
+                "reviewed": True,
+                "title": "Cross-agent Link proof",
+            },
+            "recall": {"found": True},
+            "prompts": {
+                "agent_a": "remember that I want Link memory shared across my local agents",
+                "agent_b": "start with Link before we continue",
+            },
+            "commands": {
+                "start": "lnk start /tmp/link-proof --task 'cross-agent proof'",
+                "recall": "lnk query 'cross-agent proof local memory' /tmp/link-proof --budget micro",
+                "mcp": "lnk connect codex /tmp/link-proof",
+                "serve": "lnk serve /tmp/link-proof --port 3000",
+            },
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Cross-agent memory continuity works", text)
+        self.assertIn("Workspace: created local Markdown wiki", text)
+        self.assertIn("Memory: created and reviewed", text)
+        self.assertIn("same bounded recall path used by CLI, skills, and MCP", text)
+        self.assertIn("Try it with two agents", text)
+        self.assertIn("No viewer required", text)
+        self.assertIn("Result: proof passed", text)
 
     def test_render_onboard_text_preview(self):
         code, text = render_onboard_text({
