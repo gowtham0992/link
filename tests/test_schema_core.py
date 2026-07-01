@@ -32,6 +32,35 @@ class SchemaCoreTests(unittest.TestCase):
         self.assertTrue((wiki / "memories").is_dir())
         self.assertEqual(schema_status(wiki)["status"], "current")
 
+    def test_migrate_aged_schema_fixture_preserves_existing_pages(self):
+        wiki = Path(tempfile.mkdtemp(prefix="link-schema-aged-")) / "wiki"
+        (wiki / "sources").mkdir(parents=True)
+        (wiki / "concepts").mkdir()
+        (wiki / "sources" / "release-notes.md").write_text(
+            "---\ntype: source\ntitle: Release notes\n---\n"
+            "# Release notes\n\n> **TLDR:** Older source page.\n",
+            encoding="utf-8",
+        )
+        (wiki / "concepts" / "agent-memory.md").write_text(
+            "---\ntype: concept\ntitle: Agent memory\n---\n"
+            "# Agent memory\n\n> **TLDR:** Existing concept.\n",
+            encoding="utf-8",
+        )
+        old_marker = {"schema": "link-wiki", "version": 0, "updated_at": "2026-01-01T00:00:00Z"}
+        (wiki / "_link_schema.json").write_text(json.dumps(old_marker), encoding="utf-8")
+
+        result = migrate_wiki(wiki)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["migrated"])
+        self.assertEqual(result["previous"]["status"], "old")
+        self.assertIn("wrote _link_schema.json", result["changes"])
+        self.assertTrue((wiki / "memories").is_dir())
+        self.assertTrue((wiki / "comparisons").is_dir())
+        self.assertIn("Older source page", (wiki / "sources" / "release-notes.md").read_text(encoding="utf-8"))
+        self.assertIn("Existing concept", (wiki / "concepts" / "agent-memory.md").read_text(encoding="utf-8"))
+        self.assertEqual(schema_status(wiki)["status"], "current")
+
     def test_migrate_wiki_is_idempotent(self):
         wiki = Path(tempfile.mkdtemp(prefix="link-schema-core-")) / "wiki"
         migrate_wiki(wiki)
