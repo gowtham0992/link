@@ -289,6 +289,9 @@ from link_core.validation import (
 from link_core.version import (
     LINK_VERSION,
 )
+from link_core.cli_style import (
+    style_cli_text as _core_style_cli_text,
+)
 from link_core.status import (
     link_status as _core_link_status,
 )
@@ -391,8 +394,12 @@ def _emit_json_or_text(
         print(json.dumps(payload, indent=2))
         return json_code
     code, text = renderer(payload)
-    print(text)
+    _print_text(text)
     return code
+
+
+def _print_text(text: object) -> None:
+    print(_core_style_cli_text(str(text)))
 
 
 def _recent_memories(records: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -646,7 +653,7 @@ def doctor(target: Path, fix: bool = False) -> int:
         secret_name_patterns=SECRET_NAME_PATTERNS,
         skip_suffixes=SKIP_SCAN_SUFFIXES,
     )
-    print(_core_render_doctor_report(report))
+    _print_text(_core_render_doctor_report(report))
     return 0 if report.healthy else 1
 
 
@@ -659,7 +666,7 @@ def validate(target: Path, strict: bool = False, json_output: bool = False) -> i
         return 0 if payload["passed"] else 1
 
     code, text = _core_render_validate_text(payload, wiki_dir=wiki_dir)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -672,7 +679,7 @@ def migrate(target: Path, json_output: bool = False) -> int:
         return 0 if payload["ok"] else 1
 
     code, text = _core_render_migrate_text(payload, wiki_dir=wiki_dir)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -685,7 +692,7 @@ def status(target: Path, include_validation: bool = False, json_output: bool = F
         return 0 if payload["ready"] else 1
 
     code, text = _core_render_status_text(payload, wiki_dir=wiki_dir, version=LINK_VERSION)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -760,7 +767,7 @@ def health(target: Path, json_output: bool = False) -> int:
     if json_output:
         print(json.dumps(payload, indent=2))
         return code
-    print(_render_health_text(payload))
+    _print_text(_render_health_text(payload))
     return code
 
 
@@ -772,7 +779,7 @@ def operations(target: Path, limit: int = 20, json_output: bool = False) -> int:
     if json_output:
         print(json.dumps(payload, indent=2))
         return code
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -791,7 +798,7 @@ def backup(
             print(json.dumps(payload, indent=2))
             return 0
         code, text = _core_render_backup_list_text(payload)
-        print(text)
+        _print_text(text)
         return code
 
     try:
@@ -808,7 +815,7 @@ def backup(
         return 0
 
     code, text = _core_render_backup_created_text(payload, include_raw=include_raw)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -842,7 +849,7 @@ def restore_backup(
         return 0 if payload.get("restored") or payload.get("confirmation_required") else 1
 
     code, text = _core_render_backup_restore_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -868,7 +875,7 @@ def compliance_export(
             print(json.dumps({"wrote": str(output_path), "export": payload}, indent=2))
             return 0
         code, text = _core_render_compliance_export_text(payload, output=str(output_path))
-        print(text)
+        _print_text(text)
         return code
     print(json.dumps(payload, indent=2))
     return 0
@@ -881,7 +888,7 @@ def team_sync(target: Path, remote: str | None = None, json_output: bool = False
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_team_sync_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -930,7 +937,7 @@ def ingest_status(target: Path, json_output: bool = False) -> int:
         print(json.dumps(status, indent=2))
         return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
 
-    print(_core_render_ingest_status_text(str(target), status))
+    _print_text(_core_render_ingest_status_text(str(target), status))
     return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
 
 
@@ -978,7 +985,7 @@ def rebuild_backlinks(target: Path) -> int:
         page_count=page_count,
         edge_count=edge_count,
     )
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -993,7 +1000,7 @@ def rebuild_index(target: Path) -> int:
         print(f"Could not rebuild index: {exc}", file=sys.stderr)
         return 1
     code, text = _core_render_rebuild_index_text(result, index_path=wiki_dir / "index.md")
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1089,7 +1096,7 @@ def propose_memories(
         return 0
 
     code, text = _core_render_propose_memories_text(result)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1158,7 +1165,7 @@ def capture_session(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_capture_session_text(payload))
+    _print_text(_core_render_capture_session_text(payload))
     return 0
 
 
@@ -1194,7 +1201,7 @@ def capture_inbox(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_capture_inbox_text(payload))
+    _print_text(_core_render_capture_inbox_text(payload))
     return 0
 
 
@@ -1301,7 +1308,7 @@ def accept_capture(
         return 0 if payload["accepted"] else 1
 
     code, text = _core_render_accept_capture_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1343,7 +1350,7 @@ def redact_capture(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_redact_capture_text(payload))
+    _print_text(_core_render_redact_capture_text(payload))
     return 0
 
 
@@ -1370,7 +1377,7 @@ def delete_capture(
             print(json.dumps(payload, indent=2))
         else:
             _, text = _core_render_delete_capture_text(payload, target=target)
-            print(text)
+            _print_text(text)
         return 1
 
     _append_log(
@@ -1384,7 +1391,7 @@ def delete_capture(
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_delete_capture_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1478,7 +1485,7 @@ def recall(
         project=project_name,
         target=target,
     )
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1545,7 +1552,7 @@ def forget_memory(target: Path, identifier: str, confirm: bool = False, json_out
     if not result.get("found"):
         print(text, file=sys.stderr)
     else:
-        print(text)
+        _print_text(text)
     return code
 
 
@@ -1629,7 +1636,7 @@ def explain_memory(target: Path, identifier: str, json_output: bool = False) -> 
         return 0
 
     code, text = _core_render_explain_memory_text(explanation)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1652,7 +1659,7 @@ def query(
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_query_text(payload, query_text=query_text, command_target=str(target))
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1684,7 +1691,7 @@ def graph_summary(
         return 0
 
     code, text = _core_render_graph_summary_text(payload, topic=topic)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1714,7 +1721,7 @@ def benchmark(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_benchmark_text(payload))
+    _print_text(_core_render_benchmark_text(payload))
     return 0
 
 
@@ -1743,7 +1750,7 @@ def brief(
         return 0
 
     code, text = _core_render_brief_text(payload, query=query, project=project_name)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1795,7 +1802,7 @@ def start(
     _, brief_text = _core_render_brief_text(brief_payload, query=task, project=project_name)
     text_payload = {**payload, "brief_text": brief_text}
     code, text = _core_render_start_text(text_payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1813,7 +1820,7 @@ def profile(target: Path, limit: int = 10, project: str | None = None, json_outp
         return 0
 
     code, text = _core_render_profile_text(profile_data, target=target, project=project_name)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1847,7 +1854,7 @@ def memory_audit(target: Path, limit: int = 10, project: str | None = None, json
         return 0
 
     code, text = _core_render_memory_audit_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1885,7 +1892,7 @@ def verify_mcp(
         return 0 if status["ready"] else 1
 
     code, text = _core_render_mcp_verify_text(status)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1918,7 +1925,7 @@ def connect_mcp(
         return 0 if not write or bool(write_status.get("ok")) else 1
 
     code, text = _core_render_mcp_connect_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1933,7 +1940,7 @@ def init_wiki(target: Path) -> int:
     fixes = _apply_doctor_fixes(target)
 
     code, text = _core_render_init_text(target=target, fixes=fixes)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -2052,7 +2059,7 @@ def onboard(
         return 0 if status_payload.get("ready") and not failed else 1
 
     code, text = _core_render_onboard_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -2063,7 +2070,7 @@ def starter_prompts(target: Path, project: str | None = None, json_output: bool 
         return 0
 
     code, text = _core_render_starter_prompts_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -2074,7 +2081,7 @@ def welcome(target: Path, project: str | None = None, json_output: bool = False)
         return 0
 
     code, text = _core_render_welcome_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -2145,7 +2152,7 @@ def create_demo(target: Path, force: bool = False) -> int:
         ]),
         audit_command=_display_command(["python3", str(target / "link.py"), "memory-audit", str(target)]),
     )
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -2226,7 +2233,7 @@ def try_link(
         benchmark_command=payload["commands"]["benchmark"],
         url=payload["url"],
     )
-    print(text)
+    _print_text(text)
     if serve:
         return serve_wiki(target, port=port)
     return code
