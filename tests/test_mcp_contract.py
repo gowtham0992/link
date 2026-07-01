@@ -133,6 +133,38 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["count"], 0)
         self.assertEqual(payload["results"], [])
 
+    def test_cross_surface_memory_written_by_cli_is_recalled_by_mcp(self):
+        with redirect_stdout(StringIO()):
+            code = link_cli.remember(
+                self.target,
+                "User wants cross-agent continuity to work from CLI writes into MCP recall.",
+                title="Cross-agent continuity preference",
+                memory_type="preference",
+                scope="user",
+                source="cli-agent",
+            )
+        self.assertEqual(code, 0)
+        if hasattr(self.server, "_clear_cache"):
+            self.server._clear_cache()
+
+        payload = json.loads(self.server.recall("cross-agent continuity", budget="small"))
+
+        self.assertTrue(payload["found"])
+        self.assertEqual(payload["surface"], "slim")
+        self.assertEqual(payload["tool"], "recall")
+        self.assertEqual(payload["mode"], "query")
+        self.assertTrue(
+            any(item.get("name") == "cross-agent-continuity-preference" for item in payload.get("memory", {}).get("items", [])),
+            payload.get("memory", {}).get("items", []),
+        )
+
+        memory_only = json.loads(self.server.recall("cross-agent continuity", mode="memory"))
+        self.assertEqual(memory_only["mode"], "memory")
+        self.assertTrue(
+            any(item.get("name") == "cross-agent-continuity-preference" for item in memory_only.get("memories", [])),
+            memory_only.get("memories", []),
+        )
+
     def test_query_link_contract(self):
         payload = json.loads(self.server.query_link("agent memory", budget="small"))
 
@@ -251,6 +283,13 @@ class McpContractTests(unittest.TestCase):
             sys.modules.pop(module_name, None)
             restore_mcp_modules(previous_modules)
             sys.argv = previous_argv
+
+    def test_full_surface_instructions_mark_compatibility_surface(self):
+        instructions = self.server._instructions("full")
+
+        self.assertIn("full MCP surface is for compatibility", instructions)
+        self.assertIn("--surface slim", instructions)
+        self.assertIn("one obvious recall tool", instructions)
 
     def test_mcp_prompts_and_resources_contract(self):
         self.assertIn("recall(query='', mode='brief'", self.server.link_start_prompt("release work"))

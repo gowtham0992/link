@@ -1,11 +1,11 @@
 ---
 name: link-memory
-description: Use when a user asks an agent to remember, recall, review, update, archive, restore, forget, or explain local Link memories through the CLI without requiring MCP.
+description: Use for explicit Link memory lifecycle work and after important user-approved decisions: remember, recall, review, update, archive, restore, forget, or explain local memories through the CLI without requiring MCP.
 ---
 
 # Link Memory
 
-Use explicit memory operations. In a source checkout, replace `lnk` with `python3 link.py`. Do not silently save durable memory; only remember when the user asks or approves a proposal.
+Use explicit memory operations. In a source checkout, replace `lnk` with `python3 link.py`. Do not silently save durable memory; only remember when the user asks, approves a proposal, or explicitly confirms an important decision should become durable memory.
 
 1. Prime before work:
    ```bash

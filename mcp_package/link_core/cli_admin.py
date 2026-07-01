@@ -162,6 +162,14 @@ def render_backup_restore_text(payload: Mapping[str, object], *, target: object 
         safety = payload.get("safety_backup")
         if isinstance(safety, Mapping):
             lines.append(f"Safety backup: {safety.get('path')}")
+        integrity = payload.get("integrity")
+        if isinstance(integrity, Mapping) and integrity.get("checked"):
+            result = "passed" if integrity.get("passed") else "failed"
+            lines.append(
+                "Integrity: "
+                f"{result} "
+                f"({integrity.get('error_count', 0)} errors, {integrity.get('warning_count', 0)} warnings)"
+            )
         lines.append("Result: restored")
         return 0, "\n".join(lines)
     lines.extend([

@@ -133,6 +133,22 @@ class StatusCoreTests(unittest.TestCase):
         self.assertFalse(payload["ready"])
         self.assertEqual(payload["warnings"][0]["code"], "cache_read_warnings")
 
+    def test_link_status_warns_when_search_uses_token_fallback(self):
+        wiki = self.make_wiki()
+        cache = build_wiki_cache(wiki)
+        cache["search_backend"] = "token-index"
+        cache["fts_index_info"] = {
+            "available": False,
+            "persistent": False,
+            "reused": False,
+            "path": "",
+        }
+
+        payload = link_status(wiki, cache=cache)
+
+        self.assertTrue(payload["ready"])
+        self.assertIn("search_backend_fallback", [warning["code"] for warning in payload["warnings"]])
+
     def test_link_status_blocks_ready_on_stale_operation_marker(self):
         wiki = self.make_wiki()
         begin_operation(wiki, "remember", "Saved memory", timestamp="2000-01-01T00:00:00Z")

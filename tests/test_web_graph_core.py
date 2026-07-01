@@ -107,6 +107,9 @@ class WebGraphCoreTests(unittest.TestCase):
         self.assertIn('id="graph-copy-link"', html)
         self.assertIn("Load all data (10 nodes)", html)
         self.assertIn("the canvas remains capped until you narrow it.", html)
+        self.assertIn("<strong>Bounded overview:</strong>", html)
+        self.assertIn("showing 3 of 10 nodes", html)
+        self.assertIn("Use search, type filters, focused neighborhoods, or Load all data", html)
         self.assertIn('id="graph-search"', html)
         self.assertIn('id="graph-category"', html)
         self.assertIn('id="graph-size"', html)
@@ -167,6 +170,7 @@ class WebGraphCoreTests(unittest.TestCase):
         )
 
         self.assertNotIn("Load all data", html)
+        self.assertNotIn("Bounded overview", html)
 
     def test_render_graph_script_uses_supplied_json_payloads(self):
         script = render_graph_script(

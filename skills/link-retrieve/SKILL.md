@@ -1,11 +1,11 @@
 ---
 name: link-retrieve
-description: Use when a user asks an agent to search, answer from, summarize, brief from, or navigate Link context through the CLI without loading the whole wiki or configuring MCP.
+description: Use before answering work that may depend on user memory, project history, source-backed notes, or prior decisions; retrieve compact Link context through the CLI without loading the whole wiki or requiring MCP.
 ---
 
 # Link Retrieve
 
-Use bounded CLI commands so the agent does not dump the whole wiki into context. In a source checkout, replace `lnk` with `python3 link.py`.
+Use bounded CLI commands so the agent does not dump the whole wiki into context. Load this skill proactively at the first substantive turn of a session, before project/release/debug/design work, or whenever the answer may depend on prior Link memory. In a source checkout, replace `lnk` with `python3 link.py`.
 
 1. If readiness is unclear, start with:
    ```bash

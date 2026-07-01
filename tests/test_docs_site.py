@@ -35,6 +35,11 @@ class DocsSiteTests(unittest.TestCase):
         self.assertIn("python3 scripts/smoke_large_wiki.py --pages 10000", scale_html)
         self.assertIn("Current Limits", scale_html)
 
+        why_html = (ROOT / "docs/why-link.html").read_text(encoding="utf-8")
+        self.assertIn("Compared With Alternatives", why_html)
+        for competitor in ("Obsidian", "Mem0", "Letta", "Graphiti", "Built-in agent memory", "Plain RAG"):
+            self.assertIn(competitor, why_html)
+
         ui_html = (ROOT / "docs/ui.html").read_text(encoding="utf-8")
         self.assertIn("http://127.0.0.1:3000/onboard", ui_html)
         self.assertIn("browser version of <code>lnk onboard</code>", ui_html)

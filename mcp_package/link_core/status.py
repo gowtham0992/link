@@ -140,6 +140,12 @@ def link_status(
                     "message": f"{read_warning_count} wiki page(s) could not be read; search and page counts may be incomplete.",
                     "detail": str((wiki_cache.get("read_warnings") or [])[:5]),
                 })
+            if pages and search_backend != "sqlite-fts":
+                warnings.append({
+                    "code": "search_backend_fallback",
+                    "message": "SQLite FTS search is not active; Link is using the slower token-index fallback.",
+                    "detail": "Install/use a Python build with sqlite3 FTS5 support for faster search on larger wikis.",
+                })
         except Exception as exc:
             pages = []
             warnings.append(_warning(

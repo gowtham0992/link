@@ -61,6 +61,27 @@ class OfficialSkillsTests(unittest.TestCase):
                 for forbidden in forbidden_claims:
                     self.assertNotIn(forbidden, lower)
 
+    def test_skills_have_ambient_agent_triggers(self):
+        expectations = {
+            "link-health": ("start", "readiness", "installs"),
+            "link-retrieve": ("before answering", "first substantive turn", "prior Link memory"),
+            "link-ingest": ("raw files", "drops files", "learn next"),
+            "link-memory": ("explicit", "approves a proposal", "durable memory"),
+        }
+        passive_only_phrases = (
+            "use when a user asks",
+            "use when a user wants",
+            "use when users ask",
+        )
+        for name, required in expectations.items():
+            with self.subTest(skill=name):
+                text = read_skill(name)
+                lower = text.lower()
+                for phrase in passive_only_phrases:
+                    self.assertNotIn(phrase, lower)
+                for phrase in required:
+                    self.assertIn(phrase.lower(), lower)
+
     def test_docs_and_readme_reference_official_skills(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         docs = (ROOT / "docs/skills.html").read_text(encoding="utf-8")

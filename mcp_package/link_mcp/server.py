@@ -94,7 +94,10 @@ def _instructions(surface: str) -> str:
             "silently save durable memory; propose or review first when unsure."
         )
     return (
-        "Link is local personal memory for agents. Use link_status when "
+        "Link is local personal memory for agents. This full MCP surface is "
+        "for compatibility and advanced workflows; new clients should prefer "
+        "--surface slim so the model sees one obvious recall tool and one "
+        "obvious remember tool. Use link_status when "
         "connecting to Link or troubleshooting setup/readiness. Start with "
         "migrate_wiki if link_status reports a missing or old schema marker. "
         "Use starter_prompts when the user asks what to try after install. "
