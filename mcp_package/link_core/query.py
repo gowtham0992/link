@@ -142,6 +142,7 @@ def _compact_memory(memory: Mapping[str, object]) -> dict[str, object]:
         "summary": memory.get("tldr") or memory.get("snippet") or "",
         "score": memory.get("score", 0),
         "rank_score": memory.get("rank_score", 0),
+        "confidence": memory.get("confidence", ""),
         "recall": memory.get("recall", {}),
         "review_issue_count": memory.get("review_issue_count", 0),
         "highest_review_severity": memory.get("highest_review_severity", "none"),
@@ -464,6 +465,12 @@ def query_link(
     review = _compact_review(brief.get("review", {}), limit=limits["memories"])
     if review.get("count"):
         guidance.insert(2, "Some memories need review; treat provisional memories carefully.")
+    if memories and all(str(memory.get("confidence") or "") == "weak" for memory in memories):
+        guidance.insert(
+            1,
+            "Memory matches are weak (shared words only); verify with the user "
+            "before acting on them and do not present them as known preferences.",
+        )
     budget_report = {
         "memories": _budget_item(len(memories), limits["memories"], memory_has_more),
         "wiki_search": _budget_item(len(search_results), limits["search_results"], search_has_more),

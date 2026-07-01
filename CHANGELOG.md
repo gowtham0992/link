@@ -8,6 +8,10 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Added
 
+- Added per-memory recall `confidence` labels (`strong`, `moderate`, `weak`) based on significant-token coverage, so agents can tell a real preference match from an incidental shared word before acting on it.
+- Added lightweight suffix stemming to memory recall scoring so close paraphrases like "commits" still find memories phrased with "committing", without embeddings or external services.
+- Added weak-match guidance to recall packets and CLI recall output: when every matched memory is a weak lexical match, Link now says so and tells the agent to verify with the user instead of presenting it as a known preference.
+
 - Added a slim MCP surface for LLM-native clients so agents can rely on a smaller default set of high-signal tools while the full tool surface remains available for compatibility.
 - Added MCP prompt and resource coverage so clients can expose Link recall, remember, ingest, and review workflows as native agent actions instead of requiring users to memorize tool names.
 - Added MCP `link_start` and `link://instructions` so clients can attach the portable startup loop: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads.
@@ -25,6 +29,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added cache-backed backlink rebuild logic so rebuilds reuse parsed page data while preserving existing body-only/full-link behavior.
 
 ### Changed
+
+- Seeded the generated demo with four realistic memories (three reviewed, one pending) so the first recall, brief, and viewer walkthrough show a believable memory system and the review loop at the same time.
 
 - Added `lnk start`, a CLI startup loop that combines readiness, validation state, and a local memory brief for agents using skills or shell instead of MCP.
 - Updated agent installers and MCP config writers to prefer the slim MCP surface by default, reducing tool-list noise while keeping advanced tools available.

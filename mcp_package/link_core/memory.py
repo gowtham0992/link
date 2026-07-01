@@ -181,6 +181,62 @@ def significant_memory_tokens(value: str) -> set[str]:
     }
 
 
+def stem_memory_token(token: str) -> str:
+    """Light deterministic suffix stemming so close paraphrases still match.
+
+    Intentionally tiny: no dictionaries, no language models, no external
+    services. Enough to make "committing" match "commit" and "answers"
+    match "answer" without changing Link's local-first story.
+    """
+    for suffix in ("ing", "ed", "es", "s"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            return token[: -len(suffix)]
+    return token
+
+
+def stemmed_memory_tokens(tokens: set[str]) -> set[str]:
+    return {stem_memory_token(token) for token in tokens}
+
+
+def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
+    """Classify how strongly a recalled memory matches the query.
+
+    Lexical recall can surface a memory on one incidental shared word. The
+    confidence label lets agents treat weak matches as hints to verify with
+    the user instead of facts to act on.
+
+    - strong: the query appears verbatim in the title/TLDR, or every
+      significant query token appears in the memory head (title/TLDR/tags).
+    - moderate: at least half of the significant query tokens appear
+      anywhere in the memory, or a significant query token appears in the
+      title (the intent-bearing summary of the memory).
+    - weak: everything else that still crossed the recall score floor.
+    """
+    q = query.lower().strip()
+    significant = stemmed_memory_tokens(significant_memory_tokens(q))
+    title = str(record.get("title", "")).lower()
+    tldr = str(record.get("tldr", "")).lower()
+    tags = " ".join(str(tag).lower() for tag in record.get("tags", []))
+    body = str(record.get("body", "")).lower()
+    if q and (q in title or q in tldr):
+        return "strong"
+    if not significant:
+        return "weak"
+    title_tokens = stemmed_memory_tokens(memory_tokens(title))
+    head_tokens = title_tokens | stemmed_memory_tokens(
+        memory_tokens(tldr) | memory_tokens(tags)
+    )
+    all_tokens = head_tokens | stemmed_memory_tokens(memory_tokens(body))
+    if significant <= head_tokens:
+        return "strong"
+    coverage = len(significant & all_tokens) / len(significant)
+    if coverage >= 0.5:
+        return "moderate"
+    if significant & title_tokens:
+        return "moderate"
+    return "weak"
+
+
 def expanded_memory_query_tokens(value: str) -> set[str]:
     """Return query tokens plus small local synonyms for agent-memory recall.
 
@@ -1872,6 +1928,19 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
             score += 2
         if token in body_tokens:
             score += 1
+    # Stemmed pass: catch close paraphrases ("committing" vs "commit push")
+    # that raw token equality misses, at lower weight than exact hits.
+    exact_all = title_tokens | tldr_tokens | tags_tokens | body_tokens
+    stemmed_head = stemmed_memory_tokens(title_tokens | tldr_tokens | tags_tokens)
+    stemmed_body = stemmed_memory_tokens(body_tokens)
+    for token in significant_tokens:
+        if token in exact_all:
+            continue
+        stem = stem_memory_token(token)
+        if stem in stemmed_head:
+            score += 3
+        elif stem in stemmed_body:
+            score += 1
     return score
 
 
@@ -1957,6 +2026,7 @@ def recall_memories(
             slim = slim_memory(record)
             slim["score"] = score
             slim["rank_score"] = rank_score
+            slim["confidence"] = memory_recall_confidence(record, q)
             slim["recall"] = recall_state(record, issues)
             slim["review_issue_count"] = len(issues)
             slim["highest_review_severity"] = (

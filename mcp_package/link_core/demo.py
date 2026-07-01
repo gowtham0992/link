@@ -584,6 +584,102 @@ The user wants [[link]] to feel like local personal memory for agents rather tha
 
 Captured as demo product intent for the first-run wiki.
 """,
+    "wiki/memories/keep-answers-short-and-cite-wiki-sources.md": """---
+type: memory
+title: "Keep answers short and cite wiki sources"
+memory_type: preference
+scope: user
+status: active
+date_captured: "2026-05-02T00:00:00Z"
+source: "demo"
+review_status: reviewed
+reviewed_at: "2026-05-02T00:00:00Z"
+review_note: "Seeded as a reviewed demo preference."
+tags: [memory, style, answers]
+aliases: ["answer style", "response style"]
+---
+
+# Keep answers short and cite wiki sources
+
+> **TLDR:** The user prefers short, direct answers that cite the wiki pages they came from.
+
+## Memory
+
+When answering from Link, keep responses short and point to the [[knowledge-graph]] pages behind each claim instead of repeating whole documents.
+
+## Use This When
+
+- Formatting any answer that uses Link context.
+- Deciding how much wiki text to quote in a reply.
+
+## Source
+
+Seeded demo preference for the first-run wiki.
+""",
+    "wiki/memories/keep-agent-memory-in-local-markdown.md": """---
+type: memory
+title: "Keep agent memory in local Markdown"
+memory_type: decision
+scope: project
+status: active
+date_captured: "2026-05-02T00:00:00Z"
+source: "demo"
+review_status: reviewed
+reviewed_at: "2026-05-02T00:00:00Z"
+review_note: "Seeded as a reviewed demo decision."
+tags: [memory, decision, local-first]
+aliases: ["local markdown decision", "no cloud sync"]
+---
+
+# Keep agent memory in local Markdown
+
+> **TLDR:** The project decided agent memory stays in local Markdown files with no cloud sync.
+
+## Memory
+
+This project keeps durable agent memory in plain local Markdown under `wiki/`, following [[local-first-software]]. No cloud sync, no hosted memory profile, no embeddings service.
+
+## Use This When
+
+- An agent or teammate proposes syncing memory to a hosted service.
+- Explaining where memory lives and how to audit it.
+
+## Source
+
+Seeded demo decision for the first-run wiki.
+""",
+    "wiki/memories/local-viewer-runs-on-port-3000.md": """---
+type: memory
+title: "Local viewer runs on port 3000"
+memory_type: fact
+scope: project
+status: active
+date_captured: "2026-05-02T00:00:00Z"
+source: "demo"
+review_status: reviewed
+reviewed_at: "2026-05-02T00:00:00Z"
+review_note: "Seeded as a reviewed demo fact."
+tags: [memory, viewer, setup]
+aliases: ["viewer port", "serve port"]
+---
+
+# Local viewer runs on port 3000
+
+> **TLDR:** The local Link viewer serves this wiki at http://127.0.0.1:3000 by default.
+
+## Memory
+
+`lnk serve` binds the read-only local viewer for [[link]] to `127.0.0.1:3000`. It is loopback-only and needs no account or network access.
+
+## Use This When
+
+- Telling the user where to inspect a page, memory, or the graph.
+- Debugging why the viewer is unreachable.
+
+## Source
+
+Seeded demo fact for the first-run wiki.
+""",
     "wiki/explorations/why-link-helps-agents.md": """---
 type: exploration
 title: "Why Link helps agents"
@@ -616,7 +712,7 @@ The answer combines [[agent-memory-session]], [[transformer-reading-notes]], and
 """,
     "wiki/index.md": """# Link Demo Wiki Index
 
-> Last updated: 2026-05-02 | 11 pages | 3 sources
+> Last updated: 2026-05-02 | 14 pages | 3 sources
 
 ## Categories
 
@@ -632,6 +728,9 @@ The answer combines [[agent-memory-session]], [[transformer-reading-notes]], and
 
 ### memories
 - [[prefer-local-personal-memory]] - User preference that Link should behave as local personal memory for agents. preference · user
+- [[keep-answers-short-and-cite-wiki-sources]] - Reviewed style preference for answers built from Link context. preference · user
+- [[keep-agent-memory-in-local-markdown]] - Reviewed decision that memory stays in local Markdown with no cloud sync. decision · project
+- [[local-viewer-runs-on-port-3000]] - Reviewed fact about where the local viewer serves this wiki. fact · project
 
 ### sources
 - [[agent-memory-session]] - Demo note on durable project context. high
@@ -645,7 +744,7 @@ The answer combines [[agent-memory-session]], [[transformer-reading-notes]], and
 
 | Date | Operation | Pages Touched |
 |------|-----------|---------------|
-| 2026-05-02 | demo: create first-run sample wiki | 11 pages |
+| 2026-05-02 | demo: create first-run sample wiki | 14 pages |
 """,
     "wiki/log.md": """# Link Demo Wiki Log
 
@@ -668,9 +767,12 @@ The answer combines [[agent-memory-session]], [[transformer-reading-notes]], and
 - Created: concepts/knowledge-graph.md
 - Created: entities/link.md
 - Created: memories/prefer-local-personal-memory.md
+- Created: memories/keep-answers-short-and-cite-wiki-sources.md
+- Created: memories/keep-agent-memory-in-local-markdown.md
+- Created: memories/local-viewer-runs-on-port-3000.md
 - Created: explorations/why-link-helps-agents.md
 - Rebuilt: wiki/_backlinks.json
-- Pages touched: 11
+- Pages touched: 14
 
 ---
 """,

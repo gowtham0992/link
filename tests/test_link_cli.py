@@ -1196,7 +1196,7 @@ class LinkCliTests(unittest.TestCase):
 
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["count"], 5)
         self.assertEqual(payload["memories"][0]["name"], "local-memory-preference")
         self.assertEqual(payload["memories"][0]["recall"]["state"], "needs_review")
         self.assertEqual(payload["memories"][0]["review_issue_count"], 1)
@@ -1252,9 +1252,9 @@ class LinkCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Link memory profile", out.getvalue())
-        self.assertIn("2 memories", out.getvalue())
-        self.assertIn("preference: 1", out.getvalue())
-        self.assertIn("decision: 1", out.getvalue())
+        self.assertIn("5 memories", out.getvalue())
+        self.assertIn("preference: 2", out.getvalue())
+        self.assertIn("decision: 2", out.getvalue())
         self.assertIn("Keep Memory Mode local", out.getvalue())
 
     def test_profile_json(self):
@@ -1268,8 +1268,8 @@ class LinkCliTests(unittest.TestCase):
 
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["memory_count"], 1)
-        self.assertEqual(payload["by_type"]["preference"], 1)
+        self.assertEqual(payload["memory_count"], 4)
+        self.assertEqual(payload["by_type"]["preference"], 2)
         self.assertEqual(payload["preferences"][0]["name"], "prefer-local-personal-memory")
         self.assertEqual(payload["review_count"], 1)
 
@@ -1299,7 +1299,7 @@ class LinkCliTests(unittest.TestCase):
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
         self.assertEqual(payload["selection"], "query")
-        self.assertEqual(payload["profile"]["memory_count"], 1)
+        self.assertEqual(payload["profile"]["memory_count"], 4)
         self.assertEqual(payload["captures"]["count"], 0)
         self.assertEqual(payload["relevant_memories"][0]["name"], "prefer-local-personal-memory")
         self.assertNotIn("body", payload["relevant_memories"][0])
@@ -1352,7 +1352,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(payload["budget"], "small")
         self.assertIn("memory", payload["strategy"]["mode"])
         self.assertEqual(payload["wiki"]["primary"], "agent-memory")
-        self.assertEqual(payload["memory"]["items"][0]["name"], "prefer-local-personal-memory")
+        self.assertEqual(payload["memory"]["items"][0]["name"], "keep-agent-memory-in-local-markdown")
         self.assertIn("context_packet", payload)
 
     def test_agent_facing_cli_queries_are_bounded(self):
@@ -1949,7 +1949,7 @@ class LinkCliTests(unittest.TestCase):
         with redirect_stdout(profile_out):
             link_cli.profile(target, json_output=True)
         profile_payload = json.loads(profile_out.getvalue())
-        self.assertEqual(profile_payload["active_count"], 0)
+        self.assertEqual(profile_payload["active_count"], 3)
         self.assertEqual(profile_payload["by_status"]["archived"], 1)
         self.assertEqual(profile_payload["archived"][0]["name"], "prefer-local-personal-memory")
 
@@ -1957,7 +1957,7 @@ class LinkCliTests(unittest.TestCase):
         with redirect_stdout(out):
             recall_code = link_cli.recall(target, "local personal memory")
         self.assertEqual(recall_code, 0)
-        self.assertIn("No matching memories found.", out.getvalue())
+        self.assertNotIn("Prefer local personal memory", out.getvalue())
 
         out_json = StringIO()
         with redirect_stdout(out_json):

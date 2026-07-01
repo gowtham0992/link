@@ -59,7 +59,7 @@
         <p>Link is not asking every agent to learn a new notes app. It gives agents a small, repeatable memory contract backed by local Markdown files.</p>
         <div class="grid compact-grid">
           <article class="feature"><h3>Readable storage</h3><p>Raw source notes live in <code>raw/</code>. Structured pages and durable memories live in <code>wiki/</code>.</p></article>
-          <article class="feature"><h3>Bounded recall</h3><p>Agents ask for a task-sized packet instead of dumping the whole wiki into context.</p></article>
+          <article class="feature"><h3>Bounded recall</h3><p>Agents ask for a task-sized packet instead of dumping the whole wiki into context. Each recalled memory carries a <code>confidence</code> label (<code>strong</code>, <code>moderate</code>, <code>weak</code>) so weak lexical matches are verified with the user instead of trusted.</p></article>
           <article class="feature"><h3>Reviewable writes</h3><p>Durable memory writes are explicit, duplicate-checked, conflict-checked, and logged.</p></article>
           <article class="feature"><h3>Local trust</h3><p>The CLI, official skills, HTTP viewer, and MCP server read the same local files. <code>serve.py</code> is not required for recall.</p></article>
         </div>
