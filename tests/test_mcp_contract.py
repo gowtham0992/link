@@ -119,6 +119,45 @@ class McpContractTests(unittest.TestCase):
         self.assertIn("score", payload["results"][0])
         self.assertIn("snippet", payload["results"][0])
 
+    def test_cross_agent_continuity_cli_memory_recalled_by_slim_mcp(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.remember(
+                self.target,
+                "User prefers pnpm as the package manager for Link project work.",
+                title="Prefer pnpm package manager",
+                memory_type="preference",
+                scope="project",
+                tags="tools, package-manager",
+                source="agent-a cli",
+                project="link",
+            )
+        self.assertEqual(code, 0, out.getvalue())
+
+        slim_server, previous_modules, previous_argv, module_name = import_mcp_server(
+            self.target / "wiki",
+            surface="slim",
+        )
+        try:
+            payload = json.loads(slim_server.recall("package manager preference", mode="memory", project="link"))
+        finally:
+            if hasattr(slim_server, "_clear_cache"):
+                slim_server._clear_cache()
+            sys.modules.pop(module_name, None)
+            restore_mcp_modules(previous_modules)
+            sys.argv = previous_argv
+
+        self.assertEqual(payload["surface"], "slim")
+        self.assertEqual(payload["tool"], "recall")
+        self.assertGreaterEqual(payload["count"], 1)
+        self.assertTrue(
+            any(
+                "pnpm" in f"{memory.get('title', '')} {memory.get('tldr', '')} {memory.get('snippet', '')}".lower()
+                for memory in payload["memories"]
+            ),
+            payload,
+        )
+
     def test_search_wiki_handles_invalid_limits(self):
         bad_limit = json.loads(self.server.search_wiki("agent memory", limit="bad"))
         negative_limit = json.loads(self.server.search_wiki("agent memory", limit=-10))

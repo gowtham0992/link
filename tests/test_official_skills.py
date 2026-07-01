@@ -66,7 +66,7 @@ class OfficialSkillsTests(unittest.TestCase):
             "link-health": ("start", "readiness", "installs"),
             "link-retrieve": ("before answering", "first substantive turn", "prior Link memory"),
             "link-ingest": ("raw files", "drops files", "learn next"),
-            "link-memory": ("explicit", "approves a proposal", "durable memory"),
+            "link-memory": ("important user-approved decisions", "propose first", "durable memory"),
         }
         passive_only_phrases = (
             "use when a user asks",

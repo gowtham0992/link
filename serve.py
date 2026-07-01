@@ -183,7 +183,7 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
 )
 from link_core.wiki import (
-    build_backlinks as _core_build_backlinks,
+    build_backlinks_from_cache as _core_build_backlinks_from_cache,
     build_wiki_cache as _core_build_wiki_cache,
     close_wiki_cache as _core_close_wiki_cache,
     context_for_topic as _core_context_for_topic,
@@ -1287,10 +1287,12 @@ def _get_context(topic: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _build_backlinks() -> dict[str, dict[str, list[str]]]:
-    """Scan all wiki pages for [[wikilinks]] and build graph indexes.
-    Returns {"backlinks": {target: [sources]}, "forward": {source: [targets]}}.
-    """
-    return _core_build_backlinks(WIKI_DIR)
+    """Build graph indexes from a fresh parsed wiki cache."""
+    cache = _core_build_wiki_cache(WIKI_DIR, use_persistent_cache=False)
+    try:
+        return _core_build_backlinks_from_cache(cache)
+    finally:
+        _core_close_wiki_cache(cache)
 
 
 def _get_graph_data() -> dict:

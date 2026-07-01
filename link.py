@@ -296,7 +296,7 @@ from link_core.status import (
     link_status as _core_link_status,
 )
 from link_core.wiki import (
-    build_backlinks as _core_build_backlinks,
+    build_backlinks_from_cache as _core_build_backlinks_from_cache,
     build_wiki_cache as _core_build_wiki_cache,
     close_wiki_cache as _core_close_wiki_cache,
     graph_summary as _core_graph_summary,
@@ -307,7 +307,11 @@ del _BUNDLED_CORE
 
 
 def _build_backlinks(wiki_dir: Path) -> dict[str, dict[str, list[str]]]:
-    return _core_build_backlinks(wiki_dir, body_only=False)
+    cache = _core_build_wiki_cache(wiki_dir, use_persistent_cache=False)
+    try:
+        return _core_build_backlinks_from_cache(cache, body_only=False)
+    finally:
+        _core_close_wiki_cache(cache)
 
 
 def _wiki_pages(wiki_dir: Path) -> list[Path]:

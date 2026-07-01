@@ -12,8 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.wiki import (  # noqa: E402
-    build_index_markdown,
     build_backlinks,
+    build_backlinks_from_cache,
+    build_index_markdown,
     build_wiki_cache,
     close_wiki_cache,
     context_for_topic,
@@ -108,6 +109,31 @@ class WikiCoreTests(unittest.TestCase):
         self.assertEqual(cache["forward_links_index"]["agent-memory"], ["link", "retrieval"])
         self.assertIn({"source": "agent-memory", "target": "link"}, graph["edges"])
         self.assertIn({"source": "agent-memory", "target": "retrieval"}, graph["edges"])
+
+    def test_build_backlinks_from_cache_matches_body_scan(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "concepts/agent-memory.md",
+            "---\ntype: concept\ntitle: Agent Memory\n---\n"
+            "# Agent Memory\n\nLinks to [[link]], [[link]], [[retrieval]], and [[missing]].\n",
+        )
+        write_page(
+            wiki,
+            "entities/link.md",
+            "---\ntype: entity\ntitle: Link\n---\n# Link\n\n[[agent-memory]]\n",
+        )
+        write_page(
+            wiki,
+            "concepts/retrieval.md",
+            "---\ntype: concept\ntitle: Retrieval\n---\n# Retrieval\n\n[[retrieval]]\n",
+        )
+
+        cache = build_wiki_cache(wiki)
+        try:
+            self.assertEqual(build_backlinks_from_cache(cache), build_backlinks(wiki))
+        finally:
+            close_wiki_cache(cache)
 
     def test_build_wiki_cache_reports_read_warnings(self):
         wiki = self.make_wiki()

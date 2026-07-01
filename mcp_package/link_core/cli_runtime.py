@@ -15,9 +15,9 @@ def render_init_text(*, target: object, fixes: Sequence[str]) -> tuple[int, str]
     lines.extend([
         "",
         "Next:",
-        f"  {display_command(['link', 'health', command_target])}",
-        f"  {display_command(['link', 'onboard', command_target])}",
-        f"  {display_command(['link', 'serve', command_target])}",
+        f"  {display_command(['lnk', 'health', command_target])}",
+        f"  {display_command(['lnk', 'onboard', command_target])}",
+        f"  {display_command(['lnk', 'serve', command_target])}",
         "  Open http://127.0.0.1:3000/onboard for the browser checklist",
         "  Drop sources into raw/ and ask your agent: ingest raw/<file> into Link",
     ])

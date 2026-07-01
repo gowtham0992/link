@@ -241,7 +241,7 @@ from link_core.schema import (
     migrate_wiki as _core_migrate_wiki,
 )
 from link_core.wiki import (
-    build_backlinks as _core_build_backlinks,
+    build_backlinks_from_cache as _core_build_backlinks_from_cache,
     build_wiki_cache as _core_build_wiki_cache,
     close_wiki_cache as _core_close_wiki_cache,
     context_for_topic as _core_context_for_topic,
@@ -1156,9 +1156,13 @@ def ingest(action: str = "status", strict: bool = False) -> str:
         payload["tool"] = "ingest"
         return json.dumps(payload, ensure_ascii=False)
     if clean_action == "rebuild":
-        index_result = _core_rebuild_index(WIKI_DIR, cache=_build_cache())
-        backlinks = _core_build_backlinks(WIKI_DIR)
-        _core_atomic_write_json(WIKI_DIR / "_backlinks.json", backlinks)
+        cache = _core_build_wiki_cache(WIKI_DIR, use_persistent_cache=False)
+        try:
+            index_result = _core_rebuild_index(WIKI_DIR, cache=cache)
+            backlinks = _core_build_backlinks_from_cache(cache)
+            _core_atomic_write_json(WIKI_DIR / "_backlinks.json", backlinks)
+        finally:
+            _core_close_wiki_cache(cache)
         _clear_cache()
         return json.dumps({
             "surface": "slim",
@@ -1999,14 +2003,18 @@ def rebuild_index() -> str:
 
 @_full_tool()
 def rebuild_backlinks() -> str:
-    """Rebuild the wiki's backlink index by scanning all [[wikilinks]].
+    """Rebuild the wiki's backlink index from the parsed wiki cache.
 
     Call this after ingesting new sources or running lint to ensure
     the graph index is up to date. Updates wiki/_backlinks.json with
     both reverse links (backlinks) and forward links.
     """
     try:
-        result = _core_build_backlinks(WIKI_DIR)
+        cache = _core_build_wiki_cache(WIKI_DIR, use_persistent_cache=False)
+        try:
+            result = _core_build_backlinks_from_cache(cache)
+        finally:
+            _core_close_wiki_cache(cache)
     except OSError as exc:
         return json.dumps({"rebuilt": False, "error": f"Could not rebuild backlinks: {exc}"}, ensure_ascii=False)
     bl_path = WIKI_DIR / "_backlinks.json"

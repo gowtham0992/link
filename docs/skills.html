@@ -55,7 +55,7 @@
       <article class="doc-content">
         <h2 id="why">Why Skills</h2>
         <p>MCP gives Link structured tool calls, but it should not be the only path. If an agent can run local commands, it can use Link through <code>lnk</code> without an MCP server, background viewer, or extra client configuration. From a source checkout, the same workflows work with <code>python3 link.py</code>.</p>
-        <p>The skills are intentionally proactive. Retrieval should load before work that may depend on previous context, health should load before trusting a changed wiki, ingest should load when raw files appear, and memory should load when the user approves something durable.</p>
+        <p>The skills are intentionally proactive. Retrieval should load before work that may depend on previous context, health should load before trusting a changed wiki, ingest should load when raw files appear, and memory should load after important decisions so the agent can propose durable memory for review.</p>
         <div class="callout">
           <strong><code>lnk serve</code> is optional</strong>
           <p>The web viewer is only for humans. Skills, CLI commands, and MCP tools all read the same local Markdown wiki directly.</p>
@@ -71,7 +71,7 @@
             <tr><td><code>link-health</code></td><td>Start of Link work, after installs/upgrades, interrupted writes, backups, repair, validation.</td><td><code>lnk health</code></td></tr>
             <tr><td><code>link-retrieve</code></td><td>Before answering context-sensitive work: bounded query packets, briefs, graph summaries, benchmarks.</td><td><code>lnk query "..."</code></td></tr>
             <tr><td><code>link-ingest</code></td><td>When raw files are present: source ingest, stale sources, memory proposals, post-ingest checks.</td><td><code>lnk ingest-status</code></td></tr>
-            <tr><td><code>link-memory</code></td><td>Explicit user-approved memory: remember, recall, review, explain, update, archive, restore, forget.</td><td><code>lnk brief "..."</code></td></tr>
+            <tr><td><code>link-memory</code></td><td>After important user-approved decisions: propose, remember, recall, review, explain, update, archive, restore, forget.</td><td><code>lnk brief "..."</code></td></tr>
           </tbody>
         </table>
 

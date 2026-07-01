@@ -16,6 +16,11 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `lnk onboard` to create or repair a real `~/link` workspace, check health, optionally seed a first memory, preview or write agent MCP config, and print first prompts in one guided flow.
 - Added a local `/onboard` viewer page that turns health, first memory, agent wiring, and starter prompts into one copyable setup checklist.
 - Added `/onboard` links to first-run output, starter prompts, the local home page, the health page, HTTP viewer smoke coverage, and large-wiki smoke guidance.
+- Added TTY-only CLI styling for human output while keeping JSON and non-TTY output plain for agents and scripts.
+- Added audit-log hash-chain entries and doctor verification so silent edits to the local audit trail are detectable.
+- Added rollback snapshots for write operations so interrupted multi-file memory/index updates can restore touched files or remove newly created files.
+- Added cross-agent continuity coverage proving a memory written through the CLI can be recalled through the slim MCP surface from the same local wiki.
+- Added cache-backed backlink rebuild logic so rebuilds reuse parsed page data while preserving existing body-only/full-link behavior.
 
 ### Changed
 
@@ -29,11 +34,15 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Clarified public UI docs around the `/onboard` checklist and viewer-independent CLI, skills, and MCP usage.
 - Redesigned the GitHub Pages landing page and refreshed the product brand, logo assets, README header links, and public docs styling around the newer product positioning.
 - Replaced older synthetic docs GIFs with real, on-brand product screenshots and figures for UI, CLI, MCP, health, home, and graph flows.
+- Reworked the README and docs landing page around one canonical proof path instead of multiple competing quick starts.
+- Improved `lnk try` human-readable output so the first-run proof reads like a product moment instead of a debug checklist.
+- Tightened official skill trigger wording so skill-only agents can proactively retrieve context and propose memory after important user-approved decisions without silently writing.
 
 ### Fixed
 
 - Fixed a flaky Windows write-lock path by retrying file-lock acquisition on transient `PermissionError`.
 - Fixed docs-site validation so the self-contained landing bundle is allowed while the rest of the public docs keep the local-first/no-external-runtime guarantee.
+- Fixed first-run `init` output to print the installed `lnk` command instead of the collision-prone `link` command.
 
 ## [1.4.0] - 2026-06-14
 
