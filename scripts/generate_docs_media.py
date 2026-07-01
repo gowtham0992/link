@@ -114,6 +114,15 @@ def _save_gif(frames: list[Image.Image], path: Path, duration: int = 1350) -> No
     )
 
 
+def _open_asset_image(*names: str) -> Image.Image:
+    for name in names:
+        path = ASSETS / name
+        if path.exists():
+            return Image.open(path).convert("RGB")
+    joined = ", ".join(names)
+    raise FileNotFoundError(f"missing docs media source: {joined}")
+
+
 def _window_frame(title: str, subtitle: str = "") -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGB", SIZE, COLORS["paper"])
     draw = ImageDraw.Draw(image)
@@ -129,15 +138,15 @@ def _window_frame(title: str, subtitle: str = "") -> tuple[Image.Image, ImageDra
 
 def _make_ui_tour() -> None:
     shots = [
-        ("Start with prompts", "The local viewer gives a human-readable front door.", "link-home-dark.png"),
-        ("Ingest safely", "Raw files are scanned, represented, and validated.", "link-ingest-dark.png"),
-        ("Brief before work", "Agents get compact, source-backed context.", "link-brief-dark.png"),
-        ("Review memory", "Memories are inspectable, explainable, and reversible.", "link-memory-dashboard-dark.png"),
-        ("Explore the graph", "Large graphs open bounded first, then expand on demand.", "link-graph-dark.png"),
+        ("Start with prompts", "The local viewer gives a human-readable front door.", ("link-home-dark.png",)),
+        ("Ingest safely", "Raw files are scanned, represented, and validated.", ("link-ingest-dark.png",)),
+        ("Brief before work", "Agents get compact, source-backed context.", ("link-brief-dark.png",)),
+        ("Review memory", "Memories are inspectable, explainable, and reversible.", ("link-memory-dashboard-dark.png",)),
+        ("Explore the graph", "Large graphs open bounded first, then expand on demand.", ("link-graph-dark.png", "link-graph.png")),
     ]
     frames: list[Image.Image] = []
-    for title, caption, filename in shots:
-        screenshot = Image.open(ASSETS / filename).convert("RGB").resize(SIZE)
+    for title, caption, filenames in shots:
+        screenshot = _open_asset_image(*filenames).resize(SIZE)
         overlay = Image.new("RGBA", SIZE, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
         draw.rectangle((0, 0, SIZE[0], 76), fill=(0, 0, 0, 220))
@@ -173,7 +182,7 @@ def _make_cli_tour() -> None:
         _terminal_frame(
             "1. Check readiness",
             [
-                ("cmd", "link status --validate"),
+                ("cmd", "lnk health --validate"),
                 ("ok", "Ready: yes"),
                 ("ok", "Pages: 25 · Memories: 1 active · Search: sqlite-fts"),
                 ("muted", "Next: query, brief, ingest, or serve the local viewer."),
@@ -182,7 +191,7 @@ def _make_cli_tour() -> None:
         _terminal_frame(
             "2. Ask for compact context",
             [
-                ("cmd", 'link query "why does Link help agents?" --budget small'),
+                ("cmd", 'lnk query "why does Link help agents?" --budget small'),
                 ("ok", "Answer-ready packet: 3 memories, 5 pages, graph neighborhood."),
                 ("muted", "has_more: true · follow_up: widen budget or open context."),
             ],
@@ -190,7 +199,7 @@ def _make_cli_tour() -> None:
         _terminal_frame(
             "3. Prime an agent",
             [
-                ("cmd", 'link brief "working on Link release" --project link'),
+                ("cmd", 'lnk brief "working on Link release" --project link'),
                 ("ok", "Relevant decisions, preferences, open review items, and project context."),
                 ("muted", "Local Markdown. No hosted memory service."),
             ],
@@ -198,7 +207,7 @@ def _make_cli_tour() -> None:
         _terminal_frame(
             "4. Prove scale locally",
             [
-                ("cmd", 'link benchmark "agent memory"'),
+                ("cmd", 'lnk benchmark "agent memory"'),
                 ("ok", "cache 0.10s · search 0.009s · query 0.018s · graph 0.022s"),
                 ("ok", "Verdict: interactive"),
             ],

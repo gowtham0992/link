@@ -44,6 +44,13 @@ class DocsSiteTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:3000/onboard", ui_html)
         self.assertIn("browser version of <code>lnk onboard</code>", ui_html)
         self.assertIn("MCP clients keep working after you close the browser", ui_html)
+        self.assertIn("assets/link-ui-tour.gif", ui_html)
+
+        cli_html = (ROOT / "docs/cli.html").read_text(encoding="utf-8")
+        self.assertIn("assets/link-cli-tour.gif", cli_html)
+
+        mcp_html = (ROOT / "docs/mcp.html").read_text(encoding="utf-8")
+        self.assertIn("assets/link-mcp-agent-chat.gif", mcp_html)
 
     def test_github_pages_site_has_no_external_runtime_dependencies(self):
         for page in self.docs_pages():
