@@ -78,8 +78,6 @@ compound over time.
 Run the demo first. It creates a complete local wiki with raw sources, wiki
 pages, one starter memory, graph data, and query packets ready to inspect.
 
-macOS with Homebrew:
-
 ```bash
 brew install gowtham0992/link/link
 lnk try
@@ -89,29 +87,10 @@ lnk serve link-demo
 The installed command is `lnk` because `link` is already a POSIX/macOS system
 utility. From a source checkout, use `python3 link.py ...` instead.
 
-Windows PowerShell:
-
-```powershell
-git clone https://github.com/gowtham0992/link.git
-cd link
-py link.py demo
-py link.py next link-demo
-py link.py serve link-demo
-```
-
-Source checkout on macOS/Linux:
-
-```bash
-git clone https://github.com/gowtham0992/link.git
-cd link
-python3 link.py demo
-python3 link.py next link-demo
-python3 link.py serve link-demo
-```
-
-Use `lnk try` for the shortest Homebrew proof loop. It creates the demo,
-checks readiness, runs a compact query/brief proof, and prints the agent prompts
-and viewer command. From source, use `python3 link.py try`.
+Use `lnk try` for the shortest proof loop. It creates the demo, checks
+readiness, runs a compact query/brief proof, and prints the agent prompts and
+viewer command. Windows, source checkout, MCP-only, and skill-first setup live
+in the [First 10 Minutes guide](https://gowtham0992.github.io/link/getting-started.html).
 
 When you are ready to use Link for real memory, run one guided command:
 
@@ -145,8 +124,6 @@ for local use only. It binds to `127.0.0.1`, has no user
 accounts or authentication, and should not be exposed to the internet unless you
 add your own auth layer.
 
-For the shortest guided proof path, run `lnk welcome link-demo`.
-
 Try the value loop:
 
 ```bash
@@ -164,15 +141,6 @@ tools live under `more`, and structured wiki pages get a local contents outline
 plus related-page links from the graph.
 Home shows recently updated pages, while `/all` and search group results by page
 type with chips for narrowing larger wikis.
-
-From a source checkout, use `python3 link.py ...`:
-
-```bash
-python3 link.py query "why does Link help agents?" link-demo --budget small
-python3 link.py brief "working on agent memory" link-demo
-python3 link.py benchmark "agent memory" link-demo
-python3 link.py health link-demo
-```
 
 The generated demo is the public proof wiki. The repo's root `wiki/` directory
 is only a scaffold for local development and personal testing. Generated content
