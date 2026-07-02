@@ -27,8 +27,8 @@ CSS = """
   --border-strong: rgba(34,28,18,0.25);
   --surface: #fffdf8;
   --surface-muted: rgba(34,28,18,0.04);
-  --surface-code: #171209;
-  --surface-code-ink: #f0e9dc;
+  --surface-code: rgba(34,28,18,0.04);
+  --surface-code-ink: #221c12;
   --surface-code-inline: rgba(34,28,18,0.05);
   --surface-table: rgba(34,28,18,0.03);
   --surface-graph: #12100c;
@@ -627,7 +627,7 @@ header nav .nav-more summary { padding: 7px 11px; color: var(--muted); font-fami
   color: var(--text-strong); font-weight: 400; }
 
 /* command blocks + copy */
-pre { background: var(--surface-code); color: var(--surface-code-ink); border: 1px solid var(--surface-code);
+pre { background: var(--surface-code); color: var(--surface-code-ink); border: 1px solid var(--border);
   border-radius: 5px; font-family: var(--font-mono); }
 pre code { color: var(--surface-code-ink); background: transparent; }
 .copy-button, .cmd-copy { font-family: var(--font-mono); font-size: 11px; background: var(--accent);
