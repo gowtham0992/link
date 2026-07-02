@@ -76,3 +76,5 @@ mcp_package/.mcpregistry_*
 *.p12
 id_rsa
 id_ed25519
+# Local design references
+Link Console Handoff.html
