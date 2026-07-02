@@ -581,12 +581,16 @@ class ServeTests(unittest.TestCase):
         self.assertIn(b"Onboard", body)
         self.assertIn(b"--agent codex", body)
 
-    def test_css_has_explicit_black_dark_theme(self):
+    def test_css_has_explicit_warm_dark_theme(self):
+        # The console design uses a warm dark theme (never pure black) and
+        # system font stacks: sans body, serif headings, mono labels.
         self.assertIn(':root[data-theme="dark"]', serve.CSS)
-        self.assertIn("--bg: #000000;", serve.CSS)
-        self.assertIn("body { font-family: Georgia", serve.CSS)
+        self.assertIn("--bg: #191309;", serve.CSS)
+        self.assertIn("--surface: #1e1810;", serve.CSS)
+        self.assertIn("--accent: #cd7657;", serve.CSS)
+        self.assertNotIn("--bg: #000000;", serve.CSS)
+        self.assertIn("body { font-family: var(--font-sans)", serve.CSS)
         self.assertIn("background: var(--bg); color: var(--text);", serve.CSS)
-        self.assertNotIn("background: #1a1a1a", serve.CSS)
 
     def test_raw_static_paths_stay_under_raw_directory(self):
         wiki = self.make_wiki()

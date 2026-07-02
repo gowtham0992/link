@@ -30,6 +30,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Changed
 
+- Redesigned the local web console to the Link design system: cream/ink/rust editorial palette with a warm-dark theme (never pure black), serif headings with mono labels on system font stacks, a tab-strip nav, ledger memory cards, health status cards, and a segment-meter confidence indicator on recalled memories (weak matches carry a 'verify before trusting' note).
+
 - Restored the designed animated landing page on GitHub Pages (live memory-graph hero) and refreshed its content for the slim MCP surface: canonical six tools, `lnk proof`/`lnk try`/`lnk start`/`lnk onboard` commands, and recall confidence labels.
 - Tightened the README quick start and moved scale checks into the documentation table; documented recall confidence labels in the agent-facing tool list.
 

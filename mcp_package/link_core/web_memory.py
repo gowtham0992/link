@@ -127,6 +127,18 @@ def render_memory_action_commands(actions: Sequence[dict[str, object]]) -> str:
     return f'<div class="memory-actions">{rows}</div>'
 
 
+def render_confidence_meter(confidence: str) -> str:
+    """Render the T1 segment meter for a recall confidence label."""
+    level = str(confidence or "").strip().lower()
+    if level not in {"strong", "moderate", "weak"}:
+        return ""
+    return (
+        f'<span class="conf conf--{level}">'
+        '<span class="m"><i></i><i></i><i></i></span>'
+        f'{level}</span>'
+    )
+
+
 def render_memory_card(
     record: dict[str, object],
     *,
@@ -171,12 +183,26 @@ def render_memory_card(
         f'<a href="/graph?focus={encoded_name}&amp;depth=2">graph</a>'
         "</div>"
     )
+    confidence_html = render_confidence_meter(str(record.get("confidence") or ""))
+    review_status = str(record.get("review_status") or "")
+    card_class = "memory-card"
+    if review_status and review_status != "reviewed":
+        card_class += " needs-review"
+    verify_html = ""
+    if confidence_html and str(record.get("confidence")) == "weak" and review_status != "reviewed":
+        verify_html = '<div class="verify-note">weak recall · pending review — verify before trusting</div>'
+    title_html = (
+        f'<h3><a href="{page_url}">{html.escape(title)}</a>'
+        + (f" {confidence_html}" if confidence_html else "")
+        + "</h3>"
+    )
     return (
-        '<article class="memory-card">'
-        f'<h3><a href="{page_url}">{html.escape(title)}</a></h3>'
+        f'<article class="{card_class}">'
+        f'{title_html}'
         f'<div class="memory-meta">{html.escape(meta)}</div>'
         f'{trust_links}'
         f'{summary_html}'
+        f'{verify_html}'
         f'{issues_html}'
         f'{actions}'
         '</article>'
