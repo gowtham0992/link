@@ -60,7 +60,9 @@ class TeamSyncCoreTests(unittest.TestCase):
         self.assertTrue(any("remote" in command and "add" in command for command in commands))
         stage_commands = [command for command in commands if " add " in f" {command} "]
         self.assertTrue(stage_commands)
-        self.assertIn("wiki/memories", stage_commands[0])
+        # Windows renders staged paths with backslashes; compare separator-agnostically.
+        self.assertIn("memories", stage_commands[0].replace("\\", "/"))
+        self.assertIn("wiki/memories", stage_commands[0].replace("\\", "/"))
         self.assertNotIn("wiki/log.md", stage_commands[0])
 
     def test_git_workspace_with_raw_protection_is_ready(self):
@@ -92,7 +94,9 @@ class TeamSyncCoreTests(unittest.TestCase):
             if action["label"] == "stage shared memory files"
         ]
         self.assertEqual(len(stage_commands), 1)
-        self.assertIn("wiki/memories", stage_commands[0])
+        # Windows renders staged paths with backslashes; compare separator-agnostically.
+        self.assertIn("memories", stage_commands[0].replace("\\", "/"))
+        self.assertIn("wiki/memories", stage_commands[0].replace("\\", "/"))
         self.assertNotIn("wiki/log.md", stage_commands[0])
 
     def test_git_workspace_without_raw_protection_warns(self):
