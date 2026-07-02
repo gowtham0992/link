@@ -662,6 +662,11 @@ pre code { color: var(--surface-code-ink); background: transparent; }
 THEME_INIT_JS = """
 (function() {
   try {
+    var params = new URLSearchParams(window.location.search);
+    var override = params.get('theme');
+    if (override === 'dark' || override === 'light') {
+      localStorage.setItem('link-theme', override);
+    }
     var theme = localStorage.getItem('link-theme') || 'system';
     if (theme === 'dark' || theme === 'light') {
       document.documentElement.dataset.theme = theme;

@@ -217,8 +217,7 @@ when the web viewer is not running.
 </table>
 
 <p align="center">
-  <img src="docs/assets/link-web-ui.png" alt="Link local web viewer — home" width="49%">
-  <img src="docs/assets/link-graph.png" alt="Link knowledge graph view" width="49%">
+  <img src="docs/assets/link-ui-tour.gif" alt="Link local console tour: home, memory dashboard, health, and graph" width="840">
 </p>
 <p align="center"><em>The local web viewer: browse source-backed memory and explore the knowledge graph — all on <code>127.0.0.1</code>, no accounts, no backend.</em></p>
 
