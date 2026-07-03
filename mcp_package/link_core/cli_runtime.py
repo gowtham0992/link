@@ -74,6 +74,24 @@ def render_start_text(payload: Mapping[str, object]) -> tuple[int, str]:
     if brief_text:
         lines.extend(["", brief_text])
 
+    context_preview = payload.get("context_preview") if isinstance(payload.get("context_preview"), Mapping) else {}
+    capsule = context_preview.get("recall_capsule") if isinstance(context_preview.get("recall_capsule"), Mapping) else {}
+    capsule_items = capsule.get("items") if isinstance(capsule.get("items"), Sequence) else []
+    if capsule_items and not isinstance(capsule_items, (str, bytes)):
+        lines.extend([
+            "",
+            f"Context preview ({context_preview.get('budget', 'micro')} · ~{capsule.get('estimated_tokens', '?')} tokens)",
+        ])
+        for item in capsule_items[:3]:
+            if not isinstance(item, Mapping):
+                continue
+            kind = str(item.get("kind") or "context")
+            title = str(item.get("title") or item.get("name") or "context")
+            summary = " ".join(str(item.get("summary") or "").split())
+            lines.append(f"- {title} ({kind})")
+            if summary:
+                lines.append(f"  {summary[:180]}{'...' if len(summary) > 180 else ''}")
+
     commands = payload.get("commands") if isinstance(payload.get("commands"), Mapping) else {}
     project_seed = payload.get("project_seed") if isinstance(payload.get("project_seed"), Mapping) else {}
     if not status.get("ready"):

@@ -64,6 +64,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Updated the local `/onboard` checklist to surface project context seeding before first memory and agent wiring, matching the new `lnk onboard --seed-project .` path.
 - Updated installed agent instructions so agents recover from empty project recall by seeding allowlisted source-backed repo context before broad searching.
 - Updated `lnk start`, MCP `link_start`, and slim MCP `admin` so empty project recall points agents toward source-backed project seeding before broad file reads.
+- Updated `lnk start` to include a tiny token-bounded context preview from the same hybrid query packet used by CLI, skills, and MCP once source-backed project context exists.
 
 ### Fixed
 

@@ -125,6 +125,42 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Run from the project repo.", text)
         self.assertLess(text.index("Seed project context"), text.index("Need more context"))
 
+    def test_render_start_text_includes_tiny_context_preview(self):
+        code, text = render_start_text({
+            "target": "/tmp/link",
+            "task": "release work",
+            "status": {
+                "ready": True,
+                "content_page_count": 3,
+                "page_count": 5,
+                "active_memory_count": 0,
+                "needs_review_count": 0,
+                "search_backend": "sqlite-fts",
+                "validation": {"checked": True, "passed": True},
+            },
+            "brief_text": "Link memory brief: release work\n- none",
+            "context_preview": {
+                "budget": "micro",
+                "recall_capsule": {
+                    "estimated_tokens": 96,
+                    "items": [{
+                        "kind": "page",
+                        "title": "Project seed: Link",
+                        "summary": "README context says Link gives agents local memory.",
+                    }],
+                },
+            },
+            "commands": {
+                "query": "lnk query 'release work' /tmp/link --budget micro",
+                "review": "lnk memory-inbox /tmp/link",
+            },
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Context preview (micro · ~96 tokens)", text)
+        self.assertIn("Project seed: Link (page)", text)
+        self.assertIn("README context says Link gives agents local memory.", text)
+
     def test_render_demo_text(self):
         code, text = render_demo_text(
             target="/tmp/link-demo",

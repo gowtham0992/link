@@ -1430,6 +1430,28 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Seed project context:", text_out.getvalue())
         self.assertIn("Run from the project repo", text_out.getvalue())
 
+    def test_start_shows_context_preview_after_project_seed(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        project = tmp / "client-app"
+        target = tmp / "my-link"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nClient App keeps source-backed agent memory local.\n",
+            encoding="utf-8",
+        )
+        with redirect_stdout(StringIO()):
+            self.assertEqual(link_cli.seed_project(target, project, project_name="Client App"), 0)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="Client App")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("Context preview", text)
+        self.assertIn("Project seed: Client App", text)
+        self.assertNotIn("Seed project context:", text)
+
     def test_query_builds_context_packet(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-query-test-"))
         target = tmp / "demo"

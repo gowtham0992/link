@@ -1889,6 +1889,16 @@ def start(
         status_payload.get("content_page_count") or 0
     )
     seed_command = _display_command(["link", "seed", ".", str(target)])
+    context_preview: dict[str, object] | None = None
+    if task and int(status_payload.get("content_page_count") or 0):
+        preview_payload = _query_link(wiki_dir, task, budget="micro", project=project_name)
+        if preview_payload.get("found"):
+            context_preview = {
+                "query": preview_payload.get("query", task),
+                "budget": preview_payload.get("budget", "micro"),
+                "recall_capsule": preview_payload.get("recall_capsule", {}),
+                "follow_up": preview_payload.get("follow_up", []),
+            }
     payload = {
         "target": str(target),
         "wiki": str(wiki_dir),
@@ -1896,6 +1906,7 @@ def start(
         "project": project_name,
         "status": status_payload,
         "brief": brief_payload,
+        "context_preview": context_preview or {},
         "commands": {
             "health": _display_command(["link", "health", str(target)]),
             "query": _display_command(["link", "query", query_text, str(target), "--budget", "micro"]),
