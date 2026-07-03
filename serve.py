@@ -2020,7 +2020,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def _parse_serve_args(argv: list[str], default_port: int = PORT, default_root: Path = ROOT) -> tuple[int, Path]:
     port = default_port
     root = default_root
-    for index, arg in enumerate(argv):
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
         if arg in {"--host", "--bind"} or arg.startswith("--host=") or arg.startswith("--bind="):
             raise SystemExit("Link serve is local-only; host/bind options are not supported.")
         if arg == "--port":
@@ -2030,17 +2032,31 @@ def _parse_serve_args(argv: list[str], default_port: int = PORT, default_root: P
                 port = int(argv[index + 1])
             except ValueError as exc:
                 raise SystemExit("--port must be an integer") from exc
+            index += 2
+            continue
         elif arg.startswith("--port="):
             try:
                 port = int(arg.split("=", 1)[1])
             except ValueError as exc:
                 raise SystemExit("--port must be an integer") from exc
+            index += 1
+            continue
         elif arg == "--root":
             if index + 1 >= len(argv):
                 raise SystemExit("--root requires a value")
             root = Path(argv[index + 1]).expanduser().resolve()
+            index += 2
+            continue
         elif arg.startswith("--root="):
             root = Path(arg.split("=", 1)[1]).expanduser().resolve()
+            index += 1
+            continue
+        elif arg.startswith("-"):
+            raise SystemExit(f"unknown option for serve.py: {arg}")
+        raise SystemExit(
+            "serve.py does not accept a positional target. "
+            "Use 'python serve.py --root /path/to/link' or 'lnk serve /path/to/link'."
+        )
     if port < 1 or port > 65535:
         raise SystemExit("--port must be between 1 and 65535")
     return port, root

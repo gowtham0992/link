@@ -523,6 +523,10 @@ class ServeTests(unittest.TestCase):
             serve._parse_serve_port(["--host", "0.0.0.0"], default=3000)
         with self.assertRaises(SystemExit):
             serve._parse_serve_port(["--bind=0.0.0.0"], default=3000)
+        with self.assertRaisesRegex(SystemExit, "does not accept a positional target"):
+            serve._parse_serve_args(["/tmp/link-demo"], default_port=3000, default_root=Path("/tmp/default"))
+        with self.assertRaisesRegex(SystemExit, "unknown option"):
+            serve._parse_serve_args(["--public"], default_port=3000, default_root=Path("/tmp/default"))
 
     def test_server_bind_error_message_suggests_next_port(self):
         message = serve._serve_bind_error_message(OSError(48, "Address already in use"), 3000)

@@ -62,6 +62,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- Fixed direct `serve.py` argument parsing so a positional target now fails with guidance instead of silently serving the wrong wiki root; use `--root` directly or `lnk serve <target>`.
 - Fixed a flaky Windows write-lock path by retrying file-lock acquisition on transient `PermissionError`.
 - Fixed docs-site validation so the self-contained landing bundle is allowed while the rest of the public docs keep the local-first/no-external-runtime guarantee.
 - Fixed first-run `init` output to print the installed `lnk` command instead of the collision-prone `link` command.
