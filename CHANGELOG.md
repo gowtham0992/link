@@ -59,6 +59,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Updated team-sync to keep `wiki/log.md` local so Git-based team sharing does not create false audit hash-chain tamper alarms.
 - Regenerated dark-mode docs screenshots from deterministic source images before rebuilding the checked-in product GIFs.
 - Tightened official skill trigger wording so skill-only agents can proactively retrieve context and propose memory after important user-approved decisions without silently writing.
+- Retired the old synthetic docs media generator in favor of a non-destructive verifier for checked-in real product screenshots, GIFs, and diagrams.
 
 ### Fixed
 

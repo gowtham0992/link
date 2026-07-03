@@ -1,470 +1,111 @@
 #!/usr/bin/env python3
-"""Generate small, reproducible GIF assets for the public docs."""
+"""Validate checked-in docs media assets.
+
+This script used to generate synthetic GIFs. Link now uses real product
+captures and hand-maintained diagrams for public docs, so this script is a
+non-destructive verifier. It keeps the old command name for maintainer muscle
+memory while refusing to overwrite product screenshots.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import wrap
-
-from PIL import Image, ImageDraw, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "docs" / "assets"
-SIZE = (860, 484)
 
+REQUIRED_ASSETS = {
+    "favicon.svg",
+    "logo.svg",
+    "logo-512.png",
+    "link-site.png",
+    "link-web-ui.png",
+    "link-home.png",
+    "link-health.png",
+    "link-graph.png",
+    "link-cli.png",
+    "link-mcp.png",
+    "link-memory-flow.svg",
+    "link-ui-tour.gif",
+    "link-cli-tour.gif",
+    "link-mcp-agent-chat.gif",
+    "link-product-tour-dark.gif",
+}
 
-COLORS = {
-    "bg": "#050607",
-    "panel": "#0e1116",
-    "panel_2": "#17120c",
-    "paper": "#fff4b8",
-    "paper_2": "#fffdf1",
-    "ink": "#f7f0d8",
-    "muted": "#9ca3af",
-    "blue": "#5b8cff",
-    "green": "#54c79d",
-    "yellow": "#ffd342",
-    "red": "#ff6d5f",
-    "border": "#17120c",
+OPTIONAL_REAL_CAPTURES = {
+    "link-home-dark.png",
+    "link-ingest-dark.png",
+    "link-brief-dark.png",
+    "link-memory-dashboard-dark.png",
+    "link-explain-memory-dark.png",
+    "link-graph-dark.png",
+}
+
+SUPPORTED_BINARY_TYPES = {
+    ".gif": "gif",
+    ".png": "png",
 }
 
 
-def _font(size: int, bold: bool = False, mono: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    candidates = []
-    if mono:
-        candidates.extend(
-            [
-                "/System/Library/Fonts/Menlo.ttc",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-            ]
-        )
-    if bold:
-        candidates.extend(
-            [
-                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            ]
-        )
-    candidates.extend(
-        [
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]
-    )
-    for candidate in candidates:
+def _asset_kind(path: Path) -> str:
+    if path.suffix == ".svg":
         try:
-            return ImageFont.truetype(candidate, size)
+            text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            continue
-    return ImageFont.load_default()
+            return ""
+        return "svg" if "<svg" in text[:500].lower() else ""
+    try:
+        header = path.read_bytes()[:16]
+    except OSError:
+        return ""
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    return ""
 
 
-FONT_TITLE = _font(24, bold=True)
-FONT_SUBTITLE = _font(15)
-FONT_MONO = _font(16, mono=True)
-FONT_MONO_SMALL = _font(13, mono=True)
-FONT_MONO_BOLD = _font(16, bold=True, mono=True)
+def validate_docs_media() -> tuple[int, list[str]]:
+    findings: list[str] = []
+    if not ASSETS.exists():
+        return 1, [f"missing docs assets directory: {ASSETS}"]
 
-
-def _fit_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, width: int) -> list[str]:
-    words = text.split()
-    lines: list[str] = []
-    current: list[str] = []
-    for word in words:
-        candidate = " ".join([*current, word])
-        if draw.textbbox((0, 0), candidate, font=font)[2] <= width:
-            current.append(word)
-        else:
-            if current:
-                lines.append(" ".join(current))
-            current = [word]
-    if current:
-        lines.append(" ".join(current))
-    return lines
-
-
-def _draw_text_block(
-    draw: ImageDraw.ImageDraw,
-    xy: tuple[int, int],
-    text: str,
-    font: ImageFont.ImageFont,
-    fill: str,
-    max_width: int,
-    line_gap: int = 6,
-) -> int:
-    x, y = xy
-    for line in _fit_text(draw, text, font, max_width):
-        draw.text((x, y), line, font=font, fill=fill)
-        y += draw.textbbox((0, 0), line, font=font)[3] + line_gap
-    return y
-
-
-def _save_gif(frames: list[Image.Image], path: Path, duration: int = 1350) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    palette_frames = [frame.convert("P", palette=Image.Palette.ADAPTIVE) for frame in frames]
-    palette_frames[0].save(
-        path,
-        save_all=True,
-        append_images=palette_frames[1:],
-        duration=duration,
-        loop=0,
-        optimize=True,
-        disposal=2,
-    )
-
-
-def _open_asset_image(*names: str) -> Image.Image:
-    for name in names:
+    for name in sorted(REQUIRED_ASSETS):
         path = ASSETS / name
-        if path.exists():
-            return Image.open(path).convert("RGB")
-    joined = ", ".join(names)
-    raise FileNotFoundError(f"missing docs media source: {joined}")
+        if not path.exists():
+            findings.append(f"missing required docs media asset: docs/assets/{name}")
+            continue
+        if path.stat().st_size <= 0:
+            findings.append(f"empty docs media asset: docs/assets/{name}")
+            continue
+        expected_kind = "svg" if path.suffix == ".svg" else SUPPORTED_BINARY_TYPES.get(path.suffix)
+        actual_kind = _asset_kind(path)
+        if expected_kind and actual_kind != expected_kind:
+            findings.append(
+                f"docs/assets/{name} has unexpected format: expected {expected_kind}, got {actual_kind or 'unknown'}"
+            )
+
+    for name in sorted(OPTIONAL_REAL_CAPTURES):
+        path = ASSETS / name
+        if path.exists() and path.stat().st_size <= 0:
+            findings.append(f"empty optional docs media capture: docs/assets/{name}")
+
+    return (1 if findings else 0), findings
 
 
-def _draw_link_header(draw: ImageDraw.ImageDraw, active: str) -> None:
-    draw.rectangle((0, 0, SIZE[0], 88), fill="#020403")
-    draw.rounded_rectangle((42, 26, 67, 51), radius=4, fill="#101827", outline="#54c79d", width=2)
-    draw.text((76, 23), "Link", font=FONT_TITLE, fill=COLORS["ink"])
-    draw.text((137, 35), "agent memory", font=FONT_MONO_SMALL, fill="#9ca3af")
-    nav = ["home", "brief", "memory", "ingest", "graph", "health", "more"]
-    x = 42
-    for item in nav:
-        color = COLORS["yellow"] if item == active else "#93c5fd"
-        draw.text((x, 62), item, font=FONT_MONO_SMALL, fill=color)
-        x += 70 if item != "memory" else 78
-    draw.rounded_rectangle((640, 38, 812, 62), radius=5, fill="#111111", outline="#333333")
-    draw.text((654, 43), "search... (/)", font=FONT_MONO_SMALL, fill="#9ca3af")
-    draw.line((42, 86, 812, 86), fill="#2b2b2b", width=1)
+def main() -> int:
+    code, findings = validate_docs_media()
+    if findings:
+        print("Docs media validation failed:")
+        for finding in findings:
+            print(f"- {finding}")
+        return code
 
-
-def _draw_card(draw: ImageDraw.ImageDraw, xy: tuple[int, int], title: str, body: str, width: int = 230) -> None:
-    x, y = xy
-    draw.rounded_rectangle((x, y, x + width, y + 108), radius=8, fill="#101310", outline="#305b3f", width=2)
-    draw.text((x + 16, y + 14), title, font=FONT_MONO_BOLD, fill="#d8f7d0")
-    _draw_text_block(draw, (x + 16, y + 42), body, FONT_SUBTITLE, "#d1d5db", width - 32, line_gap=4)
-
-
-def _dark_page_screenshot(name: str, active: str, crumb: str, heading: str, subtitle: str, cards: list[tuple[str, str]]) -> None:
-    image = Image.new("RGB", SIZE, "#050607")
-    draw = ImageDraw.Draw(image)
-    _draw_link_header(draw, active)
-    draw.text((42, 116), f"Link / {crumb}", font=FONT_MONO_SMALL, fill="#93c5fd")
-    draw.text((42, 150), heading, font=FONT_TITLE, fill=COLORS["ink"])
-    _draw_text_block(draw, (42, 185), subtitle, FONT_SUBTITLE, "#d1d5db", 720, line_gap=5)
-    x = 42
-    y = 250
-    for index, (title, body) in enumerate(cards[:6]):
-        _draw_card(draw, (x, y), title, body)
-        x += 258
-        if (index + 1) % 3 == 0:
-            x = 42
-            y += 132
-    image.save(ASSETS / name)
-
-
-def _make_dark_source_screenshots() -> None:
-    _dark_page_screenshot(
-        "link-home-dark.png",
-        "home",
-        "home",
-        "First 10 Minutes",
-        "Start with prompts, query source-backed memory, then keep the local loop healthy.",
-        [
-            ("Ready", "One health check for validation, operations, and next action."),
-            ("Start", "Prime an agent with compact memory before work."),
-            ("Query", "Ask for answer-ready context without dumping the whole wiki."),
-            ("Ingest", "Drop raw notes locally and let the agent compile sources."),
-            ("Review", "Approve, archive, or forget durable memories."),
-            ("Graph", "Explore bounded neighborhoods before full graph loading."),
-        ],
-    )
-    _dark_page_screenshot(
-        "link-ingest-dark.png",
-        "ingest",
-        "ingest",
-        "Ingest",
-        "Raw files are scanned, represented in wiki/sources, and validated before recall.",
-        [
-            ("Raw", "Paste notes, docs, transcripts, or project context."),
-            ("Safety", "Secret-looking values block normal ingest guidance."),
-            ("Source page", "Every raw file maps to inspectable Markdown."),
-            ("Proposal", "Memories stay review-gated until approved."),
-            ("Backlinks", "Index and graph repairs are explicit."),
-            ("Validate", "The ingest gate proves the wiki is healthy."),
-        ],
-    )
-    _dark_page_screenshot(
-        "link-brief-dark.png",
-        "brief",
-        "brief",
-        "Brief",
-        "Give agents a compact session-start packet with only relevant memories and pages.",
-        [
-            ("Memories", "Reviewed preferences, decisions, and project context."),
-            ("Pages", "Source-backed wiki context selected by budget."),
-            ("Review", "Pending memories are surfaced before default trust."),
-            ("Budget", "micro, small, medium, and large packets."),
-            ("Why", "Each item explains why it was selected."),
-            ("Follow up", "Agents get precise next tool actions."),
-        ],
-    )
-    _dark_page_screenshot(
-        "link-memory-dashboard-dark.png",
-        "memory",
-        "memory",
-        "Memory",
-        "Durable memory is inspectable Markdown with lifecycle controls and provenance.",
-        [
-            ("Inbox", "Review pending memories before trusting them."),
-            ("Explain", "See source and reason for each memory."),
-            ("Visibility", "Private, project, or team sharing intent."),
-            ("Archive", "Soft-delete stale memory without losing audit trail."),
-            ("Forget", "Hard-delete only after explicit confirmation."),
-            ("Audit", "Track local writes without sending telemetry."),
-        ],
-    )
-    _dark_page_screenshot(
-        "link-explain-memory-dark.png",
-        "memory",
-        "memory / explain",
-        "Explain Memory",
-        "Inspect why a memory exists, where it came from, and how it can be changed.",
-        [
-            ("Source", "Raw path or source-backed page provenance."),
-            ("Status", "Active, archived, stale, or pending review."),
-            ("Scope", "User, project, or global memory intent."),
-            ("Actions", "Review, update, archive, restore, or forget."),
-            ("Audit", "Write lifecycle appears in local log entries."),
-            ("Trust", "Nothing is hidden in a cloud profile."),
-        ],
-    )
-    _dark_page_screenshot(
-        "link-graph-dark.png",
-        "graph",
-        "graph",
-        "Knowledge Graph",
-        "Large wikis open as bounded overviews with filters, search, and explicit full loading.",
-        [
-            ("Overview", "High-signal nodes first for fast load."),
-            ("Search", "Highlight nodes by title or topic."),
-            ("Filters", "Type, size, label density, and neighborhood depth."),
-            ("Fullscreen", "Inspect larger graphs without page clutter."),
-            ("Motion", "Simulation is capped for large wikis."),
-            ("Agent", "MCP graph summaries stay token-safe."),
-        ],
-    )
-
-
-def _window_frame(title: str, subtitle: str = "") -> tuple[Image.Image, ImageDraw.ImageDraw]:
-    image = Image.new("RGB", SIZE, COLORS["paper"])
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, SIZE[0] - 1, SIZE[1] - 1), fill=COLORS["paper"], outline=COLORS["border"], width=4)
-    draw.rectangle((4, 4, SIZE[0] - 5, 54), fill=COLORS["paper_2"], outline=COLORS["border"], width=2)
-    for x, color in [(24, COLORS["red"]), (48, COLORS["yellow"]), (72, COLORS["green"])]:
-        draw.ellipse((x, 21, x + 13, 34), fill=color, outline=COLORS["border"], width=2)
-    draw.text((102, 18), title, font=FONT_TITLE, fill=COLORS["border"])
-    if subtitle:
-        draw.text((102, 56), subtitle, font=FONT_SUBTITLE, fill=COLORS["muted"])
-    return image, draw
-
-
-def _make_ui_tour() -> None:
-    shots = [
-        ("Start with prompts", "The local viewer gives a human-readable front door.", ("link-home-dark.png",)),
-        ("Ingest safely", "Raw files are scanned, represented, and validated.", ("link-ingest-dark.png",)),
-        ("Brief before work", "Agents get compact, source-backed context.", ("link-brief-dark.png",)),
-        ("Review memory", "Memories are inspectable, explainable, and reversible.", ("link-memory-dashboard-dark.png",)),
-        ("Explore the graph", "Large graphs open bounded first, then expand on demand.", ("link-graph-dark.png", "link-graph.png")),
-    ]
-    frames: list[Image.Image] = []
-    for title, caption, filenames in shots:
-        screenshot = _open_asset_image(*filenames).resize(SIZE)
-        overlay = Image.new("RGBA", SIZE, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        draw.rectangle((0, 0, SIZE[0], 76), fill=(0, 0, 0, 220))
-        draw.text((28, 15), title, font=FONT_TITLE, fill=COLORS["ink"])
-        draw.text((28, 45), caption, font=FONT_SUBTITLE, fill="#d1d5db")
-        frames.append(Image.alpha_composite(screenshot.convert("RGBA"), overlay).convert("RGB"))
-    _save_gif(frames, ASSETS / "link-ui-tour.gif")
-    _save_gif(frames, ASSETS / "link-product-tour-dark.gif")
-
-
-def _terminal_frame(title: str, lines: list[tuple[str, str]]) -> Image.Image:
-    image, draw = _window_frame(title, "CLI commands stay local and scriptable.")
-    draw.rectangle((34, 96, SIZE[0] - 34, SIZE[1] - 34), fill=COLORS["bg"], outline=COLORS["border"], width=3)
-    y = 122
-    for kind, line in lines:
-        color = {
-            "prompt": COLORS["green"],
-            "cmd": "#93c5fd",
-            "ok": COLORS["ink"],
-            "muted": "#9ca3af",
-            "warn": COLORS["yellow"],
-        }.get(kind, COLORS["ink"])
-        prefix = "$ " if kind == "cmd" else "  "
-        for wrapped in wrap(line, width=78) or [""]:
-            draw.text((58, y), prefix + wrapped if wrapped == line else "  " + wrapped, font=FONT_MONO, fill=color)
-            y += 25
-        y += 4
-    return image
-
-
-def _make_cli_tour() -> None:
-    frames = [
-        _terminal_frame(
-            "1. Check readiness",
-            [
-                ("cmd", "lnk health --validate"),
-                ("ok", "Ready: yes"),
-                ("ok", "Pages: 25 · Memories: 1 active · Search: sqlite-fts"),
-                ("muted", "Next: query, brief, ingest, or serve the local viewer."),
-            ],
-        ),
-        _terminal_frame(
-            "2. Ask for compact context",
-            [
-                ("cmd", 'lnk query "why does Link help agents?" --budget small'),
-                ("ok", "Answer-ready packet: 3 memories, 5 pages, graph neighborhood."),
-                ("muted", "has_more: true · follow_up: widen budget or open context."),
-            ],
-        ),
-        _terminal_frame(
-            "3. Prime an agent",
-            [
-                ("cmd", 'lnk brief "working on Link release" --project link'),
-                ("ok", "Relevant decisions, preferences, open review items, and project context."),
-                ("muted", "Local Markdown. No hosted memory service."),
-            ],
-        ),
-        _terminal_frame(
-            "4. Prove scale locally",
-            [
-                ("cmd", 'lnk benchmark "agent memory"'),
-                ("ok", "cache 0.10s · search 0.009s · query 0.018s · graph 0.022s"),
-                ("ok", "Verdict: interactive"),
-            ],
-        ),
-    ]
-    _save_gif(frames, ASSETS / "link-cli-tour.gif", duration=1450)
-
-
-def _chat_bubble(
-    draw: ImageDraw.ImageDraw,
-    xy: tuple[int, int],
-    width: int,
-    label: str,
-    body: str,
-    *,
-    align: str,
-) -> int:
-    x, y = xy
-    fill = "#2563eb" if align == "right" else "#1f2937"
-    outline = "#60a5fa" if align == "right" else "#374151"
-    body_color = "#ffffff"
-    label_color = "#bfdbfe" if align == "right" else "#86efac"
-    lines = _fit_text(draw, body, FONT_SUBTITLE, width - 34)
-    height = 50 + (len(lines) * 23)
-    draw.rounded_rectangle((x, y, x + width, y + height), radius=16, fill=fill, outline=outline, width=2)
-    draw.text((x + 16, y + 12), label, font=FONT_MONO_SMALL, fill=label_color)
-    text_y = y + 34
-    for line in lines:
-        draw.text((x + 16, text_y), line, font=FONT_SUBTITLE, fill=body_color)
-        text_y += 23
-    return y + height
-
-
-def _tool_card(
-    draw: ImageDraw.ImageDraw,
-    xy: tuple[int, int],
-    tool: str,
-    args: str,
-    result: str,
-    *,
-    active: bool = True,
-) -> int:
-    x, y = xy
-    width = 738
-    fill = "#101827" if active else "#111111"
-    outline = COLORS["green"] if active else "#374151"
-    draw.rounded_rectangle((x, y, x + width, y + 128), radius=14, fill=fill, outline=outline, width=3)
-    draw.rectangle((x, y, x + width, y + 38), fill="#172033", outline=outline, width=0)
-    draw.text((x + 18, y + 10), "MCP tool", font=FONT_MONO_SMALL, fill="#9ca3af")
-    draw.text((x + 108, y + 9), f"link / {tool}", font=FONT_MONO_BOLD, fill="#86efac")
-    draw.text((x + width - 88, y + 9), "ready", font=FONT_MONO_SMALL, fill=COLORS["yellow"])
-    draw.text((x + 18, y + 54), "{", font=FONT_MONO_SMALL, fill="#9ca3af")
-    draw.text((x + 34, y + 76), f'"arguments": {args}', font=FONT_MONO_SMALL, fill="#d1d5db")
-    draw.text((x + 18, y + 100), f"→ {result}", font=FONT_MONO_SMALL, fill="#bfdbfe")
-    return y + 128
-
-
-def _mcp_chat_frame(title: str, user_prompt: str, tool: str, args: str, result: str, answer: str) -> Image.Image:
-    image = Image.new("RGB", SIZE, COLORS["paper"])
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, SIZE[0] - 1, SIZE[1] - 1), fill=COLORS["paper"], outline=COLORS["border"], width=4)
-    draw.rectangle((20, 20, SIZE[0] - 20, SIZE[1] - 20), fill="#080b10", outline=COLORS["border"], width=4)
-    draw.rectangle((24, 24, SIZE[0] - 24, 70), fill="#151923")
-    for x, color in [(44, COLORS["red"]), (66, COLORS["yellow"]), (88, COLORS["green"])]:
-        draw.ellipse((x, 40, x + 11, 51), fill=color)
-    draw.text((116, 38), "Agent chat", font=FONT_MONO_BOLD, fill=COLORS["ink"])
-    draw.text((SIZE[0] - 280, 38), title, font=FONT_MONO_SMALL, fill="#9ca3af")
-
-    _chat_bubble(draw, (500, 92), 298, "User", user_prompt, align="right")
-    _chat_bubble(draw, (58, 166), 408, "Agent", "I'll ask Link first so I do not guess from chat history.", align="left")
-    _tool_card(draw, (58, 246), tool, args, result)
-    _chat_bubble(draw, (58, 392), 560, "Agent", answer, align="left")
-
-    return image
-
-
-def _make_mcp_tour() -> None:
-    frames = [
-        _mcp_chat_frame(
-            "1 / readiness",
-            "is Link ready?",
-            "link_status",
-            "{}",
-            "ready: yes · pages: 25 · search: sqlite-fts",
-            "Link is ready. I can query, brief, ingest, or remember from here.",
-        ),
-        _mcp_chat_frame(
-            "2 / brief",
-            "start with Link before we continue",
-            "memory_brief",
-            '{"query": "current task", "project": "link"}',
-            "2 memories · 4 pages · 1 review warning",
-            "I have the relevant preferences, project context, and review notes.",
-        ),
-        _mcp_chat_frame(
-            "3 / smart query",
-            "query Link for release process",
-            "query_link",
-            '{"query": "release process", "budget": "small"}',
-            "why_selected · 3 memories · 5 pages · follow-ups",
-            "Here is the compact release context. I did not dump the whole wiki.",
-        ),
-        _mcp_chat_frame(
-            "4 / reviewed memory",
-            "remember that I prefer short release notes",
-            "remember_memory",
-            '{"memory_type": "preference", "scope": "user"}',
-            "saved · pending review · duplicate check passed",
-            "Saved locally as Markdown. You can review, update, archive, or forget it.",
-        ),
-    ]
-    _save_gif(frames, ASSETS / "link-mcp-agent-chat.gif", duration=1650)
-
-
-def main() -> None:
-    _make_dark_source_screenshots()
-    _make_ui_tour()
-    _make_cli_tour()
-    _make_mcp_tour()
-    print("Generated docs GIFs:")
-    for name in ["link-ui-tour.gif", "link-cli-tour.gif", "link-mcp-agent-chat.gif", "link-product-tour-dark.gif"]:
-        print(f"- docs/assets/{name}")
+    print("Docs media assets are present and valid.")
+    print("No files were generated. Update docs media through real product captures, then commit the assets.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

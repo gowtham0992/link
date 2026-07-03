@@ -1,4 +1,5 @@
 import re
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -51,6 +52,21 @@ class DocsSiteTests(unittest.TestCase):
 
         mcp_html = (ROOT / "docs/mcp.html").read_text(encoding="utf-8")
         self.assertIn("assets/link-mcp-agent-chat.gif", mcp_html)
+
+    def test_docs_media_verifier_accepts_checked_in_assets(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_docs_media",
+            ROOT / "scripts" / "generate_docs_media.py",
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        code, findings = module.validate_docs_media()
+
+        self.assertEqual(code, 0, findings)
+        self.assertEqual(findings, [])
 
     def test_github_pages_site_has_no_external_runtime_dependencies(self):
         index = ROOT / "docs/index.html"
