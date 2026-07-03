@@ -59,6 +59,11 @@ class ProjectSeedCoreTests(unittest.TestCase):
         self.assertIn("> **TLDR:**", source_text)
         self.assertIn("## Summary", source_text)
         self.assertIn("## Raw Source", source_text)
+        # The wiki page must carry the actual seeded context, not just file
+        # names — recall packets excerpt this page, so this is what makes
+        # day-one recall return something useful.
+        self.assertIn("payments reporting for internal finance users", source_text)
+        self.assertIn("check Link for client-app release context", source_text)
 
         validation = validate_wiki(target / "wiki")
         self.assertTrue(validation["passed"], validation["findings"])

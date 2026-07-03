@@ -250,9 +250,32 @@ def _format_source_page(
     today = datetime.now(timezone.utc).date().isoformat()
     aliases = [project_title, f"{project_title} project context", f"{project_slug} project seed"]
     summary = _summary_from_files(included)
-    file_lines = [f"- `{item['path']}` ({item['size_bytes']} bytes)" for item in included]
-    if git_history.get("included"):
-        file_lines.append(f"- recent git history ({len(git_history.get('lines', []))} commits)")
+    # Recall packets return excerpts of this page, so the page must carry the
+    # actual (secret-scanned) context, not just a list of file names.
+    excerpt_limit = 1200
+    file_lines: list[str] = []
+    for item in included:
+        text = str(item.get("text") or "").strip()
+        truncated = len(text) > excerpt_limit
+        excerpt = text[:excerpt_limit].rstrip()
+        file_lines.extend([
+            f"### `{item['path']}` ({item['size_bytes']} bytes)",
+            "",
+            "```text",
+            excerpt + ("\n[... truncated for recall budget]" if truncated else ""),
+            "```",
+            "",
+        ])
+    git_lines = [str(line) for line in git_history.get("lines", [])]
+    if git_history.get("included") and git_lines:
+        file_lines.extend([
+            f"### Recent git history ({len(git_lines)} commits)",
+            "",
+            *[f"- {line}" for line in git_lines[:10]],
+            "",
+        ])
+    if file_lines and file_lines[-1] == "":
+        file_lines.pop()
     git_note = " Recent git history was included." if git_history.get("included") else ""
     return "\n".join([
         "---",

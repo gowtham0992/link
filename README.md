@@ -534,7 +534,7 @@ More detail: [Security guide](https://gowtham0992.github.io/link/security.html).
 | Use Link without MCP setup | [Official skills](https://gowtham0992.github.io/link/skills.html) |
 | Use local HTTP endpoints | [HTTP API](https://gowtham0992.github.io/link/api.html) |
 | Review security boundaries | [Security model](https://gowtham0992.github.io/link/security.html) |
-| Check scale limits and measure your wiki | [Link Scale](https://gowtham0992.github.io/link/scale.html) — or run `python3 scripts/smoke_large_wiki.py --pages 10000` from a source checkout |
+| Check scale limits and measure your wiki | [Link Scale](https://gowtham0992.github.io/link/scale.html) |
 | Evaluate Link for a small team | [Team security review](https://gowtham0992.github.io/link/team-security.html) |
 | Fix setup issues | [Troubleshooting](https://gowtham0992.github.io/link/troubleshooting.html) |
 
