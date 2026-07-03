@@ -59,6 +59,106 @@ def benchmark_graph_initial_payload(cache: dict[str, object], full_graph: object
     return graph_initial_payload(full_graph, summary_graph=summary_graph)
 
 
+def _estimated_tokens(chars: int) -> int:
+    # Practical rough count for agent budgeting; exact tokenizers vary by model.
+    return max(1, (chars + 3) // 4) if chars else 0
+
+
+def _safe_int(value: object) -> int:
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def benchmark_value_evidence(cache: Mapping[str, object], packet: Mapping[str, object]) -> dict[str, object]:
+    """Estimate how much broad local context the query packet avoided sending.
+
+    This is a context-budget metric, not an answer-quality score. It compares
+    the bounded Link query packet against the body text currently indexed in
+    the local wiki.
+    """
+    body_index = cache.get("body_index")
+    if not isinstance(body_index, Mapping):
+        body_index = {}
+    broad_chars = sum(len(str(body)) for body in body_index.values())
+    broad_tokens = _estimated_tokens(broad_chars)
+
+    budget_report = packet.get("budget_report")
+    if not isinstance(budget_report, Mapping):
+        budget_report = {}
+    packet_report = budget_report.get("context_packet")
+    if not isinstance(packet_report, Mapping):
+        packet_report = {}
+    packet_chars = _safe_int(packet_report.get("estimated_chars"))
+    packet_tokens = _safe_int(packet_report.get("estimated_tokens"))
+
+    recall_capsule = packet.get("recall_capsule")
+    if not isinstance(recall_capsule, Mapping):
+        recall_capsule = {}
+    capsule_chars = _safe_int(recall_capsule.get("estimated_chars"))
+    capsule_tokens = _safe_int(recall_capsule.get("estimated_tokens"))
+
+    context_packet = packet.get("context_packet")
+    packet_items = len(context_packet) if isinstance(context_packet, list) else 0
+    memory = packet.get("memory")
+    memory_count = 0
+    if isinstance(memory, Mapping):
+        memory_count = _safe_int(memory.get("count"))
+    wiki = packet.get("wiki")
+    wiki_pages = 0
+    search_count = 0
+    if isinstance(wiki, Mapping):
+        pages = wiki.get("pages")
+        wiki_pages = len(pages) if isinstance(pages, list) else 0
+        search_count = _safe_int(wiki.get("search_count"))
+
+    avoided_chars = max(0, broad_chars - packet_chars)
+    avoided_tokens = max(0, broad_tokens - packet_tokens)
+    compression_ratio = round(broad_chars / max(packet_chars, 1), 1) if broad_chars else 0.0
+
+    notes = [
+        "Context savings are estimated from local wiki body text versus the bounded query packet.",
+        "This does not score answer quality; use it to see whether Link is reducing context budget waste.",
+    ]
+    if broad_chars == 0:
+        notes.append("No wiki body text was indexed yet, so there is no broad-context baseline.")
+    elif packet_chars == 0:
+        notes.append("The query packet was empty; seed or ingest sources before using this as a value signal.")
+    elif compression_ratio < 2:
+        notes.append("This wiki is still small or the packet is broad; savings become more useful as sources accumulate.")
+    else:
+        notes.append("The query returned a bounded packet instead of asking the agent to scan broad wiki context.")
+
+    return {
+        "baseline": {
+            "label": "broad wiki body text",
+            "pages": len(body_index),
+            "estimated_chars": broad_chars,
+            "estimated_tokens": broad_tokens,
+        },
+        "context_packet": {
+            "items": packet_items,
+            "estimated_chars": packet_chars,
+            "estimated_tokens": packet_tokens,
+            "has_more": bool(packet_report.get("has_more")),
+        },
+        "recall_capsule": {
+            "items": _safe_int(recall_capsule.get("count")),
+            "estimated_chars": capsule_chars,
+            "estimated_tokens": capsule_tokens,
+        },
+        "selection": {
+            "memory_items": memory_count,
+            "wiki_pages": wiki_pages,
+            "search_results": search_count,
+        },
+        "avoidance": {
+            "estimated_chars": avoided_chars,
+            "estimated_tokens": avoided_tokens,
+            "compression_ratio": compression_ratio,
+        },
+        "notes": notes,
+    }
+
+
 def build_benchmark_payload(
     target: Path,
     wiki_dir: Path,
@@ -167,6 +267,8 @@ def build_benchmark_payload(
             "timings": {key: round(value, 4) for key, value in timings.items()},
             "budget_report": budget_report,
         }
+        if isinstance(packet, Mapping):
+            payload["value_evidence"] = benchmark_value_evidence(cache, packet)
         payload["scale_notes"] = benchmark_scale_notes(payload)
         payload["health"] = benchmark_health(payload)
         return payload
@@ -311,6 +413,59 @@ def render_benchmark_text(payload: Mapping[str, object]) -> str:
         lines.append(f"Verdict: {health.get('label', 'unknown')}")
         if health.get("summary"):
             lines.append(f"Health: {health.get('summary')}")
+
+    value_evidence = payload.get("value_evidence")
+    if isinstance(value_evidence, Mapping):
+        baseline = value_evidence.get("baseline")
+        context_packet = value_evidence.get("context_packet")
+        recall_capsule = value_evidence.get("recall_capsule")
+        selection = value_evidence.get("selection")
+        avoidance = value_evidence.get("avoidance")
+        if (
+            isinstance(baseline, Mapping)
+            and isinstance(context_packet, Mapping)
+            and isinstance(recall_capsule, Mapping)
+            and isinstance(selection, Mapping)
+            and isinstance(avoidance, Mapping)
+        ):
+            lines.append("")
+            lines.append("Value evidence")
+            lines.append(
+                "Broad wiki baseline: "
+                f"{baseline.get('pages', 0)} pages · "
+                f"{baseline.get('estimated_chars', 0)} chars · "
+                f"{baseline.get('estimated_tokens', 0)} tokens"
+            )
+            lines.append(
+                "Bounded query packet: "
+                f"{context_packet.get('items', 0)} items · "
+                f"{context_packet.get('estimated_chars', 0)} chars · "
+                f"{context_packet.get('estimated_tokens', 0)} tokens · "
+                f"has_more={context_packet.get('has_more', False)}"
+            )
+            lines.append(
+                "Recall capsule: "
+                f"{recall_capsule.get('items', 0)} items · "
+                f"{recall_capsule.get('estimated_chars', 0)} chars · "
+                f"{recall_capsule.get('estimated_tokens', 0)} tokens"
+            )
+            lines.append(
+                "Selected context: "
+                f"{selection.get('memory_items', 0)} memories · "
+                f"{selection.get('wiki_pages', 0)} wiki pages · "
+                f"{selection.get('search_results', 0)} search results"
+            )
+            lines.append(
+                "Estimated context avoided: "
+                f"{avoidance.get('estimated_chars', 0)} chars · "
+                f"{avoidance.get('estimated_tokens', 0)} tokens · "
+                f"{avoidance.get('compression_ratio', 0)}x smaller than broad wiki text"
+            )
+        notes = value_evidence.get("notes")
+        if isinstance(notes, list) and notes:
+            lines.append("Value notes:")
+            for note in notes:
+                lines.append(f"- {note}")
 
     lines.append("")
     lines.append("Timings")

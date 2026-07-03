@@ -168,6 +168,10 @@ lnk benchmark "agent memory" link-demo
 lnk health link-demo
 ```
 
+`lnk benchmark` reports both performance and value evidence: cache/search/query
+timings, graph payload shape, and an estimate of how much broad wiki context the
+bounded Link packet avoided sending to an agent.
+
 The `/health` page mirrors the readiness loop in the browser: validation state,
 interrupted writes, memory review status, and copyable repair commands. The
 viewer stays document-first — common paths in the top nav, deeper tools under
@@ -221,7 +225,7 @@ when the web viewer is not running.
     </td>
     <td width="33%">
       <strong><a href="https://gowtham0992.github.io/link/cli.html">CLI</a></strong><br>
-      Script readiness, query packets, briefs, validation, backup, benchmark, and repair.
+      Script readiness, query packets, briefs, validation, backup, context-savings benchmark, and repair.
     </td>
     <td width="33%">
       <strong><a href="https://gowtham0992.github.io/link/mcp.html">MCP</a></strong><br>

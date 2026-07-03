@@ -119,7 +119,7 @@ query Link for the release process</code></pre>
 lnk graph-summary "local memory" --limit 40 --depth 1
 lnk validate
 lnk rebuild-backlinks</code></pre>
-        <p>Use <code>lnk benchmark</code> when a wiki starts to feel slow. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, and readiness recommendations.</p>
+        <p>Use <code>lnk benchmark</code> when a wiki starts to feel slow or when you want evidence that Link is keeping agent context bounded. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, readiness recommendations, and estimated context avoided by the bounded query packet.</p>
       </article>
     </div>
   </main>
