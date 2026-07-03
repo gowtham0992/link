@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-03
+
 ### Added
 
 - Added per-memory recall `confidence` labels (`strong`, `moderate`, `weak`) based on significant-token coverage, so agents can tell a real preference match from an incidental shared word before acting on it.
