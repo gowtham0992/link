@@ -14,6 +14,8 @@ When the user asks to ingest or drops files into `raw/`, use MCP `ingest` when a
 
 When answering a substantive question that may need local memory or wiki context, start with MCP `recall` when available, or run `lnk query "<task or question>" --budget micro`. Read the returned `recall_capsule` first. Do this before broad file reads, grep/search, or asking the user to repeat project context.
 
+If the recall packet has no useful project context and the user is working inside a repo, seed allowlisted source-backed project context before broad searching: run `lnk seed . ~/link` when CLI is available, then retry bounded recall. This does not create durable memory; it only writes source-backed wiki context after secret scanning.
+
 When you only need graph orientation, especially for a large wiki, prefer MCP `admin` with action `graph_summary` or `lnk graph-summary "<topic>"` before requesting the full graph.
 
 Before broad repairs or risky local wiki edits, create a local backup with MCP `admin` action `backup` when available, or run `lnk backup`. Do not include `raw/` unless the user explicitly asks.

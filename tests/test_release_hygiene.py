@@ -138,6 +138,17 @@ class ReleaseHygieneTests(unittest.TestCase):
         self.assertIn(f"agent contract missing 'admin' in {bad_path}", findings)
         self.assertIn(f"agent contract file missing: {missing_path}", findings)
 
+    def test_installed_agent_instructions_include_project_seed_recovery(self):
+        global_text = (ROOT / "integrations/_shared/link-instructions.md").read_text(encoding="utf-8")
+        project_text = (ROOT / "integrations/_shared/link-instructions-project.md").read_text(encoding="utf-8")
+
+        self.assertIn("no useful project context", global_text)
+        self.assertIn("lnk seed . ~/link", global_text)
+        self.assertIn("does not create durable memory", global_text)
+        self.assertIn("no useful project context", project_text)
+        self.assertIn("python3 link.py seed . .", project_text)
+        self.assertIn("does not create durable memory", project_text)
+
     def test_tracked_path_hygiene_blocks_build_artifacts_and_secret_names(self):
         findings: list[str] = []
 

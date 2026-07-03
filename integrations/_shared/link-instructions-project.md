@@ -14,6 +14,8 @@ When the user asks to ingest or drops files into `raw/`, use MCP `ingest` when a
 
 When answering a substantive project question, start with MCP `recall` when available, or run `python3 link.py query "<task or question>" --budget micro`. Read the returned `recall_capsule` first. Do this before broad file reads, grep/search, or asking the user to repeat project context.
 
+If the recall packet has no useful project context and this repo has not been seeded yet, seed allowlisted source-backed project context before broad searching: run `python3 link.py seed . .` from the project checkout, then retry bounded recall. This does not create durable memory; it only writes source-backed wiki context after secret scanning.
+
 When you only need graph orientation, especially for a large wiki, prefer MCP `admin` with action `graph_summary` or `python3 link.py graph-summary "<topic>"` before requesting the full graph.
 
 Project installs infer the current repo as the memory project key, so project-scoped memories stay separate from other repos while broad user memories still apply.
