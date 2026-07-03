@@ -57,6 +57,13 @@ def build_cli_parser(
     onboard_cmd.add_argument("--all-agents", action="store_true", help="preview or write all supported agent configs")
     onboard_cmd.add_argument("--write", action="store_true", help="update selected agent config files")
     onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
+    onboard_cmd.add_argument(
+        "--seed-project",
+        nargs="?",
+        const=".",
+        default=None,
+        help="seed source-backed project context from this directory during onboarding",
+    )
     onboard_cmd.add_argument("--project", default=None, help="project slug for prompts and first memory")
     onboard_cmd.add_argument("--port", type=int, default=3000, help="local viewer port to print")
     onboard_cmd.add_argument("--json", action="store_true", help="print machine-readable onboarding data")
@@ -412,6 +419,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             all_agents=args.all_agents,
             write=args.write,
             first_memory=args.first_memory,
+            seed_project=args.seed_project,
             project=args.project,
             port=args.port,
             json_output=args.json,

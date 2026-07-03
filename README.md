@@ -117,6 +117,7 @@ When you are ready to use Link for real memory, run one guided command:
 ```bash
 lnk onboard
 lnk onboard --first-memory "I prefer concise release notes"
+lnk onboard --seed-project .
 lnk onboard --agent codex
 lnk onboard --agent codex --write
 ```
@@ -124,9 +125,10 @@ lnk onboard --agent codex --write
 `lnk onboard` creates or repairs `~/link`, checks health, prints the exact agent
 prompts to try, and previews MCP wiring for Codex, Claude Code, Cursor, Kiro,
 VS Code, Copilot, Antigravity, and other supported clients. It only writes an
-agent config when you pass `--write`.
+agent config when you pass `--write`. Add `--seed-project .` from inside a repo
+when you want onboarding to create the first source-backed project context page.
 
-Then seed your current repo so the first real recall is not empty:
+Or seed your current repo as a separate step so the first real recall is not empty:
 
 ```bash
 cd /path/to/your/project

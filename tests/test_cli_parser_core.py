@@ -559,6 +559,8 @@ class CliParserCoreTests(unittest.TestCase):
             "--write",
             "--first-memory",
             "I prefer concise updates",
+            "--seed-project",
+            "/tmp/project",
             "--project",
             "alpha",
             "--port",
@@ -579,6 +581,7 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["all_agents"])
         self.assertTrue(calls[0][1]["write"])
         self.assertEqual(calls[0][1]["first_memory"], "I prefer concise updates")
+        self.assertEqual(calls[0][1]["seed_project"], "/tmp/project")
         self.assertEqual(calls[0][1]["project"], "alpha")
         self.assertEqual(calls[0][1]["port"], 3456)
         self.assertTrue(calls[0][1]["json_output"])

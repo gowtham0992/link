@@ -2066,6 +2066,7 @@ def onboard(
     all_agents: bool = False,
     write: bool = False,
     first_memory: str | None = None,
+    seed_project: str | None = None,
     project: str | None = None,
     port: int = 3000,
     json_output: bool = False,
@@ -2097,6 +2098,53 @@ def onboard(
             memory_result = {
                 "created": False,
                 "message": str(exc),
+            }
+
+    seed_result: dict[str, object] | None = None
+    if seed_project is not None:
+        try:
+            seed_result = _core_seed_project_context(
+                target,
+                Path(seed_project),
+                project_name=project,
+                overwrite=False,
+                dry_run=False,
+                include_git_log=True,
+            )
+            seed_project_root = Path(seed_project).expanduser().resolve()
+            status_value = str(seed_result.get("status") or "")
+            if status_value == "already_seeded":
+                seed_result["next_commands"] = [
+                    _display_command(["link", "seed", str(seed_project_root), str(target), "--overwrite"]),
+                    _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+                    _display_command(["link", "health", str(target)]),
+                ]
+            elif status_value == "needs_attention":
+                seed_result["next_commands"] = [
+                    "redact blocked project files, then rerun: "
+                    + _display_command(["link", "seed", str(seed_project_root), str(target)])
+                ]
+            elif status_value == "empty":
+                seed_result["next_commands"] = [
+                    "add README.md, AGENTS.md, CLAUDE.md, .cursorrules, or agent rule files, then rerun seed"
+                ]
+            else:
+                seed_result["next_commands"] = [
+                    _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+                    _display_command(["link", "brief", f"working on {seed_result.get('project_title') or 'this project'}", str(target)]),
+                    _display_command(["link", "health", str(target)]),
+                ]
+        except (OSError, ValueError) as exc:
+            seed_result = {
+                "status": "needs_attention",
+                "project_root": str(Path(seed_project).expanduser()),
+                "target": str(target),
+                "message": str(exc),
+                "wrote": False,
+                "included_count": 0,
+                "blocked_secret_count": 0,
+                "read_error_count": 1,
+                "next_commands": [_display_command(["link", "seed", seed_project, str(target)])],
             }
 
     connections: list[dict[str, object]] = []
@@ -2136,6 +2184,7 @@ def onboard(
     commands = {
         "health": _display_command(["link", "health", str(target)]),
         "serve": _display_command(["link", "serve", str(target), "--port", str(port)]),
+        "seed_project": _display_command(["link", "seed", ".", str(target)]),
         "memory_inbox": _display_command(["link", "memory-inbox", str(target)]),
         "ingest_status": _display_command(["link", "ingest-status", str(target)]),
         "brief": _display_command(["link", "brief", "working with Link", str(target)]),
@@ -2146,6 +2195,7 @@ def onboard(
         "fixes": fixes,
         "status": status_payload,
         "first_memory": memory_result,
+        "project_seed": seed_result,
         "connections": connections,
         "write_requested": write,
         "prompts": prompts,

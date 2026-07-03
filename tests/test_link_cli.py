@@ -163,6 +163,48 @@ class LinkCliTests(unittest.TestCase):
             [item["prompt"] for item in payload["prompts"]],
         )
 
+    def test_onboard_json_can_seed_project_context(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
+        project = tmp / "client-app"
+        target = tmp / "my-link"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nThis project keeps agent memory local and reviewable.\n",
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(
+                target,
+                seed_project=str(project),
+                project="Client App",
+                json_output=True,
+            )
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertEqual(payload["project_seed"]["status"], "ok")
+        self.assertTrue(payload["project_seed"]["wrote"])
+        self.assertEqual(payload["project_seed"]["included_count"], 1)
+        self.assertTrue((target / "raw/project-seeds/client-app/project-context.md").exists())
+        self.assertTrue((target / "wiki/sources/project-seed-client-app.md").exists())
+
+    def test_onboard_text_suggests_project_seed_when_not_run(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
+        target = tmp / "my-link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(target)
+        text = out.getvalue()
+
+        self.assertEqual(code, 0)
+        self.assertIn("Project seed", text)
+        self.assertIn("not run", text)
+        self.assertIn("seed .", text)
+
     def test_seed_project_initializes_workspace_and_writes_source_context(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-seed-test-"))
         project = tmp / "client-app"

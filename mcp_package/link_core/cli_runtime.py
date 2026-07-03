@@ -281,12 +281,18 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
     """Render the guided first-run path for a normal Link workspace."""
     status = payload.get("status") if isinstance(payload.get("status"), Mapping) else {}
     memory = payload.get("first_memory") if isinstance(payload.get("first_memory"), Mapping) else None
+    project_seed = payload.get("project_seed") if isinstance(payload.get("project_seed"), Mapping) else None
     commands = payload.get("commands") if isinstance(payload.get("commands"), Mapping) else {}
     ready = bool(status.get("ready"))
     connections = _first_mapping_items(payload.get("connections"), 12)
     connection_failed = any(_connection_state(connection) == "failed" for connection in connections)
     write_requested_without_agent = bool(payload.get("write_requested")) and not connections
-    code = 0 if ready and not connection_failed and not write_requested_without_agent and not payload.get("error") else 1
+    seed_failed = bool(project_seed) and project_seed.get("status") not in {"ok", "partial", "already_seeded"}
+    code = (
+        0
+        if ready and not connection_failed and not write_requested_without_agent and not payload.get("error") and not seed_failed
+        else 1
+    )
 
     lines = [
         f"Link onboard: {payload.get('target')}",
@@ -309,6 +315,31 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
             lines.append(f"- not written: {memory.get('message') or memory.get('reason') or 'needs review'}")
     else:
         lines.append("- none yet. Add one when the agent learns a durable preference or decision.")
+
+    lines.extend(["", "Project seed"])
+    if project_seed:
+        status_label = project_seed.get("status") or "unknown"
+        lines.append(f"- status: {status_label}")
+        lines.append(f"- project: {project_seed.get('project_root')}")
+        lines.append(f"- included files: {project_seed.get('included_count', 0)}")
+        if project_seed.get("wrote"):
+            lines.append(f"- source page: {project_seed.get('source_page')}")
+        elif project_seed.get("message"):
+            lines.append(f"- not written: {project_seed.get('message')}")
+        if project_seed.get("blocked_secret_count") or project_seed.get("read_error_count"):
+            lines.append(
+                "- needs attention: "
+                f"{project_seed.get('blocked_secret_count', 0)} secret warning(s), "
+                f"{project_seed.get('read_error_count', 0)} read error(s)"
+            )
+        next_commands = project_seed.get("next_commands")
+        if isinstance(next_commands, Sequence) and not isinstance(next_commands, (str, bytes)):
+            for command in list(next_commands)[:3]:
+                lines.append(f"  {command}")
+    else:
+        lines.append("- not run. Seed this repo when you want first recall to know the project:")
+        if commands.get("seed_project"):
+            lines.append(f"  {commands.get('seed_project')}")
 
     lines.extend(["", "Agent connection"])
     if connections:

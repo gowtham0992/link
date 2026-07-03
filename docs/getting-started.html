@@ -102,9 +102,10 @@ lnk health link-demo</code></pre>
         <p>Use <code>lnk onboard</code> when you are ready to create or repair your real <code>~/link</code> memory workspace. It checks health, prints the first agent prompts, and previews MCP wiring without changing agent config files unless you pass <code>--write</code>.</p>
         <pre><code>lnk onboard
 lnk onboard --first-memory "I prefer concise release notes"
+lnk onboard --seed-project .
 lnk onboard --agent codex
 lnk onboard --agent codex --write</code></pre>
-        <p>From source, use <code>python3 link.py onboard</code> on macOS/Linux or <code>py link.py onboard</code> on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs. If the local viewer is running, <code>http://127.0.0.1:3000/onboard</code> shows the same setup loop with copy buttons.</p>
+        <p>From source, use <code>python3 link.py onboard</code> on macOS/Linux or <code>py link.py onboard</code> on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs. Add <code>--seed-project .</code> from inside a repo when you want onboarding to create the first source-backed project page. If the local viewer is running, <code>http://127.0.0.1:3000/onboard</code> shows the same setup loop with copy buttons.</p>
 
         <h2 id="seed">3. Seed Project Context</h2>
         <p>Run <code>lnk seed</code> inside a project so Link has useful source-backed context before you ask an agent to recall anything. It reads allowlisted project files such as <code>README.md</code>, <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>.cursorrules</code>, and editor rule files, blocks secret-looking values, writes a generated source page, and rebuilds the graph.</p>
