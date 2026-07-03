@@ -1,19 +1,18 @@
 """Text rendering helpers for Link memory CLI commands."""
 from __future__ import annotations
 
-import os
-import shlex
-import subprocess
 from collections.abc import Mapping, Sequence
+
+from .mcp_verify import display_command
 
 
 def _shell_words(*parts: object) -> str:
     words = [str(part) for part in parts if str(part) != ""]
     if not words:
         return ""
-    if os.name == "nt":
-        return subprocess.list2cmdline(words)
-    return shlex.join(words)
+    if len(words) >= 2 and words[0].startswith("python") and words[1] == "link.py":
+        return display_command(["link", *words[2:]])
+    return display_command(words)
 
 
 def _candidate_lines(candidates: object, *, include_reasons: bool = False) -> list[str]:
@@ -229,11 +228,23 @@ def render_recall_text(
         lines.append(f"- {record['title']} ({record['memory_type']} · {record['scope']})")
         lines.append(f"  {record['path']}")
         recall = record.get("recall") if isinstance(record.get("recall"), Mapping) else {}
+        confidence = str(record.get("confidence") or "")
         if recall.get("state"):
-            lines.append(f"  Recall: {recall['state']}")
+            state_line = f"  Recall: {recall['state']}"
+            if confidence:
+                state_line += f" · match: {confidence}"
+            lines.append(state_line)
+        elif confidence:
+            lines.append(f"  Match: {confidence}")
         summary = record.get("tldr") or record.get("snippet")
         if summary:
             lines.append(f"  {summary}")
+    if results and all(str(record.get("confidence") or "") == "weak" for record in results):
+        lines.extend([
+            "",
+            "All matches are weak (shared words only). Verify with the user "
+            "before relying on them.",
+        ])
     return 0, "\n".join(lines)
 
 

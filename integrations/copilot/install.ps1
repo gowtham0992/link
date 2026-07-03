@@ -23,6 +23,6 @@ if ($Project) {
 $mcpPython = Link-ReadMcpPython $wikiPath
 Write-Host ""
 Write-Host "  MCP: add to your Copilot MCP config:"
-Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`"] } } }"
+Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`", `"--surface`", `"slim`"] } } }"
 
 Link-PrintNextSteps $mode

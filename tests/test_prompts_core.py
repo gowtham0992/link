@@ -26,9 +26,11 @@ class PromptsCoreTests(unittest.TestCase):
 
         self.assertEqual(payload["project"], "")
         self.assertIn("remember that I prefer local-first agent memory", prompts)
-        self.assertIn("query Link for what you know about me", prompts)
+        self.assertIn("what does Link know about me?", prompts)
+        self.assertIn("seed this project into Link", prompts)
         self.assertIn("propose memories from raw/<file>", prompts)
         self.assertTrue(str(payload["shortcut"]).startswith("lnk next "))
+        self.assertTrue(any(command.startswith("lnk seed . ") for command in payload["commands"]))
         self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
         self.assertTrue(any(str(root.resolve()) in command for command in payload["commands"]))
 
@@ -43,7 +45,7 @@ class PromptsCoreTests(unittest.TestCase):
 
         self.assertEqual(payload["project"], "client-launch")
         self.assertIn("remember that this project uses Link for local agent memory", prompts)
-        self.assertIn("query Link for what this project remembers", prompts)
+        self.assertIn("what does Link remember about this project?", prompts)
 
     def test_explicit_project_is_normalized(self):
         root = Path(tempfile.mkdtemp(prefix="link-prompts-core-"))
@@ -65,6 +67,7 @@ class PromptsCoreTests(unittest.TestCase):
         self.assertIn("Agent can find Link", payload["steps"][0]["proves"])
         self.assertTrue(any(command.startswith("lnk serve ") for command in payload["commands"]))
         self.assertTrue(any(str(root.resolve()) in command for command in payload["commands"]))
+        self.assertIn("http://127.0.0.1:3000/onboard", payload["urls"])
         self.assertIn("http://127.0.0.1:3000/health", payload["urls"])
 
 

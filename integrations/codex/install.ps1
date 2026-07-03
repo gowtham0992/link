@@ -26,7 +26,7 @@ $codexConfig = Join-Path $HOME ".codex\config.toml"
 if (Test-Path $codexConfig) {
     $command = $mcpPython | ConvertTo-Json -Compress
     $wiki = $wikiPath | ConvertTo-Json -Compress
-    $block = "[mcp_servers.link]`ncommand = $command`nargs = [`"-m`", `"link_mcp`", `"--wiki`", $wiki]`n"
+    $block = "[mcp_servers.link]`ncommand = $command`nargs = [`"-m`", `"link_mcp`", `"--wiki`", $wiki, `"--surface`", `"slim`"]`n"
     $text = Get-Content -Raw -Encoding UTF8 $codexConfig
     $pattern = "(?ms)^\[mcp_servers\.link\]\r?\n.*?(?=^\[|\z)"
     if ([regex]::IsMatch($text, $pattern)) {
@@ -43,7 +43,7 @@ if (Test-Path $codexConfig) {
     Write-Host "  MCP config: add to ${codexConfig}:"
     Write-Host "  [mcp_servers.link]"
     Write-Host "  command = `"$mcpPython`""
-    Write-Host "  args = [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`"]"
+    Write-Host "  args = [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`", `"--surface`", `"slim`"]"
 }
 
 Link-PrintNextSteps $mode

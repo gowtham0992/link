@@ -63,7 +63,7 @@ try:
         config = json.load(f)
     config.setdefault("mcpServers", {})["link"] = {
         "command": mcp_python,
-        "args": ["-m", "link_mcp", "--wiki", wiki_path]
+        "args": ["-m", "link_mcp", "--wiki", wiki_path, "--surface", "slim"]
     }
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
@@ -74,7 +74,7 @@ PYEOF
 elif [ ! -f "$MCP_CONFIG" ]; then
     echo ""
     echo "  Add to ~/.cursor/mcp.json:"
-    echo "  { \"mcpServers\": { \"link\": { \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\"] } } }"
+    echo "  { \"mcpServers\": { \"link\": { \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"] } } }"
 fi
 
 link_print_next_steps "$MODE"

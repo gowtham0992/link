@@ -24,9 +24,9 @@ def starter_prompt_payload(target: Path, project: str | None = None) -> dict[str
         else "remember that I prefer local-first agent memory"
     )
     query_prompt = (
-        "query Link for what this project remembers"
+        "what does Link remember about this project?"
         if project_name
-        else "query Link for what you know about me"
+        else "what does Link know about me?"
     )
     prompts = [
         {
@@ -35,9 +35,14 @@ def starter_prompt_payload(target: Path, project: str | None = None) -> dict[str
             "when": "right after install or before troubleshooting",
         },
         {
-            "label": "Prime memory",
-            "prompt": "brief me from Link before we continue",
+            "label": "Start with Link",
+            "prompt": "start with Link before we continue",
             "when": "at the start of a session or task",
+        },
+        {
+            "label": "Seed project context",
+            "prompt": "seed this project into Link",
+            "when": "after install inside a repo, before the first real project recall",
         },
         {
             "label": "Save explicit memory",
@@ -66,6 +71,7 @@ def starter_prompt_payload(target: Path, project: str | None = None) -> dict[str
         "shortcut": display_command(["link", "next", command_target]),
         "prompts": prompts,
         "commands": [
+            display_command(["link", "seed", ".", command_target]),
             display_command(["link", "health", command_target]),
             display_command(["link", "ingest-status", command_target]),
             display_command(["link", "memory-inbox", command_target]),
@@ -107,6 +113,7 @@ def welcome_payload(target: Path, project: str | None = None) -> dict[str, objec
         ],
         "urls": [
             "http://127.0.0.1:3000",
+            "http://127.0.0.1:3000/onboard",
             "http://127.0.0.1:3000/health",
             "http://127.0.0.1:3000/graph",
         ],

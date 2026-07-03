@@ -1364,6 +1364,16 @@ def render_graph_page_body(
             '<a href="/graph">Clear filters</a>'
             "</p>"
         )
+    bounded_html = ""
+    if graph_mode != "full":
+        bounded_html = (
+            '<p class="graph-focus-note">'
+            "<strong>Bounded overview:</strong> "
+            f"showing {html.escape(str(node_count))} of {html.escape(str(total_node_count))} nodes. "
+            "Use search, type filters, focused neighborhoods, or Load all data before asking the "
+            "browser to draw the whole graph."
+            "</p>"
+        )
 
     return (
         '<div class="breadcrumb"><a href="/">Link</a> / graph</div>'
@@ -1371,6 +1381,7 @@ def render_graph_page_body(
         '<p class="meta">For large wikis, use fullscreen, zoom, pan, and sparse labels. '
         "The graph is for exploring neighborhoods, not reading every label at once."
         f"{html.escape(graph_note)}</p>"
+        f"{bounded_html}"
         f"{focus_html}"
         '<section id="graph-frame" class="graph-frame">'
         '<div class="graph-toolbar" aria-label="Graph controls">'

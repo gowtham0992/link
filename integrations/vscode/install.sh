@@ -64,6 +64,6 @@ fi
 
 echo ""
 echo "  MCP: add to .vscode/mcp.json:"
-echo "  { \"servers\": { \"link\": { \"type\": \"stdio\", \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\"] } } }"
+echo "  { \"servers\": { \"link\": { \"type\": \"stdio\", \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"] } } }"
 
 link_print_next_steps "$MODE"

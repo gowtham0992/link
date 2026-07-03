@@ -472,7 +472,7 @@ def build_ingest_completion(status: dict[str, object], limit: int = 8) -> dict[s
         next_prompt = str(guidance.get("agent_prompt") or "")
     elif represented_count:
         summary = f"All {represented_count} raw source(s) are represented in wiki source pages."
-        next_prompt = 'brief me from Link before we continue'
+        next_prompt = 'start with Link before we continue'
     else:
         summary = "No raw source files are represented yet."
         next_prompt = str(guidance.get("agent_prompt") or "ingest raw/<file> into Link")

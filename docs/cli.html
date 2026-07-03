@@ -6,7 +6,7 @@
   <meta name="description" content="Link CLI reference for local agent memory, wiki maintenance, validation, backup, and MCP verification.">
   <title>Link - CLI Reference</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -57,16 +57,25 @@
       <article class="doc-content">
         <h2 id="tour">CLI Tour</h2>
         <figure class="screenshot-card media-wide">
-          <img src="assets/link-cli.png" alt="Link CLI — status and query packet output">
+          <img src="assets/link-cli-tour.gif" alt="Animated tour of Link CLI readiness, query, brief, and benchmark commands">
           <figcaption>Status, query, brief, and benchmark are the core terminal loop.</figcaption>
         </figure>
-        <p>The CLI is independent of the web viewer. Use <code>lnk query</code>, <code>lnk brief</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
+        <p>The CLI is independent of the web viewer. Use <code>lnk start</code>, <code>lnk query</code>, <code>lnk brief</code>, <code>lnk session-end</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
         <p>Use <code>lnk try</code> when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command.</p>
+        <p>Use <code>lnk proof</code> when you want to prove the cross-agent memory loop directly: one clean local workspace, one reviewed memory, and one bounded recall packet shared by CLI, skills, and MCP.</p>
+        <p>Use <code>lnk onboard</code> when you want to set up a real <code>~/link</code> workspace: safe repair, health check, optional first memory, optional project seed, first prompts, and optional agent MCP wiring in one guided command. If the local viewer is running, <code>/onboard</code> mirrors that flow with copy buttons.</p>
+        <p>Use <code>lnk seed . ~/link</code> from a project directory when you want Link to create a source-backed project page from existing repo context before the first real recall. It scans allowlisted docs/rule files, blocks secret-looking values, and does not create durable memories silently.</p>
 
         <h2 id="daily">Daily Loop</h2>
-        <pre><code>lnk serve
+<pre><code>lnk serve
+lnk onboard
+lnk onboard --seed-project .
+lnk seed . ~/link
+lnk proof
 lnk welcome
 lnk next
+lnk start ~/link --task "working on Link release"
+lnk session-end session-notes.md ~/link --limit 3
 lnk health
 lnk ingest-status
 lnk remember "User prefers feature branches for Link work." --type preference --scope project --project link --visibility project --review-after 2026-08-01
@@ -88,8 +97,10 @@ lnk validate</code></pre>
         </div>
 
         <h2 id="captures">Capture Workflow</h2>
-        <p>Use captures for longer chat notes or session summaries that should be reviewed before becoming durable memory.</p>
-        <pre><code>lnk capture-session session-notes.md --project link
+        <p>Use <code>lnk session-end</code> at the end of a work session when an agent has notes or a transcript and should propose memory without saving it silently. Use lower-level captures for saved review inbox workflows.</p>
+        <pre><code>lnk session-end session-notes.md ~/link --project link --limit 3
+cat transcript.md | lnk session-end - ~/link --project link
+lnk capture-session session-notes.md --project link
 lnk capture-inbox --project link
 lnk accept-capture raw/memory-captures/&lt;capture&gt;.md --index 1
 lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
@@ -110,8 +121,9 @@ lnk rebuild-index
 lnk rebuild-backlinks
 lnk validate
 lnk verify-mcp</code></pre>
-        <p>Use <code>lnk backup</code> before broad repair work. Use <code>lnk benchmark</code> when a wiki starts to feel slow. <code>lnk status --validate</code> and <code>lnk benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
-        <p>Use <code>lnk team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, checks whether review or <code>visibility: private</code> memories would make sharing unsafe, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
+        <p>Use <code>lnk backup</code> before broad repair work. Use <code>lnk benchmark</code> when a wiki starts to feel slow or when you want to see how much broad wiki context the bounded packet avoided sending to an agent. <code>lnk status --validate</code> and <code>lnk benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
+        <p>Use <code>lnk operations</code> when health reports an interrupted write. If a marker has a rollback snapshot, run <code>lnk operations ~/link --recover &lt;marker&gt;</code> to preview the recovery and add <code>--confirm</code> only after reviewing the plan.</p>
+        <p>Use <code>lnk team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, checks whether review or <code>visibility: private</code> memories would make sharing unsafe, keeps <code>wiki/log.md</code> local to preserve each machine's audit hash chain, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
         <p>Use <code>lnk snapshot</code> when you need a static, read-only HTML export for a teammate, maintainer, security reviewer, or demo. It excludes <code>raw/</code>, captures, local operation state, and memory pages by default. With <code>--include-memories</code>, it still excludes <code>visibility: private</code> memories unless <code>--include-private-memories</code> is explicitly passed.</p>
         <p>Use <code>lnk connect &lt;agent&gt;</code> when an agent already has Link instructions but still needs MCP wiring. It previews the config before writing.</p>
         <pre><code>lnk connect codex ~/link
@@ -126,13 +138,16 @@ lnk verify-mcp ~/link</code></pre>
 lnk version
 lnk init [dir]
 lnk serve [dir] [--port 3000]
+lnk onboard [dir] [--agent codex] [--write] [--first-memory "..."] [--seed-project .]
+lnk seed [project-dir] [dir] [--project-name name] [--overwrite] [--dry-run]
 lnk try [dir] [--force] [--serve] [--port 3000]
+lnk proof [dir] [--force] [--serve] [--port 3000]
 lnk welcome [dir] [--project slug]
 lnk prompts [dir] [--project slug]
 lnk next [dir] [--project slug]
 lnk health [dir] [--json]
 lnk status [--validate]
-lnk operations [--limit 20]
+lnk operations [--limit 20] [--recover marker.json] [--confirm]
 lnk backup [--label name] [--include-raw]
 lnk compliance-export [dir] [--output audit.json] [--project slug]
 lnk team-sync [dir] [--remote git-url]
@@ -142,14 +157,16 @@ lnk ingest-status
 lnk import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
 lnk remember "text" [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD]
 lnk propose-memories &lt;file-or-text&gt; [--project slug]
+lnk session-end &lt;file-or-text-or-&gt; [dir] [--project slug] [--limit 3]
 lnk capture-session &lt;file-or-text&gt; [--project slug]
 lnk capture-inbox [--project slug]
 lnk accept-capture &lt;capture&gt; [--index N] [--visibility private|project|team]
 lnk redact-capture &lt;capture&gt;
 lnk delete-capture &lt;capture&gt; --confirm
-lnk query "task" [--budget small|medium|large] [--project slug]
+lnk query "task" [--budget micro|small|medium|large] [--project slug]
 lnk graph-summary ["topic"] [--limit 40] [--depth 1]
-lnk benchmark ["query"] [--budget small|medium|large] [--project slug]
+lnk benchmark ["query"] [--budget micro|small|medium|large] [--project slug]
+lnk start [dir] [--task "task"] [--project slug]
 lnk brief "task" [--project slug]
 lnk memory-audit [--project slug]
 lnk recall "query" [--project slug]

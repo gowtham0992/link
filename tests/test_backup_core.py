@@ -121,6 +121,8 @@ class BackupCoreTests(unittest.TestCase):
         self.assertFalse(restored["confirmation_required"])
         self.assertEqual((root / "wiki/index.md").read_text(encoding="utf-8"), "# Index\n")
         self.assertIn("safety_backup", restored)
+        self.assertTrue(restored["integrity"]["checked"])
+        self.assertIn("passed", restored["integrity"])
 
     def test_restore_backup_skips_raw_unless_requested(self):
         root = self.make_root()

@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import re
-import os
-import shlex
-import subprocess
 from pathlib import Path
 from collections.abc import Callable, Mapping
 
 from .files import atomic_write_text
 from .frontmatter import frontmatter_string, parse_frontmatter
 from .log import utc_timestamp
+from .mcp_verify import display_command
 from .memory import normalize_project, slugify
 from .security import redact_secret_values, secret_value_warnings
 
@@ -23,9 +21,9 @@ def _shell_words(*parts: object) -> str:
     words = [str(part) for part in parts if str(part) != ""]
     if not words:
         return ""
-    if os.name == "nt":
-        return subprocess.list2cmdline(words)
-    return shlex.join(words)
+    if len(words) >= 2 and words[0].startswith("python") and words[1] == "link.py":
+        return display_command(["link", *words[2:]])
+    return display_command(words)
 
 
 def capture_title(
@@ -556,6 +554,50 @@ def render_capture_session_text(payload: dict[str, object]) -> str:
         lines.append(f"   Action: {proposal.get('suggested_action')}")
         lines.append(f"   Memory: {proposal.get('memory')}")
     lines.extend(["", "Next:", "  Ask the user which proposals to remember, update, or discard."])
+    return "\n".join(lines)
+
+
+def render_session_end_text(payload: dict[str, object]) -> str:
+    """Render the agent-friendly session-end proposal output."""
+    proposals = payload.get("proposals") if isinstance(payload.get("proposals"), dict) else {}
+    proposal_items = proposals.get("proposals") if isinstance(proposals.get("proposals"), list) else []
+    lines = [
+        "Link session end",
+        "Captured proposal-only session notes for review.",
+        f"Path: {payload.get('path')}",
+    ]
+    if payload.get("project"):
+        lines.append(f"Project: {payload.get('project')}")
+    secret_warnings = payload.get("secret_warnings") if isinstance(payload.get("secret_warnings"), list) else []
+    if secret_warnings:
+        lines.append("Secret-looking content: " + ", ".join(str(label) for label in secret_warnings))
+    lines.append(f"Memory proposals: {proposals.get('count', 0)}")
+    if not proposal_items:
+        lines.extend([
+            "No durable memory candidates found.",
+            "",
+            "Next:",
+            "  Continue without saving memory.",
+        ])
+        return "\n".join(lines)
+    for index, proposal in enumerate(proposal_items, start=1):
+        if not isinstance(proposal, dict):
+            continue
+        lines.extend([
+            "",
+            f"{index}. {proposal.get('title')} [{proposal.get('confidence')}]",
+            f"   Type: {proposal.get('memory_type')} | Scope: {proposal.get('scope')}",
+        ])
+        if proposal.get("project"):
+            lines.append(f"   Project: {proposal.get('project')}")
+        lines.append(f"   Action: {proposal.get('suggested_action')}")
+        lines.append(f"   Memory: {proposal.get('memory')}")
+    lines.extend([
+        "",
+        "Next:",
+        "  Ask the user which proposals to remember, update, archive, or discard.",
+        "  Do not save durable memory without approval.",
+    ])
     return "\n".join(lines)
 
 

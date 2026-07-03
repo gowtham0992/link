@@ -42,6 +42,27 @@ class DemoCoreTests(unittest.TestCase):
         self.assertTrue((target / "wiki/memories/prefer-local-personal-memory.md").exists())
         self.assertTrue((target / "raw/agent-memory-session.md").exists())
 
+    def test_create_demo_workspace_seeds_reviewed_memory_set(self):
+        # The first recall a new user sees should show a believable memory
+        # system: several memories, mostly reviewed, one pending to teach the
+        # review loop.
+        tmp = Path(tempfile.mkdtemp(prefix="link-demo-core-test-"))
+        target = tmp / "demo"
+
+        create_demo_workspace(target, source_root=ROOT)
+
+        memory_files = sorted((target / "wiki/memories").glob("*.md"))
+        self.assertEqual(len(memory_files), 4)
+        statuses = []
+        for path in memory_files:
+            text = path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if line.startswith("review_status:"):
+                    statuses.append(line.split(":", 1)[1].strip())
+                    break
+        self.assertEqual(statuses.count("reviewed"), 3)
+        self.assertEqual(statuses.count("pending"), 1)
+
     def test_create_demo_workspace_refuses_non_demo_directory(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-demo-core-test-"))
         target = tmp / "not-demo"

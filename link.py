@@ -6,6 +6,9 @@ Usage:
   python link.py serve [target]
   python link.py demo [target]
   python link.py try [target]
+  python link.py proof [target]
+  python link.py onboard [target]
+  python link.py seed [project-dir] [target]
   python link.py welcome [target]
   python link.py prompts [target]
   python link.py status [target]
@@ -24,6 +27,7 @@ Usage:
   python link.py import-obsidian <vault> [target]
   python link.py remember "memory text" [target]
   python link.py propose-memories <file-or-text> [target]
+  python link.py session-end <file-or-text> [target]
   python link.py capture-inbox [target]
   python link.py update-memory <name-or-title> "new memory text" [target]
   python link.py query "task or question" [target]
@@ -50,6 +54,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +63,13 @@ from typing import Callable
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DEMO_DIR = "link-demo"
+DEFAULT_PROOF_DIR = "link-proof"
+PROOF_MARKER = ".link-proof"
+PROOF_MEMORY_TITLE = "Cross-agent Link proof"
+PROOF_MEMORY_TEXT = (
+    "For the Link cross-agent proof, remember that local agent memory should be "
+    "available to every connected agent through the same local Markdown wiki."
+)
 SECRET_NAME_PATTERNS = (
     ".env",
     ".env.*",
@@ -222,11 +234,13 @@ from link_core.capture import (
     render_capture_inbox_text as _core_render_capture_inbox_text,
     render_delete_capture_text as _core_render_delete_capture_text,
     render_redact_capture_text as _core_render_redact_capture_text,
+    render_session_end_text as _core_render_session_end_text,
     redact_capture_file as _core_redact_capture_file,
     write_session_capture as _core_write_session_capture,
 )
 from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
+    atomic_write_text as _core_atomic_write_text,
 )
 from link_core.ingest import (
     collect_ingest_status as _core_collect_ingest_status,
@@ -245,13 +259,20 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    supported_agents as _core_supported_agents,
 )
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
     render_import_obsidian_text as _core_render_import_obsidian_text,
 )
+from link_core.project_seed import (
+    render_seed_project_text as _core_render_seed_project_text,
+    seed_project_context as _core_seed_project_context,
+)
 from link_core.operations import (
     operation_report as _core_operation_report,
+    recover_operation as _core_recover_operation,
+    render_operation_recovery_text as _core_render_operation_recovery_text,
     render_operations_text as _core_render_operations_text,
 )
 from link_core.schema import (
@@ -271,6 +292,9 @@ from link_core.cli_runtime import (
     render_demo_text as _core_render_demo_text,
     render_init_text as _core_render_init_text,
     render_mcp_connect_text as _core_render_mcp_connect_text,
+    render_onboard_text as _core_render_onboard_text,
+    render_proof_text as _core_render_proof_text,
+    render_start_text as _core_render_start_text,
     render_starter_prompts_text as _core_render_starter_prompts_text,
     render_try_text as _core_render_try_text,
     render_welcome_text as _core_render_welcome_text,
@@ -285,11 +309,14 @@ from link_core.validation import (
 from link_core.version import (
     LINK_VERSION,
 )
+from link_core.cli_style import (
+    style_cli_text as _core_style_cli_text,
+)
 from link_core.status import (
     link_status as _core_link_status,
 )
 from link_core.wiki import (
-    build_backlinks as _core_build_backlinks,
+    build_backlinks_from_cache as _core_build_backlinks_from_cache,
     build_wiki_cache as _core_build_wiki_cache,
     close_wiki_cache as _core_close_wiki_cache,
     graph_summary as _core_graph_summary,
@@ -300,7 +327,11 @@ del _BUNDLED_CORE
 
 
 def _build_backlinks(wiki_dir: Path) -> dict[str, dict[str, list[str]]]:
-    return _core_build_backlinks(wiki_dir, body_only=False)
+    cache = _core_build_wiki_cache(wiki_dir, use_persistent_cache=False)
+    try:
+        return _core_build_backlinks_from_cache(cache, body_only=False)
+    finally:
+        _core_close_wiki_cache(cache)
 
 
 def _wiki_pages(wiki_dir: Path) -> list[Path]:
@@ -387,8 +418,12 @@ def _emit_json_or_text(
         print(json.dumps(payload, indent=2))
         return json_code
     code, text = renderer(payload)
-    print(text)
+    _print_text(text)
     return code
+
+
+def _print_text(text: object) -> None:
+    print(_core_style_cli_text(str(text)))
 
 
 def _recent_memories(records: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -642,7 +677,7 @@ def doctor(target: Path, fix: bool = False) -> int:
         secret_name_patterns=SECRET_NAME_PATTERNS,
         skip_suffixes=SKIP_SCAN_SUFFIXES,
     )
-    print(_core_render_doctor_report(report))
+    _print_text(_core_render_doctor_report(report))
     return 0 if report.healthy else 1
 
 
@@ -655,7 +690,7 @@ def validate(target: Path, strict: bool = False, json_output: bool = False) -> i
         return 0 if payload["passed"] else 1
 
     code, text = _core_render_validate_text(payload, wiki_dir=wiki_dir)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -668,7 +703,7 @@ def migrate(target: Path, json_output: bool = False) -> int:
         return 0 if payload["ok"] else 1
 
     code, text = _core_render_migrate_text(payload, wiki_dir=wiki_dir)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -681,7 +716,7 @@ def status(target: Path, include_validation: bool = False, json_output: bool = F
         return 0 if payload["ready"] else 1
 
     code, text = _core_render_status_text(payload, wiki_dir=wiki_dir, version=LINK_VERSION)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -756,19 +791,33 @@ def health(target: Path, json_output: bool = False) -> int:
     if json_output:
         print(json.dumps(payload, indent=2))
         return code
-    print(_render_health_text(payload))
+    _print_text(_render_health_text(payload))
     return code
 
 
-def operations(target: Path, limit: int = 20, json_output: bool = False) -> int:
+def operations(
+    target: Path,
+    limit: int = 20,
+    recover: str | None = None,
+    confirm: bool = False,
+    json_output: bool = False,
+) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
+    if recover:
+        payload = _core_recover_operation(wiki_dir, recover, confirm=confirm)
+        code, text = _core_render_operation_recovery_text(payload, target=target)
+        if json_output:
+            print(json.dumps(payload, indent=2))
+            return code
+        _print_text(text)
+        return code
     payload = _core_operation_report(wiki_dir, limit=limit)
     code, text = _core_render_operations_text(payload)
     if json_output:
         print(json.dumps(payload, indent=2))
         return code
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -787,7 +836,7 @@ def backup(
             print(json.dumps(payload, indent=2))
             return 0
         code, text = _core_render_backup_list_text(payload)
-        print(text)
+        _print_text(text)
         return code
 
     try:
@@ -804,7 +853,7 @@ def backup(
         return 0
 
     code, text = _core_render_backup_created_text(payload, include_raw=include_raw)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -838,7 +887,7 @@ def restore_backup(
         return 0 if payload.get("restored") or payload.get("confirmation_required") else 1
 
     code, text = _core_render_backup_restore_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -864,7 +913,7 @@ def compliance_export(
             print(json.dumps({"wrote": str(output_path), "export": payload}, indent=2))
             return 0
         code, text = _core_render_compliance_export_text(payload, output=str(output_path))
-        print(text)
+        _print_text(text)
         return code
     print(json.dumps(payload, indent=2))
     return 0
@@ -877,7 +926,7 @@ def team_sync(target: Path, remote: str | None = None, json_output: bool = False
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_team_sync_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -926,7 +975,7 @@ def ingest_status(target: Path, json_output: bool = False) -> int:
         print(json.dumps(status, indent=2))
         return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
 
-    print(_core_render_ingest_status_text(str(target), status))
+    _print_text(_core_render_ingest_status_text(str(target), status))
     return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
 
 
@@ -974,7 +1023,7 @@ def rebuild_backlinks(target: Path) -> int:
         page_count=page_count,
         edge_count=edge_count,
     )
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -989,7 +1038,7 @@ def rebuild_index(target: Path) -> int:
         print(f"Could not rebuild index: {exc}", file=sys.stderr)
         return 1
     code, text = _core_render_rebuild_index_text(result, index_path=wiki_dir / "index.md")
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1041,6 +1090,8 @@ def remember(
 
 def _read_proposal_input(target: Path, value: str) -> tuple[str, str]:
     raw = value.strip()
+    if raw == "-":
+        return sys.stdin.read(), "stdin"
     candidates = [Path(raw).expanduser()]
     target_path = target.expanduser()
     if not Path(raw).is_absolute():
@@ -1085,7 +1136,7 @@ def propose_memories(
         return 0
 
     code, text = _core_render_propose_memories_text(result)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1154,7 +1205,76 @@ def capture_session(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_capture_session_text(payload))
+    _print_text(_core_render_capture_session_text(payload))
+    return 0
+
+
+def session_end(
+    target: Path,
+    source_input: str,
+    title: str | None = None,
+    limit: int = 3,
+    project: str | None = None,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+
+    text, source = _read_proposal_input(root, source_input)
+    if not text.strip():
+        print("Session-end input is required", file=sys.stderr)
+        return 1
+
+    project_name = project or _default_project(root)
+    capture_record = _core_write_session_capture(
+        root,
+        text=text,
+        source=source,
+        title=title or "Session end",
+        project=project_name,
+        default_source="session-end",
+        path_source=True,
+    )
+    rel_path = str(capture_record["path"])
+    result = _propose_memories_from_text(
+        wiki_dir,
+        text,
+        source=rel_path,
+        limit=max(1, min(limit, 10)),
+        project=project_name,
+        command_target=root,
+    )
+    payload = {
+        "captured": True,
+        "path": rel_path,
+        "source_input": source,
+        "title": capture_record["title"],
+        "project": capture_record["project"],
+        "secret_warnings": capture_record["secret_warnings"],
+        "proposals": result,
+    }
+    _append_log(
+        wiki_dir,
+        str(capture_record["timestamp"]),
+        "session-end",
+        f"Captured proposal-only session end notes at {rel_path}",
+        [
+            f"Source input: {source}",
+            f"Project: {capture_record['project'] or 'none'}",
+            f"Secret warnings: {', '.join(capture_record['secret_warnings']) if capture_record['secret_warnings'] else 'none'}",
+            f"Proposals: {result['count']}",
+        ],
+    )
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_text(_core_render_session_end_text(payload))
     return 0
 
 
@@ -1190,7 +1310,7 @@ def capture_inbox(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_capture_inbox_text(payload))
+    _print_text(_core_render_capture_inbox_text(payload))
     return 0
 
 
@@ -1297,7 +1417,7 @@ def accept_capture(
         return 0 if payload["accepted"] else 1
 
     code, text = _core_render_accept_capture_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1339,7 +1459,7 @@ def redact_capture(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_redact_capture_text(payload))
+    _print_text(_core_render_redact_capture_text(payload))
     return 0
 
 
@@ -1366,7 +1486,7 @@ def delete_capture(
             print(json.dumps(payload, indent=2))
         else:
             _, text = _core_render_delete_capture_text(payload, target=target)
-            print(text)
+            _print_text(text)
         return 1
 
     _append_log(
@@ -1380,7 +1500,7 @@ def delete_capture(
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_delete_capture_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1474,7 +1594,7 @@ def recall(
         project=project_name,
         target=target,
     )
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1541,7 +1661,7 @@ def forget_memory(target: Path, identifier: str, confirm: bool = False, json_out
     if not result.get("found"):
         print(text, file=sys.stderr)
     else:
-        print(text)
+        _print_text(text)
     return code
 
 
@@ -1625,7 +1745,7 @@ def explain_memory(target: Path, identifier: str, json_output: bool = False) -> 
         return 0
 
     code, text = _core_render_explain_memory_text(explanation)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1648,7 +1768,7 @@ def query(
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_query_text(payload, query_text=query_text, command_target=str(target))
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1680,7 +1800,7 @@ def graph_summary(
         return 0
 
     code, text = _core_render_graph_summary_text(payload, topic=topic)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1710,7 +1830,7 @@ def benchmark(
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(_core_render_benchmark_text(payload))
+    _print_text(_core_render_benchmark_text(payload))
     return 0
 
 
@@ -1739,7 +1859,89 @@ def brief(
         return 0
 
     code, text = _core_render_brief_text(payload, query=query, project=project_name)
-    print(text)
+    _print_text(text)
+    return code
+
+
+def start(
+    target: Path,
+    task: str = "",
+    limit: int = 6,
+    project: str | None = None,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    task = _clean_text_input(task, max_len=500)
+    project_name = project or _default_project(target)
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    brief_payload = _memory_brief(wiki_dir, query=task, limit=limit, project=project_name)
+    brief_payload = _core_add_capture_review_to_brief(
+        brief_payload,
+        _capture_review_summary(target, project=project_name),
+    )
+    query_text = task or "your current task"
+    relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
+    project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
+        status_payload.get("content_page_count") or 0
+    )
+    seed_command = _display_command(["link", "seed", ".", str(target)])
+    context_preview: dict[str, object] | None = None
+    if task and int(status_payload.get("content_page_count") or 0):
+        preview_payload = _query_link(wiki_dir, task, budget="micro", project=project_name)
+        if preview_payload.get("found"):
+            context_preview = {
+                "query": preview_payload.get("query", task),
+                "budget": preview_payload.get("budget", "micro"),
+                "recall_capsule": preview_payload.get("recall_capsule", {}),
+                "follow_up": preview_payload.get("follow_up", []),
+            }
+    payload = {
+        "target": str(target),
+        "wiki": str(wiki_dir),
+        "task": task,
+        "project": project_name,
+        "status": status_payload,
+        "brief": brief_payload,
+        "context_preview": context_preview or {},
+        "commands": {
+            "health": _display_command(["link", "health", str(target)]),
+            "query": _display_command(["link", "query", query_text, str(target), "--budget", "micro"]),
+            "brief": _display_command(["link", "brief", query_text, str(target)]),
+            "remember": _display_command(["link", "remember", "<approved memory>", str(target)]),
+            "review": _display_command(["link", "memory-inbox", str(target)]),
+            "seed_project": seed_command,
+        },
+        "project_seed": {
+            "recommended": project_seed_recommended,
+            "reason": (
+                "No source-backed project context or relevant memory found in this startup packet."
+                if project_seed_recommended
+                else ""
+            ),
+            "command": seed_command,
+            "safety": (
+                "Run from the project repo. Link reads allowlisted project docs/rules, "
+                "secret-scans them, and writes source-backed wiki context without creating durable memory."
+            ),
+        },
+        "agent_loop": [
+            "Use this brief before asking the user to repeat durable context.",
+            "Use query for task-specific context when this brief is not enough.",
+            "Save memory only after explicit user approval.",
+        ],
+    }
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0 if status_payload["ready"] else 1
+
+    _, brief_text = _core_render_brief_text(brief_payload, query=task, project=project_name)
+    text_payload = {**payload, "brief_text": brief_text}
+    code, text = _core_render_start_text(text_payload)
+    _print_text(text)
     return code
 
 
@@ -1757,7 +1959,7 @@ def profile(target: Path, limit: int = 10, project: str | None = None, json_outp
         return 0
 
     code, text = _core_render_profile_text(profile_data, target=target, project=project_name)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1791,7 +1993,7 @@ def memory_audit(target: Path, limit: int = 10, project: str | None = None, json
         return 0
 
     code, text = _core_render_memory_audit_text(payload, target=target)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1829,7 +2031,7 @@ def verify_mcp(
         return 0 if status["ready"] else 1
 
     code, text = _core_render_mcp_verify_text(status)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1862,7 +2064,7 @@ def connect_mcp(
         return 0 if not write or bool(write_status.get("ok")) else 1
 
     code, text = _core_render_mcp_connect_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1877,7 +2079,241 @@ def init_wiki(target: Path) -> int:
     fixes = _apply_doctor_fixes(target)
 
     code, text = _core_render_init_text(target=target, fixes=fixes)
-    print(text)
+    _print_text(text)
+    return code
+
+
+def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str]:
+    requested: list[str] = list(_core_supported_agents()) if all_agents else []
+    requested.extend(agents or [])
+    return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
+
+
+def onboard(
+    target: Path,
+    *,
+    agents: list[str] | None = None,
+    all_agents: bool = False,
+    write: bool = False,
+    first_memory: str | None = None,
+    seed_project: str | None = None,
+    project: str | None = None,
+    port: int = 3000,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    if port < 1 or port > 65535:
+        print("--port must be between 1 and 65535")
+        return 1
+
+    created = not (target / "wiki").exists()
+    target.mkdir(parents=True, exist_ok=True)
+    _copy_runtime_files(target)
+    fixes = _apply_doctor_fixes(target)
+    wiki_dir = _resolve_wiki_dir(target)
+
+    memory_result: dict[str, object] | None = None
+    if first_memory and first_memory.strip():
+        try:
+            memory_result = _write_memory_page(
+                target,
+                first_memory,
+                memory_type="preference",
+                scope="project" if project else "user",
+                tags="onboarding",
+                source="onboard",
+                project=project,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            memory_result = {
+                "created": False,
+                "message": str(exc),
+            }
+
+    seed_result: dict[str, object] | None = None
+    if seed_project is not None:
+        try:
+            seed_result = _core_seed_project_context(
+                target,
+                Path(seed_project),
+                project_name=project,
+                overwrite=False,
+                dry_run=False,
+                include_git_log=True,
+            )
+            seed_project_root = Path(seed_project).expanduser().resolve()
+            status_value = str(seed_result.get("status") or "")
+            if status_value == "already_seeded":
+                seed_result["next_commands"] = [
+                    _display_command(["link", "seed", str(seed_project_root), str(target), "--overwrite"]),
+                    _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+                    _display_command(["link", "health", str(target)]),
+                ]
+            elif status_value == "needs_attention":
+                seed_result["next_commands"] = [
+                    "redact blocked project files, then rerun: "
+                    + _display_command(["link", "seed", str(seed_project_root), str(target)])
+                ]
+            elif status_value == "empty":
+                seed_result["next_commands"] = [
+                    "add README.md, AGENTS.md, CLAUDE.md, .cursorrules, or agent rule files, then rerun seed"
+                ]
+            else:
+                seed_result["next_commands"] = [
+                    _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+                    _display_command(["link", "brief", f"working on {seed_result.get('project_title') or 'this project'}", str(target)]),
+                    _display_command(["link", "health", str(target)]),
+                ]
+        except (OSError, ValueError) as exc:
+            seed_result = {
+                "status": "needs_attention",
+                "project_root": str(Path(seed_project).expanduser()),
+                "target": str(target),
+                "message": str(exc),
+                "wrote": False,
+                "included_count": 0,
+                "blocked_secret_count": 0,
+                "read_error_count": 1,
+                "next_commands": [_display_command(["link", "seed", seed_project, str(target)])],
+            }
+
+    connections: list[dict[str, object]] = []
+    for agent in _onboard_agent_names(agents, all_agents):
+        try:
+            connections.append(_core_build_mcp_connect_payload(
+                target=target,
+                wiki_dir=wiki_dir,
+                agent=agent,
+                expected_version=LINK_VERSION,
+                init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+                default_python=sys.executable,
+                write=write,
+            ))
+        except ValueError as exc:
+            connections.append({
+                "agent": agent,
+                "display_name": agent,
+                "config_path": "",
+                "write": {"requested": write, "ok": False, "message": str(exc)},
+                "next_actions": [],
+            })
+
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    starter_payload = _core_starter_prompt_payload(target, project=project)
+    prompts = starter_payload.get("prompts", [])
+    if first_memory and isinstance(prompts, list):
+        prompts = [
+            {
+                **item,
+                "prompt": f"remember that {first_memory.strip()}",
+            }
+            if isinstance(item, dict) and item.get("label") == "Save explicit memory"
+            else item
+            for item in prompts
+        ]
+    commands = {
+        "health": _display_command(["link", "health", str(target)]),
+        "serve": _display_command(["link", "serve", str(target), "--port", str(port)]),
+        "seed_project": _display_command(["link", "seed", ".", str(target)]),
+        "memory_inbox": _display_command(["link", "memory-inbox", str(target)]),
+        "ingest_status": _display_command(["link", "ingest-status", str(target)]),
+        "brief": _display_command(["link", "brief", "working with Link", str(target)]),
+    }
+    payload: dict[str, object] = {
+        "target": str(target),
+        "created": created,
+        "fixes": fixes,
+        "status": status_payload,
+        "first_memory": memory_result,
+        "project_seed": seed_result,
+        "connections": connections,
+        "write_requested": write,
+        "prompts": prompts,
+        "commands": commands,
+        "agent_examples": [
+            _display_command(["link", "onboard", str(target), "--agent", agent])
+            for agent in ("codex", "claude-code", "cursor")
+        ],
+        "url": f"http://127.0.0.1:{port}",
+    }
+
+    if json_output:
+        print(json.dumps(payload, indent=2, default=str))
+        failed = any(
+            isinstance(connection.get("write"), dict)
+            and connection["write"].get("requested")
+            and not connection["write"].get("ok")
+            for connection in connections
+        )
+        return 0 if status_payload.get("ready") and not failed else 1
+
+    code, text = _core_render_onboard_text(payload)
+    _print_text(text)
+    return code
+
+
+def seed_project(
+    target: Path,
+    project_root: Path,
+    *,
+    project_name: str | None = None,
+    overwrite: bool = False,
+    dry_run: bool = False,
+    limit: int = 12,
+    include_git_log: bool = True,
+    git_log_limit: int = 20,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    project_root = project_root.expanduser().resolve()
+    if limit < 0:
+        print("--limit must be 0 or greater")
+        return 1
+    if git_log_limit < 0:
+        print("--git-log-limit must be 0 or greater")
+        return 1
+
+    target.mkdir(parents=True, exist_ok=True)
+    _copy_runtime_files(target)
+    _apply_doctor_fixes(target)
+    payload = _core_seed_project_context(
+        target,
+        project_root,
+        project_name=project_name,
+        overwrite=overwrite,
+        dry_run=dry_run,
+        limit=limit,
+        include_git_log=include_git_log,
+        git_log_limit=git_log_limit,
+    )
+    status_value = str(payload.get("status") or "")
+    if status_value == "already_seeded":
+        payload["next_commands"] = [
+            _display_command(["link", "seed", str(project_root), str(target), "--overwrite"]),
+            _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+            _display_command(["link", "health", str(target)]),
+        ]
+    elif status_value == "needs_attention":
+        payload["next_commands"] = [
+            "redact blocked project files, then rerun: "
+            + _display_command(["link", "seed", str(project_root), str(target)])
+        ]
+    elif status_value == "empty":
+        payload["next_commands"] = [
+            "add README.md, AGENTS.md, CLAUDE.md, .cursorrules, or agent rule files, then rerun seed"
+        ]
+    else:
+        payload["next_commands"] = [
+            _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+            _display_command(["link", "brief", f"working on {payload.get('project_title') or 'this project'}", str(target)]),
+            _display_command(["link", "health", str(target)]),
+        ]
+    if json_output:
+        print(json.dumps(payload, indent=2, default=str))
+        return 0 if payload.get("status") in {"ok", "partial", "already_seeded"} else 1
+
+    code, text = _core_render_seed_project_text(payload)
+    _print_text(text)
     return code
 
 
@@ -1888,7 +2324,7 @@ def starter_prompts(target: Path, project: str | None = None, json_output: bool 
         return 0
 
     code, text = _core_render_starter_prompts_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1899,7 +2335,7 @@ def welcome(target: Path, project: str | None = None, json_output: bool = False)
         return 0
 
     code, text = _core_render_welcome_text(payload)
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1944,6 +2380,14 @@ def create_demo(target: Path, force: bool = False) -> int:
         guide_path=target / "START_HERE.md",
         serve_command=_display_command(["python3", str(target / "link.py"), "serve", str(target)]),
         next_command=_display_command(["python3", str(target / "link.py"), "next", str(target)]),
+        start_command=_display_command([
+            "python3",
+            str(target / "link.py"),
+            "start",
+            str(target),
+            "--task",
+            "working on agent memory",
+        ]),
         query_command=_display_command([
             "python3",
             str(target / "link.py"),
@@ -1962,7 +2406,7 @@ def create_demo(target: Path, force: bool = False) -> int:
         ]),
         audit_command=_display_command(["python3", str(target / "link.py"), "memory-audit", str(target)]),
     )
-    print(text)
+    _print_text(text)
     return code
 
 
@@ -1972,14 +2416,135 @@ def _try_summary_from_query(payload: dict[str, object]) -> str:
     primary = wiki.get("primary") or "no primary page"
     memory_items = memory.get("items") if isinstance(memory.get("items"), list) else []
     page_count = len(payload.get("context_packet") or []) if isinstance(payload.get("context_packet"), list) else 0
-    return f"{primary} · {len(memory_items)} memories · {page_count} context items"
+    memory_count = len(memory_items)
+    memory_label = "memory" if memory_count == 1 else "memories"
+    context_label = "item" if page_count == 1 else "items"
+    return f"{primary} · {memory_count} {memory_label} · {page_count} context {context_label}"
 
 
 def _try_summary_from_brief(payload: dict[str, object]) -> str:
     memories = payload.get("relevant_memories") if isinstance(payload.get("relevant_memories"), list) else []
     review = payload.get("review") if isinstance(payload.get("review"), dict) else {}
     review_count = review.get("count", 0)
-    return f"{len(memories)} relevant memories · {review_count} review items"
+    memory_count = len(memories)
+    memory_label = "memory" if memory_count == 1 else "memories"
+    review_label = "item" if review_count == 1 else "items"
+    return f"{memory_count} relevant {memory_label} · {review_count} review {review_label}"
+
+
+def _proof_recall_found(payload: dict[str, object], title: str) -> bool:
+    title_lc = title.lower()
+    memory = payload.get("memory") if isinstance(payload.get("memory"), dict) else {}
+    items = memory.get("items") if isinstance(memory.get("items"), list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        haystack = " ".join(
+            str(item.get(key) or "")
+            for key in ("title", "name", "summary", "why_selected", "text")
+        ).lower()
+        if title_lc in haystack or "cross-agent" in haystack:
+            return True
+    return title_lc in json.dumps(payload, ensure_ascii=False).lower()
+
+
+def proof(
+    target: Path,
+    *,
+    force: bool = False,
+    serve: bool = False,
+    port: int = 3000,
+    json_output: bool = False,
+) -> int:
+    """Create a concrete cross-agent continuity proof workspace."""
+    target = target.expanduser().resolve()
+    created = not (target / "wiki").exists()
+    if target.exists() and any(target.iterdir()) and (force or created):
+        marker = target / PROOF_MARKER
+        if not marker.exists():
+            print(f"{target} does not look like a Link proof directory; refusing to overwrite it.", file=sys.stderr)
+            return 1
+        if force:
+            shutil.rmtree(target)
+            created = True
+    target.mkdir(parents=True, exist_ok=True)
+    _core_atomic_write_text(target / PROOF_MARKER, "Link proof directory\n")
+    _copy_runtime_files(target)
+    _apply_doctor_fixes(target)
+
+    wiki_dir = _resolve_wiki_dir(target)
+    try:
+        memory_result = _write_memory_page(
+            target,
+            PROOF_MEMORY_TEXT,
+            title=PROOF_MEMORY_TITLE,
+            memory_type="note",
+            scope="user",
+            tags="proof,cross-agent",
+            source="lnk proof",
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Could not create proof memory: {exc}", file=sys.stderr)
+        return 1
+
+    reviewed = False
+    if memory_result.get("created") and memory_result.get("name"):
+        try:
+            review_result = _mark_memory_reviewed(
+                target,
+                str(memory_result["name"]),
+                note="Reviewed automatically because the user explicitly ran lnk proof.",
+            )
+            reviewed = str(review_result.get("review_status") or "").lower() == "reviewed"
+        except (FileNotFoundError, ValueError):
+            reviewed = False
+    memory_result = {**memory_result, "reviewed": reviewed}
+    _core_rebuild_index(wiki_dir)
+    backlinks = _build_backlinks(wiki_dir)
+    _core_atomic_write_json(wiki_dir / "_backlinks.json", backlinks)
+
+    query_text = "cross-agent proof local memory"
+    recall_payload = _query_link(wiki_dir, query_text, budget="micro")
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
+    recall_found = _proof_recall_found(recall_payload, PROOF_MEMORY_TITLE)
+    ready = bool(status_payload.get("ready")) and recall_found
+    command_target = str(target)
+    payload = {
+        "target": command_target,
+        "created": created,
+        "ready": ready,
+        "status": status_payload,
+        "memory": memory_result,
+        "recall": {
+            "query": query_text,
+            "found": recall_found,
+            "budget": "micro",
+            "estimated_tokens": recall_payload.get("estimated_tokens"),
+            "recall_capsule": recall_payload.get("recall_capsule"),
+        },
+        "prompts": {
+            "agent_a": "remember that I want Link memory shared across my local agents",
+            "agent_b": "start with Link before we continue, then tell me what Link remembers about cross-agent proof",
+        },
+        "commands": {
+            "start": _display_command(["link", "start", command_target, "--task", "cross-agent proof"]),
+            "recall": _display_command(["link", "query", query_text, command_target, "--budget", "micro"]),
+            "mcp": _display_command(["link", "connect", "codex", command_target]),
+            "serve": _display_command(["link", "serve", command_target, "--port", str(port)]),
+        },
+        "url": f"http://127.0.0.1:{port}",
+    }
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        if serve:
+            return serve_wiki(target, port=port)
+        return 0 if ready else 1
+
+    code, text = _core_render_proof_text(payload)
+    _print_text(text)
+    if serve:
+        return serve_wiki(target, port=port)
+    return code
 
 
 def try_link(
@@ -2043,14 +2608,14 @@ def try_link(
         benchmark_command=payload["commands"]["benchmark"],
         url=payload["url"],
     )
-    print(text)
+    _print_text(text)
     if serve:
         return serve_wiki(target, port=port)
     return code
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR)
+    parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
     _configure_link_command_display()
     try:
@@ -2059,6 +2624,9 @@ def main(argv: list[str] | None = None) -> int:
             "serve": serve_wiki,
             "demo": create_demo,
             "try": try_link,
+            "proof": proof,
+            "onboard": onboard,
+            "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,
             "status": status,
@@ -2078,6 +2646,7 @@ def main(argv: list[str] | None = None) -> int:
             "remember": remember,
             "propose-memories": propose_memories,
             "capture-session": capture_session,
+            "session-end": session_end,
             "capture-inbox": capture_inbox,
             "accept-capture": accept_capture,
             "redact-capture": redact_capture,
@@ -2089,6 +2658,7 @@ def main(argv: list[str] | None = None) -> int:
             "graph-summary": graph_summary,
             "benchmark": benchmark,
             "brief": brief,
+            "start": start,
             "profile": profile,
             "wins": memory_wins,
             "memory-audit": memory_audit,

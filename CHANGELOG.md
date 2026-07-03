@@ -6,6 +6,78 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-03
+
+### Added
+
+- Added per-memory recall `confidence` labels (`strong`, `moderate`, `weak`) based on significant-token coverage, so agents can tell a real preference match from an incidental shared word before acting on it.
+- Added lightweight suffix stemming to memory recall scoring so close paraphrases like "commits" still find memories phrased with "committing", without embeddings or external services.
+- Added weak-match guidance to recall packets and CLI recall output: when every matched memory is a weak lexical match, Link now says so and tells the agent to verify with the user instead of presenting it as a known preference.
+- Added `lnk session-end` (alias `lnk end`) as the agent-agnostic end-of-session lifecycle command: it stores proposal-only session notes, returns a small set of memory candidates, and refuses to create durable memory without user approval.
+- Added MCP `link_session_end` prompt guidance and `admin(action="session_end")` support so MCP clients can run the same proposal-only shutdown loop without adding another default slim tool.
+- Updated official skills, installed agent instructions, README, CLI docs, MCP docs, and package README around the portable loop: start with bounded recall, end with review-gated memory proposals.
+- Added `lnk seed [project-dir] [target]` to create a source-backed project context page from allowlisted repo files such as `README.md`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, and editor rule files, with secret scanning and no silent durable-memory writes.
+- Added `lnk onboard --seed-project [dir]` so first-run setup can create the initial source-backed project context page without making users discover a separate command.
+- Added benchmark value evidence: `lnk benchmark` now estimates broad wiki body text versus the bounded Link query packet so users can see concrete context-budget savings alongside speed and scale checks.
+
+- Added a slim MCP surface for LLM-native clients so agents can rely on a smaller default set of high-signal tools while the full tool surface remains available for compatibility.
+- Added MCP prompt and resource coverage so clients can expose Link recall, remember, ingest, and review workflows as native agent actions instead of requiring users to memorize tool names.
+- Added MCP `link_start` and `link://instructions` so clients can attach the portable startup loop: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads.
+- Added token-efficient recall capsules with a `micro` budget, rank signals, estimated token counts, and follow-up guidance so agents can retrieve the right memory before expanding context.
+- Added `scripts/smoke_recall_quality.py` to exercise recall quality and token-budget behavior across representative memory queries.
+- Added `lnk onboard` to create or repair a real `~/link` workspace, check health, optionally seed a first memory, preview or write agent MCP config, and print first prompts in one guided flow.
+- Added `lnk proof`, a clean cross-agent continuity demo that creates a local proof workspace, writes one reviewed memory, and recalls it through the same bounded path used by CLI, skills, and MCP.
+- Added a local `/onboard` viewer page that turns health, first memory, agent wiring, and starter prompts into one copyable setup checklist.
+- Added `/onboard` links to first-run output, starter prompts, the local home page, the health page, HTTP viewer smoke coverage, and large-wiki smoke guidance.
+- Added TTY-only CLI styling for human output while keeping JSON and non-TTY output plain for agents and scripts.
+- Added audit-log hash-chain entries and doctor verification so silent edits to the local audit trail are detectable.
+- Added rollback snapshots for write operations so interrupted multi-file memory/index updates can restore touched files or remove newly created files.
+- Added `lnk operations --recover <marker> --confirm` so leftover crash snapshots from interrupted writes can be previewed and applied instead of becoming dead local state.
+- Added cross-agent continuity coverage proving a memory written through the CLI can be recalled through the slim MCP surface from the same local wiki.
+- Added cache-backed backlink rebuild logic so rebuilds reuse parsed page data while preserving existing body-only/full-link behavior.
+
+### Changed
+
+- Project seed pages now carry bounded, secret-scanned excerpts of the seeded files and recent commit subjects, so day-one recall returns the actual project context instead of a list of file names.
+
+- Redesigned the local web console to the Link design system: cream/ink/rust editorial palette with a warm-dark theme (never pure black), serif headings with mono labels on system font stacks, a tab-strip nav, ledger memory cards, health status cards, and a segment-meter confidence indicator on recalled memories (weak matches carry a 'verify before trusting' note).
+
+- Restored the designed animated landing page on GitHub Pages (live memory-graph hero) and refreshed its content for the slim MCP surface: canonical six tools, `lnk proof`/`lnk try`/`lnk start`/`lnk onboard` commands, and recall confidence labels.
+- Tightened the README quick start and moved scale checks into the documentation table; documented recall confidence labels in the agent-facing tool list.
+
+- Seeded the generated demo with four realistic memories (three reviewed, one pending) so the first recall, brief, and viewer walkthrough show a believable memory system and the review loop at the same time.
+
+- Added `lnk start`, a CLI startup loop that combines readiness, validation state, and a local memory brief for agents using skills or shell instead of MCP.
+- Updated agent installers and MCP config writers to prefer the slim MCP surface by default, reducing tool-list noise while keeping advanced tools available.
+- Made the slim MCP surface the default server surface and aligned README, LINK.md, installed agent instructions, MCP docs, status actions, and query follow-ups around the canonical `status`, `recall`, `remember`, `ingest`, `review`, and `admin` vocabulary.
+- Reworded starter prompts around the clearer `start with Link before we continue` flow so first-run users ask for the same startup recall loop exposed by MCP `link_start`.
+- Improved query/search ranking for token-efficient recall, including stronger exact/phrase matching, better budget accounting, and clearer recall metadata in query packets, benchmark output, status, and health views.
+- Tightened `lnk onboard --write` guidance so config-writing is explicit, repeatable, and clear about which agent files are affected.
+- Improved `lnk serve` startup guidance so the terminal points new users to `/onboard`, `/health`, `/graph`, and clearly states that MCP and CLI work without the viewer running.
+- Clarified public UI docs around the `/onboard` checklist and viewer-independent CLI, skills, and MCP usage.
+- Redesigned the GitHub Pages landing page and refreshed the product brand, logo assets, README header links, and public docs styling around the newer product positioning.
+- Replaced older synthetic docs GIFs with real, on-brand product screenshots and figures for UI, CLI, MCP, health, home, and graph flows.
+- Reworked the README and docs landing page around one canonical proof path instead of multiple competing quick starts.
+- Tightened README and public docs onboarding around a proof-first flow: `lnk proof` for the core memory aha, `lnk try` for the richer demo, and `lnk onboard` for real setup.
+- Improved `lnk try` human-readable output so the first-run proof reads like a product moment instead of a debug checklist.
+- Updated doctor backlink and isolated-page checks to reuse cached page records instead of rereading the whole wiki independently during health checks.
+- Updated team-sync to keep `wiki/log.md` local so Git-based team sharing does not create false audit hash-chain tamper alarms.
+- Regenerated dark-mode docs screenshots from deterministic source images before rebuilding the checked-in product GIFs.
+- Tightened official skill trigger wording so skill-only agents can proactively retrieve context and propose memory after important user-approved decisions without silently writing.
+- Retired the old synthetic docs media generator in favor of a non-destructive verifier for checked-in real product screenshots, GIFs, and diagrams.
+- Updated the local `/onboard` checklist to surface project context seeding before first memory and agent wiring, matching the new `lnk onboard --seed-project .` path.
+- Updated installed agent instructions so agents recover from empty project recall by seeding allowlisted source-backed repo context before broad searching.
+- Updated `lnk start`, MCP `link_start`, and slim MCP `admin` so empty project recall points agents toward source-backed project seeding before broad file reads.
+- Updated `lnk start` to include a tiny token-bounded context preview from the same hybrid query packet used by CLI, skills, and MCP once source-backed project context exists.
+- Updated status/health next actions so empty initialized workspaces recommend source-backed project seeding before generic ingest prompts.
+
+### Fixed
+
+- Fixed direct `serve.py` argument parsing so a positional target now fails with guidance instead of silently serving the wrong wiki root; use `--root` directly or `lnk serve <target>`.
+- Fixed a flaky Windows write-lock path by retrying file-lock acquisition on transient `PermissionError`.
+- Fixed docs-site validation so the self-contained landing bundle is allowed while the rest of the public docs keep the local-first/no-external-runtime guarantee.
+- Fixed first-run `init` output to print the installed `lnk` command instead of the collision-prone `link` command.
+
 ## [1.4.0] - 2026-06-14
 
 ### Added

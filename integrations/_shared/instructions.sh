@@ -46,9 +46,9 @@ link_print_next_steps() {
         echo "  Print starter prompts: python3 link.py next"
         echo "  Try in your agent:"
         echo "    is Link ready?"
-        echo "    brief me from Link before we continue"
+        echo "    start with Link before we continue"
         echo "    remember that this project uses Link for local agent memory"
-        echo "    query Link for what this project remembers"
+        echo "    what does Link remember about this project?"
         echo "    ingest raw/<file> into Link"
     else
         echo "  Drop sources into ~/link/raw/."
@@ -56,9 +56,9 @@ link_print_next_steps() {
         echo "  Print starter prompts: lnk next"
         echo "  Try in your agent:"
         echo "    is Link ready?"
-        echo "    brief me from Link before we continue"
+        echo "    start with Link before we continue"
         echo "    remember that I prefer local-first agent memory"
-        echo "    query Link for what you know about me"
+        echo "    what does Link know about me?"
         echo "    ingest raw/<file> into Link"
     fi
 }

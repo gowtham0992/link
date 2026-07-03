@@ -31,6 +31,9 @@ EXPECTED_WIKI_PAGES = {
     "local-first-software",
     "local-release-notes",
     "log",
+    "keep-agent-memory-in-local-markdown",
+    "keep-answers-short-and-cite-wiki-sources",
+    "local-viewer-runs-on-port-3000",
     "prefer-local-personal-memory",
     "retrieval-augmented-generation",
     "transformer-reading-notes",
@@ -133,8 +136,8 @@ class DemoSnapshotTests(unittest.TestCase):
         edges = {(edge["source"], edge["target"]) for edge in graph["edges"]}
 
         self.assertEqual(node_ids, EXPECTED_WIKI_PAGES)
-        self.assertEqual(len(graph["nodes"]), 13)
-        self.assertEqual(len(graph["edges"]), 58)
+        self.assertEqual(len(graph["nodes"]), 16)
+        self.assertEqual(len(graph["edges"]), 64)
         self.assertEqual(len(edges), len(graph["edges"]))
         self.assertTrue(EXPECTED_KEY_EDGES.issubset(edges))
 
@@ -165,10 +168,10 @@ class DemoSnapshotTests(unittest.TestCase):
         profile = serve._memory_profile()
         html = serve._render_profile()
 
-        self.assertEqual(profile["memory_count"], 1)
-        self.assertEqual(profile["active_count"], 1)
+        self.assertEqual(profile["memory_count"], 4)
+        self.assertEqual(profile["active_count"], 4)
         self.assertEqual(profile["review_count"], 1)
-        self.assertEqual(profile["by_type"]["preference"], 1)
+        self.assertEqual(profile["by_type"]["preference"], 2)
         self.assertEqual(profile["recent"][0]["name"], "prefer-local-personal-memory")
         self.assertIn("Memory Profile", html)
         self.assertIn("Prefer local personal memory", html)
@@ -194,8 +197,8 @@ class DemoSnapshotTests(unittest.TestCase):
         dashboard = serve._memory_dashboard()
         html = serve._render_memory_dashboard()
 
-        self.assertEqual(dashboard["memory_count"], 1)
-        self.assertEqual(dashboard["active_count"], 1)
+        self.assertEqual(dashboard["memory_count"], 4)
+        self.assertEqual(dashboard["active_count"], 4)
         self.assertEqual(dashboard["review_count"], 1)
         self.assertEqual(dashboard["next_actions"][0]["label"], "Review pending memories")
         self.assertEqual(dashboard["review"][0]["name"], "prefer-local-personal-memory")
@@ -204,9 +207,9 @@ class DemoSnapshotTests(unittest.TestCase):
         self.assertIn("Next actions", html)
         self.assertIn("Review needed", html)
         self.assertIn("Prefer local personal memory", html)
-        self.assertIn("python3 link.py review-memory", html)
-        self.assertIn("python3 link.py update-memory", html)
-        self.assertIn("python3 link.py archive-memory", html)
+        self.assertIn("review-memory", html)
+        self.assertIn("update-memory", html)
+        self.assertIn("archive-memory", html)
 
     def test_demo_memory_dashboard_shows_recent_updates(self):
         target = self.make_demo()
@@ -254,11 +257,12 @@ class DemoSnapshotTests(unittest.TestCase):
         profile = serve._memory_profile()
         html = serve._render_profile()
 
-        self.assertEqual(profile["memory_count"], 1)
-        self.assertEqual(profile["active_count"], 0)
+        self.assertEqual(profile["memory_count"], 4)
+        self.assertEqual(profile["active_count"], 3)
         self.assertEqual(profile["review_count"], 0)
         self.assertEqual(profile["by_status"]["archived"], 1)
-        self.assertEqual(profile["recent"], [])
+        recent_names = {memory["name"] for memory in profile["recent"]}
+        self.assertNotIn("prefer-local-personal-memory", recent_names)
         self.assertEqual(profile["archived"][0]["name"], "prefer-local-personal-memory")
         self.assertIn("Archived memories", html)
         self.assertIn("Prefer local personal memory", html)

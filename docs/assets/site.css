@@ -120,6 +120,22 @@ a { color: inherit; }
   max-width: 960px;
 }
 
+/* Scroll reveal */
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 600ms ease, transform 600ms ease;
+}
+
+.reveal.revealed {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+
 .page-hero {
   padding: 74px clamp(20px, 5vw, 72px) 50px;
   border-bottom: 1px solid var(--line);

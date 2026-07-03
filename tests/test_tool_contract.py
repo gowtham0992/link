@@ -19,6 +19,13 @@ class ToolContractTests(unittest.TestCase):
     def test_mcp_contract_matches_expected_tools(self):
         self.assertEqual(contract.mcp_tools(), contract.EXPECTED_MCP_TOOLS)
 
+    def test_mcp_slim_contract_matches_expected_tools(self):
+        self.assertEqual(contract.mcp_slim_tools(), contract.EXPECTED_MCP_SLIM_TOOLS)
+
+    def test_mcp_prompts_and_resources_match_expected_contract(self):
+        self.assertEqual(contract.mcp_prompts(), contract.EXPECTED_MCP_PROMPTS)
+        self.assertEqual(contract.mcp_resources(), contract.EXPECTED_MCP_RESOURCES)
+
     def test_repo_tool_contract_passes(self):
         self.assertEqual(contract.check_tool_contract(), [])
 
@@ -34,9 +41,13 @@ class ToolContractTests(unittest.TestCase):
 
             (tmp / "docs").mkdir()
             cli_reference = "\n".join(f"`lnk {command}`" for command in sorted(contract.DOCS_CLI_COMMANDS))
-            mcp_reference = "\n".join(
-                tool for tool in sorted(contract.EXPECTED_MCP_TOOLS) if tool != "query_link"
+            all_mcp_terms = (
+                contract.EXPECTED_MCP_TOOLS
+                | contract.EXPECTED_MCP_SLIM_TOOLS
+                | contract.EXPECTED_MCP_PROMPTS
+                | contract.EXPECTED_MCP_RESOURCES
             )
+            mcp_reference = "\n".join(tool for tool in sorted(all_mcp_terms) if tool != "query_link")
             (tmp / "docs/cli.html").write_text(cli_reference, encoding="utf-8")
             (tmp / "docs/mcp.html").write_text(mcp_reference, encoding="utf-8")
             (tmp / "mcp_package/README.md").write_text(mcp_reference, encoding="utf-8")

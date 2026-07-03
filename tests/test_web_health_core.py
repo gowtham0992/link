@@ -23,6 +23,7 @@ def test_render_health_page_shows_readiness_operations_and_commands(tmp_path):
             "active_memory_count": 2,
             "needs_review_count": 1,
             "search_backend": "sqlite-fts",
+            "fts_index": {"available": True, "persistent": True, "reused": True},
             "persistent_cache": {"enabled": True, "reused_records": 10, "total_records": 12},
             "schema": {"status": "current"},
             "validation": {"checked": True, "passed": False},
@@ -54,12 +55,15 @@ def test_render_health_page_shows_readiness_operations_and_commands(tmp_path):
     assert "Next Safe Action" in html
     assert "Interrupted writes should be inspected before more repairs." in html
     assert "sqlite-fts" in html
+    assert "FTS index" in html
+    assert "persistent" in html
     assert "Persistent cache" in html
     assert "10/12 pages reused" in html
     assert "stale_operations" in html
     assert "remember-1.json" in html
     assert "Operation Next Actions" in html
     assert str(tmp_path) in html
+    assert "lnk onboard" in html
     assert "lnk operations" in html
     assert "lnk benchmark" in html
     assert "agent memory" in html

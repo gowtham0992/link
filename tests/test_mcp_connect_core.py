@@ -114,7 +114,10 @@ class McpConnectCoreTests(unittest.TestCase):
 
         self.assertTrue(payload["write"]["ok"])
         self.assertEqual(data["servers"]["link"]["type"], "stdio")
-        self.assertEqual(data["servers"]["link"]["args"], ["-m", "link_mcp", "--wiki", str(wiki)])
+        self.assertEqual(
+            data["servers"]["link"]["args"],
+            ["-m", "link_mcp", "--wiki", str(wiki), "--surface", "slim"],
+        )
 
     def test_unknown_agent_is_clear(self):
         with tempfile.TemporaryDirectory() as temp:

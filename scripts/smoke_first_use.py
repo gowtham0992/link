@@ -92,6 +92,7 @@ def run_smoke(work_dir: Path, python: str = sys.executable) -> None:
 
     demo_result = run_link("demo", str(demo_target), "--force", python=python)
     require("Try the value loop:" in demo_result.stdout, "demo output did not show the value loop")
+    require(" start " in demo_result.stdout, "demo output did not show the start proof command")
     require(
         "query 'why does Link help agents?'" in demo_result.stdout
         or 'query "why does Link help agents?"' in demo_result.stdout,
@@ -109,8 +110,14 @@ def run_smoke(work_dir: Path, python: str = sys.executable) -> None:
     require(int(demo_status.get("memory_count") or 0) >= 1, "demo did not include a starter memory")
 
     project_prompts = run_json("prompts", str(demo_target), "--project", "demo", "--json", python=python)
+    prompt_texts = [
+        str(item.get("prompt", ""))
+        for item in project_prompts.get("prompts", [])
+        if isinstance(item, dict)
+    ]
+    require("seed this project into Link" in prompt_texts, "project prompts did not include seed guidance")
     require(
-        "this project uses Link" in project_prompts.get("prompts", [{}, {}, {}])[2].get("prompt", ""),
+        any("this project uses Link" in prompt for prompt in prompt_texts),
         "project prompts did not include project memory guidance",
     )
 

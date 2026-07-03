@@ -96,10 +96,10 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Print starter prompts: lnk next", instructions)
         self.assertIn("Try in your agent:", instructions)
         self.assertIn("is Link ready?", instructions)
-        self.assertIn("brief me from Link before we continue", instructions)
+        self.assertIn("start with Link before we continue", instructions)
         self.assertIn("ingest raw/<file> into Link", instructions)
-        self.assertIn("query Link for what you know about me", instructions)
-        self.assertIn("query Link for what this project remembers", instructions)
+        self.assertIn("what does Link know about me?", instructions)
+        self.assertIn("what does Link remember about this project?", instructions)
 
         for installer in INSTALLERS:
             with self.subTest(installer=installer.name):

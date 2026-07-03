@@ -6,7 +6,7 @@
   <meta name="description" content="Install and use Link's MCP server with Codex, Claude, Cursor, Kiro, VS Code, Copilot, and other agents.">
   <title>Link - MCP Setup</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -57,12 +57,12 @@
       <article class="doc-content">
         <h2 id="tour">MCP Tour</h2>
         <figure class="screenshot-card media-wide">
-          <img src="assets/link-mcp.png" alt="An agent calling Link's memory_brief MCP tool">
-          <figcaption>Agents use natural prompts, then call Link tools for readiness, briefs, query packets, and reviewed memory writes.</figcaption>
+          <img src="assets/link-mcp-agent-chat.gif" alt="Animated MCP chat tour showing Link readiness, brief, query, and memory writes">
+          <figcaption>Agents use natural prompts, then call Link tools for readiness, recall packets, ingest plans, and reviewed memory writes.</figcaption>
         </figure>
         <div class="callout">
           <strong>MCP does not need <code>serve.py</code></strong>
-          The local web viewer is only for humans. MCP clients start <code>python -m link_mcp --wiki ...</code> over stdio and read the same Markdown wiki directly.
+          The local web viewer is only for humans. MCP clients start <code>python -m link_mcp --wiki ... --surface slim</code> over stdio and read the same Markdown wiki directly.
         </div>
         <div class="callout">
           <strong>Prefer no MCP?</strong>
@@ -88,7 +88,11 @@ bash integrations/antigravity/install.sh</code></pre>
 .\integrations\copilot\install.ps1
 .\integrations\vscode\install.ps1
 .\integrations\antigravity\install.ps1</code></pre>
-        <p>If you already have agent instructions and only need the MCP config, use <code>lnk connect</code>. It previews the target file and config snippet first; add <code>--write</code> for an explicit update.</p>
+        <p>If you want a guided setup that also checks the wiki and prints first-run prompts, use <code>lnk onboard --agent AGENT</code>. It previews the target config first; add <code>--write</code> for an explicit update. MCP and CLI work without <code>lnk serve</code>; the local <code>/onboard</code> page is only a browser checklist.</p>
+        <pre><code>lnk onboard --agent codex
+lnk onboard --agent codex --write
+lnk onboard --agent cursor --write</code></pre>
+        <p>If you already have agent instructions and only need MCP wiring, use <code>lnk connect</code> directly.</p>
         <pre><code>lnk connect codex ~/link
 lnk connect codex ~/link --write
 lnk connect kiro ~/link --write
@@ -104,7 +108,7 @@ python3 -m link_mcp --version</code></pre>
   "mcpServers": {
     "link": {
       "command": "python3",
-      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki", "--surface", "slim"]
     }
   }
 }</code></pre>
@@ -118,26 +122,48 @@ python3 -m link_mcp --version</code></pre>
   "mcpServers": {
     "link": {
       "command": "C:\\Users\\YOU\\.link-mcp-venv\\Scripts\\python.exe",
-      "args": ["-m", "link_mcp", "--wiki", "C:\\Users\\YOU\\link\\wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "C:\\Users\\YOU\\link\\wiki", "--surface", "slim"]
     }
   }
 }</code></pre>
 
         <h2 id="workflow">Predictable Agent Workflow</h2>
-        <p>Agents should use Link in this order:</p>
+        <p>New MCP configs use the slim surface by default so agents see one obvious read tool and one obvious write tool instead of a long menu of overlapping helpers. The full compatibility surface remains available with <code>--surface full</code>.</p>
+        <p>Slim agents should use Link in this order:</p>
         <ol>
-          <li>Call <code>link_status</code> when connecting or troubleshooting.</li>
-          <li>Call <code>starter_prompts</code> when the user asks what to try next.</li>
-          <li>Call <code>ingest_status</code> before ingesting raw files.</li>
-          <li>Call <code>query_link</code> first for most answers.</li>
-          <li>Call <code>memory_brief</code> before longer work.</li>
-          <li>Call <code>get_graph_summary</code> when graph context is needed.</li>
-          <li>Call <code>backup_wiki</code> before broad repair work.</li>
-          <li>Call <code>validate_wiki</code> after ingest or substantial page edits.</li>
+          <li>Call <code>status</code> when connecting or troubleshooting.</li>
+          <li>Call <code>recall</code> with an empty query once at the first substantive turn of a session.</li>
+          <li>Call <code>recall(query, budget="micro")</code> before broad file reads or asking the user to repeat durable context.</li>
+          <li>Call <code>ingest</code> when the user drops files into <code>raw/</code>.</li>
+          <li>Call <code>remember</code> only after the user explicitly approves durable memory.</li>
+          <li>At session end, call <code>admin(action="session_end")</code> or <code>capture_session</code> to propose memory candidates without saving them silently.</li>
+          <li>Call <code>review</code> for memory inbox, profile, audit, explain, archive, restore, forget, and visibility workflows.</li>
+          <li>Call <code>admin</code> for backup, migrate, validate, rebuild, graph export, pages, captures, and advanced updates.</li>
         </ol>
 
         <h2 id="tools">MCP Tools</h2>
-        <p>Full tool set:</p>
+        <p>Recommended slim tool set:</p>
+        <pre><code>status
+recall
+remember
+ingest
+review
+admin</code></pre>
+        <p>MCP prompts exposed by Link:</p>
+        <pre><code>link_start
+link_brief
+link_remember
+link_session_end
+link_ingest
+link_review</code></pre>
+        <p>MCP resources exposed by Link:</p>
+        <pre><code>link://instructions
+link://health
+link://brief
+link://profile
+link://project</code></pre>
+        <p><code>link_start</code> and <code>link://instructions</code> carry the portable startup loop for clients that support native prompts or resource attachment: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads. If recall finds no useful project context, agents can call <code>admin(action="seed_project", arguments="{&quot;project_root&quot;:&quot;/absolute/project/path&quot;}")</code> or ask the user to run <code>lnk seed . ~/link</code> from the repo before retrying recall. <code>link_session_end</code> carries the matching review-gated shutdown loop: capture useful session notes, return proposals, and wait for user approval before durable memory writes.</p>
+        <p>Full compatibility tool set available with <code>--surface full</code>:</p>
         <pre><code>link_status
 link_operations
 starter_prompts
@@ -175,7 +201,7 @@ get_graph_summary
 get_graph
 rebuild_index
 rebuild_backlinks</code></pre>
-        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page. <code>remember_memory</code> also accepts optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled re-checks, and temporary memories.</p>
+        <p>Memory write tools return <code>duplicate_candidates</code> or <code>conflict_candidates</code> when review, update, or archive is safer than creating another memory page. The slim <code>remember</code> tool and full <code>remember_memory</code> compatibility tool both accept optional <code>visibility</code>, <code>review_after</code>, and <code>expires_at</code> fields for sharing intent, scheduled re-checks, and temporary memories.</p>
         <p>Project-aware tools accept an optional <code>project</code> argument. When set, Link returns broad user/global memory plus memories for that project, while excluding memories from other explicit projects.</p>
 
 <h2 id="verify">Verify Setup</h2>
@@ -186,7 +212,7 @@ lnk next</code></pre>
         <div class="callout">
           <strong>Natural prompts to try</strong>
           <p><code>is Link ready?</code></p>
-          <p><code>brief me from Link before we continue</code></p>
+          <p><code>start with Link before we continue</code></p>
           <p><code>query Link for my current project context</code></p>
           <p><code>remember that I prefer short release notes</code></p>
         </div>

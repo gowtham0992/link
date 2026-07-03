@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .validation import validate_wiki
+
 
 BACKUP_DIR_NAME = ".link-backups"
 DEFAULT_BACKUP_LIMIT = 20
@@ -300,9 +302,27 @@ def restore_backup(
                     destination.unlink()
             shutil.move(str(restored_root), str(destination))
 
+    integrity: dict[str, Any] = {
+        "checked": False,
+        "passed": False,
+        "error_count": 0,
+        "warning_count": 0,
+        "finding_count": 0,
+    }
+    if "wiki" in plan["restore_roots"]:
+        validation = validate_wiki(root / "wiki")
+        integrity = {
+            "checked": True,
+            "passed": bool(validation.get("passed")),
+            "error_count": int(validation.get("error_count") or 0),
+            "warning_count": int(validation.get("warning_count") or 0),
+            "finding_count": int(validation.get("finding_count") or 0),
+        }
+
     return {
         "restored": True,
         "confirmation_required": False,
         **plan,
         "safety_backup": safety,
+        "integrity": integrity,
     }

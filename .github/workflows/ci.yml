@@ -167,4 +167,5 @@ jobs:
       - name: MCP stdio smoke test
         run: |
           python link.py demo /tmp/link-mcp-smoke --force
+          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki --surface full
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki

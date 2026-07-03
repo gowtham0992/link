@@ -71,7 +71,7 @@ def _render_after_approval() -> str:
         '<div class="page-actions">'
         '<a class="button-link" href="/inbox">Open memory inbox</a>'
         '<a class="button-link" href="/audit">Open memory audit</a>'
-        f'{copy_button("brief me from Link before we continue", "Copy brief prompt")}'
+        f'{copy_button("start with Link before we continue", "Copy brief prompt")}'
         f'{copy_button("query Link for what you remember about this task", "Copy query prompt")}'
         '</div></div></section>'
     )

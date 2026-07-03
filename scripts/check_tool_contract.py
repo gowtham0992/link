@@ -21,6 +21,7 @@ EXPECTED_CLI_COMMANDS = {
     "delete-capture",
     "demo",
     "doctor",
+    "end",
     "explain-memory",
     "forget-memory",
     "graph-summary",
@@ -34,8 +35,10 @@ EXPECTED_CLI_COMMANDS = {
     "wins",
     "migrate",
     "next",
+    "onboard",
     "operations",
     "profile",
+    "proof",
     "prompts",
     "propose-memories",
     "query",
@@ -48,10 +51,13 @@ EXPECTED_CLI_COMMANDS = {
     "restore-backup",
     "restore-memory",
     "review-memory",
+    "seed",
     "serve",
     "set-memory-visibility",
+    "session-end",
     "share",
     "snapshot",
+    "start",
     "status",
     "team-sync",
     "try",
@@ -102,7 +108,33 @@ EXPECTED_MCP_TOOLS = {
     "validate_wiki",
 }
 
-DOCS_CLI_COMMANDS = EXPECTED_CLI_COMMANDS - {"query-link"}
+EXPECTED_MCP_SLIM_TOOLS = {
+    "admin",
+    "ingest",
+    "recall",
+    "remember",
+    "review",
+    "status",
+}
+
+EXPECTED_MCP_PROMPTS = {
+    "link_brief",
+    "link_ingest",
+    "link_remember",
+    "link_review",
+    "link_session_end",
+    "link_start",
+}
+
+EXPECTED_MCP_RESOURCES = {
+    "link://brief",
+    "link://health",
+    "link://instructions",
+    "link://profile",
+    "link://project",
+}
+
+DOCS_CLI_COMMANDS = EXPECTED_CLI_COMMANDS - {"end", "query-link"}
 CLI_DOC_PATH = Path("docs/cli.html")
 MCP_DOC_PATHS = (
     Path("docs/mcp.html"),
@@ -157,16 +189,88 @@ def _is_mcp_tool_decorator(node: ast.AST) -> bool:
     )
 
 
+def _is_named_decorator(node: ast.AST, names: set[str]) -> bool:
+    target = node.func if isinstance(node, ast.Call) else node
+    return isinstance(target, ast.Name) and target.id in names
+
+
 def mcp_tools(path: Path = ROOT / "mcp_package/link_mcp/server.py") -> set[str]:
-    """Return functions exported through @mcp.tool()."""
+    """Return full-surface functions exported through MCP."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     tools: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if any(_is_mcp_tool_decorator(decorator) for decorator in node.decorator_list):
+        if any(
+            _is_mcp_tool_decorator(decorator) or _is_named_decorator(decorator, {"_full_tool"})
+            for decorator in node.decorator_list
+        ):
             tools.add(node.name)
     return tools
+
+
+def mcp_slim_tools(path: Path = ROOT / "mcp_package/link_mcp/server.py") -> set[str]:
+    """Return slim-surface functions exported through MCP."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tools: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if any(_is_named_decorator(decorator, {"_slim_tool"}) for decorator in node.decorator_list):
+            tools.add(node.name)
+    return tools
+
+
+def _decorator_call(decorator: ast.AST, attr: str) -> ast.Call | None:
+    if not isinstance(decorator, ast.Call):
+        return None
+    target = decorator.func
+    if (
+        isinstance(target, ast.Attribute)
+        and target.attr == attr
+        and isinstance(target.value, ast.Name)
+        and target.value.id == "mcp"
+    ):
+        return decorator
+    return None
+
+
+def mcp_prompts(path: Path = ROOT / "mcp_package/link_mcp/server.py") -> set[str]:
+    """Return prompt names exported through @mcp.prompt()."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    prompts: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            call = _decorator_call(decorator, "prompt")
+            if call is None:
+                continue
+            name = None
+            if call.args:
+                name = _literal_string(call.args[0])
+            for keyword in call.keywords:
+                if keyword.arg == "name":
+                    name = _literal_string(keyword.value)
+            prompts.add(name or node.name)
+    return prompts
+
+
+def mcp_resources(path: Path = ROOT / "mcp_package/link_mcp/server.py") -> set[str]:
+    """Return resource URIs exported through @mcp.resource()."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    resources: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            call = _decorator_call(decorator, "resource")
+            if call is None or not call.args:
+                continue
+            uri = _literal_string(call.args[0])
+            if uri:
+                resources.add(uri)
+    return resources
 
 
 def _missing_terms(path: Path, terms: set[str]) -> list[str]:
@@ -211,13 +315,37 @@ def check_tool_contract(root: Path = ROOT) -> list[str]:
     if extra_mcp:
         findings.append(f"link_mcp.server has undocumented MCP tools: {', '.join(extra_mcp)}")
 
+    actual_slim = mcp_slim_tools(root / "mcp_package/link_mcp/server.py")
+    missing_slim = sorted(EXPECTED_MCP_SLIM_TOOLS - actual_slim)
+    extra_slim = sorted(actual_slim - EXPECTED_MCP_SLIM_TOOLS)
+    if missing_slim:
+        findings.append(f"link_mcp.server is missing slim MCP tools: {', '.join(missing_slim)}")
+    if extra_slim:
+        findings.append(f"link_mcp.server has undocumented slim MCP tools: {', '.join(extra_slim)}")
+
+    actual_prompts = mcp_prompts(root / "mcp_package/link_mcp/server.py")
+    missing_prompts = sorted(EXPECTED_MCP_PROMPTS - actual_prompts)
+    extra_prompts = sorted(actual_prompts - EXPECTED_MCP_PROMPTS)
+    if missing_prompts:
+        findings.append(f"link_mcp.server is missing MCP prompts: {', '.join(missing_prompts)}")
+    if extra_prompts:
+        findings.append(f"link_mcp.server has undocumented MCP prompts: {', '.join(extra_prompts)}")
+
+    actual_resources = mcp_resources(root / "mcp_package/link_mcp/server.py")
+    missing_resources = sorted(EXPECTED_MCP_RESOURCES - actual_resources)
+    extra_resources = sorted(actual_resources - EXPECTED_MCP_RESOURCES)
+    if missing_resources:
+        findings.append(f"link_mcp.server is missing MCP resources: {', '.join(missing_resources)}")
+    if extra_resources:
+        findings.append(f"link_mcp.server has undocumented MCP resources: {', '.join(extra_resources)}")
+
     missing_cli_docs = _missing_cli_reference(root / CLI_DOC_PATH)
     if missing_cli_docs:
         findings.append(f"{CLI_DOC_PATH} command reference is missing: {', '.join(missing_cli_docs)}")
 
     for relative_path in MCP_DOC_PATHS:
         path = root / relative_path
-        missing = _missing_terms(path, EXPECTED_MCP_TOOLS)
+        missing = _missing_terms(path, EXPECTED_MCP_TOOLS | EXPECTED_MCP_SLIM_TOOLS | EXPECTED_MCP_PROMPTS | EXPECTED_MCP_RESOURCES)
         if missing:
             findings.append(f"{relative_path} is missing MCP tools: {', '.join(missing)}")
 

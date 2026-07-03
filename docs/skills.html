@@ -6,7 +6,7 @@
   <meta name="description" content="Use Link through official lazy-loadable CLI skills when MCP setup is not needed.">
   <title>Link - Skills</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -39,7 +39,7 @@
     <div class="hero-inner">
       <span class="eyebrow">No MCP required</span>
       <h1>Lazy-load Link through skills.</h1>
-      <p>Official skills are small CLI workflows an agent can load only when needed: health, retrieval, ingest, and memory lifecycle.</p>
+      <p>Official skills are small CLI workflows an agent can load when Link is relevant: session start, retrieval, ingest, health, session-end proposals, and memory lifecycle.</p>
     </div>
   </header>
 
@@ -55,6 +55,7 @@
       <article class="doc-content">
         <h2 id="why">Why Skills</h2>
         <p>MCP gives Link structured tool calls, but it should not be the only path. If an agent can run local commands, it can use Link through <code>lnk</code> without an MCP server, background viewer, or extra client configuration. From a source checkout, the same workflows work with <code>python3 link.py</code>.</p>
+        <p>The skills are intentionally proactive. Retrieval should load before work that may depend on previous context, health should load before trusting a changed wiki, ingest should load when raw files appear, and memory should load after important decisions or at session end so the agent can propose durable memory for review.</p>
         <div class="callout">
           <strong><code>lnk serve</code> is optional</strong>
           <p>The web viewer is only for humans. Skills, CLI commands, and MCP tools all read the same local Markdown wiki directly.</p>
@@ -67,10 +68,10 @@
             <tr><th>Skill</th><th>Use it for</th><th>First command</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>link-health</code></td><td>Readiness, interrupted writes, backups, repair, validation.</td><td><code>lnk health</code></td></tr>
-            <tr><td><code>link-retrieve</code></td><td>Bounded query packets, briefs, graph summaries, benchmarks.</td><td><code>lnk query "..."</code></td></tr>
-            <tr><td><code>link-ingest</code></td><td>Raw source ingest, stale sources, memory proposals, post-ingest checks.</td><td><code>lnk ingest-status</code></td></tr>
-            <tr><td><code>link-memory</code></td><td>Remember, recall, review, explain, update, archive, restore, forget.</td><td><code>lnk brief "..."</code></td></tr>
+            <tr><td><code>link-health</code></td><td>Start of Link work, after installs/upgrades, interrupted writes, backups, repair, validation.</td><td><code>lnk health</code></td></tr>
+            <tr><td><code>link-retrieve</code></td><td>Before answering context-sensitive work: bounded query packets, briefs, graph summaries, benchmarks.</td><td><code>lnk query "..."</code></td></tr>
+            <tr><td><code>link-ingest</code></td><td>When raw files are present: source ingest, stale sources, memory proposals, post-ingest checks.</td><td><code>lnk ingest-status</code></td></tr>
+            <tr><td><code>link-memory</code></td><td>After important user-approved decisions or session end: propose, remember, recall, review, explain, update, archive, restore, forget.</td><td><code>lnk session-end</code></td></tr>
           </tbody>
         </table>
 
@@ -82,14 +83,18 @@ skills/link-ingest/SKILL.md
 skills/link-memory/SKILL.md</code></pre>
         <p>Then use natural prompts that map to the skills:</p>
         <pre><code>is Link ready?
-brief me from Link before we continue
+start with Link before we continue
+seed this project into Link
 query Link for the release process
+end this session with Link memory proposals
 ingest raw/notes.md into Link
 remember that I prefer short release notes</code></pre>
 
         <h2 id="rules">Rules For Agents</h2>
         <ul>
-          <li>Prefer <code>lnk health</code> when readiness is unclear.</li>
+          <li>Prefer <code>lnk health</code> when readiness is unclear, especially after an install, upgrade, restore, or broad wiki edit.</li>
+          <li>Start with <code>lnk start</code> for readiness plus memory context, and use <code>lnk session-end</code> to capture proposal-only memory candidates at the end of meaningful work.</li>
+          <li>Use <code>lnk seed . ~/link</code> from a project directory when the user's wiki has no project context yet.</li>
           <li>Prefer <code>lnk query</code>, <code>lnk brief</code>, and <code>lnk graph-summary</code> over reading the whole wiki.</li>
           <li>Use <code>lnk ingest-status</code> before touching raw sources.</li>
           <li>Do not silently create durable memory; use <code>lnk remember</code> only when the user asks or approves a proposal.</li>

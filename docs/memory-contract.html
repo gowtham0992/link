@@ -6,7 +6,7 @@
   <meta name="description" content="The stable Link memory contract for MCP agents: readiness, prompts, query packets, briefs, memory lifecycle, audit, and sharing safety.">
   <title>Link - Memory Contract</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -59,48 +59,47 @@
         <p>Link is not asking every agent to learn a new notes app. It gives agents a small, repeatable memory contract backed by local Markdown files.</p>
         <div class="grid compact-grid">
           <article class="feature"><h3>Readable storage</h3><p>Raw source notes live in <code>raw/</code>. Structured pages and durable memories live in <code>wiki/</code>.</p></article>
-          <article class="feature"><h3>Bounded recall</h3><p>Agents ask for a task-sized packet instead of dumping the whole wiki into context.</p></article>
+          <article class="feature"><h3>Bounded recall</h3><p>Agents ask for a task-sized packet instead of dumping the whole wiki into context. Each recalled memory carries a <code>confidence</code> label (<code>strong</code>, <code>moderate</code>, <code>weak</code>) so weak lexical matches are verified with the user instead of trusted.</p></article>
           <article class="feature"><h3>Reviewable writes</h3><p>Durable memory writes are explicit, duplicate-checked, conflict-checked, and logged.</p></article>
           <article class="feature"><h3>Local trust</h3><p>The CLI, official skills, HTTP viewer, and MCP server read the same local files. <code>serve.py</code> is not required for recall.</p></article>
         </div>
 
         <h2 id="loop">Recommended Agent Loop</h2>
         <ol>
-          <li>Call <code>link_status</code>. If schema or validation needs attention, call the repair tool the payload suggests.</li>
-          <li>Call <code>starter_prompts</code> when a user asks what to try first.</li>
-          <li>Call <code>memory_brief</code> before substantive work.</li>
-          <li>Call <code>query_link</code> for answer-ready context packets.</li>
-          <li>Call <code>ingest_status</code> after the user drops files into <code>raw/</code>.</li>
-          <li>Use <code>propose_memories</code> before writing durable memories from long notes.</li>
-          <li>Use <code>remember_memory</code> only after the user explicitly asks to remember something.</li>
+          <li>Call <code>status</code>. If schema or validation needs attention, follow the safe action it returns.</li>
+          <li>Call <code>recall</code> with an empty query once at the first substantive turn of a session.</li>
+          <li>Call <code>recall(query, budget="micro")</code> before broad file reads or asking the user to repeat durable context.</li>
+          <li>Call <code>ingest</code> after the user drops files into <code>raw/</code>, then follow its guided plan.</li>
+          <li>Use <code>remember</code> only after the user explicitly asks to remember something or approves a proposal.</li>
+          <li>Use <code>review</code> for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows.</li>
+          <li>Use <code>admin</code> for backup, migration, graph export, captures, rebuilds, and advanced maintenance.</li>
         </ol>
         <pre><code>User: is Link ready?
-Agent: link_status()
+Agent: status()
 
-User: brief me from Link before we continue
-Agent: memory_brief(query="current task")
+User: start with Link before we continue
+Agent: recall(query="", mode="brief")
 
 User: query Link for the release plan
-Agent: query_link(query="release plan", budget="small")</code></pre>
+Agent: recall(query="release plan", budget="small")</code></pre>
 
         <h2 id="tools">Core Tool Groups</h2>
         <table>
           <thead><tr><th>Need</th><th>Primary tools</th><th>Contract behavior</th></tr></thead>
           <tbody>
-            <tr><td>Readiness</td><td><code>link_status</code>, <code>validate_wiki</code>, <code>link_operations</code></td><td>Returns safe next actions instead of guessing.</td></tr>
-            <tr><td>First use</td><td><code>starter_prompts</code>, <code>ingest_status</code></td><td>Provides natural prompts and exact post-ingest checks.</td></tr>
-            <tr><td>Recall</td><td><code>memory_brief</code>, <code>query_link</code>, <code>recall_memory</code>, <code>get_context</code></td><td>Returns ranked memory/wiki context with reasons and budget limits.</td></tr>
-            <tr><td>Graph</td><td><code>get_graph_summary</code>, <code>get_backlinks</code>, <code>get_graph</code></td><td>Starts bounded, then asks before expanding to large exports.</td></tr>
-            <tr><td>Memory writes</td><td><code>propose_memories</code>, <code>remember_memory</code>, <code>update_memory</code>, <code>set_memory_visibility</code>, <code>review_memory</code></td><td>Requires explicit approval and surfaces duplicate/conflict candidates.</td></tr>
-            <tr><td>Audit</td><td><code>memory_log</code>, <code>memory_wins</code>, <code>memory_audit</code>, <code>backup_wiki</code></td><td>Reports lifecycle and proof signals without raw memory bodies.</td></tr>
+            <tr><td>Readiness</td><td><code>status</code></td><td>Returns safe next actions instead of guessing.</td></tr>
+            <tr><td>Recall</td><td><code>recall</code></td><td>Returns startup briefs, ranked memory/wiki context, graph context, reasons, and budget limits.</td></tr>
+            <tr><td>Memory writes</td><td><code>remember</code>, <code>review</code></td><td>Requires explicit approval and surfaces duplicate/conflict candidates.</td></tr>
+            <tr><td>Ingest</td><td><code>ingest</code></td><td>Provides raw-source plans, validation, and rebuild checks.</td></tr>
+            <tr><td>Maintenance</td><td><code>admin</code></td><td>Handles backup, migrate, validate, graph export, captures, pages, rebuilds, and compatibility actions.</td></tr>
           </tbody>
         </table>
 
         <h2 id="writes">Write Rules</h2>
         <p>Agents should treat Link memory as durable state, not scratch space.</p>
         <ul>
-          <li>Do not call <code>remember_memory</code> unless the user explicitly asks to remember something.</li>
-          <li>Use <code>propose_memories</code> for transcripts, long notes, or uncertain context.</li>
+          <li>Do not call <code>remember</code> unless the user explicitly asks to remember something.</li>
+          <li>Use <code>admin</code> action <code>propose_memories</code> for transcripts, long notes, or uncertain context.</li>
           <li>If a write returns <code>duplicate_candidates</code>, update the existing memory instead of creating another one.</li>
           <li>If a write returns <code>conflict_candidates</code>, explain the conflict and ask the user before overriding.</li>
           <li>Use <code>review_after</code> for memories that should be re-checked, and <code>expires_at</code> for temporary context.</li>
@@ -116,11 +115,11 @@ Agent: query_link(query="release plan", budget="small")</code></pre>
           </tbody>
         </table>
         <p>By default, user/global memories are private and project memories are project-visible. <code>lnk team-sync</code> blocks ready status if private memories would be included in a broad Git share. <code>lnk snapshot --include-memories</code> still excludes private memories unless <code>--include-private-memories</code> is explicitly passed.</p>
-        <p>Use <code>set_memory_visibility</code> or <code>lnk set-memory-visibility</code> only after explicit user approval when an existing memory should move between private, project, and team sharing intent.</p>
+        <p>Use <code>admin</code> action <code>set_visibility</code> or <code>lnk set-memory-visibility</code> only after explicit user approval when an existing memory should move between private, project, and team sharing intent.</p>
 
         <h2 id="budgets">Budgets</h2>
-        <p><code>query_link</code> supports <code>small</code>, <code>medium</code>, and <code>large</code> budgets. Each packet includes why an item was selected, estimated tokens, <code>has_more</code> flags, and follow-up actions. This keeps agents from reading a 500-page or 10,000-page wiki just to answer one task.</p>
-        <pre><code>query_link(query="what should I know before changing release docs?", budget="small")</code></pre>
+        <p><code>recall</code> supports <code>micro</code>, <code>small</code>, <code>medium</code>, and <code>large</code> budgets. Each packet includes a <code>recall_capsule</code>, why an item was selected, estimated tokens, <code>has_more</code> flags, and follow-up actions. This keeps agents from reading a 500-page or 10,000-page wiki just to answer one task.</p>
+        <pre><code>recall(query="what should I know before changing release docs?", budget="small")</code></pre>
       </article>
     </div>
   </main>

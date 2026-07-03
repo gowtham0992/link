@@ -9,7 +9,7 @@ EXPECTED_SKILLS = {
     "link-health": ("lnk health", "lnk operations", "lnk backup", "lnk validate"),
     "link-retrieve": ("lnk query", "lnk brief", "lnk graph-summary", "lnk benchmark"),
     "link-ingest": ("lnk ingest-status", "lnk propose-memories", "lnk rebuild-index", "lnk validate"),
-    "link-memory": ("lnk brief", "lnk recall", "lnk remember", "lnk memory-inbox"),
+    "link-memory": ("lnk brief", "lnk recall", "lnk session-end", "lnk remember", "lnk memory-inbox"),
 }
 
 
@@ -60,6 +60,27 @@ class OfficialSkillsTests(unittest.TestCase):
                     self.assertIn(command, text)
                 for forbidden in forbidden_claims:
                     self.assertNotIn(forbidden, lower)
+
+    def test_skills_have_ambient_agent_triggers(self):
+        expectations = {
+            "link-health": ("start", "readiness", "installs"),
+            "link-retrieve": ("before answering", "first substantive turn", "prior Link memory"),
+            "link-ingest": ("raw files", "drops files", "learn next"),
+            "link-memory": ("important user-approved decisions", "propose first", "durable memory"),
+        }
+        passive_only_phrases = (
+            "use when a user asks",
+            "use when a user wants",
+            "use when users ask",
+        )
+        for name, required in expectations.items():
+            with self.subTest(skill=name):
+                text = read_skill(name)
+                lower = text.lower()
+                for phrase in passive_only_phrases:
+                    self.assertNotIn(phrase, lower)
+                for phrase in required:
+                    self.assertIn(phrase.lower(), lower)
 
     def test_docs_and_readme_reference_official_skills(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

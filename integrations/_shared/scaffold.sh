@@ -190,7 +190,7 @@ if [ "$LINK_MCP_INSTALLED" = true ] && "$LINK_MCP_PYTHON" -c "import link_mcp" 2
     echo '    "mcpServers": {'
     echo '      "link": {'
     echo "        \"command\": \"$LINK_MCP_PYTHON\","
-    echo "        \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$TARGET_DIR/wiki\"]"
+    echo "        \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$TARGET_DIR/wiki\", \"--surface\", \"slim\"]"
     echo '      }'
     echo '    }'
     echo '  }'

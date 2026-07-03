@@ -26,7 +26,19 @@ class FakeFastMCP:
         self.args = args
         self.kwargs = kwargs
 
-    def tool(self):
+    def tool(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    def prompt(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    def resource(self, *args, **kwargs):
         def decorator(fn):
             return fn
 
@@ -67,12 +79,12 @@ def create_demo_quiet(target: Path) -> None:
         link_cli.create_demo(target, force=False)
 
 
-def import_mcp_server(wiki_dir: Path):
+def import_mcp_server(wiki_dir: Path, surface: str = "full"):
     previous_modules = install_mcp_stub()
     previous_argv = sys.argv[:]
-    module_name = f"link_mcp_server_contract_{id(wiki_dir)}"
+    module_name = f"link_mcp_server_contract_{surface}_{id(wiki_dir)}"
     try:
-        sys.argv = ["link_mcp.server", "--wiki", str(wiki_dir)]
+        sys.argv = ["link_mcp.server", "--wiki", str(wiki_dir), "--surface", surface]
         spec = importlib.util.spec_from_file_location(module_name, ROOT / "mcp_package/link_mcp/server.py")
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
@@ -107,6 +119,45 @@ class McpContractTests(unittest.TestCase):
         self.assertIn("score", payload["results"][0])
         self.assertIn("snippet", payload["results"][0])
 
+    def test_cross_agent_continuity_cli_memory_recalled_by_slim_mcp(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.remember(
+                self.target,
+                "User prefers pnpm as the package manager for Link project work.",
+                title="Prefer pnpm package manager",
+                memory_type="preference",
+                scope="project",
+                tags="tools, package-manager",
+                source="agent-a cli",
+                project="link",
+            )
+        self.assertEqual(code, 0, out.getvalue())
+
+        slim_server, previous_modules, previous_argv, module_name = import_mcp_server(
+            self.target / "wiki",
+            surface="slim",
+        )
+        try:
+            payload = json.loads(slim_server.recall("package manager preference", mode="memory", project="link"))
+        finally:
+            if hasattr(slim_server, "_clear_cache"):
+                slim_server._clear_cache()
+            sys.modules.pop(module_name, None)
+            restore_mcp_modules(previous_modules)
+            sys.argv = previous_argv
+
+        self.assertEqual(payload["surface"], "slim")
+        self.assertEqual(payload["tool"], "recall")
+        self.assertGreaterEqual(payload["count"], 1)
+        self.assertTrue(
+            any(
+                "pnpm" in f"{memory.get('title', '')} {memory.get('tldr', '')} {memory.get('snippet', '')}".lower()
+                for memory in payload["memories"]
+            ),
+            payload,
+        )
+
     def test_search_wiki_handles_invalid_limits(self):
         bad_limit = json.loads(self.server.search_wiki("agent memory", limit="bad"))
         negative_limit = json.loads(self.server.search_wiki("agent memory", limit=-10))
@@ -121,6 +172,38 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["count"], 0)
         self.assertEqual(payload["results"], [])
 
+    def test_cross_surface_memory_written_by_cli_is_recalled_by_mcp(self):
+        with redirect_stdout(StringIO()):
+            code = link_cli.remember(
+                self.target,
+                "User wants cross-agent continuity to work from CLI writes into MCP recall.",
+                title="Cross-agent continuity preference",
+                memory_type="preference",
+                scope="user",
+                source="cli-agent",
+            )
+        self.assertEqual(code, 0)
+        if hasattr(self.server, "_clear_cache"):
+            self.server._clear_cache()
+
+        payload = json.loads(self.server.recall("cross-agent continuity", budget="small"))
+
+        self.assertTrue(payload["found"])
+        self.assertEqual(payload["surface"], "slim")
+        self.assertEqual(payload["tool"], "recall")
+        self.assertEqual(payload["mode"], "query")
+        self.assertTrue(
+            any(item.get("name") == "cross-agent-continuity-preference" for item in payload.get("memory", {}).get("items", [])),
+            payload.get("memory", {}).get("items", []),
+        )
+
+        memory_only = json.loads(self.server.recall("cross-agent continuity", mode="memory"))
+        self.assertEqual(memory_only["mode"], "memory")
+        self.assertTrue(
+            any(item.get("name") == "cross-agent-continuity-preference" for item in memory_only.get("memories", [])),
+            memory_only.get("memories", []),
+        )
+
     def test_query_link_contract(self):
         payload = json.loads(self.server.query_link("agent memory", budget="small"))
 
@@ -128,7 +211,7 @@ class McpContractTests(unittest.TestCase):
         self.assertEqual(payload["budget"], "small")
         self.assertIn("memory", payload["strategy"]["mode"])
         self.assertEqual(payload["wiki"]["primary"], "agent-memory")
-        self.assertEqual(payload["memory"]["items"][0]["name"], "prefer-local-personal-memory")
+        self.assertEqual(payload["memory"]["items"][0]["name"], "keep-agent-memory-in-local-markdown")
         self.assertIn("why_selected", payload["context_packet"][0])
         self.assertIn("budget_report", payload)
         self.assertIn("follow_up", payload)
@@ -138,14 +221,15 @@ class McpContractTests(unittest.TestCase):
 
         self.assertTrue(payload["ready"])
         self.assertEqual(payload["version"], self.server.LINK_VERSION)
-        self.assertEqual(payload["page_count"], 13)
-        self.assertEqual(payload["content_page_count"], 11)
-        self.assertEqual(payload["memory_count"], 1)
+        self.assertEqual(payload["page_count"], 16)
+        self.assertEqual(payload["content_page_count"], 14)
+        self.assertEqual(payload["memory_count"], 4)
         self.assertIn(payload["search_backend"], {"sqlite-fts", "token-index"})
         self.assertEqual(payload["schema"]["status"], "current")
         self.assertTrue(payload["validation"]["passed"])
         self.assertEqual(payload["warnings"], [])
-        self.assertEqual(payload["next_actions"][0]["tool"], "query_link")
+        self.assertEqual(payload["next_actions"][0]["tool"], "recall")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"query": "<user task>", "budget": "micro"})
 
     def test_mcp_cache_throttles_repeated_mtime_scans(self):
         self.server._clear_cache()
@@ -197,8 +281,103 @@ class McpContractTests(unittest.TestCase):
 
         self.assertEqual(payload["project"], "client-launch")
         self.assertEqual(payload["prompts"][0]["prompt"], "is Link ready?")
-        self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
+        prompts = [item["prompt"] for item in payload["prompts"]]
+        self.assertIn("seed this project into Link", prompts)
+        self.assertTrue(any("this project uses Link" in prompt for prompt in prompts))
         self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
+
+    def test_slim_surface_contract(self):
+        slim, previous_modules, previous_argv, module_name = import_mcp_server(self.target / "wiki", surface="slim")
+        try:
+            self.assertEqual(slim.MCP_SURFACE, "slim")
+            status = json.loads(slim.status(include_validation=True))
+            self.assertTrue(status["ready"])
+            self.assertTrue(status["validation"]["passed"])
+
+            brief = json.loads(slim.recall(mode="brief"))
+            self.assertEqual(brief["surface"], "slim")
+            self.assertEqual(brief["tool"], "recall")
+            self.assertEqual(brief["mode"], "brief")
+            self.assertGreaterEqual(brief["brief"]["relevant_count"], 1)
+
+            packet = json.loads(slim.recall("agent memory", budget="small"))
+            self.assertTrue(packet["found"])
+            self.assertEqual(packet["surface"], "slim")
+            self.assertEqual(packet["tool"], "recall")
+            self.assertEqual(packet["wiki"]["primary"], "agent-memory")
+
+            ingest = json.loads(slim.ingest())
+            self.assertEqual(ingest["surface"], "slim")
+            self.assertEqual(ingest["tool"], "ingest")
+            self.assertEqual(ingest["pending_count"], 0)
+
+            review = json.loads(slim.review(action="profile"))
+            self.assertEqual(review["surface"], "slim")
+            self.assertEqual(review["tool"], "review")
+            self.assertGreaterEqual(review["memory_count"], 1)
+
+            admin = json.loads(slim.admin("validate", '{"strict": true}'))
+            self.assertTrue(admin["passed"])
+        finally:
+            if hasattr(slim, "_clear_cache"):
+                slim._clear_cache()
+            sys.modules.pop(module_name, None)
+            restore_mcp_modules(previous_modules)
+            sys.argv = previous_argv
+
+    def test_full_surface_instructions_mark_compatibility_surface(self):
+        instructions = self.server._instructions("full")
+
+        self.assertIn("full MCP surface is for compatibility", instructions)
+        self.assertIn("--surface slim", instructions)
+        self.assertIn("one obvious recall tool", instructions)
+
+    def test_mcp_prompts_and_resources_contract(self):
+        self.assertIn("recall(query='', mode='brief'", self.server.link_start_prompt("release work"))
+        self.assertIn("recall_capsule", self.server.link_start_prompt("release work"))
+        self.assertIn("admin(action='seed_project'", self.server.link_start_prompt("release work"))
+        self.assertIn("recall(query=", self.server.link_brief_prompt("release work"))
+        self.assertIn("remember", self.server.link_remember_prompt("I prefer short notes"))
+        self.assertIn("admin(action='session_end'", self.server.link_session_end_prompt("we kept memory reviewed"))
+        self.assertIn("without silently saving durable memory", self.server.link_session_end_prompt())
+        self.assertIn("ingest(action='status')", self.server.link_ingest_prompt("raw/notes.md"))
+        self.assertIn("review(action='inbox')", self.server.link_review_prompt())
+
+        instructions = self.server.link_instructions_resource()
+        self.assertIn("session_end", instructions)
+        health = json.loads(self.server.link_health_resource())
+        brief = json.loads(self.server.link_brief_resource())
+        profile = json.loads(self.server.link_profile_resource())
+        project = json.loads(self.server.link_project_resource())
+
+        self.assertIn("recall(query=\"\", mode=\"brief\"", instructions)
+        self.assertIn("Never silently save durable memory", instructions)
+        self.assertTrue(health["ready"])
+        self.assertIn("relevant_memories", brief)
+        self.assertGreaterEqual(profile["memory_count"], 1)
+        self.assertIn("prompts", project)
+
+    def test_slim_admin_can_seed_project_context(self):
+        project = self.target.parent / "client-app"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nThis project keeps local agent memory reviewable.\n",
+            encoding="utf-8",
+        )
+
+        payload = json.loads(self.server.admin("seed_project", json.dumps({
+            "project_root": str(project),
+            "project": "Client App",
+            "include_git_log": False,
+        })))
+
+        self.assertEqual(payload["surface"], "slim")
+        self.assertEqual(payload["tool"], "admin")
+        self.assertEqual(payload["action"], "seed_project")
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["wrote"])
+        self.assertTrue((self.target / "raw/project-seeds/client-app/project-context.md").exists())
+        self.assertTrue((self.target / "wiki/sources/project-seed-client-app.md").exists())
 
     def test_missing_wiki_message_points_to_current_setup_paths(self):
         previous_argv = sys.argv[:]
@@ -418,8 +597,8 @@ class McpContractTests(unittest.TestCase):
         nodes = {node["id"] for node in payload["nodes"]}
         edges = {(edge["source"], edge["target"]) for edge in payload["edges"]}
 
-        self.assertEqual(len(payload["nodes"]), 13)
-        self.assertEqual(len(payload["edges"]), 58)
+        self.assertEqual(len(payload["nodes"]), 16)
+        self.assertEqual(len(payload["edges"]), 64)
         self.assertEqual(len(edges), len(payload["edges"]))
         self.assertIn("agent-memory", nodes)
         self.assertIn("prefer-local-personal-memory", nodes)
@@ -478,11 +657,11 @@ class McpContractTests(unittest.TestCase):
     def test_memory_profile_contract(self):
         payload = json.loads(self.server.memory_profile())
 
-        self.assertEqual(payload["memory_count"], 1)
-        self.assertEqual(payload["active_count"], 1)
+        self.assertEqual(payload["memory_count"], 4)
+        self.assertEqual(payload["active_count"], 4)
         self.assertEqual(payload["review_count"], 1)
-        self.assertEqual(payload["by_type"]["preference"], 1)
-        self.assertEqual(payload["by_scope"]["user"], 1)
+        self.assertEqual(payload["by_type"]["preference"], 2)
+        self.assertEqual(payload["by_scope"]["user"], 2)
         self.assertEqual(payload["recent"][0]["name"], "prefer-local-personal-memory")
         self.assertEqual(payload["preferences"][0]["memory_type"], "preference")
 
@@ -491,7 +670,7 @@ class McpContractTests(unittest.TestCase):
 
         self.assertEqual(payload["selection"], "query")
         self.assertEqual(payload["query"], "local personal memory")
-        self.assertEqual(payload["profile"]["memory_count"], 1)
+        self.assertEqual(payload["profile"]["memory_count"], 4)
         self.assertEqual(payload["review"]["count"], 1)
         self.assertEqual(payload["captures"]["count"], 0)
         self.assertEqual(payload["relevant_memories"][0]["name"], "prefer-local-personal-memory")
@@ -779,9 +958,11 @@ class McpContractTests(unittest.TestCase):
 
         self.assertTrue(archived["updated"])
         self.assertEqual(archived["status"], "archived")
-        self.assertEqual(recall_default["count"], 0)
-        self.assertEqual(recall_archived["memories"][0]["status"], "archived")
-        self.assertEqual(profile["active_count"], 0)
+        default_names = {memory["name"] for memory in recall_default["memories"]}
+        self.assertNotIn("prefer-local-personal-memory", default_names)
+        archived_by_name = {memory["name"]: memory for memory in recall_archived["memories"]}
+        self.assertEqual(archived_by_name["prefer-local-personal-memory"]["status"], "archived")
+        self.assertEqual(profile["active_count"], 3)
         self.assertEqual(profile["archived"][0]["name"], "prefer-local-personal-memory")
         self.assertTrue(restored["updated"])
         self.assertEqual(restored["status"], "active")
@@ -801,7 +982,8 @@ class McpContractTests(unittest.TestCase):
         self.assertTrue(forgotten["forgotten"])
         self.assertTrue(forgotten["backlinks_rebuilt"])
         self.assertFalse(memory_path.exists())
-        self.assertEqual(recall["count"], 0)
+        recall_names = {memory["name"] for memory in recall["memories"]}
+        self.assertNotIn("prefer-local-personal-memory", recall_names)
         self.assertNotIn("[[prefer-local-personal-memory]]", index_text)
         self.assertIn("forget-memory", log_text)
         self.assertNotIn("local personal memory for agents", log_text)

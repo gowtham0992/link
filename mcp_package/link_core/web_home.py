@@ -145,6 +145,7 @@ def _render_prompt_strip(starter_prompts: Mapping[str, object]) -> str:
 
 def _render_next_steps() -> str:
     actions = [
+        ("Onboard", "/onboard", "Health, first memory, agent wiring, and the daily prompt loop."),
         ("Check health", "/health", "Readiness, validation, interrupted writes, and safe repairs."),
         ("Add source", "/ingest", "Save raw notes locally, then ask your agent to ingest them."),
         ("Review memory", "/memory", "Inspect remembered preferences, decisions, and project context."),

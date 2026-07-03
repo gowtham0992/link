@@ -7,7 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
-from link_core.benchmark import build_benchmark_payload, benchmark_health, benchmark_scale_notes, render_benchmark_text  # noqa: E402
+from link_core.benchmark import (  # noqa: E402
+    benchmark_health,
+    benchmark_scale_notes,
+    benchmark_value_evidence,
+    build_benchmark_payload,
+    render_benchmark_text,
+)
 from link_core.demo import create_demo_workspace  # noqa: E402
 
 
@@ -27,15 +33,66 @@ class BenchmarkCoreTests(unittest.TestCase):
 
         self.assertEqual(payload["target"], str(target))
         self.assertEqual(payload["project"], "demo")
-        self.assertEqual(payload["pages"], 13)
-        self.assertEqual(payload["memories"], 1)
+        self.assertEqual(payload["pages"], 16)
+        self.assertEqual(payload["memories"], 4)
         self.assertIn(payload["search_backend"], {"sqlite-fts", "token-index"})
         self.assertIn("persistent_cache", payload)
         self.assertTrue(payload["persistent_cache"]["enabled"])
-        self.assertEqual(payload["persistent_cache"]["total_records"], 13)
+        self.assertEqual(payload["persistent_cache"]["total_records"], 16)
         self.assertTrue(payload["found"])
+        self.assertIn("value_evidence", payload)
+        self.assertEqual(payload["value_evidence"]["baseline"]["pages"], 16)
+        self.assertGreater(payload["value_evidence"]["baseline"]["estimated_chars"], 0)
+        self.assertGreaterEqual(payload["value_evidence"]["avoidance"]["estimated_tokens"], 0)
         self.assertIn("health", payload)
         self.assertIn("cache", payload["timings"])
+
+    def test_benchmark_value_evidence_reports_context_avoidance(self):
+        payload = benchmark_value_evidence(
+            {
+                "body_index": {
+                    "alpha": "A" * 4000,
+                    "beta": "B" * 2000,
+                }
+            },
+            {
+                "budget_report": {
+                    "context_packet": {
+                        "estimated_chars": 1200,
+                        "estimated_tokens": 300,
+                        "has_more": False,
+                    }
+                },
+                "recall_capsule": {
+                    "count": 2,
+                    "estimated_chars": 400,
+                    "estimated_tokens": 100,
+                },
+                "context_packet": [{"kind": "memory"}, {"kind": "wiki"}],
+                "memory": {"count": 1},
+                "wiki": {"pages": [{"name": "alpha"}], "search_count": 3},
+            },
+        )
+
+        self.assertEqual(payload["baseline"]["pages"], 2)
+        self.assertEqual(payload["baseline"]["estimated_chars"], 6000)
+        self.assertEqual(payload["baseline"]["estimated_tokens"], 1500)
+        self.assertEqual(payload["context_packet"]["items"], 2)
+        self.assertEqual(payload["recall_capsule"]["items"], 2)
+        self.assertEqual(payload["selection"]["memory_items"], 1)
+        self.assertEqual(payload["selection"]["wiki_pages"], 1)
+        self.assertEqual(payload["selection"]["search_results"], 3)
+        self.assertEqual(payload["avoidance"]["estimated_tokens"], 1200)
+        self.assertEqual(payload["avoidance"]["compression_ratio"], 5.0)
+        self.assertTrue(any("bounded packet" in note for note in payload["notes"]))
+
+    def test_benchmark_value_evidence_warns_when_packet_is_empty(self):
+        payload = benchmark_value_evidence(
+            {"body_index": {"alpha": "A" * 100}},
+            {"budget_report": {"context_packet": {"estimated_chars": 0, "estimated_tokens": 0}}},
+        )
+
+        self.assertTrue(any("query packet was empty" in note for note in payload["notes"]))
 
     def test_benchmark_health_passes_fast_sqlite_search(self):
         payload = {
@@ -183,6 +240,38 @@ class BenchmarkCoreTests(unittest.TestCase):
                     "has_more": False,
                 }
             },
+            "value_evidence": {
+                "baseline": {
+                    "pages": 12,
+                    "estimated_chars": 12_000,
+                    "estimated_tokens": 3_000,
+                },
+                "context_packet": {
+                    "items": 3,
+                    "estimated_chars": 1200,
+                    "estimated_tokens": 300,
+                    "has_more": False,
+                },
+                "recall_capsule": {
+                    "items": 2,
+                    "estimated_chars": 600,
+                    "estimated_tokens": 150,
+                },
+                "selection": {
+                    "memory_items": 1,
+                    "wiki_pages": 2,
+                    "search_results": 4,
+                },
+                "avoidance": {
+                    "estimated_chars": 10_800,
+                    "estimated_tokens": 2_700,
+                    "compression_ratio": 10.0,
+                },
+                "notes": [
+                    "Context savings are estimated from local wiki body text versus the bounded query packet.",
+                    "This does not score answer quality; use it to see whether Link is reducing context budget waste.",
+                ],
+            },
         }
 
         text = render_benchmark_text(payload)
@@ -195,6 +284,13 @@ class BenchmarkCoreTests(unittest.TestCase):
         self.assertIn("Scale notes:", text)
         self.assertIn("SQLite FTS is active", text)
         self.assertIn("Verdict: interactive", text)
+        self.assertIn("Value evidence", text)
+        self.assertIn("Broad wiki baseline: 12 pages · 12000 chars · 3000 tokens", text)
+        self.assertIn("Bounded query packet: 3 items · 1200 chars · 300 tokens · has_more=False", text)
+        self.assertIn("Recall capsule: 2 items · 600 chars · 150 tokens", text)
+        self.assertIn("Selected context: 1 memories · 2 wiki pages · 4 search results", text)
+        self.assertIn("Estimated context avoided: 10800 chars · 2700 tokens · 10.0x smaller", text)
+        self.assertIn("Value notes:", text)
         self.assertIn("Packet: 1200 chars · 300 tokens · has_more=False", text)
         self.assertIn("Result: found", text)
 

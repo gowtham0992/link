@@ -97,6 +97,7 @@ def render_header_html() -> str:
   </div>
   <nav aria-label="Link sections">
     <a href="/">home</a>
+    <a href="/onboard">onboard</a>
     <a href="/brief">brief</a>
     <a href="/memory">memory</a>
     <a href="/ingest">ingest</a>
@@ -127,8 +128,16 @@ def render_footer_html() -> str:
 
 def render_stat_grid(items: Sequence[tuple[object, str]]) -> str:
     """Render Link's compact stat grid."""
+    def _num_class(value: object, label: str) -> str:
+        # Attention counts (pending review) render in accent when non-zero.
+        try:
+            pending = int(str(value)) > 0
+        except (TypeError, ValueError):
+            pending = False
+        return "num num--alert" if pending and "review" in label.lower() else "num"
+
     stats = "".join(
-        f'<div class="stat"><span class="num">{html.escape(str(value))}</span>'
+        f'<div class="stat"><span class="{_num_class(value, label)}">{html.escape(str(value))}</span>'
         f'<span class="label">{html.escape(label)}</span></div>'
         for value, label in items
     )

@@ -6,7 +6,7 @@
   <meta name="description" content="First 10 minutes with Link: demo, source ingest, memory recall, and validation.">
   <title>Link - First 10 Minutes</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -38,8 +38,8 @@
   <header class="page-hero">
     <div class="hero-inner">
       <span class="eyebrow">First 10 minutes</span>
-      <h1>Turn one local note into agent memory.</h1>
-      <p>Start with the demo, add one real source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.</p>
+      <h1>Prove that your agent can remember.</h1>
+      <p>Run the cross-agent proof, explore the demo, onboard a real local workspace, seed your current repo, add one source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.</p>
     </div>
   </header>
 
@@ -47,7 +47,9 @@
     <div class="section-inner doc-grid">
       <aside class="toc">
         <strong>On this page</strong>
-        <a href="#demo">Run the demo</a>
+        <a href="#demo">Prove the loop</a>
+        <a href="#onboard">Onboard a real workspace</a>
+        <a href="#seed">Seed project context</a>
         <a href="#install">Install for an agent</a>
         <a href="#source">Add one source</a>
         <a href="#memory">Save one memory</a>
@@ -55,26 +57,31 @@
         <a href="#verify">Verify the loop</a>
       </aside>
       <article class="doc-content">
-        <h2 id="demo">1. Run The Demo</h2>
-        <p>The demo is the fastest proof of value. It already has raw sources, wiki pages, memories, backlinks, and graph data.</p>
+        <h2 id="demo">1. Prove The Memory Loop</h2>
+        <p>Start with <code>lnk proof</code>. It creates a clean local workspace, writes one reviewed memory, then recalls it through the same bounded path used by CLI, skills, and MCP. This proves the core product before you configure an agent or open the web viewer.</p>
         <p>macOS with Homebrew:</p>
 <pre><code>brew install gowtham0992/link/link
-lnk try
+lnk proof</code></pre>
+        <p>You should see <code>Cross-agent memory continuity works</code> and <code>Result: proof passed</code>.</p>
+        <p>The richer demo is next. It already has raw sources, wiki pages, memories, backlinks, graph data, and a local viewer to inspect:</p>
+<pre><code>lnk try
 lnk serve link-demo</code></pre>
         <p>The Homebrew formula is maintained in the public <a href="https://github.com/gowtham0992/homebrew-link">gowtham0992/homebrew-link</a> tap.</p>
         <p>Or from source:</p>
         <pre><code>git clone https://github.com/gowtham0992/link.git
 cd link
+python3 link.py proof
 python3 link.py demo
 python3 link.py next link-demo
 python3 link.py serve link-demo</code></pre>
         <p>On Windows from source, use the Python launcher:</p>
         <pre><code>git clone https://github.com/gowtham0992/link.git
 cd link
+py link.py proof
 py link.py demo
 py link.py next link-demo
 py link.py serve link-demo</code></pre>
-        <p>Use <code>lnk try</code> for the shortest Homebrew proof loop. It creates the demo, checks readiness, runs a compact query and brief, and prints the viewer command plus the first agent prompts. From source, use <code>python3 link.py try</code> or <code>py link.py try</code>.</p>
+        <p><code>lnk try</code> creates the demo, checks readiness, runs a compact query and brief, and prints the viewer command plus the first agent prompts. From source, use <code>python3 link.py try</code> or <code>py link.py try</code>.</p>
         <div class="callout">
           <strong>Judge the generated demo</strong>
           The repo's root <code>wiki/</code> is only a scaffold for local development and personal testing. Generated content in <code>wiki/</code>, <code>raw/</code>, and <code>link-demo/</code> is ignored by git so private memory is not published by accident.
@@ -84,13 +91,30 @@ py link.py serve link-demo</code></pre>
           <code>lnk serve</code> is only for browsing Link in a local web UI. CLI commands, official skills, and MCP-enabled agents work without it because they read the same local <code>wiki/</code> files directly.
         </div>
         <p>The demo includes one pending memory intentionally, so the review inbox and explain-memory workflow are visible. Run <code>lnk review-memory prefer-local-personal-memory link-demo</code> if you want memory audit to be fully clear.</p>
-        <p>Open <code>http://127.0.0.1:3000</code>, then inspect <code>/brief</code>, <code>/memory</code>, <code>/ingest</code>, <code>/graph</code>, and <code>/health</code>. Open <strong>more</strong> for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts <code>localhost</code> too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups.</p>
-        <pre><code>lnk query "why does Link help agents?" link-demo --budget small
+        <p>Open <code>http://127.0.0.1:3000</code>, then inspect <code>/onboard</code>, <code>/brief</code>, <code>/memory</code>, <code>/ingest</code>, <code>/graph</code>, and <code>/health</code>. Open <strong>more</strong> for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts <code>localhost</code> too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups.</p>
+        <pre><code>lnk start link-demo --task "working on agent memory"
+lnk query "why does Link help agents?" link-demo --budget small
 lnk brief "working on agent memory" link-demo
 lnk benchmark "agent memory" link-demo
 lnk health link-demo</code></pre>
 
-        <h2 id="install">2. Install Link For Your Agent</h2>
+        <h2 id="onboard">2. Onboard A Real Workspace</h2>
+        <p>Use <code>lnk onboard</code> when you are ready to create or repair your real <code>~/link</code> memory workspace. It checks health, prints the first agent prompts, and previews MCP wiring without changing agent config files unless you pass <code>--write</code>.</p>
+        <pre><code>lnk onboard
+lnk onboard --first-memory "I prefer concise release notes"
+lnk onboard --seed-project .
+lnk onboard --agent codex
+lnk onboard --agent codex --write</code></pre>
+        <p>From source, use <code>python3 link.py onboard</code> on macOS/Linux or <code>py link.py onboard</code> on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs. Add <code>--seed-project .</code> from inside a repo when you want onboarding to create the first source-backed project page. If the local viewer is running, <code>http://127.0.0.1:3000/onboard</code> shows the same setup loop with copy buttons.</p>
+
+        <h2 id="seed">3. Seed Project Context</h2>
+        <p>Run <code>lnk seed</code> inside a project so Link has useful source-backed context before you ask an agent to recall anything. It reads allowlisted project files such as <code>README.md</code>, <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>.cursorrules</code>, and editor rule files, blocks secret-looking values, writes a generated source page, and rebuilds the graph.</p>
+        <pre><code>cd /path/to/your/project
+lnk seed . ~/link
+lnk query "what is this project about?" ~/link --budget small</code></pre>
+        <p>Seeding does not create durable memories. It gives agents a cited project source to retrieve from; preferences and decisions should still go through reviewed memory proposals.</p>
+
+        <h2 id="install">4. Install Link For Your Agent</h2>
         <p>From the cloned checkout, run the installer for the agent you use. Re-running the same installer updates code and instructions without replacing existing wiki data.</p>
         <pre><code>bash integrations/codex/install.sh
 bash integrations/kiro/install.sh
@@ -109,7 +133,7 @@ bash integrations/antigravity/install.sh</code></pre>
 .\integrations\vscode\install.ps1
 .\integrations\antigravity\install.ps1</code></pre>
 
-        <h2 id="source">3. Add One Source</h2>
+        <h2 id="source">5. Add One Source</h2>
         <p>Open the local viewer and use <strong>ingest -> Add Raw Source</strong>, or write a first note directly:</p>
         <pre><code>mkdir -p ~/link/raw
 cat &gt; ~/link/raw/first-memory.md &lt;&lt;'EOF'
@@ -135,11 +159,13 @@ EOF</code></pre>
           If you already have files in <code>~/link/raw/</code>, <code>lnk ingest-status</code> may point to a different pending file first. If <code>first-memory.md</code> was already ingested and you overwrite it, Link marks that raw file as stale and asks the agent to refresh the existing source page.
         </div>
 
-        <h2 id="memory">4. Save One Direct Memory</h2>
+        <h2 id="memory">6. Save One Direct Memory</h2>
         <p>Use natural language with an agent:</p>
         <pre><code>remember that I am testing Link as local personal memory for agents
-brief me from Link before we continue
+start with Link before we continue
 what does Link remember about local personal memory?</code></pre>
+        <p>CLI-first agents or Link skills can run the same startup loop directly:</p>
+        <pre><code>lnk start ~/link --task "working on Link release"</code></pre>
         <p>Or use the CLI:</p>
         <pre><code>lnk remember "I am testing Link as local personal memory for agents." --type preference --scope user --tags onboarding
 lnk brief "local personal memory"
@@ -147,13 +173,13 @@ lnk recall "local personal memory"
 lnk profile
 lnk memory-audit</code></pre>
 
-        <h2 id="ingest">5. Ask The Agent To Ingest</h2>
+        <h2 id="ingest">7. Ask The Agent To Ingest</h2>
         <p>In your agent chat, ask:</p>
         <pre><code>ingest raw/first-memory.md into Link</code></pre>
         <p>The agent reads <code>~/link/LINK.md</code>, creates a source page, updates concepts/entities when useful, updates the index and log, rebuilds backlinks, and validates generated pages.</p>
         <p>Return to <code>/ingest</code> after the agent finishes. Link shows which raw files are represented and gives follow-up prompts for proposals or retrieval checks.</p>
 
-        <h2 id="verify">6. Verify The Loop</h2>
+        <h2 id="verify">8. Verify The Loop</h2>
         <pre><code>lnk doctor --fix
 lnk health
 lnk ingest-status

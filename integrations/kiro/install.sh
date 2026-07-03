@@ -43,7 +43,7 @@ try:
         config = json.load(f)
     config.setdefault("mcpServers", {})["link"] = {
         "command": mcp_python,
-        "args": ["-m", "link_mcp", "--wiki", wiki_path],
+        "args": ["-m", "link_mcp", "--wiki", wiki_path, "--surface", "slim"],
         "disabled": False
     }
     with open(config_path, "w") as f:
@@ -51,7 +51,7 @@ try:
     print("  ✓ Link MCP server registered in ~/.kiro/settings/mcp.json")
 except Exception as e:
     print(f"  · Could not auto-register MCP: {e}")
-    print(f"    Add manually: {mcp_python} -m link_mcp --wiki {wiki_path}")
+    print(f"    Add manually: {mcp_python} -m link_mcp --wiki {wiki_path} --surface slim")
 PYEOF
     fi
 

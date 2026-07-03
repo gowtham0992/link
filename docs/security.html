@@ -6,7 +6,7 @@
   <meta name="description" content="Link security model: local-first storage, secret scanning, backups, HTTP safety boundaries, and release hygiene.">
   <title>Link - Security</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -84,7 +84,7 @@ python3 scripts/check_release_hygiene.py</code></pre>
         <p>HTTP write actions require <code>X-Link-Local-Action: true</code>. Responses include <code>X-Link-API-Version</code>. Proposal analysis does not write pages.</p>
 
         <h2 id="backups">Backups</h2>
-        <p><code>lnk backup</code> and MCP <code>backup_wiki</code> write local <code>.link-backups/</code> archives. Raw sources are excluded unless explicitly requested.</p>
+        <p><code>lnk backup</code> and MCP <code>admin</code> action <code>backup</code> write local <code>.link-backups/</code> archives. Raw sources are excluded unless explicitly requested.</p>
         <pre><code>lnk backup
 lnk backup --include-raw
 lnk doctor --fix</code></pre>

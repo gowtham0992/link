@@ -58,6 +58,12 @@ class TeamSyncCoreTests(unittest.TestCase):
         commands = [action["command_text"] for action in payload["setup_actions"]]
         self.assertTrue(any("git" in command and "init" in command for command in commands))
         self.assertTrue(any("remote" in command and "add" in command for command in commands))
+        stage_commands = [command for command in commands if " add " in f" {command} "]
+        self.assertTrue(stage_commands)
+        # Windows renders staged paths with backslashes; compare separator-agnostically.
+        self.assertIn("memories", stage_commands[0].replace("\\", "/"))
+        self.assertIn("wiki/memories", stage_commands[0].replace("\\", "/"))
+        self.assertNotIn("wiki/log.md", stage_commands[0])
 
     def test_git_workspace_with_raw_protection_is_ready(self):
         root = Path(tempfile.mkdtemp(prefix="link-team-sync-"))
@@ -81,6 +87,17 @@ class TeamSyncCoreTests(unittest.TestCase):
         self.assertIn("ready for reviewed Git sharing", text)
         self.assertIn("Memory share gate: 0 active", text)
         self.assertIn("Safe sync loop", text)
+        self.assertIn("wiki/log.md local", text)
+        stage_commands = [
+            str(action["command_text"])
+            for action in payload["sync_actions"]
+            if action["label"] == "stage shared memory files"
+        ]
+        self.assertEqual(len(stage_commands), 1)
+        # Windows renders staged paths with backslashes; compare separator-agnostically.
+        self.assertIn("memories", stage_commands[0].replace("\\", "/"))
+        self.assertIn("wiki/memories", stage_commands[0].replace("\\", "/"))
+        self.assertNotIn("wiki/log.md", stage_commands[0])
 
     def test_git_workspace_without_raw_protection_warns(self):
         root = Path(tempfile.mkdtemp(prefix="link-team-sync-"))

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Link logo</title>
+  <desc id="desc">A local memory graph mark: connected nodes forming an L, with a rust accent node at the end.</desc>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14" fill="#faf9f5" stroke="#221c12" stroke-opacity="0.10" stroke-width="1.5"/>
+  <g transform="translate(12.8 12.8) scale(1.6)">
+    <g stroke="#221c12" stroke-width="1.7" stroke-linecap="round">
+      <line x1="6.5" y1="5" x2="6.5" y2="18.5"/>
+      <line x1="6.5" y1="18.5" x2="18.5" y2="18.5"/>
+    </g>
+    <circle cx="6.5" cy="5" r="2.3" fill="#faf9f5" stroke="#221c12" stroke-width="1.6"/>
+    <circle cx="6.5" cy="12" r="1.7" fill="#221c12"/>
+    <circle cx="6.5" cy="18.5" r="2.6" fill="#221c12"/>
+    <circle cx="12.5" cy="18.5" r="1.7" fill="#221c12"/>
+    <circle cx="18.5" cy="18.5" r="2.6" fill="#a8492f"/>
+  </g>
+</svg>

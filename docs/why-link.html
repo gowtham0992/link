@@ -6,7 +6,7 @@
   <meta name="description" content="Why Link exists, when to use it, and how it differs from notes apps, hosted memory APIs, stateful-agent platforms, and graph memory systems.">
   <title>Link - Why Link?</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -50,6 +50,7 @@
         <a href="#fit">Best fit</a>
         <a href="#loop">Session loop</a>
         <a href="#compare">How to choose</a>
+        <a href="#competitors">Compared with alternatives</a>
         <a href="#trust">Trust model</a>
         <a href="#boundaries">Boundaries</a>
       </aside>
@@ -67,7 +68,7 @@
         <p>Link is useful when it changes the start and end of real agent sessions.</p>
         <div class="choice-table">
           <div><strong>Moment</strong><strong>Without Link</strong><strong>With Link</strong></div>
-          <div><span>Starting work</span><span>You retype project state and preferences.</span><span>The agent asks for a brief or calls <code>memory_brief</code>/<code>query_link</code> for compact local context.</span></div>
+          <div><span>Starting work</span><span>You retype project state and preferences.</span><span>The agent calls <code>recall</code> for a compact local brief or task packet.</span></div>
           <div><span>Switching agents</span><span>Each tool has its own memory gap.</span><span>Codex, Claude, Cursor, Kiro, VS Code, and Antigravity can point at the same wiki.</span></div>
           <div><span>Saving a decision</span><span>The note disappears into chat history.</span><span>An explicit remember becomes a reviewable Markdown memory.</span></div>
           <div><span>Trusting memory</span><span>You cannot see why the agent knows something.</span><span>You can inspect sources, graph links, review state, and lifecycle history.</span></div>
@@ -83,11 +84,23 @@
           <div><span>Plain file search</span><span>You want search plus memory lifecycle, graph context, MCP tools, validation, and provenance.</span><span>You only need grep, ripgrep, or a folder of notes with no agent-memory workflow.</span></div>
         </div>
 
+        <h2 id="competitors">Compared With Alternatives</h2>
+        <p>Link is intentionally narrow: local, inspectable memory for agents. That makes the tradeoffs clearer.</p>
+        <div class="choice-table">
+          <div><strong>Alternative</strong><strong>Where Link wins</strong><strong>Where they win</strong></div>
+          <div><span>Obsidian</span><span>Agent-ready memory lifecycle, MCP/CLI retrieval, validation, source-backed query packets.</span><span>Human-first note editing, mobile sync, plugins, and a mature visual graph.</span></div>
+          <div><span>Mem0</span><span>No hosted account, local Markdown storage, cross-agent desktop use, inspectable provenance.</span><span>Managed cloud APIs, hosted dashboards, and team/app integration primitives.</span></div>
+          <div><span>Letta</span><span>Works beside existing agents instead of becoming the agent runtime; simpler local file model.</span><span>Full stateful-agent runtime, managed execution loop, and hosted deployment options.</span></div>
+          <div><span>Graphiti</span><span>Personal/project memory with reviewable Markdown and simple local operations.</span><span>Temporal knowledge graphs, automatic extraction, and enterprise graph use cases.</span></div>
+          <div><span>Built-in agent memory</span><span>One memory layer shared across Codex, Claude, Cursor, Kiro, VS Code, Antigravity, and local agents.</span><span>Zero setup inside one vendor's product.</span></div>
+          <div><span>Plain RAG or vector search</span><span>Reviewable memory, source files, graph context, lifecycle controls, and bounded agent packets.</span><span>Semantic retrieval quality, embedding connectors, and application-specific pipelines.</span></div>
+        </div>
+
         <h2 id="trust">Trust Model</h2>
         <p>Link deliberately avoids hidden memory. A durable memory is a Markdown page with scope, status, review state, source/provenance, graph links, and a local audit trail. Agents can recall it, but humans can inspect, edit, archive, restore, or forget it.</p>
         <pre><code>raw/file.md -> wiki/sources/file.md -> linked concepts
 remember "preference" -> wiki/memories/preference.md
-query_link -> compact context + why_selected + follow_up actions</code></pre>
+recall -> recall_capsule + why_selected + follow_up actions</code></pre>
 
         <h2 id="boundaries">Boundaries</h2>
         <ul>

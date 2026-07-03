@@ -6,7 +6,7 @@
   <meta name="description" content="How Link handles larger local wikis, what stays bounded, what users can measure, and where the current limits are.">
   <title>Link - Scale</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -57,25 +57,25 @@
         <h2 id="promise">Practical Promise</h2>
         <p>Link is local personal memory software. The expected sweet spot is a real user's working wiki: hundreds to thousands of Markdown pages, raw sources, durable memories, and graph links. The product is designed so agents do not need to enumerate that whole corpus for normal work.</p>
         <div class="grid two-up">
-          <article class="panel"><h3>Search</h3><p>SQLite FTS5 is used when Python provides it. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend in status and benchmark output.</p></article>
-          <article class="panel"><h3>Cache reuse</h3><p>Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command.</p></article>
+          <article class="panel"><h3>Search</h3><p>SQLite FTS5 is used when Python provides it. Link stores a derived FTS sidecar under <code>.link-cache/</code> so unchanged wikis can reuse the search table across process starts.</p></article>
+          <article class="panel"><h3>Cache reuse</h3><p>Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend in status and benchmark output.</p></article>
           <article class="panel"><h3>Graph</h3><p>Large graphs open as a bounded high-signal overview first. Users can search, filter, focus neighborhoods, or explicitly load more when they need it.</p></article>
-          <article class="panel"><h3>Agent context</h3><p>MCP and CLI query packets use small, medium, and large budgets with follow-up actions instead of dumping every page into the model.</p></article>
+          <article class="panel"><h3>Agent context</h3><p>MCP and CLI query packets use micro, small, medium, and large budgets. Agents read the recall capsule first, then follow-up actions instead of dumping every page into the model.</p></article>
         </div>
 
         <h2 id="bounded">Bounded Surfaces</h2>
         <p>The important scale behavior is not "can Link list every page?" It is "does the default agent and UI path stay bounded?"</p>
         <div class="choice-table">
           <div><strong>Surface</strong><strong>Default behavior</strong><strong>Expansion path</strong></div>
-          <div><span><code>query_link</code></span><span>Returns a budgeted context packet with why each item was selected.</span><span>Use follow-up actions for more memory, search, context, or graph detail.</span></div>
-          <div><span><code>get_graph_summary</code></span><span>Returns a bounded topic or high-degree graph neighborhood.</span><span>Increase limit/depth or request the full graph only when needed.</span></div>
+          <div><span><code>recall</code></span><span>Returns a budgeted context packet plus a tiny hybrid-ranked recall capsule.</span><span>Use follow-up actions for more memory, search, context, or graph detail.</span></div>
+          <div><span><code>admin(action="graph_summary")</code></span><span>Returns a bounded topic or high-degree graph neighborhood.</span><span>Increase limit/depth or request the full graph only when needed.</span></div>
           <div><span>Local graph UI</span><span>Starts capped with sparse labels and motion limits for large wikis.</span><span>Use type filters, node search, focused neighborhoods, fullscreen, and explicit all-data loading.</span></div>
           <div><span>All pages</span><span>Lists a bounded window grouped by page type.</span><span>Use paging, search, and type filters instead of scrolling the whole wiki.</span></div>
-          <div><span>Health</span><span>Shows readiness, validation, interrupted writes, backend, and cache reuse.</span><span>Run repair commands only when health points to a specific issue.</span></div>
+          <div><span>Health</span><span>Shows readiness, validation, interrupted writes, backend, and cache reuse.</span><span>Run repair commands only when health points to a specific issue; doctor uses the parsed page cache for backlink checks.</span></div>
         </div>
 
         <h2 id="measure">Measure Locally</h2>
-        <p>Use <code>lnk benchmark</code> on your real wiki. It reports cache time, persistent-cache reuse, search backend, search/query timing, graph payload shape, and recommendations.</p>
+        <p>Use <code>lnk benchmark</code> on your real wiki. It reports cache time, persistent-cache reuse, search backend, search/query timing, graph payload shape, value evidence, and recommendations. The value section compares broad wiki body text with the bounded query packet so you can see whether Link is reducing context-budget waste.</p>
         <pre><code>lnk benchmark "agent memory"
 lnk health
 lnk status --validate</code></pre>
@@ -89,7 +89,7 @@ lnk status --validate</code></pre>
           <li>Use page-type filters and search before opening full graph data.</li>
           <li>Run <code>lnk health</code> after ingest or broad manual edits.</li>
           <li>Run <code>lnk doctor --fix</code> only when health or validation points to a repairable issue.</li>
-          <li>Keep private raw sources out of Git; use <code>snapshot</code>, <code>team-sync</code>, and <code>compliance-export</code> for reviewable sharing paths.</li>
+          <li>Keep private raw sources and local <code>wiki/log.md</code> out of Git; use <code>snapshot</code>, <code>team-sync</code>, and <code>compliance-export</code> for reviewable sharing paths.</li>
         </ul>
 
         <h2 id="limits">Current Limits</h2>

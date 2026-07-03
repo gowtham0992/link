@@ -6,7 +6,7 @@
   <meta name="description" content="How engineering teams can evaluate Link: local deployment, data boundaries, review gates, Git sharing, audit exports, and operational checks.">
   <title>Link - Team Security Review</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -92,7 +92,7 @@ lnk archive-memory memory-name ~/link --reason stale</code></pre>
         <pre><code>lnk team-sync ~/link --remote git@example.com:team/link-memory.git
 lnk compliance-export ~/link --output link-audit.json
 lnk backup ~/link</code></pre>
-        <p><code>lnk team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and whether active <code>visibility: private</code> memories would be swept into a broad <code>git add wiki</code>. It prints paste-safe commands instead of pushing data for you.</p>
+        <p><code>lnk team-sync</code> is read-only. It checks Git state, raw-source protection, review readiness, and whether active <code>visibility: private</code> memories would be swept into a broad <code>git add wiki</code>. It prints paste-safe commands instead of pushing data for you. The generated Git plan keeps <code>wiki/log.md</code> local because each machine has its own tamper-evident audit chain; sharing merged logs would create false integrity alarms.</p>
 
         <h2 id="audit">Audit Packet</h2>
         <p><code>lnk compliance-export</code> creates a redacted JSON packet for review. It includes readiness, validation status, memory review counts, operation markers, recent audit log metadata, and safe next actions. Raw source contents and memory bodies are excluded.</p>
@@ -113,8 +113,8 @@ lnk memory-log ~/link</code></pre>
           <li>Run <code>lnk health ~/link</code> and verify readiness is green.</li>
           <li>Run <code>lnk doctor ~/link</code> and resolve secret or validation warnings.</li>
           <li>Run <code>lnk compliance-export ~/link --output link-audit.json</code>.</li>
-          <li>Confirm <code>raw/</code>, backups, caches, and local MCP Python markers are ignored by Git.</li>
-          <li>Review <code>wiki/log.md</code>, <code>lnk memory-log ~/link</code>, and <code>lnk wins ~/link</code>.</li>
+          <li>Confirm <code>raw/</code>, backups, caches, local MCP Python markers, and <code>wiki/log.md</code> are ignored by Git.</li>
+          <li>Review local <code>wiki/log.md</code>, <code>lnk memory-log ~/link</code>, and <code>lnk wins ~/link</code> before sharing the reviewed wiki pages.</li>
           <li>Only share reviewed <code>wiki/</code> pages whose memories are marked <code>visibility: project</code> or <code>visibility: team</code>.</li>
         </ol>
       </article>

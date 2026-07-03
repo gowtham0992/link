@@ -60,6 +60,7 @@ def test_render_home_page_shows_stats_sections_and_prompts():
     assert "Recently Updated" in html
     assert html.index("Local Memory") < html.index("Agent Memory")
     assert "updated 2026-05-02" in html
+    assert 'href="/onboard"' in html
     assert 'href="/health"' in html
     assert 'href="/ingest"' in html
     assert 'href="/memory"' in html

@@ -2,11 +2,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
+import link_core.doctor as doctor_module  # noqa: E402
 from link_core.doctor import (  # noqa: E402
     DoctorReport,
     apply_doctor_fixes,
@@ -27,6 +29,7 @@ from link_core.doctor import (  # noqa: E402
     raw_source_refs,
     source_section_links,
 )
+from link_core.log import append_log  # noqa: E402
 from link_core.operations import begin_operation  # noqa: E402
 
 
@@ -119,6 +122,20 @@ class DoctorCoreTests(unittest.TestCase):
         self.assertIn("OK no interrupted Link operations", report.ok)
         self.assertIn("OK no sensitive-looking filenames", report.ok)
 
+    def test_build_doctor_report_uses_cache_backed_backlinks(self):
+        root = Path(tempfile.mkdtemp(prefix="link-doctor-report-cache-"))
+        apply_doctor_fixes(root)
+
+        with patch.object(
+            doctor_module,
+            "build_backlinks_from_cache",
+            wraps=doctor_module.build_backlinks_from_cache,
+        ) as cached_backlinks:
+            report = build_doctor_report(root)
+
+        self.assertTrue(report.healthy)
+        self.assertGreaterEqual(cached_backlinks.call_count, 2)
+
     def test_build_doctor_report_fails_on_stale_operation_marker(self):
         root = Path(tempfile.mkdtemp(prefix="link-doctor-report-"))
         apply_doctor_fixes(root)
@@ -128,6 +145,28 @@ class DoctorCoreTests(unittest.TestCase):
 
         self.assertFalse(report.healthy)
         self.assertTrue(any("incomplete Link operations need review" in error for error in report.errors))
+
+    def test_build_doctor_report_fails_on_tampered_audit_log(self):
+        root = Path(tempfile.mkdtemp(prefix="link-doctor-report-"))
+        apply_doctor_fixes(root)
+        wiki_dir = root / "wiki"
+        append_log(
+            wiki_dir,
+            "2026-05-17T00:00:00Z",
+            "remember",
+            "Prefer local memory",
+            ["Created: memories/prefer-local-memory.md", "Scope: user"],
+        )
+        log_path = wiki_dir / "log.md"
+        log_path.write_text(
+            log_path.read_text(encoding="utf-8").replace("Scope: user", "Scope: team"),
+            encoding="utf-8",
+        )
+
+        report = build_doctor_report(root)
+
+        self.assertFalse(report.healthy)
+        self.assertTrue(any("audit log hash chain broken" in error for error in report.errors))
 
     def test_page_health_helpers_find_doctor_findings(self):
         root = Path(tempfile.mkdtemp(prefix="link-doctor-core-"))

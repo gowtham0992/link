@@ -112,7 +112,7 @@ class LargeWikiSmokeTests(unittest.TestCase):
         self.assertTrue(packet["budget_report"]["wiki_search"]["has_more"])
         self.assertLess(packet["budget_report"]["context_packet"]["estimated_tokens"], 3000)
         self.assertLessEqual(packet["memory"]["count"], 3)
-        self.assertEqual(packet["follow_up"][0]["tool"], "query_link")
+        self.assertEqual(packet["follow_up"][0]["tool"], "recall")
         self.assertEqual(len(graph["nodes"]), page_count + 30)
         self.assertGreaterEqual(len(graph["edges"]), page_count)
         close_wiki_cache(cache)
@@ -140,6 +140,7 @@ class LargeWikiSmokeTests(unittest.TestCase):
         self.assertEqual(payload["graph_initial"]["nodes"], payload["graph_initial"]["total_nodes"])
         self.assertEqual(payload["work_dir"], str(root))
         self.assertEqual(payload["viewer"]["serve_command"], f"python3 link.py serve {root}")
+        self.assertEqual(payload["viewer"]["onboard_url"], "http://127.0.0.1:3000/onboard")
         self.assertEqual(payload["viewer"]["graph_url"], "http://127.0.0.1:3000/graph")
         self.assertEqual(payload["viewer"]["health_url"], "http://127.0.0.1:3000/health")
 

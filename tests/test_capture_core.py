@@ -21,6 +21,7 @@ from mcp_package.link_core.capture import (
     render_capture_session_text,
     render_delete_capture_text,
     render_redact_capture_text,
+    render_session_end_text,
     resolve_capture_file,
     write_session_capture,
 )
@@ -424,7 +425,7 @@ class CaptureCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Capture proposal accepted", text)
         self.assertIn("Memory: wiki/memories/prefer-local-memory.md", text)
-        self.assertIn("python3 link.py review-memory prefer-local-memory", text)
+        self.assertIn("lnk review-memory prefer-local-memory", text)
 
         code, text = render_accept_capture_text({
             "accepted": False,
@@ -504,6 +505,32 @@ class CaptureCoreTests(unittest.TestCase):
             "proposals": {"count": 0, "proposals": []},
         })
         self.assertIn("No durable memory candidates found.", text)
+
+    def test_render_session_end_text_lists_review_gated_proposals(self):
+        text = render_session_end_text({
+            "path": "raw/memory-captures/session-end.md",
+            "project": "link",
+            "secret_warnings": ["GitHub token"],
+            "proposals": {
+                "count": 1,
+                "proposals": [{
+                    "title": "Prefer review gated memory",
+                    "confidence": "high",
+                    "memory_type": "preference",
+                    "scope": "project",
+                    "project": "link",
+                    "suggested_action": "remember",
+                    "memory": "The user prefers review-gated memory.",
+                }],
+            },
+        })
+
+        self.assertIn("Link session end", text)
+        self.assertIn("proposal-only session notes", text)
+        self.assertIn("Path: raw/memory-captures/session-end.md", text)
+        self.assertIn("Secret-looking content: GitHub token", text)
+        self.assertIn("1. Prefer review gated memory [high]", text)
+        self.assertIn("Do not save durable memory without approval.", text)
 
 
 if __name__ == "__main__":

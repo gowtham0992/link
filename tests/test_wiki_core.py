@@ -12,9 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.wiki import (  # noqa: E402
-    build_index_markdown,
     build_backlinks,
+    build_backlinks_from_cache,
+    build_index_markdown,
     build_wiki_cache,
+    close_wiki_cache,
     context_for_topic,
     graph_data,
     graph_summary,
@@ -108,6 +110,31 @@ class WikiCoreTests(unittest.TestCase):
         self.assertIn({"source": "agent-memory", "target": "link"}, graph["edges"])
         self.assertIn({"source": "agent-memory", "target": "retrieval"}, graph["edges"])
 
+    def test_build_backlinks_from_cache_matches_body_scan(self):
+        wiki = self.make_wiki()
+        write_page(
+            wiki,
+            "concepts/agent-memory.md",
+            "---\ntype: concept\ntitle: Agent Memory\n---\n"
+            "# Agent Memory\n\nLinks to [[link]], [[link]], [[retrieval]], and [[missing]].\n",
+        )
+        write_page(
+            wiki,
+            "entities/link.md",
+            "---\ntype: entity\ntitle: Link\n---\n# Link\n\n[[agent-memory]]\n",
+        )
+        write_page(
+            wiki,
+            "concepts/retrieval.md",
+            "---\ntype: concept\ntitle: Retrieval\n---\n# Retrieval\n\n[[retrieval]]\n",
+        )
+
+        cache = build_wiki_cache(wiki)
+        try:
+            self.assertEqual(build_backlinks_from_cache(cache), build_backlinks(wiki))
+        finally:
+            close_wiki_cache(cache)
+
     def test_build_wiki_cache_reports_read_warnings(self):
         wiki = self.make_wiki()
         write_page(wiki, "concepts/readable.md", "---\ntype: concept\ntitle: Readable\n---\n# Readable\n")
@@ -141,6 +168,11 @@ class WikiCoreTests(unittest.TestCase):
         self.assertEqual(first["persistent_cache"]["reused_records"], 0)
         self.assertTrue(first["persistent_cache"]["written"])
         self.assertTrue((wiki.parent / ".link-cache/wiki-cache-v2.json").exists())
+        if first["search_backend"] == "sqlite-fts":
+            self.assertTrue(first["fts_index_info"]["persistent"])
+            self.assertFalse(first["fts_index_info"]["reused"])
+            self.assertTrue((wiki.parent / ".link-cache/page-fts-v1.sqlite").exists())
+        close_wiki_cache(first)
 
         original_read_text = Path.read_text
 
@@ -157,6 +189,10 @@ class WikiCoreTests(unittest.TestCase):
         self.assertEqual(second["persistent_cache"]["reused_records"], second["persistent_cache"]["total_records"])
         self.assertIn("agent-memory", second["page_map"])
         self.assertIn("durable", second["fulltext"]["agent-memory"])
+        if second["search_backend"] == "sqlite-fts":
+            self.assertTrue(second["fts_index_info"]["persistent"])
+            self.assertTrue(second["fts_index_info"]["reused"])
+        close_wiki_cache(second)
 
     def test_build_wiki_cache_reuses_unchanged_persistent_records_after_page_edit(self):
         wiki = self.make_wiki()

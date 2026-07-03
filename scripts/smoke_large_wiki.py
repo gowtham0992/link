@@ -199,10 +199,10 @@ def run_smoke(work_dir: Path, page_count: int, max_seconds: dict[str, float] | N
     expected_pages = page_count + max(12, min(40, page_count // 20)) + max(16, min(40, page_count // 25)) + 2
     require(len(cache["pages"]) == expected_pages, f"expected {expected_pages} cached pages, got {len(cache['pages'])}")
     require(len(results) == 20, f"expected capped search results, got {len(results)}")
-    require(packet.get("found") is True, "query_link did not find large-wiki context")
+    require(packet.get("found") is True, "recall did not find large-wiki context")
     require(len(packet.get("context_packet", [])) <= 6, "small query budget was not enforced")
     require(packet.get("budget_report", {}).get("wiki_search", {}).get("has_more") is True, "query did not report additional matches")
-    require(packet.get("follow_up", [{}])[0].get("tool") == "query_link", "query did not return follow-up guidance")
+    require(packet.get("follow_up", [{}])[0].get("tool") == "recall", "query did not return recall follow-up guidance")
     require(graph_packet.get("returned_nodes", 0) <= 40, "graph_summary did not enforce node limit")
     if expected_pages > 40:
         require(graph_packet.get("truncated") is True, "graph_summary did not report truncation for large wiki")
@@ -236,6 +236,7 @@ def run_smoke(work_dir: Path, page_count: int, max_seconds: dict[str, float] | N
         "viewer": {
             "serve_command": f"python3 link.py serve {work_dir}",
             "home_url": "http://127.0.0.1:3000",
+            "onboard_url": "http://127.0.0.1:3000/onboard",
             "graph_url": "http://127.0.0.1:3000/graph",
             "health_url": "http://127.0.0.1:3000/health",
         },

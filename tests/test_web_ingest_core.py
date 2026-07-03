@@ -97,7 +97,7 @@ def test_render_ingest_page_shows_completion_with_page_links():
                     "query_prompt": "query Link for represented source",
                 }
             ],
-            "next_prompt": "brief me from Link before we continue",
+            "next_prompt": "start with Link before we continue",
         },
     }
 
@@ -113,7 +113,7 @@ def test_render_ingest_page_shows_completion_with_page_links():
     assert "/propose?source=raw/represented-source.md" in html
     assert 'data-copy-text="propose memories from raw/represented-source.md"' in html
     assert 'data-copy-text="query Link for represented source"' in html
-    assert "brief me from Link before we continue" in html
+    assert "start with Link before we continue" in html
 
 
 def test_render_ingest_page_targets_next_step_commands():

@@ -176,6 +176,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn("data-copy-text", html)
         self.assertIn("data-raw-source-form", html)
         self.assertIn("/api/raw-source", html)
+        self.assertIn('<a href="/onboard">onboard</a>', html)
         self.assertIn('<a href="/ingest">ingest</a>', html)
         self.assertIn('<a href="/brief">brief</a>', html)
         self.assertIn('<a href="/propose">propose</a>', html)
@@ -186,6 +187,15 @@ class ServeTests(unittest.TestCase):
         self.assertTrue(issubclass(serve.ThreadingLocalTCPServer, socketserver.ThreadingMixIn))
         self.assertTrue(serve.ThreadingLocalTCPServer.daemon_threads)
         self.assertTrue(serve.ThreadingLocalTCPServer.allow_reuse_address)
+
+    def test_serve_startup_banner_points_to_onboarding(self):
+        text = "\n".join(serve._serve_startup_lines(3456))
+
+        self.assertIn("http://127.0.0.1:3456/onboard", text)
+        self.assertIn("first-run checklist", text)
+        self.assertIn("http://127.0.0.1:3456/health", text)
+        self.assertIn("http://127.0.0.1:3456/graph", text)
+        self.assertIn("MCP and CLI work without this viewer running.", text)
 
     def test_http_handler_sets_request_timeout(self):
         class FakeSocket:
@@ -219,6 +229,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn(".raw-source-controls { grid-template-columns: minmax(0, 1fr); }", serve.CSS)
         self.assertIn(".memory-grid { grid-template-columns: minmax(0, 1fr); }", serve.CSS)
         self.assertIn(".memory-actions code, .memory-next code { word-break: break-word; }", serve.CSS)
+        self.assertIn(".onboard-steps { display: grid;", serve.CSS)
 
     def test_all_pages_is_paginated_for_large_wikis(self):
         wiki = self.make_wiki()
@@ -356,6 +367,7 @@ class ServeTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertIn(b"More Tools", body)
+        self.assertIn(b"/onboard", body)
         self.assertIn(b"/prompts", body)
         self.assertIn(b"/propose", body)
         self.assertIn(b"/captures", body)
@@ -511,6 +523,10 @@ class ServeTests(unittest.TestCase):
             serve._parse_serve_port(["--host", "0.0.0.0"], default=3000)
         with self.assertRaises(SystemExit):
             serve._parse_serve_port(["--bind=0.0.0.0"], default=3000)
+        with self.assertRaisesRegex(SystemExit, "does not accept a positional target"):
+            serve._parse_serve_args(["/tmp/link-demo"], default_port=3000, default_root=Path("/tmp/default"))
+        with self.assertRaisesRegex(SystemExit, "unknown option"):
+            serve._parse_serve_args(["--public"], default_port=3000, default_root=Path("/tmp/default"))
 
     def test_server_bind_error_message_suggests_next_port(self):
         message = serve._serve_bind_error_message(OSError(48, "Address already in use"), 3000)
@@ -525,12 +541,13 @@ class ServeTests(unittest.TestCase):
 
         html = serve._render_home()
 
+        self.assertIn('href="/onboard"', html)
         self.assertIn('<a href="/prompts">prompts</a>', html)
         self.assertIn("Try These Prompts", html)
         self.assertIn("is Link ready?", html)
-        self.assertIn("brief me from Link before we continue", html)
+        self.assertIn("start with Link before we continue", html)
         self.assertIn("ingest raw/&lt;file&gt; into Link", html)
-        self.assertIn("query Link for what you know about me", html)
+        self.assertIn("what does Link know about me?", html)
         self.assertIn("propose memories from raw/&lt;file&gt;", html)
         self.assertIn("Open starter prompts", html)
 
@@ -543,19 +560,46 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["project"], "client-launch")
         self.assertEqual(payload["prompts"][0]["prompt"], "is Link ready?")
-        self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
+        prompts = [item["prompt"] for item in payload["prompts"]]
+        self.assertIn("seed this project into Link", prompts)
+        self.assertTrue(any("this project uses Link" in prompt for prompt in prompts))
         self.assertIn("Starter Prompts", html)
         self.assertIn("Ask Your Agent", html)
         self.assertIn("Local Checks", html)
         self.assertIn("Project examples are scoped to <code>client-launch</code>", html)
         self.assertIn("lnk health", html)
 
-    def test_css_has_explicit_black_dark_theme(self):
+    def test_onboard_page_shows_agent_setup_loop(self):
+        self.make_wiki()
+
+        html = serve._render_onboard()
+        status, body, _ = run_handler_raw("GET", "/onboard")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Onboard", html)
+        self.assertIn("project context", html)
+        self.assertIn("Seed this project", html)
+        self.assertIn("--seed-project", html)
+        self.assertIn("lnk seed .", html)
+        self.assertIn("MCP and CLI work without the viewer running", html)
+        self.assertIn("lnk health", html)
+        self.assertIn("lnk onboard", html)
+        self.assertIn("--first-memory", html)
+        self.assertIn("--agent codex", html)
+        self.assertIn("is Link ready?", html)
+        self.assertIn(b"Onboard", body)
+        self.assertIn(b"--agent codex", body)
+
+    def test_css_has_explicit_warm_dark_theme(self):
+        # The console design uses a warm dark theme (never pure black) and
+        # system font stacks: sans body, serif headings, mono labels.
         self.assertIn(':root[data-theme="dark"]', serve.CSS)
-        self.assertIn("--bg: #000000;", serve.CSS)
-        self.assertIn("body { font-family: Georgia", serve.CSS)
+        self.assertIn("--bg: #191309;", serve.CSS)
+        self.assertIn("--surface: #1e1810;", serve.CSS)
+        self.assertIn("--accent: #cd7657;", serve.CSS)
+        self.assertNotIn("--bg: #000000;", serve.CSS)
+        self.assertIn("body { font-family: var(--font-sans)", serve.CSS)
         self.assertIn("background: var(--bg); color: var(--text);", serve.CSS)
-        self.assertNotIn("background: #1a1a1a", serve.CSS)
 
     def test_raw_static_paths_stay_under_raw_directory(self):
         wiki = self.make_wiki()
@@ -1078,7 +1122,8 @@ class ServeTests(unittest.TestCase):
         self.assertIn(payload["search_backend"], {"sqlite-fts", "token-index"})
         self.assertTrue(payload["validation"]["passed"])
         self.assertEqual(payload["warnings"], [])
-        self.assertEqual(payload["next_actions"][0]["tool"], "query_link")
+        self.assertEqual(payload["next_actions"][0]["tool"], "recall")
+        self.assertEqual(payload["next_actions"][0]["arguments"], {"query": "<user task>", "budget": "micro"})
 
     def test_status_api_reports_cache_warnings(self):
         wiki = self.make_wiki()
@@ -1972,7 +2017,7 @@ class ServeTests(unittest.TestCase):
         self.assertIn('/propose?source=raw/represented-source.md', html)
         self.assertIn('data-copy-text="propose memories from raw/represented-source.md"', html)
         self.assertIn('data-copy-text="query Link for represented source"', html)
-        self.assertIn("brief me from Link before we continue", html)
+        self.assertIn("start with Link before we continue", html)
 
     def test_ingest_page_marks_stale_represented_raw(self):
         wiki = self.make_wiki()

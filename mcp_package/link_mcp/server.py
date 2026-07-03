@@ -2,23 +2,24 @@
 """
 Link MCP Server
 
-Exposes the Link personal knowledge wiki as MCP tools.
-Agents can search, query context, and traverse the knowledge graph
-without reading files directly.
+Exposes the Link personal knowledge wiki over MCP.
+Agents can recall local memory, search/query context, review durable
+memories, and traverse the knowledge graph without reading files directly.
 
 Install:
   pip install link-mcp
 
 Usage:
-  python -m link_mcp                      # uses ~/link/wiki/
-  python -m link_mcp --wiki /path/wiki    # custom wiki path
+  python -m link_mcp --surface slim                 # recommended agent surface
+  python -m link_mcp --wiki /path/wiki --surface slim
+  python -m link_mcp --wiki /path/wiki --surface full # compatibility surface
 
 Add to your MCP client config:
   {
     "mcpServers": {
       "link": {
         "command": "python3",
-        "args": ["-m", "link_mcp"]
+        "args": ["-m", "link_mcp", "--wiki", "~/link/wiki", "--surface", "slim"]
       }
     }
   }
@@ -26,6 +27,7 @@ Add to your MCP client config:
 from __future__ import annotations
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -35,6 +37,7 @@ from link_core.version import LINK_VERSION
 # ── Resolve wiki directory ────────────────────────────────────────────
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--wiki", default=None)
+parser.add_argument("--surface", choices=("full", "slim"), default=None)
 parser.add_argument("--version", action="store_true")
 args, _ = parser.parse_known_args()
 
@@ -46,6 +49,14 @@ if args.wiki:
     WIKI_DIR = Path(args.wiki).expanduser().resolve()
 else:
     WIKI_DIR = Path.home() / "link" / "wiki"
+
+MCP_SURFACE = (args.surface or os.environ.get("LINK_MCP_SURFACE") or "slim").strip().lower()
+if MCP_SURFACE not in {"full", "slim"}:
+    print(
+        f"[link-mcp] Invalid surface {MCP_SURFACE!r}. Use --surface full or --surface slim.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 if not WIKI_DIR.exists():
     print(
@@ -64,15 +75,37 @@ except ImportError:
     print("[link-mcp] mcp package not found. Install with: pip install mcp", file=sys.stderr)
     sys.exit(1)
 
-mcp = FastMCP(
-    "link",
-    instructions=(
-        "Link is local personal memory for agents. Use link_status when "
+def _instructions(surface: str) -> str:
+    if surface == "slim":
+        return (
+            "Link is local personal memory for agents. Use status when "
+            "connecting to Link or troubleshooting readiness. Use recall for "
+            "substantive questions, session-start briefs, user preferences, "
+            "project decisions, wiki search, and graph context; prefer small "
+            "or micro budgets before asking for more. Before broad file reads, "
+            "grep/search, or asking the user to repeat project context, call "
+            "recall first and read recall_capsule before the rest of the packet. Use remember only when "
+            "the user explicitly asks or approves durable memory. Use ingest "
+            "when the user drops files into raw/ or asks what needs ingest. "
+            "Use review for memory inbox, explain, archive, restore, forget, "
+            "profile, audit, and log workflows. Use admin for less common "
+            "maintenance such as backup, migrate, validate, rebuild, pages, "
+            "backlinks, graph export, project seeding, captures, and advanced updates. "
+            "If recall returns no useful project context and you are in a repo, "
+            "use admin(action='seed_project') before broad file reads. Never "
+            "silently save durable memory; propose or review first when unsure."
+        )
+    return (
+        "Link is local personal memory for agents. This full MCP surface is "
+        "for compatibility and advanced workflows; new clients should prefer "
+        "--surface slim so the model sees one obvious recall tool and one "
+        "obvious remember tool. Use link_status when "
         "connecting to Link or troubleshooting setup/readiness. Start with "
         "migrate_wiki if link_status reports a missing or old schema marker. "
         "Use starter_prompts when the user asks what to try after install. "
         "Use ingest_status to check pending raw files, the guided ingest plan, and the next ingest prompt. "
-        "query_link when the user asks a substantive question that may need "
+        "Use query_link before broad file reads, grep/search, or asking the user "
+        "to repeat project context when the user asks a substantive question that may need "
         "both memory and wiki context. Use memory_brief at "
         "session start or before personalized/project work; pass the user's "
         "task as the query when available. Use recall_memory for focused user "
@@ -99,8 +132,27 @@ mcp = FastMCP(
         "archive the older memory before forcing a conflict. "
         "Use archive_memory instead of deleting stale or wrong memories; use "
         "forget_memory only when the user explicitly asks for permanent deletion."
-    ),
-)
+    )
+
+
+mcp = FastMCP("link", instructions=_instructions(MCP_SURFACE))
+
+
+def _surface_tool(surface: str):
+    def decorator(fn):
+        if MCP_SURFACE == surface:
+            return mcp.tool()(fn)
+        return fn
+
+    return decorator
+
+
+def _full_tool():
+    return _surface_tool("full")
+
+
+def _slim_tool():
+    return _surface_tool("slim")
 
 # ── In-memory indexes (built on first use, invalidated by mtime) ──────
 _cache: dict = {}
@@ -181,6 +233,9 @@ from link_core.query import (
 from link_core.prompts import (
     starter_prompt_payload as _core_starter_prompt_payload,
 )
+from link_core.project_seed import (
+    seed_project_context as _core_seed_project_context,
+)
 from link_core.validation import (
     validate_wiki as _core_validate_wiki,
 )
@@ -191,7 +246,7 @@ from link_core.schema import (
     migrate_wiki as _core_migrate_wiki,
 )
 from link_core.wiki import (
-    build_backlinks as _core_build_backlinks,
+    build_backlinks_from_cache as _core_build_backlinks_from_cache,
     build_wiki_cache as _core_build_wiki_cache,
     close_wiki_cache as _core_close_wiki_cache,
     context_for_topic as _core_context_for_topic,
@@ -806,9 +861,549 @@ def _write_mcp_memory_page(
     return result
 
 
-# ── MCP Tools ─────────────────────────────────────────────────────────
+# ── MCP resources and prompts ─────────────────────────────────────────
 
-@mcp.tool()
+@mcp.resource(
+    "link://instructions",
+    name="Link agent instructions",
+    description="Short, portable instructions for using Link memory safely in any MCP client.",
+    mime_type="text/markdown",
+)
+def link_instructions_resource() -> str:
+    return (
+        "# Link Agent Instructions\n\n"
+        "Use Link as local, source-backed agent memory.\n\n"
+        "1. If readiness is unknown, call `status(include_validation=true)`.\n"
+        "2. At the first substantive turn of a session, call `recall(query=\"\", mode=\"brief\", limit=6)`.\n"
+        "3. Before broad file reads or asking the user to repeat durable context, call "
+        "`recall(query=\"<task>\", budget=\"micro\")` and read `recall_capsule` first.\n"
+        "4. Use `ingest(action=\"status\")` when the user adds files to `raw/`.\n"
+        "5. Use `remember` only when the user explicitly asks or approves durable memory.\n"
+        "6. At session end, use `admin(action=\"session_end\", arguments=\"{...}\")` or `capture_session` "
+        "to save proposal-only notes for user review.\n"
+        "7. Use `review` for inbox, explain, archive, restore, forget, profile, audit, and log workflows.\n"
+        "8. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "Never silently save durable memory. Prefer reviewed memories and source-backed wiki pages, and cite "
+        "provenance when explaining why Link knows something.\n"
+    )
+
+
+@mcp.resource(
+    "link://health",
+    name="Link health",
+    description="Current Link readiness, validation, schema, and safe next actions.",
+    mime_type="application/json",
+)
+def link_health_resource() -> str:
+    return json.dumps(_link_status(include_validation=True), ensure_ascii=False)
+
+
+@mcp.resource(
+    "link://brief",
+    name="Link memory brief",
+    description="Startup memory brief with relevant user/project memory and review guidance.",
+    mime_type="application/json",
+)
+def link_brief_resource() -> str:
+    return json.dumps(_memory_brief(query="", limit=6), ensure_ascii=False)
+
+
+@mcp.resource(
+    "link://profile",
+    name="Link memory profile",
+    description="Summary of what Link remembers by type, scope, status, tags, and recency.",
+    mime_type="application/json",
+)
+def link_profile_resource() -> str:
+    return json.dumps(_memory_profile(limit=10), ensure_ascii=False)
+
+
+@mcp.resource(
+    "link://project",
+    name="Link project prompts",
+    description="First-run prompts and checks for the configured Link project/wiki.",
+    mime_type="application/json",
+)
+def link_project_resource() -> str:
+    project = _core_default_project_for_target(WIKI_DIR.parent)
+    return json.dumps(_starter_prompts(project=project), ensure_ascii=False)
+
+
+@mcp.prompt(
+    name="link_start",
+    title="Link: start a session",
+    description="Begin work with Link's safe readiness and recall loop.",
+)
+def link_start_prompt(task: str = "") -> str:
+    task_text = task.strip() or "<current task>"
+    return (
+        "Start this session with Link. If readiness is unknown, call status(include_validation=true). "
+        "Then call recall(query='', mode='brief', limit=6) once to prime local memory. "
+        f"If {task_text!r} may depend on user preferences, project decisions, or prior context, call "
+        f"recall(query={task_text!r}, budget='micro') and read recall_capsule before broad file reads. "
+        "If recall has no useful project context and you know the project root, call "
+        "admin(action='seed_project', arguments='{\"project_root\":\"/absolute/project/path\",\"limit\":12}') once, "
+        "then retry recall with a small budget. "
+        "Do not write durable memory unless the user explicitly asks or approves it."
+    )
+
+
+@mcp.prompt(
+    name="link_brief",
+    title="Link: brief before work",
+    description="Prime the agent with local Link memory before a task.",
+)
+def link_brief_prompt(task: str = "") -> str:
+    task_text = task.strip() or "<current task>"
+    return (
+        "Before answering or coding, get compact local context from Link. "
+        f"Use recall(query={task_text!r}, budget='small') first. "
+        "Treat review warnings as provisional and ask before writing durable memory."
+    )
+
+
+@mcp.prompt(
+    name="link_remember",
+    title="Link: remember explicit context",
+    description="Save only user-approved durable memory.",
+)
+def link_remember_prompt(memory: str = "") -> str:
+    memory_text = memory.strip() or "<memory the user explicitly approved>"
+    return (
+        "Save this only if the user asked Link to remember it. "
+        f"Use remember(text={memory_text!r}) and handle duplicate/conflict responses by updating or reviewing existing memory."
+    )
+
+
+@mcp.prompt(
+    name="link_session_end",
+    title="Link: end a session",
+    description="Capture session notes as proposal-only memory candidates.",
+)
+def link_session_end_prompt(summary: str = "") -> str:
+    summary_text = summary.strip() or "<short session summary or transcript>"
+    return (
+        "End this session with Link without silently saving durable memory. "
+        f"Use admin(action='session_end', arguments='{{\"text\": {json.dumps(summary_text)}, \"limit\": 3}}') "
+        "or capture_session with the session notes. Show the returned proposals to the user and only call "
+        "remember after the user approves a proposal."
+    )
+
+
+@mcp.prompt(
+    name="link_ingest",
+    title="Link: ingest raw sources",
+    description="Start the guided raw-source ingest workflow.",
+)
+def link_ingest_prompt(path: str = "") -> str:
+    target = path.strip() or "raw/<file>"
+    return (
+        f"Use ingest(action='status') first, then follow the guided plan for {target}. "
+        "If Link reports secret warnings or unreadable files, stop and ask the user to fix or redact them. "
+        "After source edits, rebuild indexes and validate before saying ingest is complete."
+    )
+
+
+@mcp.prompt(
+    name="link_review",
+    title="Link: review memory",
+    description="Inspect pending memory review and explain/archive/update safely.",
+)
+def link_review_prompt(topic: str = "") -> str:
+    focus = topic.strip() or "pending memory"
+    return (
+        f"Use review(action='inbox') to find review work related to {focus}. "
+        "Use review(action='explain', identifier='<memory>') before trusting surprising memory. "
+        "Archive stale or wrong memory; forget only after explicit user confirmation."
+    )
+
+
+def _admin_arguments(arguments: str) -> dict[str, object]:
+    text = _clean_text_input(arguments, max_len=4000) if isinstance(arguments, str) else ""
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"arguments must be a JSON object string: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("arguments must be a JSON object string")
+    return payload
+
+
+def _bool_arg(payload: dict[str, object], name: str, default: bool = False) -> bool:
+    value = payload.get(name, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _int_arg(payload: dict[str, object], name: str, default: int = 0) -> int:
+    try:
+        return int(payload.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _str_arg(payload: dict[str, object], name: str, default: str = "") -> str:
+    value = payload.get(name, default)
+    return _clean_text_input(value, max_len=4000)
+
+
+# ── Slim MCP surface ──────────────────────────────────────────────────
+
+@_slim_tool()
+def status(include_validation: bool = False) -> str:
+    """Check Link readiness and safe next actions.
+
+    Use this first when connecting, troubleshooting, or deciding whether Link
+    can be trusted for the current task. It reports schema state, memory/page
+    counts, optional validation, interrupted operations, and recommended next
+    actions.
+    """
+    return json.dumps(_link_status(include_validation=include_validation), ensure_ascii=False)
+
+
+@_slim_tool()
+def recall(
+    query: str = "",
+    budget: str = "small",
+    project: str = "",
+    mode: str = "auto",
+    limit: int = 6,
+) -> str:
+    """Retrieve local memory/wiki context through one obvious read tool.
+
+    Use this before substantive answers, coding, planning, or personalized
+    work. mode=auto returns a startup memory brief when query is empty and an
+    answer-ready query packet when query is present. mode=brief returns the
+    memory brief; mode=memory returns focused memory-only recall.
+    """
+    clean_query = _clean_text_input(query, max_len=MAX_TEXT_INPUT)
+    clean_mode = (_clean_text_input(mode, max_len=40) or "auto").lower().replace("-", "_")
+    clean_budget = (_clean_text_input(budget, max_len=40) or "medium").lower()
+    clean_project = _resolve_project(project)
+    parsed_limit = _parse_limit(limit, default=6, max_limit=20)
+
+    if clean_mode == "brief" or (clean_mode == "auto" and not clean_query):
+        return json.dumps({
+            "surface": "slim",
+            "tool": "recall",
+            "mode": "brief",
+            "brief": _memory_brief(query=clean_query, limit=parsed_limit, project=clean_project),
+        }, ensure_ascii=False)
+
+    if clean_mode == "memory":
+        if not clean_query:
+            return json.dumps({"surface": "slim", "tool": "recall", "error": "query required for memory mode"})
+        memories = _recall_memories(clean_query, limit=parsed_limit, project=clean_project)
+        return json.dumps({
+            "surface": "slim",
+            "tool": "recall",
+            "mode": "memory",
+            "query": clean_query,
+            "project": clean_project,
+            "count": len(memories),
+            "memories": memories,
+        }, ensure_ascii=False)
+
+    if not clean_query:
+        return json.dumps({"surface": "slim", "tool": "recall", "error": "query required"})
+    payload = _query_link(query=clean_query, budget=clean_budget, project=clean_project)
+    payload["surface"] = "slim"
+    payload["tool"] = "recall"
+    payload["mode"] = "query"
+    return json.dumps(payload, ensure_ascii=False)
+
+
+@_slim_tool()
+def remember(
+    text: str,
+    title: str = "",
+    memory_type: str = "note",
+    scope: str = "user",
+    tags: str = "",
+    source: str = "mcp",
+    project: str = "",
+    visibility: str = "",
+    review_after: str = "",
+    expires_at: str = "",
+    allow_duplicate: bool = False,
+    allow_conflict: bool = False,
+) -> str:
+    """Save explicit user-approved memory.
+
+    Use only when the user asks Link to remember something or approves a memory
+    proposal. Duplicate and conflict candidates should be resolved by updating,
+    reviewing, or archiving existing memory instead of forcing a new page.
+    """
+    try:
+        result = _write_mcp_memory_page(
+            text,
+            title=title,
+            memory_type=memory_type,
+            scope=scope,
+            tags=tags,
+            source=source,
+            allow_duplicate=allow_duplicate,
+            allow_conflict=allow_conflict,
+            project=project,
+            visibility=visibility,
+            review_after=review_after,
+            expires_at=expires_at,
+        )
+    except ValueError as exc:
+        return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})
+    result["surface"] = "slim"
+    result["tool"] = "remember"
+    return json.dumps(result, ensure_ascii=False)
+
+
+@_slim_tool()
+def ingest(action: str = "status", strict: bool = False) -> str:
+    """Inspect or validate raw-source ingest state.
+
+    action=status returns the guided ingest plan. action=validate runs the
+    validation gate. action=rebuild refreshes index and backlinks after source
+    edits. Do not read secret-flagged raw files.
+    """
+    clean_action = (_clean_text_input(action, max_len=80) or "status").lower().replace("-", "_")
+    if clean_action in {"status", "plan"}:
+        payload = _ingest_status()
+        payload["surface"] = "slim"
+        payload["tool"] = "ingest"
+        return json.dumps(payload, ensure_ascii=False)
+    if clean_action == "validate":
+        payload = _validate_wiki(strict=strict)
+        payload["surface"] = "slim"
+        payload["tool"] = "ingest"
+        return json.dumps(payload, ensure_ascii=False)
+    if clean_action == "rebuild":
+        cache = _core_build_wiki_cache(WIKI_DIR, use_persistent_cache=False)
+        try:
+            index_result = _core_rebuild_index(WIKI_DIR, cache=cache)
+            backlinks = _core_build_backlinks_from_cache(cache)
+            _core_atomic_write_json(WIKI_DIR / "_backlinks.json", backlinks)
+        finally:
+            _core_close_wiki_cache(cache)
+        _clear_cache()
+        return json.dumps({
+            "surface": "slim",
+            "tool": "ingest",
+            "rebuilt": True,
+            "index": index_result,
+            "backlink_pages": len(backlinks.get("backlinks", {})),
+        }, ensure_ascii=False)
+    return json.dumps({
+        "surface": "slim",
+        "tool": "ingest",
+        "error": f"unsupported action: {clean_action}",
+        "supported_actions": ["status", "validate", "rebuild"],
+    })
+
+
+@_slim_tool()
+def review(
+    action: str = "inbox",
+    identifier: str = "",
+    note: str = "",
+    reason: str = "",
+    confirm: bool = False,
+    project: str = "",
+    limit: int = 20,
+    include_archived: bool = False,
+) -> str:
+    """Review, explain, and manage local memory lifecycle.
+
+    Supported actions: inbox, audit, profile, log, wins, explain, reviewed,
+    archive, restore, forget. Prefer archive over forget unless the user asks
+    for permanent deletion.
+    """
+    clean_action = (_clean_text_input(action, max_len=80) or "inbox").lower().replace("-", "_")
+    parsed_limit = _parse_limit(limit, default=20, max_limit=50)
+    clean_project = _resolve_project(project)
+    try:
+        if clean_action == "inbox":
+            payload = _memory_inbox(limit=parsed_limit, include_archived=include_archived, project=clean_project)
+        elif clean_action == "audit":
+            payload = _memory_audit(limit=parsed_limit, project=clean_project)
+        elif clean_action == "profile":
+            payload = _memory_profile(limit=parsed_limit, project=clean_project)
+        elif clean_action == "log":
+            payload = _memory_log(limit=parsed_limit)
+        elif clean_action == "wins":
+            payload = _memory_wins(limit=parsed_limit, project=clean_project)
+        elif clean_action == "explain":
+            payload = _memory_explanation(identifier)
+        elif clean_action in {"reviewed", "review", "mark_reviewed"}:
+            payload = _mark_memory_reviewed(identifier, note=note)
+        elif clean_action == "archive":
+            payload = _set_memory_status(identifier, "archived", reason=reason)
+        elif clean_action == "restore":
+            payload = _set_memory_status(identifier, "active")
+        elif clean_action == "forget":
+            payload = _forget_memory(identifier, confirm=confirm)
+        else:
+            return json.dumps({
+                "surface": "slim",
+                "tool": "review",
+                "error": f"unsupported action: {clean_action}",
+                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "explain", "reviewed", "archive", "restore", "forget"],
+            })
+    except ValueError as exc:
+        return json.dumps({"surface": "slim", "tool": "review", "updated": False, "error": str(exc)})
+    payload["surface"] = "slim"
+    payload["tool"] = "review"
+    payload["action"] = clean_action
+    return json.dumps(payload, ensure_ascii=False)
+
+
+@_slim_tool()
+def admin(action: str, arguments: str = "{}") -> str:
+    """Escape hatch for less common Link maintenance and advanced workflows.
+
+    Pass action plus a JSON object string in arguments. Common actions include:
+    backup, migrate, validate, operations, search, context, pages, backlinks,
+    graph_summary, graph, rebuild_index, rebuild_backlinks, seed_project, propose_memories,
+    capture_session, session_end, capture_inbox, accept_capture, redact_capture,
+    delete_capture, update_memory, and set_visibility.
+    """
+    clean_action = (_clean_text_input(action, max_len=100) or "").lower().replace("-", "_")
+    try:
+        payload = _admin_arguments(arguments)
+        if clean_action in {"status", "health"}:
+            return status(include_validation=_bool_arg(payload, "include_validation", False))
+        if clean_action in {"backup", "backup_wiki"}:
+            return backup_wiki(
+                label=_str_arg(payload, "label", "mcp"),
+                include_raw=_bool_arg(payload, "include_raw", False),
+                list_only=_bool_arg(payload, "list_only", False),
+            )
+        if clean_action in {"migrate", "migrate_wiki"}:
+            return migrate_wiki()
+        if clean_action in {"validate", "validate_wiki"}:
+            return validate_wiki(strict=_bool_arg(payload, "strict", False))
+        if clean_action in {"operations", "link_operations"}:
+            return link_operations(limit=_int_arg(payload, "limit", 20))
+        if clean_action in {"prompts", "starter_prompts"}:
+            return starter_prompts(project=_str_arg(payload, "project"))
+        if clean_action in {"search", "search_wiki"}:
+            return search_wiki(_str_arg(payload, "query"), limit=_int_arg(payload, "limit", 20))
+        if clean_action in {"context", "get_context"}:
+            return get_context(_str_arg(payload, "topic"))
+        if clean_action in {"pages", "get_pages"}:
+            return get_pages(
+                category=_str_arg(payload, "category"),
+                page_type=_str_arg(payload, "page_type"),
+                maturity=_str_arg(payload, "maturity"),
+                limit=_int_arg(payload, "limit", 100),
+                offset=_int_arg(payload, "offset", 0),
+                include_all=_bool_arg(payload, "include_all", False),
+            )
+        if clean_action in {"backlinks", "get_backlinks"}:
+            return get_backlinks(
+                _str_arg(payload, "page_name"),
+                limit=_int_arg(payload, "limit", 100),
+                offset=_int_arg(payload, "offset", 0),
+                include_all=_bool_arg(payload, "include_all", False),
+            )
+        if clean_action in {"graph_summary", "get_graph_summary"}:
+            return get_graph_summary(
+                topic=_str_arg(payload, "topic"),
+                limit=_int_arg(payload, "limit", 40),
+                depth=_int_arg(payload, "depth", 1),
+                max_edges=_int_arg(payload, "max_edges", 120),
+            )
+        if clean_action in {"graph", "get_graph"}:
+            return get_graph()
+        if clean_action == "rebuild_index":
+            return rebuild_index()
+        if clean_action == "rebuild_backlinks":
+            return rebuild_backlinks()
+        if clean_action in {"seed_project", "project_seed"}:
+            project_root = Path(_str_arg(payload, "project_root") or _str_arg(payload, "path") or ".")
+            seed_payload = _core_seed_project_context(
+                WIKI_DIR.parent,
+                project_root,
+                project_name=_str_arg(payload, "project"),
+                overwrite=_bool_arg(payload, "overwrite", False),
+                dry_run=_bool_arg(payload, "dry_run", False),
+                limit=_int_arg(payload, "limit", 12),
+                include_git_log=_bool_arg(payload, "include_git_log", True),
+                git_log_limit=_int_arg(payload, "git_log_limit", 20),
+            )
+            seed_payload["surface"] = "slim"
+            seed_payload["tool"] = "admin"
+            seed_payload["action"] = clean_action
+            _clear_cache()
+            return json.dumps(seed_payload, ensure_ascii=False)
+        if clean_action == "propose_memories":
+            return propose_memories(
+                _str_arg(payload, "text"),
+                source=_str_arg(payload, "source", "mcp"),
+                limit=_int_arg(payload, "limit", 10),
+                project=_str_arg(payload, "project"),
+            )
+        if clean_action in {"capture_session", "session_end"}:
+            return capture_session(
+                _str_arg(payload, "text"),
+                title=_str_arg(payload, "title"),
+                source=_str_arg(payload, "source", clean_action),
+                limit=_int_arg(payload, "limit", 3 if clean_action == "session_end" else 10),
+                project=_str_arg(payload, "project"),
+            )
+        if clean_action == "capture_inbox":
+            return capture_inbox(limit=_int_arg(payload, "limit", 20), project=_str_arg(payload, "project"))
+        if clean_action == "accept_capture":
+            return accept_capture(
+                _str_arg(payload, "capture"),
+                index=_int_arg(payload, "index", 1),
+                title=_str_arg(payload, "title"),
+                memory_type=_str_arg(payload, "memory_type"),
+                scope=_str_arg(payload, "scope"),
+                visibility=_str_arg(payload, "visibility"),
+                tags=_str_arg(payload, "tags"),
+                project=_str_arg(payload, "project"),
+                allow_duplicate=_bool_arg(payload, "allow_duplicate", False),
+                allow_conflict=_bool_arg(payload, "allow_conflict", False),
+            )
+        if clean_action == "redact_capture":
+            return redact_capture(_str_arg(payload, "capture"), replacement=_str_arg(payload, "replacement", "[redacted-secret]"))
+        if clean_action == "delete_capture":
+            return delete_capture(_str_arg(payload, "capture"), confirm=_bool_arg(payload, "confirm", False))
+        if clean_action == "update_memory":
+            return update_memory(
+                _str_arg(payload, "identifier"),
+                _str_arg(payload, "memory"),
+                source=_str_arg(payload, "source", "mcp"),
+                allow_conflict=_bool_arg(payload, "allow_conflict", False),
+                project=_str_arg(payload, "project"),
+            )
+        if clean_action in {"set_visibility", "set_memory_visibility"}:
+            return set_memory_visibility(_str_arg(payload, "identifier"), _str_arg(payload, "visibility"))
+    except ValueError as exc:
+        return json.dumps({"surface": "slim", "tool": "admin", "ok": False, "action": clean_action, "error": str(exc)})
+    return json.dumps({
+        "surface": "slim",
+        "tool": "admin",
+        "ok": False,
+        "action": clean_action,
+        "error": "unsupported action",
+        "supported_actions": [
+            "backup", "migrate", "validate", "operations", "prompts",
+            "search", "context", "pages", "backlinks", "graph_summary", "graph",
+            "rebuild_index", "rebuild_backlinks", "seed_project", "propose_memories",
+            "capture_session", "session_end", "capture_inbox", "accept_capture", "redact_capture",
+            "delete_capture", "update_memory", "set_visibility",
+        ],
+    })
+
+
+# ── Full MCP tool surface ─────────────────────────────────────────────
+
+@_full_tool()
 def query_link(query: str, budget: str = "medium", project: str = "") -> str:
     """Build a compact answer-ready Link context packet.
 
@@ -816,12 +1411,12 @@ def query_link(query: str, budget: str = "medium", project: str = "") -> str:
     wiki knowledge, or both. It returns budgeted memories, ranked wiki results,
     graph-neighborhood context, and why each item was selected so the agent does
     not waste context by reading the whole wiki.
-    budget: small, medium, or large.
+    budget: micro, small, medium, or large.
     """
     return json.dumps(_query_link(query=query, budget=budget, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def link_status(include_validation: bool = False) -> str:
     """Return a compact Link readiness summary.
 
@@ -832,7 +1427,7 @@ def link_status(include_validation: bool = False) -> str:
     return json.dumps(_link_status(include_validation=include_validation), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def link_operations(limit: int = 20) -> str:
     """Inspect interrupted or active local Link write operations.
 
@@ -843,7 +1438,7 @@ def link_operations(limit: int = 20) -> str:
     return json.dumps(_link_operations(limit=limit), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def starter_prompts(project: str = "") -> str:
     """Return first-run Link prompts and local checks.
 
@@ -854,7 +1449,7 @@ def starter_prompts(project: str = "") -> str:
     return json.dumps(_starter_prompts(project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def backup_wiki(label: str = "mcp", include_raw: bool = False, list_only: bool = False) -> str:
     """Create or list local backup archives for this Link wiki.
 
@@ -877,7 +1472,7 @@ def backup_wiki(label: str = "mcp", include_raw: bool = False, list_only: bool =
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def memory_brief(query: str = "", limit: int = 6, project: str = "") -> str:
     """Prime the agent with local memory before answering or coding.
 
@@ -890,7 +1485,7 @@ def memory_brief(query: str = "", limit: int = 6, project: str = "") -> str:
     return json.dumps(_memory_brief(query=query, limit=limit, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def validate_wiki(strict: bool = False) -> str:
     """Validate agent-generated wiki pages after ingest or large edits.
 
@@ -902,7 +1497,7 @@ def validate_wiki(strict: bool = False) -> str:
     return json.dumps(_validate_wiki(strict=strict), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def migrate_wiki() -> str:
     """Apply safe Link wiki schema migrations.
 
@@ -913,7 +1508,7 @@ def migrate_wiki() -> str:
     return json.dumps(_migrate_wiki(), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def ingest_status() -> str:
     """Return raw source ingest state and the next safe action.
 
@@ -923,7 +1518,7 @@ def ingest_status() -> str:
     return json.dumps(_ingest_status(), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def search_wiki(query: str, limit: int = 20) -> str:
     """Search the Link wiki by title, alias, tag, and full-text content.
 
@@ -950,7 +1545,7 @@ def search_wiki(query: str, limit: int = 20) -> str:
     return json.dumps({"query": query, "count": len(slim), "results": slim}, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def recall_memory(query: str, limit: int = 10, include_archived: bool = False, project: str = "") -> str:
     """Search local agent memory pages first.
 
@@ -974,7 +1569,7 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
     }, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def propose_memories(text: str, source: str = "mcp", limit: int = 10, project: str = "") -> str:
     """Propose durable memories from chat or session notes without writing them.
 
@@ -990,7 +1585,7 @@ def propose_memories(text: str, source: str = "mcp", limit: int = 10, project: s
     return json.dumps(_propose_memories_from_text(clean_text, source=source, limit=limit, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def capture_session(text: str, title: str = "", source: str = "mcp", limit: int = 10, project: str = "") -> str:
     """Save long chat/session notes locally and return memory proposals only.
 
@@ -1010,7 +1605,7 @@ def capture_session(text: str, title: str = "", source: str = "mcp", limit: int 
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def capture_inbox(limit: int = 20, project: str = "") -> str:
     """List saved raw session captures without changing them.
 
@@ -1021,7 +1616,7 @@ def capture_inbox(limit: int = 20, project: str = "") -> str:
     return json.dumps(_capture_inbox(limit=limit, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def accept_capture(
     capture: str,
     index: int = 1,
@@ -1057,7 +1652,7 @@ def accept_capture(
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def redact_capture(capture: str, replacement: str = "[redacted-secret]") -> str:
     """Redact secret-looking values from a saved raw session capture.
 
@@ -1071,7 +1666,7 @@ def redact_capture(capture: str, replacement: str = "[redacted-secret]") -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def delete_capture(capture: str, confirm: bool = False) -> str:
     """Delete a saved raw session capture after explicit user confirmation.
 
@@ -1085,7 +1680,7 @@ def delete_capture(capture: str, confirm: bool = False) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def memory_profile(limit: int = 10, project: str = "") -> str:
     """Summarize what Link currently remembers.
 
@@ -1097,7 +1692,7 @@ def memory_profile(limit: int = 10, project: str = "") -> str:
     return json.dumps(_memory_profile(limit=limit, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def memory_audit(limit: int = 10, project: str = "") -> str:
     """Audit local memory health, review backlog, and raw capture state.
 
@@ -1107,7 +1702,7 @@ def memory_audit(limit: int = 10, project: str = "") -> str:
     return json.dumps(_memory_audit(limit=limit, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def memory_inbox(limit: int = 20, include_archived: bool = False, project: str = "") -> str:
     """List memories that need user review.
 
@@ -1120,7 +1715,7 @@ def memory_inbox(limit: int = 20, include_archived: bool = False, project: str =
     return json.dumps(_memory_inbox(limit=limit, include_archived=include_archived, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def memory_log(limit: int = 50, include_captures: bool = True) -> str:
     """List recent memory lifecycle changes.
 
@@ -1132,7 +1727,7 @@ def memory_log(limit: int = 50, include_captures: bool = True) -> str:
     return json.dumps(_memory_log(limit=limit, include_captures=include_captures), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def memory_wins(limit: int = 6, project: str = "") -> str:
     """Summarize local proof signals for Link memory value.
 
@@ -1143,7 +1738,7 @@ def memory_wins(limit: int = 6, project: str = "") -> str:
     return json.dumps(_memory_wins(limit=limit, project=project), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def review_memory(identifier: str, note: str = "") -> str:
     """Mark a memory as reviewed after user confirmation."""
     try:
@@ -1153,7 +1748,7 @@ def review_memory(identifier: str, note: str = "") -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def explain_memory(identifier: str) -> str:
     """Explain why a memory exists and whether it is ready for recall.
 
@@ -1167,7 +1762,7 @@ def explain_memory(identifier: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def update_memory(
     identifier: str,
     memory: str,
@@ -1194,7 +1789,7 @@ def update_memory(
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def set_memory_visibility(identifier: str, visibility: str) -> str:
     """Change a memory's sharing visibility.
 
@@ -1209,7 +1804,7 @@ def set_memory_visibility(identifier: str, visibility: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def archive_memory(identifier: str, reason: str = "") -> str:
     """Archive a memory without deleting its Markdown page.
 
@@ -1224,7 +1819,7 @@ def archive_memory(identifier: str, reason: str = "") -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def restore_memory(identifier: str) -> str:
     """Restore an archived memory to active status."""
     try:
@@ -1234,7 +1829,7 @@ def restore_memory(identifier: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def forget_memory(identifier: str, confirm: bool = False) -> str:
     """Permanently delete a memory after explicit user confirmation.
 
@@ -1245,7 +1840,7 @@ def forget_memory(identifier: str, confirm: bool = False) -> str:
     return json.dumps(_forget_memory(identifier, confirm=confirm), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def remember_memory(
     memory: str,
     title: str = "",
@@ -1294,7 +1889,7 @@ def remember_memory(
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def get_context(topic: str) -> str:
     """Get full context for a topic from the Link wiki.
 
@@ -1313,7 +1908,7 @@ def get_context(topic: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def get_pages(
     category: str = "",
     page_type: str = "",
@@ -1352,7 +1947,7 @@ def get_pages(
     )
 
 
-@mcp.tool()
+@_full_tool()
 def get_backlinks(page_name: str, limit: int = 100, offset: int = 0, include_all: bool = False) -> str:
     """Get pages that link to or from a given wiki page, bounded by default.
 
@@ -1388,7 +1983,7 @@ def get_backlinks(page_name: str, limit: int = 100, offset: int = 0, include_all
     )
 
 
-@mcp.tool()
+@_full_tool()
 def get_graph() -> str:
     """Get the full knowledge graph as nodes and edges.
 
@@ -1405,7 +2000,7 @@ def get_graph() -> str:
     return json.dumps(_core_graph_data(_build_cache()), ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def get_graph_summary(topic: str = "", limit: int = 40, depth: int = 1, max_edges: int = 120) -> str:
     """Get a bounded graph summary for large wikis and agent context budgets.
 
@@ -1433,7 +2028,7 @@ def get_graph_summary(topic: str = "", limit: int = 40, depth: int = 1, max_edge
     )
 
 
-@mcp.tool()
+@_full_tool()
 def rebuild_index() -> str:
     """Regenerate wiki/index.md from current Markdown pages.
 
@@ -1448,16 +2043,20 @@ def rebuild_index() -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@mcp.tool()
+@_full_tool()
 def rebuild_backlinks() -> str:
-    """Rebuild the wiki's backlink index by scanning all [[wikilinks]].
+    """Rebuild the wiki's backlink index from the parsed wiki cache.
 
     Call this after ingesting new sources or running lint to ensure
     the graph index is up to date. Updates wiki/_backlinks.json with
     both reverse links (backlinks) and forward links.
     """
     try:
-        result = _core_build_backlinks(WIKI_DIR)
+        cache = _core_build_wiki_cache(WIKI_DIR, use_persistent_cache=False)
+        try:
+            result = _core_build_backlinks_from_cache(cache)
+        finally:
+            _core_close_wiki_cache(cache)
     except OSError as exc:
         return json.dumps({"rebuilt": False, "error": f"Could not rebuild backlinks: {exc}"}, ensure_ascii=False)
     bl_path = WIKI_DIR / "_backlinks.json"

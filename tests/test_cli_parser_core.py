@@ -42,14 +42,96 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.port, 3456)
         self.assertTrue(args.json)
 
+    def test_proof_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args(["proof", "/tmp/proof", "--force", "--serve", "--port", "3456", "--json"])
+
+        self.assertEqual(args.command, "proof")
+        self.assertEqual(args.target, "/tmp/proof")
+        self.assertTrue(args.force)
+        self.assertTrue(args.serve)
+        self.assertEqual(args.port, 3456)
+        self.assertTrue(args.json)
+
+    def test_onboard_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "onboard",
+            "/tmp/link",
+            "--agent",
+            "codex",
+            "--agent",
+            "cursor",
+            "--write",
+            "--first-memory",
+            "I prefer concise updates",
+            "--project",
+            "link",
+            "--port",
+            "3456",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "onboard")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.agent, ["codex", "cursor"])
+        self.assertTrue(args.write)
+        self.assertEqual(args.first_memory, "I prefer concise updates")
+        self.assertEqual(args.project, "link")
+        self.assertEqual(args.port, 3456)
+        self.assertTrue(args.json)
+
+    def test_seed_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "seed",
+            "/tmp/project",
+            "/tmp/link",
+            "--project-name",
+            "Client App",
+            "--overwrite",
+            "--dry-run",
+            "--limit",
+            "3",
+            "--no-git-log",
+            "--git-log-limit",
+            "5",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "seed")
+        self.assertEqual(args.project, "/tmp/project")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.project_name, "Client App")
+        self.assertTrue(args.overwrite)
+        self.assertTrue(args.dry_run)
+        self.assertEqual(args.limit, 3)
+        self.assertTrue(args.no_git_log)
+        self.assertEqual(args.git_log_limit, 5)
+        self.assertTrue(args.json)
+
     def test_operations_limit_and_json_options(self):
         parser = build_cli_parser()
 
-        args = parser.parse_args(["operations", "/tmp/link", "--limit", "5", "--json"])
+        args = parser.parse_args([
+            "operations",
+            "/tmp/link",
+            "--limit",
+            "5",
+            "--recover",
+            "remember-1.json",
+            "--confirm",
+            "--json",
+        ])
 
         self.assertEqual(args.command, "operations")
         self.assertEqual(args.target, "/tmp/link")
         self.assertEqual(args.limit, 5)
+        self.assertEqual(args.recover, "remember-1.json")
+        self.assertTrue(args.confirm)
         self.assertTrue(args.json)
 
     def test_health_json_option(self):
@@ -60,6 +142,56 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.command, "health")
         self.assertEqual(args.target, "/tmp/link")
         self.assertTrue(args.json)
+
+    def test_start_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "start",
+            "/tmp/link",
+            "--task",
+            "release work",
+            "--limit",
+            "4",
+            "--project",
+            "link",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "start")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.task, "release work")
+        self.assertEqual(args.limit, 4)
+        self.assertEqual(args.project, "link")
+        self.assertTrue(args.json)
+
+    def test_session_end_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "session-end",
+            "session-notes.md",
+            "/tmp/link",
+            "--title",
+            "Release session",
+            "--limit",
+            "2",
+            "--project",
+            "link",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "session-end")
+        self.assertEqual(args.source_input, "session-notes.md")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.title, "Release session")
+        self.assertEqual(args.limit, 2)
+        self.assertEqual(args.project, "link")
+        self.assertTrue(args.json)
+
+        alias = parser.parse_args(["end", "notes.md", "/tmp/link"])
+        self.assertEqual(alias.command, "end")
+        self.assertEqual(alias.source_input, "notes.md")
 
     def test_connect_command_options(self):
         parser = build_cli_parser()
@@ -322,6 +454,64 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][2]["budget"], "small")
         self.assertTrue(calls[0][2]["json_output"])
 
+    def test_dispatch_routes_start_to_start_handler(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "start",
+            "/tmp/link",
+            "--task",
+            "release work",
+            "--limit",
+            "4",
+            "--project",
+            "link",
+            "--json",
+        ])
+        calls = []
+
+        def start_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 8
+
+        code = dispatch_cli_command(args, {"start": start_handler})
+
+        self.assertEqual(code, 8)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1]["task"], "release work")
+        self.assertEqual(calls[0][1]["limit"], 4)
+        self.assertEqual(calls[0][1]["project"], "link")
+        self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_session_end_to_session_end_handler(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "session-end",
+            "session-notes.md",
+            "/tmp/link",
+            "--title",
+            "Release session",
+            "--limit",
+            "2",
+            "--project",
+            "link",
+            "--json",
+        ])
+        calls = []
+
+        def session_end_handler(target, source_input, **kwargs):
+            calls.append((target, source_input, kwargs))
+            return 9
+
+        code = dispatch_cli_command(args, {"session-end": session_end_handler})
+
+        self.assertEqual(code, 9)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], "session-notes.md")
+        self.assertEqual(calls[0][2]["title"], "Release session")
+        self.assertEqual(calls[0][2]["limit"], 2)
+        self.assertEqual(calls[0][2]["project"], "link")
+        self.assertTrue(calls[0][2]["json_output"])
+
     def test_dispatch_routes_try_arguments(self):
         parser = build_cli_parser()
         args = parser.parse_args(["try", "/tmp/link-demo", "--force", "--serve", "--port", "3456", "--json"])
@@ -340,9 +530,101 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["port"], 3456)
         self.assertTrue(calls[0][1]["json_output"])
 
+    def test_dispatch_routes_proof_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args(["proof", "/tmp/proof", "--force", "--serve", "--port", "3456", "--json"])
+        calls = []
+
+        def proof_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 9
+
+        code = dispatch_cli_command(args, {"proof": proof_handler})
+
+        self.assertEqual(code, 9)
+        self.assertEqual(calls[0][0], Path("/tmp/proof"))
+        self.assertTrue(calls[0][1]["force"])
+        self.assertTrue(calls[0][1]["serve"])
+        self.assertEqual(calls[0][1]["port"], 3456)
+        self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_onboard_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "onboard",
+            "/tmp/link",
+            "--agent",
+            "codex",
+            "--all-agents",
+            "--write",
+            "--first-memory",
+            "I prefer concise updates",
+            "--seed-project",
+            "/tmp/project",
+            "--project",
+            "alpha",
+            "--port",
+            "3456",
+            "--json",
+        ])
+        calls = []
+
+        def onboard_handler(target, **kwargs):
+            calls.append((target, kwargs))
+            return 2
+
+        code = dispatch_cli_command(args, {"onboard": onboard_handler})
+
+        self.assertEqual(code, 2)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1]["agents"], ["codex"])
+        self.assertTrue(calls[0][1]["all_agents"])
+        self.assertTrue(calls[0][1]["write"])
+        self.assertEqual(calls[0][1]["first_memory"], "I prefer concise updates")
+        self.assertEqual(calls[0][1]["seed_project"], "/tmp/project")
+        self.assertEqual(calls[0][1]["project"], "alpha")
+        self.assertEqual(calls[0][1]["port"], 3456)
+        self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_seed_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "seed",
+            "/tmp/project",
+            "/tmp/link",
+            "--project-name",
+            "Client App",
+            "--overwrite",
+            "--dry-run",
+            "--limit",
+            "3",
+            "--no-git-log",
+            "--git-log-limit",
+            "5",
+            "--json",
+        ])
+        calls = []
+
+        def seed_handler(target, project_root, **kwargs):
+            calls.append((target, project_root, kwargs))
+            return 7
+
+        code = dispatch_cli_command(args, {"seed": seed_handler})
+
+        self.assertEqual(code, 7)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], Path("/tmp/project"))
+        self.assertEqual(calls[0][2]["project_name"], "Client App")
+        self.assertTrue(calls[0][2]["overwrite"])
+        self.assertTrue(calls[0][2]["dry_run"])
+        self.assertEqual(calls[0][2]["limit"], 3)
+        self.assertFalse(calls[0][2]["include_git_log"])
+        self.assertEqual(calls[0][2]["git_log_limit"], 5)
+        self.assertTrue(calls[0][2]["json_output"])
+
     def test_dispatch_routes_operations_arguments(self):
         parser = build_cli_parser()
-        args = parser.parse_args(["operations", "/tmp/link", "--limit", "5", "--json"])
+        args = parser.parse_args(["operations", "/tmp/link", "--limit", "5", "--recover", "remember-1.json", "--confirm", "--json"])
         calls = []
 
         def operations_handler(target, **kwargs):
@@ -354,6 +636,8 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(code, 9)
         self.assertEqual(calls[0][0], Path("/tmp/link"))
         self.assertEqual(calls[0][1]["limit"], 5)
+        self.assertEqual(calls[0][1]["recover"], "remember-1.json")
+        self.assertTrue(calls[0][1]["confirm"])
         self.assertTrue(calls[0][1]["json_output"])
 
     def test_dispatch_routes_health_arguments(self):

@@ -97,9 +97,9 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Link starter prompts:", out.getvalue())
         self.assertIn("is Link ready?", out.getvalue())
-        self.assertIn("brief me from Link before we continue", out.getvalue())
+        self.assertIn("start with Link before we continue", out.getvalue())
         self.assertIn("remember that I prefer local-first agent memory", out.getvalue())
-        self.assertIn("query Link for what you know about me", out.getvalue())
+        self.assertIn("what does Link know about me?", out.getvalue())
         self.assertIn("propose memories from raw/<file>", out.getvalue())
         self.assertIn("lnk health", out.getvalue())
 
@@ -114,8 +114,120 @@ class LinkCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(payload["project"], "client-launch")
-        self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
-        self.assertIn("what this project remembers", payload["prompts"][3]["prompt"])
+        prompts = [item["prompt"] for item in payload["prompts"]]
+        self.assertIn("seed this project into Link", prompts)
+        self.assertTrue(any("this project uses Link" in prompt for prompt in prompts))
+        self.assertIn("what does Link remember about this project?", prompts)
+
+    def test_proof_creates_and_recalls_cross_agent_memory(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-proof-test-"))
+        target = tmp / "link-proof"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.proof(target, force=True, json_output=True)
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ready"])
+        self.assertTrue(payload["created"])
+        self.assertTrue(payload["memory"]["created"])
+        self.assertTrue(payload["memory"]["reviewed"])
+        self.assertTrue(payload["recall"]["found"])
+        self.assertEqual(payload["recall"]["budget"], "micro")
+        self.assertEqual(payload["status"]["memory_count"], 1)
+        self.assertEqual(payload["status"]["needs_review_count"], 0)
+        self.assertIn("Cross-agent Link proof", payload["memory"]["title"])
+        self.assertTrue((target / "wiki/memories").is_dir())
+        self.assertIn("start with Link", payload["prompts"]["agent_b"])
+
+    def test_onboard_json_seeds_memory_and_personalizes_prompt(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
+        target = tmp / "my-link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(
+                target,
+                first_memory="I prefer concise release notes",
+                json_output=True,
+            )
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertTrue(payload["first_memory"]["created"])
+        self.assertEqual(payload["status"]["memory_count"], 1)
+        self.assertIn(
+            "remember that I prefer concise release notes",
+            [item["prompt"] for item in payload["prompts"]],
+        )
+
+    def test_onboard_json_can_seed_project_context(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
+        project = tmp / "client-app"
+        target = tmp / "my-link"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nThis project keeps agent memory local and reviewable.\n",
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(
+                target,
+                seed_project=str(project),
+                project="Client App",
+                json_output=True,
+            )
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertEqual(payload["project_seed"]["status"], "ok")
+        self.assertTrue(payload["project_seed"]["wrote"])
+        self.assertEqual(payload["project_seed"]["included_count"], 1)
+        self.assertTrue((target / "raw/project-seeds/client-app/project-context.md").exists())
+        self.assertTrue((target / "wiki/sources/project-seed-client-app.md").exists())
+
+    def test_onboard_text_suggests_project_seed_when_not_run(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
+        target = tmp / "my-link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(target)
+        text = out.getvalue()
+
+        self.assertEqual(code, 0)
+        self.assertIn("Project seed", text)
+        self.assertIn("not run", text)
+        self.assertIn("seed .", text)
+
+    def test_seed_project_initializes_workspace_and_writes_source_context(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-seed-test-"))
+        project = tmp / "client-app"
+        target = tmp / "my-link"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nThis project manages private agent memory for finance workflows.\n",
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.seed_project(target, project, project_name="Client App", json_output=True)
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["wrote"])
+        self.assertTrue((target / "link.py").exists())
+        self.assertTrue((target / "serve.py").exists())
+        self.assertTrue((target / payload["raw_path"]).exists())
+        self.assertTrue((target / payload["source_page"]).exists())
+        self.assertTrue((target / "wiki/_backlinks.json").exists())
 
     def test_welcome_prints_short_first_use_path(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-welcome-test-"))
@@ -131,6 +243,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("1. is Link ready?", text)
         self.assertIn("Proves: Agent can find Link", text)
         self.assertIn("lnk health", text)
+        self.assertIn("http://127.0.0.1:3000/onboard", text)
         self.assertIn("http://127.0.0.1:3000/health", text)
 
     def test_welcome_json_supports_project_examples(self):
@@ -396,7 +509,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("raw/agent-memory-session.md -> wiki/sources/agent-memory-session.md", text)
         self.assertIn("Memory review: propose memories from raw/agent-memory-session.md", text)
         self.assertIn("Retrieval check: query Link for agent memory session", text)
-        self.assertIn("Next check: brief me from Link before we continue", text)
+        self.assertIn("Next check: start with Link before we continue", text)
 
     def test_ingest_status_reports_stale_represented_raw_file(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-ingest-test-"))
@@ -549,7 +662,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Search backend:", out.getvalue())
         self.assertIn("Persistent cache: enabled", out.getvalue())
         self.assertIn("Validation: passed", out.getvalue())
-        self.assertIn("query_link", out.getvalue())
+        self.assertIn("recall", out.getvalue())
 
         json_out = StringIO()
         with redirect_stdout(json_out):
@@ -559,7 +672,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(status_payload["version"], link_cli.LINK_VERSION)
         self.assertGreater(status_payload["content_page_count"], 0)
 
-    def test_status_guides_empty_initialized_wiki_to_ingest(self):
+    def test_status_guides_empty_initialized_wiki_to_project_seed(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-status-test-"))
         target = tmp / "my-link"
         with redirect_stdout(StringIO()):
@@ -573,8 +686,9 @@ class LinkCliTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Ready: yes", text)
         self.assertIn("Content pages: 0", text)
-        self.assertIn("ingest_status", text)
-        self.assertIn("starter_prompts", text)
+        self.assertIn("seed_project", text)
+        self.assertIn("ingest", text)
+        self.assertIn("admin", text)
 
         json_out = StringIO()
         with redirect_stdout(json_out):
@@ -582,8 +696,15 @@ class LinkCliTests(unittest.TestCase):
         payload = json.loads(json_out.getvalue())
         self.assertEqual(json_code, 0)
         self.assertEqual(payload["content_page_count"], 0)
-        self.assertEqual(payload["next_actions"][0]["tool"], "ingest_status")
-        self.assertEqual(payload["next_actions"][1]["tool"], "starter_prompts")
+        self.assertEqual(payload["next_actions"][0]["tool"], "admin")
+        self.assertEqual(
+            payload["next_actions"][0]["arguments"],
+            {"action": "seed_project", "project_root": "<project root>"},
+        )
+        self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "status"})
+        self.assertEqual(payload["next_actions"][2]["tool"], "admin")
+        self.assertEqual(payload["next_actions"][2]["arguments"], {"action": "prompts"})
 
     def test_health_combines_status_and_operations(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-health-test-"))
@@ -1149,7 +1270,7 @@ class LinkCliTests(unittest.TestCase):
 
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["count"], 5)
         self.assertEqual(payload["memories"][0]["name"], "local-memory-preference")
         self.assertEqual(payload["memories"][0]["recall"]["state"], "needs_review")
         self.assertEqual(payload["memories"][0]["review_issue_count"], 1)
@@ -1205,9 +1326,9 @@ class LinkCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Link memory profile", out.getvalue())
-        self.assertIn("2 memories", out.getvalue())
-        self.assertIn("preference: 1", out.getvalue())
-        self.assertIn("decision: 1", out.getvalue())
+        self.assertIn("5 memories", out.getvalue())
+        self.assertIn("preference: 2", out.getvalue())
+        self.assertIn("decision: 2", out.getvalue())
         self.assertIn("Keep Memory Mode local", out.getvalue())
 
     def test_profile_json(self):
@@ -1221,8 +1342,8 @@ class LinkCliTests(unittest.TestCase):
 
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["memory_count"], 1)
-        self.assertEqual(payload["by_type"]["preference"], 1)
+        self.assertEqual(payload["memory_count"], 4)
+        self.assertEqual(payload["by_type"]["preference"], 2)
         self.assertEqual(payload["preferences"][0]["name"], "prefer-local-personal-memory")
         self.assertEqual(payload["review_count"], 1)
 
@@ -1252,10 +1373,90 @@ class LinkCliTests(unittest.TestCase):
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
         self.assertEqual(payload["selection"], "query")
-        self.assertEqual(payload["profile"]["memory_count"], 1)
+        self.assertEqual(payload["profile"]["memory_count"], 4)
         self.assertEqual(payload["captures"]["count"], 0)
         self.assertEqual(payload["relevant_memories"][0]["name"], "prefer-local-personal-memory")
         self.assertNotIn("body", payload["relevant_memories"][0])
+
+    def test_start_combines_readiness_and_brief(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="local personal memory")
+
+        self.assertEqual(code, 0)
+        self.assertIn("Link start:", out.getvalue())
+        self.assertIn("Ready: yes", out.getvalue())
+        self.assertIn("Link memory brief: local personal memory", out.getvalue())
+        self.assertIn("Prefer local personal memory", out.getvalue())
+        self.assertIn("Need more context:", out.getvalue())
+
+    def test_start_json(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="local personal memory", json_output=True)
+
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertEqual(payload["task"], "local personal memory")
+        self.assertEqual(payload["brief"]["relevant_memories"][0]["name"], "prefer-local-personal-memory")
+        self.assertIn("query", payload["commands"])
+        self.assertIn("agent_loop", payload)
+        self.assertFalse(payload["project_seed"]["recommended"])
+
+    def test_start_recommends_project_seed_for_empty_workspace(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        target = tmp / "empty-link"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="shipping this project", json_output=True)
+
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertTrue(payload["project_seed"]["recommended"])
+        self.assertIn("seed .", payload["project_seed"]["command"])
+        self.assertEqual(payload["project_seed"]["command"], payload["commands"]["seed_project"])
+
+        text_out = StringIO()
+        with redirect_stdout(text_out):
+            text_code = link_cli.start(target, task="shipping this project")
+        self.assertEqual(text_code, 0)
+        self.assertIn("Seed project context:", text_out.getvalue())
+        self.assertIn("Run from the project repo", text_out.getvalue())
+
+    def test_start_shows_context_preview_after_project_seed(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        project = tmp / "client-app"
+        target = tmp / "my-link"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nClient App keeps source-backed agent memory local.\n",
+            encoding="utf-8",
+        )
+        with redirect_stdout(StringIO()):
+            self.assertEqual(link_cli.seed_project(target, project, project_name="Client App"), 0)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="Client App")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("Context preview", text)
+        self.assertIn("Project seed: Client App", text)
+        self.assertNotIn("Seed project context:", text)
 
     def test_query_builds_context_packet(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-query-test-"))
@@ -1272,7 +1473,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(payload["budget"], "small")
         self.assertIn("memory", payload["strategy"]["mode"])
         self.assertEqual(payload["wiki"]["primary"], "agent-memory")
-        self.assertEqual(payload["memory"]["items"][0]["name"], "prefer-local-personal-memory")
+        self.assertEqual(payload["memory"]["items"][0]["name"], "keep-agent-memory-in-local-markdown")
         self.assertIn("context_packet", payload)
 
     def test_agent_facing_cli_queries_are_bounded(self):
@@ -1469,6 +1670,38 @@ class LinkCliTests(unittest.TestCase):
         self.assertGreaterEqual(payload["proposals"]["count"], 1)
         self.assertEqual(len(after_memories), len(before_memories))
         self.assertIn("capture-session", log_text)
+
+    def test_session_end_writes_proposal_only_capture(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-session-end-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        before_memories = list((target / "wiki/memories").glob("*.md"))
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.session_end(
+                target,
+                "We decided Link session-end should propose memories but never save them without approval.",
+                project="link",
+                json_output=True,
+            )
+
+        payload = json.loads(out.getvalue())
+        capture_path = target / payload["path"]
+        after_memories = list((target / "wiki/memories").glob("*.md"))
+        capture_text = capture_path.read_text(encoding="utf-8")
+        log_text = (target / "wiki/log.md").read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["captured"])
+        self.assertEqual(payload["project"], "link")
+        self.assertTrue(payload["path"].startswith("raw/memory-captures/"))
+        self.assertIn("Session end", capture_text)
+        self.assertIn("proposal-only", capture_text)
+        self.assertGreaterEqual(payload["proposals"]["count"], 1)
+        self.assertEqual(len(after_memories), len(before_memories))
+        self.assertIn("session-end", log_text)
+        self.assertNotIn("remember-memory", log_text)
 
     def test_capture_inbox_lists_captures_without_secret_values(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-memory-test-"))
@@ -1869,7 +2102,7 @@ class LinkCliTests(unittest.TestCase):
         with redirect_stdout(profile_out):
             link_cli.profile(target, json_output=True)
         profile_payload = json.loads(profile_out.getvalue())
-        self.assertEqual(profile_payload["active_count"], 0)
+        self.assertEqual(profile_payload["active_count"], 3)
         self.assertEqual(profile_payload["by_status"]["archived"], 1)
         self.assertEqual(profile_payload["archived"][0]["name"], "prefer-local-personal-memory")
 
@@ -1877,7 +2110,7 @@ class LinkCliTests(unittest.TestCase):
         with redirect_stdout(out):
             recall_code = link_cli.recall(target, "local personal memory")
         self.assertEqual(recall_code, 0)
-        self.assertIn("No matching memories found.", out.getvalue())
+        self.assertNotIn("Prefer local personal memory", out.getvalue())
 
         out_json = StringIO()
         with redirect_stdout(out_json):

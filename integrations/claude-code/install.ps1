@@ -28,7 +28,7 @@ if (Test-Path $mcpConfig) {
 } else {
     Write-Host ""
     Write-Host "  MCP config: add to $mcpConfig or .mcp.json at project root:"
-    Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`"] } } }"
+    Write-Host "  { `"mcpServers`": { `"link`": { `"command`": `"$mcpPython`", `"args`": [`"-m`", `"link_mcp`", `"--wiki`", `"$wikiPath`", `"--surface`", `"slim`"] } } }"
 }
 
 Link-PrintNextSteps $mode

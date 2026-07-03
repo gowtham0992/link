@@ -90,6 +90,10 @@ def _persistent_cache_path(wiki_dir: Path) -> Path:
     return wiki_dir.parent / ".link-cache" / f"wiki-cache-v{PERSISTENT_CACHE_SCHEMA_VERSION}.json"
 
 
+def _persistent_fts_path(wiki_dir: Path) -> Path:
+    return wiki_dir.parent / ".link-cache" / "page-fts-v1.sqlite"
+
+
 def _page_signatures(wiki_dir: Path, page_paths: list[Path]) -> list[dict[str, Any]]:
     signatures: list[dict[str, Any]] = []
     for path in page_paths:
@@ -223,6 +227,7 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
     token_index: dict[str, set[str]] = {}
     meta_token_index: dict[str, set[str]] = {}
     raw_forward_links: dict[str, list[str]] = {}
+    raw_all_forward_links: dict[str, list[str]] = {}
 
     for record in records:
         rel = Path(record["path"])
@@ -257,6 +262,11 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
         raw_forward_links[stem] = [
             match.group(1).strip().lower()
             for match in WIKILINK_RE.finditer(body)
+            if match.group(1).strip()
+        ]
+        raw_all_forward_links[stem] = [
+            match.group(1).strip().lower()
+            for match in WIKILINK_RE.finditer(text)
             if match.group(1).strip()
         ]
         for alias in aliases:
@@ -316,7 +326,17 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
             seen_targets.add(target)
             forward_links_index.setdefault(source_name, []).append(target)
 
-    fts_index = build_fts_index(pages, fulltext)
+    persistent_fts_path = _persistent_fts_path(wiki_dir)
+    fts_index = build_fts_index(
+        pages,
+        fulltext,
+        db_path=persistent_fts_path if use_persistent_cache else None,
+        signatures=signatures,
+    )
+    fts_info = {"available": False, "persistent": False, "reused": False, "path": str(persistent_fts_path)}
+    info = getattr(fts_index, "info", None)
+    if callable(info):
+        fts_info = dict(info())
     return {
         "mtime": wiki_mtime(wiki_dir),
         "pages": pages,
@@ -331,8 +351,11 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
         "token_index": token_index,
         "meta_token_index": meta_token_index,
         "page_map": {page["name"].lower(): page for page in pages},
+        "raw_forward_links_index": raw_forward_links,
+        "raw_all_forward_links_index": raw_all_forward_links,
         "forward_links_index": forward_links_index,
         "fts_index": fts_index,
+        "fts_index_info": fts_info,
         "search_backend": "sqlite-fts" if fts_index is not None else "token-index",
         "read_warning_count": len(read_warnings),
         "read_warnings": read_warnings,
@@ -384,6 +407,46 @@ def build_backlinks(wiki_dir: Path, body_only: bool = True) -> dict[str, dict[st
         source = md.stem.lower()
         for match in WIKILINK_RE.finditer(text):
             target = match.group(1).strip().lower()
+            if not target or target == source:
+                continue
+            backlinks.setdefault(target, [])
+            if source not in backlinks[target]:
+                backlinks[target].append(source)
+            forward_links.setdefault(source, [])
+            if target not in forward_links[source]:
+                forward_links[source].append(target)
+    return {"backlinks": backlinks, "forward": forward_links}
+
+
+def _raise_for_cache_read_warnings(cache: dict[str, Any]) -> None:
+    read_warning_count = int(cache.get("read_warning_count") or 0)
+    if not read_warning_count:
+        return
+    read_warnings = cache.get("read_warnings") or []
+    first_warning = read_warnings[0] if isinstance(read_warnings, list) and read_warnings else {}
+    page = first_warning.get("page") if isinstance(first_warning, dict) else ""
+    detail = f" starting at {page}" if page else ""
+    raise OSError(f"could not read {read_warning_count} wiki page(s){detail}")
+
+
+def build_backlinks_from_cache(
+    cache: dict[str, Any],
+    body_only: bool = True,
+) -> dict[str, dict[str, list[str]]]:
+    """Build backlink indexes from the parsed wiki cache instead of rereading pages."""
+    _raise_for_cache_read_warnings(cache)
+    cache_key = "raw_forward_links_index" if body_only else "raw_all_forward_links_index"
+    forward_source = cache.get(cache_key)
+    if not isinstance(forward_source, dict):
+        return {"backlinks": {}, "forward": {}}
+    backlinks: dict[str, list[str]] = {}
+    forward_links: dict[str, list[str]] = {}
+    for raw_source, raw_targets in forward_source.items():
+        source = str(raw_source or "").lower()
+        if not isinstance(raw_targets, list):
+            continue
+        for raw_target in raw_targets:
+            target = str(raw_target or "").lower()
             if not target or target == source:
                 continue
             backlinks.setdefault(target, [])
@@ -1009,13 +1072,7 @@ def rebuild_index(
     owns_cache = cache is None
     cache = cache or build_wiki_cache(wiki_dir)
     try:
-        read_warning_count = int(cache.get("read_warning_count") or 0)
-        if read_warning_count:
-            read_warnings = cache.get("read_warnings") or []
-            first_warning = read_warnings[0] if isinstance(read_warnings, list) and read_warnings else {}
-            page = first_warning.get("page") if isinstance(first_warning, dict) else ""
-            detail = f" starting at {page}" if page else ""
-            raise OSError(f"could not read {read_warning_count} wiki page(s){detail}")
+        _raise_for_cache_read_warnings(cache)
         markdown = build_index_markdown(wiki_dir, cache=cache, generated_at=generated_at)
         index_path = wiki_dir / "index.md"
         atomic_write_text(index_path, markdown)

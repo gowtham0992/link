@@ -1,4 +1,5 @@
 import re
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -35,26 +36,60 @@ class DocsSiteTests(unittest.TestCase):
         self.assertIn("python3 scripts/smoke_large_wiki.py --pages 10000", scale_html)
         self.assertIn("Current Limits", scale_html)
 
+        why_html = (ROOT / "docs/why-link.html").read_text(encoding="utf-8")
+        self.assertIn("Compared With Alternatives", why_html)
+        for competitor in ("Obsidian", "Mem0", "Letta", "Graphiti", "Built-in agent memory", "Plain RAG"):
+            self.assertIn(competitor, why_html)
+
+        ui_html = (ROOT / "docs/ui.html").read_text(encoding="utf-8")
+        self.assertIn("http://127.0.0.1:3000/onboard", ui_html)
+        self.assertIn("browser version of <code>lnk onboard</code>", ui_html)
+        self.assertIn("MCP clients keep working after you close the browser", ui_html)
+        self.assertIn("assets/link-ui-tour.gif", ui_html)
+
+        cli_html = (ROOT / "docs/cli.html").read_text(encoding="utf-8")
+        self.assertIn("assets/link-cli-tour.gif", cli_html)
+
+        mcp_html = (ROOT / "docs/mcp.html").read_text(encoding="utf-8")
+        self.assertIn("assets/link-mcp-agent-chat.gif", mcp_html)
+
+    def test_docs_media_verifier_accepts_checked_in_assets(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_docs_media",
+            ROOT / "scripts" / "generate_docs_media.py",
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        code, findings = module.validate_docs_media()
+
+        self.assertEqual(code, 0, findings)
+        self.assertEqual(findings, [])
+
     def test_github_pages_site_has_no_external_runtime_dependencies(self):
         index = ROOT / "docs/index.html"
         for page in self.docs_pages():
             html = page.read_text(encoding="utf-8")
             lower = html.lower()
 
-            # The home page is a self-contained, pre-rendered landing bundle: it
-            # ships its own inline runtime instead of the shared site.js template,
-            # so the template-uniformity checks only apply to the other pages.
-            if page != index:
-                self.assertIn('<script src="assets/site.js" defer></script>', html)
-                self.assertNotIn("<script>", lower)
-
             # The local-first / no-external-call guarantee holds for every page,
-            # including the landing bundle (fonts are inlined, not fetched).
+            # including the landing page.
             self.assertNotIn("fonts.googleapis.com", html)
             self.assertNotIn("fonts.gstatic.com", html)
             self.assertNotIn("../logo.svg", html)
             self.assertNotIn('<script src="http', lower)
             self.assertNotIn('<link rel="stylesheet" href="http', lower)
+
+            # The landing page is a self-contained pre-rendered bundle with its
+            # own inline runtime; the template-uniformity checks below apply to
+            # the other pages.
+            if page == index:
+                continue
+
+            self.assertIn('<script src="assets/site.js" defer></script>', html)
+            self.assertNotIn("<script>", lower)
 
     def test_github_pages_analytics_is_docs_only_and_manual(self):
         site_js = (ROOT / "docs/assets/site.js").read_text(encoding="utf-8")

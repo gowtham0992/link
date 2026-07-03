@@ -6,7 +6,7 @@
   <meta name="description" content="How Link stores raw sources, wiki pages, memories, graph indexes, and query packets.">
   <title>Link - Concepts</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -97,9 +97,10 @@ query Link for the release process</code></pre>
         </div>
 
         <h2 id="query">Smart Query Packets</h2>
-        <p><code>query_link</code> is designed for agents. It returns a compact packet with relevant memory, ranked wiki pages, graph context, provenance, budget reports, estimated size, and follow-up actions.</p>
+        <p><code>recall</code> is designed for agents. It returns a compact packet with a <code>recall_capsule</code>, relevant memory, ranked wiki pages, graph context, provenance, budget reports, estimated size, and follow-up actions.</p>
         <p>Budget tiers keep context predictable:</p>
         <ul>
+          <li><code>micro</code>: the smallest capsule-first context for quick recall.</li>
           <li><code>small</code>: fast, compact context for most questions.</li>
           <li><code>medium</code>: more memory and page context for active tasks.</li>
           <li><code>large</code>: broader context when the agent needs to plan or compare.</li>
@@ -118,7 +119,7 @@ query Link for the release process</code></pre>
 lnk graph-summary "local memory" --limit 40 --depth 1
 lnk validate
 lnk rebuild-backlinks</code></pre>
-        <p>Use <code>lnk benchmark</code> when a wiki starts to feel slow. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, and readiness recommendations.</p>
+        <p>Use <code>lnk benchmark</code> when a wiki starts to feel slow or when you want evidence that Link is keeping agent context bounded. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, readiness recommendations, and estimated context avoided by the bounded query packet.</p>
       </article>
     </div>
   </main>

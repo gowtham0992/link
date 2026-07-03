@@ -75,43 +75,72 @@ compound over time.
 
 ## Quick Start
 
-Run the demo first. It creates a complete local wiki with raw sources, wiki
-pages, one starter memory, graph data, and query packets ready to inspect.
-
-macOS with Homebrew:
+Start with the memory proof. It creates a clean local workspace, writes one
+reviewed memory, and proves that the same memory can be recalled through CLI,
+official skills, and MCP. No web server is required for the proof.
 
 ```bash
 brew install gowtham0992/link/link
-lnk try
-lnk serve link-demo
+lnk proof
 ```
 
 The installed command is `lnk` because `link` is already a POSIX/macOS system
 utility. From a source checkout, use `python3 link.py ...` instead.
 
-Windows PowerShell:
+You should see:
 
-```powershell
-git clone https://github.com/gowtham0992/link.git
-cd link
-py link.py demo
-py link.py next link-demo
-py link.py serve link-demo
+```text
+Cross-agent memory continuity works
+Memory: created and reviewed: Cross-agent Link proof
+Recall: found through the same bounded recall path used by CLI, skills, and MCP.
+Result: proof passed
 ```
 
-Source checkout on macOS/Linux:
+That is the core promise: one local memory, reusable by different agents,
+without a hidden cloud profile.
+
+Then run the richer demo when you want the UI, graph, source pages, and query
+packets:
 
 ```bash
-git clone https://github.com/gowtham0992/link.git
-cd link
-python3 link.py demo
-python3 link.py next link-demo
-python3 link.py serve link-demo
+lnk try
+lnk serve link-demo
 ```
 
-Use `lnk try` for the shortest Homebrew proof loop. It creates the demo,
-checks readiness, runs a compact query/brief proof, and prints the agent prompts
-and viewer command. From source, use `python3 link.py try`.
+`lnk try` creates the demo, checks readiness, runs compact query/brief examples,
+and prints the first agent prompts. Windows, source checkout, MCP-only, and
+skill-first setup live in the
+[First 10 Minutes guide](https://gowtham0992.github.io/link/getting-started.html).
+
+When you are ready to use Link for real memory, run one guided command:
+
+```bash
+lnk onboard
+lnk onboard --first-memory "I prefer concise release notes"
+lnk onboard --seed-project .
+lnk onboard --agent codex
+lnk onboard --agent codex --write
+```
+
+`lnk onboard` creates or repairs `~/link`, checks health, prints the exact agent
+prompts to try, and previews MCP wiring for Codex, Claude Code, Cursor, Kiro,
+VS Code, Copilot, Antigravity, and other supported clients. It only writes an
+agent config when you pass `--write`. Add `--seed-project .` from inside a repo
+when you want onboarding to create the first source-backed project context page.
+
+Or seed your current repo as a separate step so the first real recall is not empty:
+
+```bash
+cd /path/to/your/project
+lnk seed . ~/link
+lnk query "what is this project about?" ~/link --budget small
+```
+
+`lnk seed` reads allowlisted project files such as `README.md`, `AGENTS.md`,
+`CLAUDE.md`, `.cursorrules`, and editor rule files, blocks secret-looking
+values, writes a source-backed project page, and rebuilds the graph. It does
+not create durable memories; agents should still use reviewed memory proposals
+for preferences and decisions.
 
 The Homebrew formula is maintained in the public
 [`gowtham0992/homebrew-link`](https://github.com/gowtham0992/homebrew-link) tap.
@@ -120,60 +149,65 @@ Open:
 
 ```text
 http://127.0.0.1:3000
+http://127.0.0.1:3000/onboard
 http://127.0.0.1:3000/graph
 http://127.0.0.1:3000/health
 ```
 
-The web viewer is for local use only. It binds to `127.0.0.1`, has no user
+Use `/onboard` when you want the same first-run checklist in the local UI:
+readiness, project context seeding, first memory, agent wiring, and starter
+prompts. The web viewer is for local use only. It binds to `127.0.0.1`, has no user
 accounts or authentication, and should not be exposed to the internet unless you
 add your own auth layer.
-
-For the shortest guided proof path, run `lnk welcome link-demo`.
 
 Try the value loop:
 
 ```bash
+lnk start link-demo --task "working on agent memory"
 lnk query "why does Link help agents?" link-demo --budget small
 lnk brief "working on agent memory" link-demo
 lnk benchmark "agent memory" link-demo
 lnk health link-demo
 ```
 
+`lnk benchmark` reports both performance and value evidence: cache/search/query
+timings, graph payload shape, and an estimate of how much broad wiki context the
+bounded Link packet avoided sending to an agent.
+
 The `/health` page mirrors the readiness loop in the browser: validation state,
-interrupted writes, memory review status, and copyable repair commands.
-The viewer itself stays document-first: common paths are in the top nav, deeper
-tools live under `more`, and structured wiki pages get a local contents outline
-plus related-page links from the graph.
-Home shows recently updated pages, while `/all` and search group results by page
-type with chips for narrowing larger wikis.
+interrupted writes, memory review status, and copyable repair commands. The
+viewer stays document-first — common paths in the top nav, deeper tools under
+`more`, and a contents outline plus graph-related links on structured pages.
 
-From a source checkout, use `python3 link.py ...`:
+The generated demo is the public proof wiki. Generated content inside `wiki/`,
+`raw/`, and `link-demo/` is ignored by git so personal memory is not published
+by accident.
+
+## Killer Demo: One Memory, Two Agents
+
+This is the moment Link is built for:
+
+1. In one agent, say:
+
+   ```text
+   remember that I prefer local, source-backed memory for AI agents
+   ```
+
+2. In another agent connected to the same `~/link` workspace, say:
+
+   ```text
+   start with Link before we continue
+   what does Link remember about local agent memory?
+   ```
+
+3. The second agent should recall the reviewed memory from local Markdown
+   instead of asking you to repeat yourself.
+
+For a clean automated version of the same idea, run:
 
 ```bash
-python3 link.py query "why does Link help agents?" link-demo --budget small
-python3 link.py brief "working on agent memory" link-demo
-python3 link.py benchmark "agent memory" link-demo
-python3 link.py health link-demo
+lnk proof
 ```
-
-The generated demo is the public proof wiki. The repo's root `wiki/` directory
-is only a scaffold for local development and personal testing. Generated content
-inside `wiki/`, `raw/`, and `link-demo/` is ignored by git so personal memory is
-not published by accident.
-
-For local scale checks from a source checkout, run:
-
-```bash
-python3 scripts/smoke_large_wiki.py --pages 10000
-```
-
-This generates a temporary synthetic wiki, verifies bounded graph/query payloads,
-and reports cache timing, persistent-cache reuse, search, query, graph, and
-health signals without touching your real Link wiki.
-The public scale model is documented at
-[Link Scale](https://gowtham0992.github.io/link/scale.html): what stays
-bounded by default, how to measure your own wiki, and where the current local
-limits are.
 
 ## Ways To Use Link
 
@@ -193,7 +227,7 @@ when the web viewer is not running.
     </td>
     <td width="33%">
       <strong><a href="https://gowtham0992.github.io/link/cli.html">CLI</a></strong><br>
-      Script readiness, query packets, briefs, validation, backup, benchmark, and repair.
+      Script readiness, query packets, briefs, validation, backup, context-savings benchmark, and repair.
     </td>
     <td width="33%">
       <strong><a href="https://gowtham0992.github.io/link/mcp.html">MCP</a></strong><br>
@@ -203,14 +237,14 @@ when the web viewer is not running.
 </table>
 
 <p align="center">
-  <img src="docs/assets/link-web-ui.png" alt="Link local web viewer — home" width="49%">
-  <img src="docs/assets/link-graph.png" alt="Link knowledge graph view" width="49%">
+  <img src="docs/assets/link-ui-tour.gif" alt="Link local console tour: home, memory dashboard, health, and graph" width="840">
 </p>
 <p align="center"><em>The local web viewer: browse source-backed memory and explore the knowledge graph — all on <code>127.0.0.1</code>, no accounts, no backend.</em></p>
 
 Prefer skills instead of MCP? Link ships small, lazy-loadable CLI skills under
 `skills/`. They let an agent use `lnk health`, `lnk query`, `lnk ingest-status`,
-and `lnk remember` directly, without MCP setup or a running web viewer.
+`lnk session-end`, and `lnk remember` directly, without MCP setup or a running
+web viewer.
 
 ```text
 skills/link-health/SKILL.md
@@ -255,18 +289,31 @@ Then ask your agent:
 
 ```text
 is Link ready?
-brief me from Link before we continue
+start with Link before we continue
+seed this project into Link
 ingest raw/notes.md into Link
 remember that I prefer short release notes
 query Link for the release process
 what does Link remember about local personal memory?
+end this session with Link memory proposals
 ```
 
-If your agent already has instructions and you only need MCP wiring, use the
-connection helper. It previews the exact config first; add `--write` when you
-want Link to update the agent config file.
+For CLI-first agents or Link skills, use the same startup loop directly:
 
 ```bash
+lnk seed . ~/link
+lnk start ~/link --task "working on Link release"
+lnk session-end session-notes.md ~/link --limit 3
+```
+
+If you want one guided setup for a real workspace and an agent, use
+`lnk onboard --agent AGENT`. If your agent already has instructions and you only
+need MCP wiring, use the lower-level connection helper. Both preview the exact
+config first; add `--write` when you want Link to update the agent config file.
+
+```bash
+lnk onboard --agent codex
+lnk onboard --agent codex --write
 lnk connect codex ~/link
 lnk connect codex ~/link --write
 lnk connect kiro ~/link --write
@@ -286,11 +333,15 @@ python3 -m link_mcp --version
   "mcpServers": {
     "link": {
       "command": "python3",
-      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki"]
+      "args": ["-m", "link_mcp", "--wiki", "~/link/wiki", "--surface", "slim"]
     }
   }
 }
 ```
+
+`--surface slim` is the recommended MCP surface for agents: six obvious tools
+for recall, remember, ingest, review, status, and admin escape hatches. The full
+compatibility surface is still available with `--surface full`.
 
 On macOS/Homebrew Python, if pip reports `externally-managed-environment`, use a
 dedicated venv:
@@ -341,26 +392,25 @@ creating a duplicate.
 
 ## What Agents Get
 
-When an agent uses Link through MCP, these are the stable tools it receives.
-CLI and skill workflows call the same core behavior through `lnk`.
+When an agent uses Link through the recommended MCP surface, it gets six
+model-facing tools. CLI and skill workflows call the same core behavior through
+`lnk`.
 
-- `query_link`: an answer-ready packet with relevant memories, pages, graph
-  neighborhood, reasons for selection, budget limits, and follow-up actions.
-- `memory_brief`: a compact pre-work brief with user/project preferences,
-  active context, review warnings, and safe memory-use rules.
-- `ingest_status`: exact next steps for raw files, including source safety,
-  stale ingest detection, validation, and memory proposal guidance.
-- `remember_memory`: durable local memory with duplicate/conflict checks,
-  `visibility` sharing intent, review state, optional `review_after` re-check
-  dates, optional `expires_at` expiry dates, provenance, and audit logging.
-- `set_memory_visibility`: explicit post-review sharing changes between
-  `private`, `project`, and `team` visibility without editing Markdown by hand.
-- `explain_memory`: why a memory exists, what it links to, whether it is ready
-  for recall, and what needs review.
-- `memory_log`: recent memory lifecycle changes from `wiki/log.md`, without
-  raw source or memory bodies.
-- `memory_wins`: local proof signals for what Link memory is carrying, based
-  on wiki metadata rather than telemetry.
+- `status`: readiness, schema state, validation, interrupted writes, and safe
+  next actions.
+- `recall`: the one read path for startup briefs, answer-ready query packets,
+  wiki search, graph context, token budgets, and follow-up actions. Every
+  recalled memory carries a `confidence` label (`strong`, `moderate`, `weak`),
+  so agents verify weak lexical matches with the user instead of trusting them.
+- `remember`: durable local memory only after explicit user approval, with
+  duplicate/conflict checks, provenance, review state, visibility, optional
+  `review_after`, and optional `expires_at`.
+- `ingest`: exact next steps for raw files, source safety, stale ingest
+  detection, validation, and rebuild checks.
+- `review`: memory inbox, profile, audit, log, explain, archive, restore,
+  forget, and lifecycle review workflows.
+- `admin`: the escape hatch for backup, migrate, validate, graph export, pages,
+  captures, rebuilds, compatibility actions, and advanced updates.
 
 The stable agent-facing loop is documented at
 [Link Memory Contract](https://gowtham0992.github.io/link/memory-contract.html):
@@ -389,7 +439,10 @@ captures.
 For recovery, `lnk backup ~/link` creates a local archive and `lnk
 restore-backup <archive> ~/link` previews what would be restored. Passing
 `--confirm` replaces local files after creating a safety backup when possible;
-`raw/` is still excluded unless `--include-raw` is explicit.
+`raw/` is still excluded unless `--include-raw` is explicit. If a multi-file
+write is interrupted, `lnk operations ~/link` shows the marker and any rollback
+snapshot; `lnk operations ~/link --recover <marker> --confirm` restores the
+snapshot after you review it.
 
 For local proof of value, `lnk wins ~/link` shows reusable memories, reviewed
 memory, provenance, project continuity, freshness guardrails, and copyable
@@ -397,9 +450,11 @@ prompts without tracking user behavior.
 
 For Git-backed team memory, `lnk team-sync ~/link` checks whether the workspace
 is ready to share reviewed `wiki/` pages while keeping `raw/`, caches, backups,
-and local MCP Python markers private by default. It also blocks "ready" status
-when the memory inbox is not clear or active `visibility: private` memories
-would be included by a broad `git add wiki`.
+local MCP Python markers, and `wiki/log.md` private by default. The audit log is
+local because it has a single-machine hash chain; merging multiple users' logs
+would create false tamper alarms. Team sync also blocks "ready" status when the
+memory inbox is not clear or active `visibility: private` memories would be
+included by a broad `git add wiki`.
 
 ```bash
 lnk team-sync ~/link --remote git@example.com:team/link-memory.git
@@ -429,14 +484,13 @@ lnk snapshot ~/link --output personal-snapshot --include-memories --include-priv
 
 For MCP clients, agents should use Link in this order:
 
-1. `link_status` to check readiness and safe next actions.
-2. `starter_prompts` when the user asks what to try first.
-3. `ingest_status` before touching raw sources.
-4. `query_link` for compact answer-ready context.
-5. `memory_brief` before longer work.
-6. `get_graph_summary` when graph context is useful but the full graph would be noisy.
-7. `backup_wiki` before broad repair or migration work.
-8. `validate_wiki` after ingest or broad wiki edits.
+1. `status` to check readiness and safe next actions.
+2. `recall` with an empty query once at the first substantive turn of a session.
+3. `recall(query, budget="micro"|"small")` before broad file reads or asking the user to repeat durable context.
+4. `ingest` before touching raw sources and after source edits for validation/rebuild checks.
+5. `remember` only when the user explicitly asks Link to remember something or approves a proposed memory.
+6. `review` for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows.
+7. `admin` for backup, migration, graph export, captures, rebuilds, compatibility actions, and advanced maintenance.
 
 Full MCP tool list: [MCP setup](https://gowtham0992.github.io/link/mcp.html).
 
@@ -480,6 +534,7 @@ More detail: [Security guide](https://gowtham0992.github.io/link/security.html).
 | Use Link without MCP setup | [Official skills](https://gowtham0992.github.io/link/skills.html) |
 | Use local HTTP endpoints | [HTTP API](https://gowtham0992.github.io/link/api.html) |
 | Review security boundaries | [Security model](https://gowtham0992.github.io/link/security.html) |
+| Check scale limits and measure your wiki | [Link Scale](https://gowtham0992.github.io/link/scale.html) |
 | Evaluate Link for a small team | [Team security review](https://gowtham0992.github.io/link/team-security.html) |
 | Fix setup issues | [Troubleshooting](https://gowtham0992.github.io/link/troubleshooting.html) |
 

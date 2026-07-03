@@ -72,6 +72,9 @@ from link_core.query import (
 from link_core.prompts import (
     starter_prompt_payload as _core_starter_prompt_payload,
 )
+from link_core.mcp_connect import (
+    supported_agents as _core_supported_agents,
+)
 from link_core.validation import (
     validate_wiki as _core_validate_wiki,
 )
@@ -125,6 +128,9 @@ from link_core.web_home import (
 from link_core.web_health import (
     render_health_page as _core_render_health_page,
 )
+from link_core.web_onboard import (
+    render_onboard_page as _core_render_onboard_page,
+)
 from link_core.web_ingest import (
     render_ingest_page as _core_render_ingest_page,
 )
@@ -177,7 +183,7 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
 )
 from link_core.wiki import (
-    build_backlinks as _core_build_backlinks,
+    build_backlinks_from_cache as _core_build_backlinks_from_cache,
     build_wiki_cache as _core_build_wiki_cache,
     close_wiki_cache as _core_close_wiki_cache,
     context_for_topic as _core_context_for_topic,
@@ -916,6 +922,7 @@ def _render_prompts(project: str | None = None):
 
 def _render_more():
     links = [
+        ("/onboard", "Onboard", "First-run checklist for health, first memory, agent wiring, and prompts."),
         ("/prompts", "Prompts", "Starter prompts and copyable next-step commands."),
         ("/propose", "Propose", "Turn notes into review-only memory candidates."),
         ("/audit", "Audit", "Review memory health, backlog, captures, and safe next actions."),
@@ -1280,10 +1287,12 @@ def _get_context(topic: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _build_backlinks() -> dict[str, dict[str, list[str]]]:
-    """Scan all wiki pages for [[wikilinks]] and build graph indexes.
-    Returns {"backlinks": {target: [sources]}, "forward": {source: [targets]}}.
-    """
-    return _core_build_backlinks(WIKI_DIR)
+    """Build graph indexes from a fresh parsed wiki cache."""
+    cache = _core_build_wiki_cache(WIKI_DIR, use_persistent_cache=False)
+    try:
+        return _core_build_backlinks_from_cache(cache)
+    finally:
+        _core_close_wiki_cache(cache)
 
 
 def _get_graph_data() -> dict:
@@ -1416,6 +1425,17 @@ def _render_health():
     return _core_render_health_page(
         _link_status_payload(include_validation=True),
         _operations_payload(),
+        layout=_layout,
+    )
+
+
+def _render_onboard(project: str | None = None):
+    return _core_render_onboard_page(
+        _link_status_payload(include_validation=True),
+        _operations_payload(),
+        _starter_prompts_payload(project=project),
+        target=str(WIKI_DIR.parent),
+        agents=_core_supported_agents(),
         layout=_layout,
     )
 
@@ -1575,6 +1595,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._err("file")
         elif path in ("/", ""):
             self._ok(_render_home())
+        elif path == "/onboard":
+            self._ok(_render_onboard(project=_query_text(query, "project", max_len=80)))
         elif path == "/health":
             self._ok(_render_health())
         elif path == "/ingest":
@@ -1998,7 +2020,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def _parse_serve_args(argv: list[str], default_port: int = PORT, default_root: Path = ROOT) -> tuple[int, Path]:
     port = default_port
     root = default_root
-    for index, arg in enumerate(argv):
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
         if arg in {"--host", "--bind"} or arg.startswith("--host=") or arg.startswith("--bind="):
             raise SystemExit("Link serve is local-only; host/bind options are not supported.")
         if arg == "--port":
@@ -2008,17 +2032,31 @@ def _parse_serve_args(argv: list[str], default_port: int = PORT, default_root: P
                 port = int(argv[index + 1])
             except ValueError as exc:
                 raise SystemExit("--port must be an integer") from exc
+            index += 2
+            continue
         elif arg.startswith("--port="):
             try:
                 port = int(arg.split("=", 1)[1])
             except ValueError as exc:
                 raise SystemExit("--port must be an integer") from exc
+            index += 1
+            continue
         elif arg == "--root":
             if index + 1 >= len(argv):
                 raise SystemExit("--root requires a value")
             root = Path(argv[index + 1]).expanduser().resolve()
+            index += 2
+            continue
         elif arg.startswith("--root="):
             root = Path(arg.split("=", 1)[1]).expanduser().resolve()
+            index += 1
+            continue
+        elif arg.startswith("-"):
+            raise SystemExit(f"unknown option for serve.py: {arg}")
+        raise SystemExit(
+            "serve.py does not accept a positional target. "
+            "Use 'python serve.py --root /path/to/link' or 'lnk serve /path/to/link'."
+        )
     if port < 1 or port > 65535:
         raise SystemExit("--port must be between 1 and 65535")
     return port, root
@@ -2039,6 +2077,20 @@ def _serve_bind_error_message(exc: OSError, port: int) -> str:
     return f"Link could not start local server on 127.0.0.1:{port}: {exc}"
 
 
+def _serve_startup_lines(port: int) -> list[str]:
+    base_url = f"http://127.0.0.1:{port}"
+    return [
+        f"  Link -> {base_url}",
+        "  Open:",
+        f"    {base_url}/onboard  first-run checklist",
+        f"    {base_url}/health   readiness and repair",
+        f"    {base_url}/graph    knowledge graph",
+        "  Local-only: bound to 127.0.0.1; no public host mode.",
+        "  No auth: do not expose this server without your own authentication layer.",
+        "  MCP and CLI work without this viewer running.",
+    ]
+
+
 def main():
     global PORT, WIKI_DIR, RAW_DIR
     PORT, root = _parse_serve_args(sys.argv[1:], default_port=PORT, default_root=ROOT)
@@ -2050,9 +2102,8 @@ def main():
     RAW_DIR = root / "raw"
     try:
         with ThreadingLocalTCPServer(("127.0.0.1", PORT), Handler) as s:
-            print(f"  Link → http://127.0.0.1:{PORT}")
-            print("  Local-only: bound to 127.0.0.1; no public host mode.")
-            print("  No auth: do not expose this server without your own authentication layer.")
+            for line in _serve_startup_lines(PORT):
+                print(line)
             try: s.serve_forever()
             except KeyboardInterrupt: print("\n  stopped.")
     except OSError as exc:

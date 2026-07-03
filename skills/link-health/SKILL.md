@@ -1,11 +1,11 @@
 ---
 name: link-health
-description: Use when a user wants to verify Link readiness, troubleshoot a local wiki, inspect interrupted writes, repair generated indexes, or back up Link without setting up MCP.
+description: Use at the start of Link work when readiness is unclear, after installs or upgrades, and before repairs; verify health, inspect interrupted writes, back up, and repair generated indexes without MCP.
 ---
 
 # Link Health
 
-Use the `lnk` CLI. In a source checkout, replace `lnk` with `python3 link.py`. MCP and the local web viewer are optional; `lnk serve` is only for humans to browse the wiki.
+Use the `lnk` CLI. Load this skill before trusting a new or changed Link wiki, after installs/upgrades, and before broad repair or restore work. In a source checkout, replace `lnk` with `python3 link.py`. MCP and the local web viewer are optional; `lnk serve` is only for humans to browse the wiki.
 
 1. Check readiness first:
    ```bash

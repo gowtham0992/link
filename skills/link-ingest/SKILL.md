@@ -1,11 +1,11 @@
 ---
 name: link-ingest
-description: Use when a user asks to ingest raw files into Link, refresh stale source pages, propose memories from sources, or validate source-backed wiki updates through the CLI without MCP.
+description: Use when raw files are present, source pages look stale, or a user asks to ingest notes into Link; refresh source-backed wiki pages, propose memories, and validate updates through the CLI without MCP.
 ---
 
 # Link Ingest
 
-Use `lnk ingest-status` as the source of truth. In a source checkout, replace `lnk` with `python3 link.py`. The command tells you which raw files need work and which checks must run next.
+Use `lnk ingest-status` as the source of truth. Load this skill when the user drops files into `raw/`, mentions new notes/transcripts/docs, or asks what Link should learn next. In a source checkout, replace `lnk` with `python3 link.py`. The command tells you which raw files need work and which checks must run next.
 
 1. Inspect the ingest plan:
    ```bash

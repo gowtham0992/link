@@ -10,14 +10,15 @@ from .capture import capture_records
 from .files import atomic_write_json, atomic_write_text
 from .frontmatter import parse_frontmatter
 from .ingest import collect_ingest_status, raw_ingest_findings
-from .log import write_default_log
+from .log import verify_log_integrity, write_default_log
 from .memory import memory_inbox, memory_records
 from .operations import pending_operations
 from .schema import migrate_wiki
 from .schema import schema_status
 from .security import find_sensitive_filenames, find_sensitive_values
 from .validation import validate_wiki
-from .wiki import WIKILINK_RE, build_backlinks, load_backlinks_index, rebuild_index
+from .wiki import WIKILINK_RE, load_backlinks_index, rebuild_index
+from .wiki import build_backlinks_from_cache, build_wiki_cache, close_wiki_cache
 
 
 DOCTOR_VALIDATION_CODES = {
@@ -203,20 +204,50 @@ def find_source_count_mismatches(wiki_dir: Path) -> list[str]:
     return sorted(mismatches)
 
 
-def find_isolated_pages(wiki_dir: Path) -> list[str]:
-    stems = page_stems(wiki_dir)
-    records = wiki_page_records(wiki_dir)
-    graph = build_backlinks(wiki_dir, body_only=False)
-    isolated: list[str] = []
-    for record in records:
-        stem = str(record["stem"])
-        if stem in {"index", "log"}:
-            continue
-        inbound = [name for name in graph["backlinks"].get(stem, []) if name in stems and name != stem]
-        outgoing = [name for name in graph["forward"].get(stem, []) if name in stems and name != stem]
-        if not inbound and not outgoing:
-            isolated.append(str(record["rel"]))
-    return sorted(isolated)
+def _expected_backlinks(
+    wiki_dir: Path,
+    *,
+    cache: dict[str, Any] | None = None,
+) -> dict[str, dict[str, list[str]]]:
+    """Return full-link backlink data, preferring the parsed wiki cache."""
+    if cache is not None:
+        return build_backlinks_from_cache(cache, body_only=False)
+    local_cache = build_wiki_cache(wiki_dir)
+    try:
+        return build_backlinks_from_cache(local_cache, body_only=False)
+    finally:
+        close_wiki_cache(local_cache)
+
+
+def find_isolated_pages(wiki_dir: Path, *, cache: dict[str, Any] | None = None) -> list[str]:
+    local_cache: dict[str, Any] | None = None
+    if cache is None:
+        local_cache = build_wiki_cache(wiki_dir)
+        cache = local_cache
+    try:
+        pages = cache.get("pages", []) if isinstance(cache, dict) else []
+        stems = {
+            str(page.get("name") or "").lower()
+            for page in pages
+            if isinstance(page, Mapping) and page.get("name")
+        }
+        graph = _expected_backlinks(wiki_dir, cache=cache)
+        isolated: list[str] = []
+        for page in pages:
+            if not isinstance(page, Mapping):
+                continue
+            stem = str(page.get("name") or "").lower()
+            if stem in {"index", "log"}:
+                continue
+            inbound = [name for name in graph["backlinks"].get(stem, []) if name in stems and name != stem]
+            outgoing = [name for name in graph["forward"].get(stem, []) if name in stems and name != stem]
+            if not inbound and not outgoing:
+                rel = str(page.get("path") or stem).removeprefix("wiki/")
+                isolated.append(rel)
+        return sorted(isolated)
+    finally:
+        if local_cache is not None:
+            close_wiki_cache(local_cache)
 
 
 def raw_source_refs(text: str) -> list[str]:
@@ -312,13 +343,18 @@ def _normalize_link_index(data: dict[str, dict[str, list[str]]]) -> dict[str, di
     return normalized
 
 
-def _backlinks_need_rebuild(wiki_dir: Path, backlinks_path: Path) -> tuple[bool, dict[str, dict[str, list[str]]]]:
+def _backlinks_need_rebuild(
+    wiki_dir: Path,
+    backlinks_path: Path,
+    *,
+    cache: dict[str, Any] | None = None,
+) -> tuple[bool, dict[str, dict[str, list[str]]]]:
     current, load_error = load_backlinks_index(
         backlinks_path,
         missing_error="missing wiki/_backlinks.json",
         invalid_prefix="invalid wiki/_backlinks.json",
     )
-    expected = build_backlinks(wiki_dir, body_only=False)
+    expected = _expected_backlinks(wiki_dir, cache=cache)
     if load_error or _normalize_link_index(current) != _normalize_link_index(expected):
         return True, expected
     return False, expected
@@ -403,6 +439,7 @@ def build_doctor_report(
     if wiki_dir.exists():
         pages = wiki_pages(wiki_dir)
         report.add_ok(f"OK markdown pages: {len(pages)}")
+        doctor_cache = build_wiki_cache(wiki_dir)
 
         dead_links = find_dead_links(wiki_dir)
         if dead_links:
@@ -424,9 +461,9 @@ def build_doctor_report(
         if load_error:
             report.add_error(load_error)
         else:
-            expected = build_backlinks(wiki_dir, body_only=False)
+            expected = _expected_backlinks(wiki_dir, cache=doctor_cache)
             if _normalize_link_index(current) != _normalize_link_index(expected):
-                report.add_error("wiki/_backlinks.json is stale; run: python3 link.py rebuild-backlinks .")
+                report.add_error("wiki/_backlinks.json is stale; run: lnk rebuild-backlinks .")
             else:
                 report.add_ok("OK backlinks are current")
 
@@ -458,6 +495,21 @@ def build_doctor_report(
         else:
             report.add_ok("OK no interrupted Link operations")
 
+        log_integrity = verify_log_integrity(wiki_dir)
+        if log_integrity.get("passed"):
+            hashed_count = int(log_integrity.get("hashed_entries") or 0)
+            if hashed_count:
+                report.add_ok(f"OK audit log hash chain ({hashed_count} entries)")
+            else:
+                report.add_ok("OK audit log readable")
+        else:
+            findings = [
+                str(item)
+                for item in log_integrity.get("findings", [])
+                if item
+            ]
+            report.add_error(join_limited("audit log hash chain broken: ", findings))
+
         missing_summaries = find_pages_missing_summaries(wiki_dir)
         if missing_summaries:
             report.add_warning(join_limited("pages missing TLDR/query summary: ", missing_summaries))
@@ -483,7 +535,7 @@ def build_doctor_report(
         else:
             report.add_ok("OK ingest validation gate")
 
-        isolated = find_isolated_pages(wiki_dir)
+        isolated = find_isolated_pages(wiki_dir, cache=doctor_cache)
         if isolated:
             report.add_warning(join_limited("isolated wiki pages: ", isolated))
         else:
@@ -504,6 +556,7 @@ def build_doctor_report(
             report.add_ok("OK no raw memory captures pending review")
         if capture_warning_count:
             report.add_warning(f"raw memory captures with secret warnings: {capture_warning_count}")
+        close_wiki_cache(doctor_cache)
 
     findings = raw_ingest_findings(collect_ingest_status(target, skip_dirs=skip_dirs))
     if findings["blocked"]:

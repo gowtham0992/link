@@ -207,9 +207,36 @@
     });
   }
 
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function initScrollReveal() {
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll(".feature, .panel, .media-card, .proof-column, .architecture-card, .compare > div")
+    );
+    if (!targets.length) {
+      return;
+    }
+    if (prefersReducedMotion() || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+    targets.forEach(function (el) { el.classList.add("reveal"); });
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("revealed");
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.1 });
+    targets.forEach(function (el) { observer.observe(el); });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     addCopyButtons();
     captureOutboundClicks();
+    initScrollReveal();
     loadPostHog();
   });
 })();

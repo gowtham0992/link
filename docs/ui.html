@@ -6,7 +6,7 @@
   <meta name="description" content="Use Link's local web UI to review memory, ingest sources, inspect graph context, and audit what agents know.">
   <title>Link - Web UI</title>
   <link rel="stylesheet" href="assets/site.css">
-  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Link">
@@ -48,6 +48,7 @@
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#tour">UI tour</a>
+        <a href="#onboard">Onboard checklist</a>
         <a href="#reading">Reading pages</a>
         <a href="#catalog">Catalog and search</a>
         <a href="#daily">Daily loop</a>
@@ -58,9 +59,15 @@
       <article class="doc-content">
         <h2 id="tour">UI Tour</h2>
         <figure class="screenshot-card media-wide">
-          <img src="assets/link-home.png" alt="Link local web viewer — home">
-          <figcaption>The local viewer's home: first-run prompts, next steps, and recently updated pages.</figcaption>
+          <img src="assets/link-ui-tour.gif" alt="Animated tour of Link's local web UI">
+          <figcaption>Prompts, ingest, brief, memory review, and graph exploration in the local viewer.</figcaption>
         </figure>
+
+        <h2 id="onboard">Onboard Checklist</h2>
+        <p>Open <code>/onboard</code> when you want the browser version of <code>lnk onboard</code>. It gathers readiness, project context seeding, first-memory setup, agent wiring, and starter prompts into one copyable checklist so a new user can move from empty local files to working agent memory without memorizing commands.</p>
+        <pre><code>lnk serve ~/link
+open http://127.0.0.1:3000/onboard</code></pre>
+        <p>The onboard page does not run MCP for you and does not need to stay open. It is a guided local setup screen; CLI commands, official skills, and MCP clients keep working after you close the browser because they read the same local Markdown wiki directly.</p>
 
         <h2 id="reading">Reading Pages</h2>
         <p>Link's local viewer is document-first. Common paths stay in the top navigation, advanced tools live under <code>more</code>, and sectioned wiki pages get a contents outline so long source-backed pages remain scannable. Page footers include related pages from inbound and forward graph links, so reading can continue without opening the full graph.</p>

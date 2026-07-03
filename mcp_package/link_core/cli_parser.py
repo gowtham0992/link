@@ -11,10 +11,14 @@ from .version import LINK_VERSION
 
 
 DEFAULT_DEMO_DIR = "link-demo"
+DEFAULT_PROOF_DIR = "link-proof"
 CliHandler = Callable[..., int]
 
 
-def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.ArgumentParser:
+def build_cli_parser(
+    default_demo_dir: str = DEFAULT_DEMO_DIR,
+    default_proof_dir: str = DEFAULT_PROOF_DIR,
+) -> argparse.ArgumentParser:
     """Build the Link CLI argument parser."""
     parser = argparse.ArgumentParser(prog="link.py", description="Link command runner")
     parser.add_argument("--version", action="version", version=f"Link {LINK_VERSION}")
@@ -40,6 +44,41 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     try_cmd.add_argument("--port", type=int, default=3000)
     try_cmd.add_argument("--json", action="store_true", help="print machine-readable try data")
 
+    proof_cmd = sub.add_parser("proof", help="prove cross-agent memory continuity in a local demo workspace")
+    proof_cmd.add_argument("target", nargs="?", default=default_proof_dir)
+    proof_cmd.add_argument("--force", action="store_true", help="replace an existing Link proof workspace")
+    proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
+    proof_cmd.add_argument("--port", type=int, default=3000)
+    proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
+
+    onboard_cmd = sub.add_parser("onboard", help="set up a real Link workspace and print the agent-first next steps")
+    onboard_cmd.add_argument("target", nargs="?", default="~/link")
+    onboard_cmd.add_argument("--agent", action="append", default=[], help="agent config to preview or write; repeatable")
+    onboard_cmd.add_argument("--all-agents", action="store_true", help="preview or write all supported agent configs")
+    onboard_cmd.add_argument("--write", action="store_true", help="update selected agent config files")
+    onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
+    onboard_cmd.add_argument(
+        "--seed-project",
+        nargs="?",
+        const=".",
+        default=None,
+        help="seed source-backed project context from this directory during onboarding",
+    )
+    onboard_cmd.add_argument("--project", default=None, help="project slug for prompts and first memory")
+    onboard_cmd.add_argument("--port", type=int, default=3000, help="local viewer port to print")
+    onboard_cmd.add_argument("--json", action="store_true", help="print machine-readable onboarding data")
+
+    seed_cmd = sub.add_parser("seed", help="seed Link with source-backed context from this project")
+    seed_cmd.add_argument("project", nargs="?", default=".", help="project directory to inspect")
+    seed_cmd.add_argument("target", nargs="?", default="~/link", help="Link workspace to seed")
+    seed_cmd.add_argument("--project-name", default=None, help="display name/project slug for the generated seed")
+    seed_cmd.add_argument("--overwrite", action="store_true", help="replace the generated seed source if it already exists")
+    seed_cmd.add_argument("--dry-run", action="store_true", help="show what would be seeded without writing files")
+    seed_cmd.add_argument("--limit", type=int, default=12, help="maximum allowlisted project files to inspect")
+    seed_cmd.add_argument("--no-git-log", action="store_true", help="do not include recent git commit summaries")
+    seed_cmd.add_argument("--git-log-limit", type=int, default=20, help="maximum recent git commits to include")
+    seed_cmd.add_argument("--json", action="store_true", help="print machine-readable seed status")
+
     welcome_cmd = sub.add_parser("welcome", help="print the shortest first-use path for Link")
     welcome_cmd.add_argument("target", nargs="?", default=".")
     welcome_cmd.add_argument("--project", default=None, help="project slug for project-scoped prompt examples")
@@ -62,6 +101,8 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     operations_cmd = sub.add_parser("operations", help="inspect interrupted or active Link write operations")
     operations_cmd.add_argument("target", nargs="?", default=".")
     operations_cmd.add_argument("--limit", type=int, default=20, help="maximum operation markers to show")
+    operations_cmd.add_argument("--recover", metavar="MARKER", help="recover an interrupted operation from its snapshot")
+    operations_cmd.add_argument("--confirm", action="store_true", help="required to apply an operation recovery snapshot")
     operations_cmd.add_argument("--json", action="store_true", help="print machine-readable operation status")
 
     backup_cmd = sub.add_parser("backup", help="create or list local wiki backup archives")
@@ -164,6 +205,14 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     capture_cmd.add_argument("--project", default=None, help="project key for proposal checks")
     capture_cmd.add_argument("--json", action="store_true", help="print machine-readable capture details")
 
+    session_end_cmd = sub.add_parser("session-end", aliases=["end"], help="end a session by saving proposal-only notes and memory candidates")
+    session_end_cmd.add_argument("source_input", help="text, path, or '-' for stdin session notes")
+    session_end_cmd.add_argument("target", nargs="?", default=".")
+    session_end_cmd.add_argument("--title", default=None, help="title for the raw session-end note")
+    session_end_cmd.add_argument("--limit", type=int, default=3, help="maximum memory proposals to return")
+    session_end_cmd.add_argument("--project", default=None, help="project key for proposal checks")
+    session_end_cmd.add_argument("--json", action="store_true", help="print machine-readable session-end details")
+
     capture_inbox_cmd = sub.add_parser("capture-inbox", help="list saved raw session captures")
     capture_inbox_cmd.add_argument("target", nargs="?", default=".")
     capture_inbox_cmd.add_argument("--limit", type=int, default=20)
@@ -222,7 +271,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     query_cmd = sub.add_parser("query", aliases=["query-link"], help="build a compact answer-ready Link context packet")
     query_cmd.add_argument("query", help="task or question to retrieve memory and wiki context for")
     query_cmd.add_argument("target", nargs="?", default=".")
-    query_cmd.add_argument("--budget", choices=("small", "medium", "large"), default="medium")
+    query_cmd.add_argument("--budget", choices=("micro", "small", "medium", "large"), default="medium")
     query_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     query_cmd.add_argument("--json", action="store_true", help="print machine-readable context packet")
 
@@ -237,7 +286,7 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     benchmark_cmd = sub.add_parser("benchmark", help="measure local search, query, and graph performance")
     benchmark_cmd.add_argument("query", nargs="?", default="agent memory", help="query to benchmark")
     benchmark_cmd.add_argument("target", nargs="?", default=".")
-    benchmark_cmd.add_argument("--budget", choices=("small", "medium", "large"), default="small")
+    benchmark_cmd.add_argument("--budget", choices=("micro", "small", "medium", "large"), default="small")
     benchmark_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     benchmark_cmd.add_argument("--json", action="store_true", help="print machine-readable benchmark data")
 
@@ -247,6 +296,13 @@ def build_cli_parser(default_demo_dir: str = DEFAULT_DEMO_DIR) -> argparse.Argum
     brief_cmd.add_argument("--limit", type=int, default=6)
     brief_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     brief_cmd.add_argument("--json", action="store_true", help="print machine-readable memory brief")
+
+    start_cmd = sub.add_parser("start", help="start a session with Link readiness and a memory brief")
+    start_cmd.add_argument("target", nargs="?", default=".")
+    start_cmd.add_argument("--task", default="", help="optional task or question to retrieve memory for")
+    start_cmd.add_argument("--limit", type=int, default=6)
+    start_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
+    start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
 
     profile_cmd = sub.add_parser("profile", help="show what Link remembers")
     profile_cmd.add_argument("target", nargs="?", default=".")
@@ -348,6 +404,38 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             port=args.port,
             json_output=args.json,
         )
+    if command == "proof":
+        return handlers["proof"](
+            Path(args.target),
+            force=args.force,
+            serve=args.serve,
+            port=args.port,
+            json_output=args.json,
+        )
+    if command == "onboard":
+        return handlers["onboard"](
+            Path(args.target),
+            agents=args.agent,
+            all_agents=args.all_agents,
+            write=args.write,
+            first_memory=args.first_memory,
+            seed_project=args.seed_project,
+            project=args.project,
+            port=args.port,
+            json_output=args.json,
+        )
+    if command == "seed":
+        return handlers["seed"](
+            Path(args.target),
+            Path(args.project),
+            project_name=args.project_name,
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+            limit=args.limit,
+            include_git_log=not args.no_git_log,
+            git_log_limit=args.git_log_limit,
+            json_output=args.json,
+        )
     if command == "welcome":
         return handlers["welcome"](Path(args.target), project=args.project, json_output=args.json)
     if command in {"prompts", "next"}:
@@ -357,7 +445,13 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "health":
         return handlers["health"](Path(args.target), json_output=args.json)
     if command == "operations":
-        return handlers["operations"](Path(args.target), limit=args.limit, json_output=args.json)
+        return handlers["operations"](
+            Path(args.target),
+            limit=args.limit,
+            recover=args.recover,
+            confirm=args.confirm,
+            json_output=args.json,
+        )
     if command == "backup":
         return handlers["backup"](
             Path(args.target),
@@ -455,6 +549,15 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             project=args.project,
             json_output=args.json,
         )
+    if command in {"session-end", "end"}:
+        return handlers["session-end"](
+            Path(args.target),
+            args.source_input,
+            title=args.title,
+            limit=args.limit,
+            project=args.project,
+            json_output=args.json,
+        )
     if command == "capture-inbox":
         return handlers["capture-inbox"](
             Path(args.target),
@@ -544,6 +647,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         )
     if command == "brief":
         return handlers["brief"](Path(args.target), query=args.query, limit=args.limit, project=args.project, json_output=args.json)
+    if command == "start":
+        return handlers["start"](
+            Path(args.target),
+            task=args.task,
+            limit=args.limit,
+            project=args.project,
+            json_output=args.json,
+        )
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":

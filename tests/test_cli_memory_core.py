@@ -35,7 +35,7 @@ class CliMemoryCoreTests(unittest.TestCase):
         self.assertIn("Project: link", text)
         self.assertIn("Review after: 2026-08-01", text)
         self.assertIn("Expires at: 2026-12-01", text)
-        self.assertIn("python3 link.py recall", text)
+        self.assertIn("lnk recall", text)
         self.assertIn("Prefer release branches", text)
 
     def test_render_remember_duplicate(self):
@@ -55,7 +55,7 @@ class CliMemoryCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Similar memory already exists", text)
         self.assertIn("Existing candidates:", text)
-        self.assertIn("python3 link.py explain-memory prefer-release-branches", text)
+        self.assertIn("lnk explain-memory prefer-release-branches", text)
 
     def test_render_remember_conflict(self):
         code, text = render_remember_text({
@@ -90,7 +90,7 @@ class CliMemoryCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Memory updated", text)
         self.assertIn("Review: reviewed -> pending", text)
-        self.assertIn("python3 link.py review-memory prefer-release-branches", text)
+        self.assertIn("lnk review-memory prefer-release-branches", text)
 
     def test_render_set_memory_visibility_text(self):
         code, text = render_set_memory_visibility_text({
@@ -107,7 +107,7 @@ class CliMemoryCoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Memory visibility updated", text)
         self.assertIn("Visibility: private -> team", text)
-        self.assertIn("python3 link.py team-sync", text)
+        self.assertIn("lnk team-sync", text)
 
     def test_render_propose_memories_text(self):
         code, text = render_propose_memories_text({
@@ -189,7 +189,7 @@ class CliMemoryCoreTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Memory archived", text)
-        self.assertIn("Restore: python3 link.py restore-memory prefer-local-memory", text)
+        self.assertIn("Restore: lnk restore-memory prefer-local-memory", text)
 
     def test_render_memory_status_restore(self):
         code, text = render_memory_status_text({
@@ -407,7 +407,7 @@ class CliMemoryCoreTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("No memories found.", text)
-        self.assertIn("python3 link.py remember", text)
+        self.assertIn("lnk remember", text)
         self.assertIn("/tmp/link", text)
 
     def test_render_profile_text_with_sections(self):

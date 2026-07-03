@@ -59,6 +59,12 @@ def link_status(
         "reused_records": 0,
         "total_records": 0,
     }
+    fts_index: dict[str, object] = {
+        "available": False,
+        "persistent": False,
+        "reused": False,
+        "path": "",
+    }
     if wiki_dir.exists():
         stale_operations: list[Mapping[str, object]] = []
         fresh_operations: list[Mapping[str, object]] = []
@@ -110,6 +116,14 @@ def link_status(
                 wiki_cache = cache
             pages = list(wiki_cache.get("pages", []))
             search_backend = str(wiki_cache.get("search_backend") or "token-index")
+            fts_info = wiki_cache.get("fts_index_info")
+            if isinstance(fts_info, Mapping):
+                fts_index = {
+                    "available": bool(fts_info.get("available")),
+                    "persistent": bool(fts_info.get("persistent")),
+                    "reused": bool(fts_info.get("reused")),
+                    "path": str(fts_info.get("path") or ""),
+                }
             cache_info = wiki_cache.get("persistent_cache")
             if isinstance(cache_info, Mapping):
                 persistent_cache = {
@@ -125,6 +139,12 @@ def link_status(
                     "code": "cache_read_warnings",
                     "message": f"{read_warning_count} wiki page(s) could not be read; search and page counts may be incomplete.",
                     "detail": str((wiki_cache.get("read_warnings") or [])[:5]),
+                })
+            if pages and search_backend != "sqlite-fts":
+                warnings.append({
+                    "code": "search_backend_fallback",
+                    "message": "SQLite FTS search is not active; Link is using the slower token-index fallback.",
+                    "detail": "Install/use a Python build with sqlite3 FTS5 support for faster search on larger wikis.",
                 })
         except Exception as exc:
             pages = []
@@ -194,7 +214,7 @@ def link_status(
     if missing:
         next_actions.append(_action("repair or scaffold Link structure", "doctor", {"fix": True}))
     if schema.get("status") in {"missing", "old"}:
-        next_actions.append(_action("write current Link wiki schema marker", "migrate_wiki"))
+        next_actions.append(_action("write current Link wiki schema marker", "admin", {"action": "migrate"}))
     elif schema.get("status") == "invalid":
         next_actions.append(_action("inspect invalid Link wiki schema marker", "doctor"))
     elif schema.get("status") == "newer":
@@ -202,21 +222,26 @@ def link_status(
     if include_validation and validation_summary.get("checked") and not validation_summary.get("passed"):
         error_codes = set(validation_summary.get("error_codes") or [])
         if error_codes & {"stale_backlinks", "invalid_backlinks"}:
-            next_actions.append(_action("rebuild graph index", "rebuild_backlinks"))
+            next_actions.append(_action("rebuild graph index", "ingest", {"action": "rebuild"}))
         if error_codes - {"stale_backlinks", "invalid_backlinks"}:
             next_actions.append(_action("repair validation findings", "doctor", {"fix": True}))
-        next_actions.append(_action("rerun validation gate", "validate_wiki"))
+        next_actions.append(_action("rerun validation gate", "ingest", {"action": "validate"}))
     if stale_operation_degraded:
         next_actions.append(_action("inspect interrupted Link operation markers", "doctor"))
-        next_actions.append(_action("validate wiki after interrupted operation", "validate_wiki"))
+        next_actions.append(_action("validate wiki after interrupted operation", "ingest", {"action": "validate"}))
     if ready and content_page_count:
-        next_actions.append(_action("answer with compact local context", "query_link", {"query": "<user task>"}))
-        next_actions.append(_action("prime agent memory before work", "memory_brief", {"query": "<user task>"}))
+        next_actions.append(_action("answer with compact local context", "recall", {"query": "<user task>", "budget": "micro"}))
+        next_actions.append(_action("prime agent memory before work", "recall", {"query": "", "mode": "brief"}))
     elif ready:
-        next_actions.append(_action("add raw sources or inspect ingest readiness", "ingest_status"))
-        next_actions.append(_action("show first-run prompts", "starter_prompts"))
+        next_actions.append(_action(
+            "seed source-backed project context",
+            "admin",
+            {"action": "seed_project", "project_root": "<project root>"},
+        ))
+        next_actions.append(_action("add raw sources or inspect ingest readiness", "ingest", {"action": "status"}))
+        next_actions.append(_action("show first-run prompts", "admin", {"action": "prompts"}))
     elif not missing:
-        next_actions.append(_action("inspect wiki health", "validate_wiki"))
+        next_actions.append(_action("inspect wiki health", "ingest", {"action": "validate"}))
 
     return {
         "ready": ready,
@@ -229,6 +254,7 @@ def link_status(
         "active_memory_count": active_memory_count,
         "needs_review_count": needs_review_count,
         "search_backend": search_backend,
+        "fts_index": fts_index,
         "persistent_cache": persistent_cache,
         "schema": schema,
         "validation": validation_summary,

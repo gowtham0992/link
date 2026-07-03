@@ -4,6 +4,7 @@ from pathlib import Path
 from mcp_package.link_core.cli_admin import (
     render_backup_created_text,
     render_backup_list_text,
+    render_backup_restore_text,
     render_migrate_text,
     render_rebuild_backlinks_text,
     render_rebuild_index_text,
@@ -124,6 +125,28 @@ class CliAdminCoreTests(unittest.TestCase):
         self.assertIn("Included: wiki, LINK.md", text)
         self.assertIn("raw/ was excluded", text)
         self.assertIn("Pruned old backups: old.tar.gz", text)
+
+    def test_render_backup_restore_includes_integrity_result(self):
+        code, text = render_backup_restore_text({
+            "name": "link.tar.gz",
+            "backup": "/tmp/link/.link-backups/link.tar.gz",
+            "restore_roots": ["wiki"],
+            "skipped_roots": [],
+            "file_count": 3,
+            "restored": True,
+            "safety_backup": {"path": "/tmp/link/.link-backups/pre-restore.tar.gz"},
+            "integrity": {
+                "checked": True,
+                "passed": True,
+                "error_count": 0,
+                "warning_count": 0,
+            },
+        }, target="/tmp/link")
+
+        self.assertEqual(code, 0)
+        self.assertIn("Safety backup:", text)
+        self.assertIn("Integrity: passed (0 errors, 0 warnings)", text)
+        self.assertIn("Result: restored", text)
 
     def test_render_rebuild_outputs(self):
         backlinks_code, backlinks_text = render_rebuild_backlinks_text(
