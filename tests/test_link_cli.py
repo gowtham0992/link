@@ -672,7 +672,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(status_payload["version"], link_cli.LINK_VERSION)
         self.assertGreater(status_payload["content_page_count"], 0)
 
-    def test_status_guides_empty_initialized_wiki_to_ingest(self):
+    def test_status_guides_empty_initialized_wiki_to_project_seed(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-status-test-"))
         target = tmp / "my-link"
         with redirect_stdout(StringIO()):
@@ -686,6 +686,7 @@ class LinkCliTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Ready: yes", text)
         self.assertIn("Content pages: 0", text)
+        self.assertIn("seed_project", text)
         self.assertIn("ingest", text)
         self.assertIn("admin", text)
 
@@ -695,10 +696,15 @@ class LinkCliTests(unittest.TestCase):
         payload = json.loads(json_out.getvalue())
         self.assertEqual(json_code, 0)
         self.assertEqual(payload["content_page_count"], 0)
-        self.assertEqual(payload["next_actions"][0]["tool"], "ingest")
-        self.assertEqual(payload["next_actions"][0]["arguments"], {"action": "status"})
-        self.assertEqual(payload["next_actions"][1]["tool"], "admin")
-        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "prompts"})
+        self.assertEqual(payload["next_actions"][0]["tool"], "admin")
+        self.assertEqual(
+            payload["next_actions"][0]["arguments"],
+            {"action": "seed_project", "project_root": "<project root>"},
+        )
+        self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "status"})
+        self.assertEqual(payload["next_actions"][2]["tool"], "admin")
+        self.assertEqual(payload["next_actions"][2]["arguments"], {"action": "prompts"})
 
     def test_health_combines_status_and_operations(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-health-test-"))

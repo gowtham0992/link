@@ -233,6 +233,11 @@ def link_status(
         next_actions.append(_action("answer with compact local context", "recall", {"query": "<user task>", "budget": "micro"}))
         next_actions.append(_action("prime agent memory before work", "recall", {"query": "", "mode": "brief"}))
     elif ready:
+        next_actions.append(_action(
+            "seed source-backed project context",
+            "admin",
+            {"action": "seed_project", "project_root": "<project root>"},
+        ))
         next_actions.append(_action("add raw sources or inspect ingest readiness", "ingest", {"action": "status"}))
         next_actions.append(_action("show first-run prompts", "admin", {"action": "prompts"}))
     elif not missing:

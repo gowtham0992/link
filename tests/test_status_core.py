@@ -83,7 +83,7 @@ class StatusCoreTests(unittest.TestCase):
         self.assertEqual(payload["search_backend"], "unavailable")
         self.assertEqual(payload["next_actions"][0]["tool"], "doctor")
 
-    def test_link_status_guides_empty_initialized_wiki_to_ingest(self):
+    def test_link_status_guides_empty_initialized_wiki_to_project_seed(self):
         root = Path(tempfile.mkdtemp(prefix="link-status-core-"))
         wiki = root / "wiki"
         for dirname in ("sources", "concepts", "entities", "memories", "comparisons", "explorations"):
@@ -98,10 +98,15 @@ class StatusCoreTests(unittest.TestCase):
         self.assertTrue(payload["ready"])
         self.assertEqual(payload["page_count"], 2)
         self.assertEqual(payload["content_page_count"], 0)
-        self.assertEqual(payload["next_actions"][0]["tool"], "ingest")
-        self.assertEqual(payload["next_actions"][0]["arguments"], {"action": "status"})
-        self.assertEqual(payload["next_actions"][1]["tool"], "admin")
-        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "prompts"})
+        self.assertEqual(payload["next_actions"][0]["tool"], "admin")
+        self.assertEqual(
+            payload["next_actions"][0]["arguments"],
+            {"action": "seed_project", "project_root": "<project root>"},
+        )
+        self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
+        self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "status"})
+        self.assertEqual(payload["next_actions"][2]["tool"], "admin")
+        self.assertEqual(payload["next_actions"][2]["arguments"], {"action": "prompts"})
 
     def test_link_status_surfaces_cache_and_memory_warnings(self):
         wiki = self.make_wiki()

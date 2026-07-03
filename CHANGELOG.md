@@ -65,6 +65,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Updated installed agent instructions so agents recover from empty project recall by seeding allowlisted source-backed repo context before broad searching.
 - Updated `lnk start`, MCP `link_start`, and slim MCP `admin` so empty project recall points agents toward source-backed project seeding before broad file reads.
 - Updated `lnk start` to include a tiny token-bounded context preview from the same hybrid query packet used by CLI, skills, and MCP once source-backed project context exists.
+- Updated status/health next actions so empty initialized workspaces recommend source-backed project seeding before generic ingest prompts.
 
 ### Fixed
 
