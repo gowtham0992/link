@@ -61,6 +61,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Regenerated dark-mode docs screenshots from deterministic source images before rebuilding the checked-in product GIFs.
 - Tightened official skill trigger wording so skill-only agents can proactively retrieve context and propose memory after important user-approved decisions without silently writing.
 - Retired the old synthetic docs media generator in favor of a non-destructive verifier for checked-in real product screenshots, GIFs, and diagrams.
+- Updated the local `/onboard` checklist to surface project context seeding before first memory and agent wiring, matching the new `lnk onboard --seed-project .` path.
 
 ### Fixed
 

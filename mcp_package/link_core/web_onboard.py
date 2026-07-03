@@ -84,6 +84,8 @@ def render_onboard_page(
     validation_label = "passed" if validation.get("passed") else ("failed" if validation.get("checked") else "not checked")
     health_command = display_command(["link", "health", command_target])
     onboard_command = display_command(["link", "onboard", command_target])
+    seed_onboard_command = display_command(["link", "onboard", command_target, "--seed-project", "."])
+    seed_command = display_command(["link", "seed", ".", command_target])
     first_memory_command = display_command([
         "link",
         "onboard",
@@ -107,13 +109,16 @@ def render_onboard_page(
         '<article class="onboard-step" data-state="done"><span>1</span><h2>Check readiness</h2>'
         '<p>Confirm the wiki is usable before trusting recall.</p>'
         f'<ul class="command-list">{_command_row(health_command)}</ul></article>'
-        '<article class="onboard-step" data-state="next"><span>2</span><h2>Seed one memory</h2>'
+        '<article class="onboard-step" data-state="next"><span>2</span><h2>Seed this project</h2>'
+        '<p>Run from a repo so the first recall already knows the project. This writes source-backed context, not durable memory.</p>'
+        f'<ul class="command-list">{_command_row(seed_onboard_command)}{_command_row(seed_command)}</ul></article>'
+        '<article class="onboard-step" data-state="next"><span>3</span><h2>Seed one memory</h2>'
         '<p>Start with one explicit preference or decision. Link saves it for review.</p>'
         f'<ul class="command-list">{_command_row(first_memory_command)}</ul></article>'
-        '<article class="onboard-step" data-state="next"><span>3</span><h2>Connect an agent</h2>'
+        '<article class="onboard-step" data-state="next"><span>4</span><h2>Connect an agent</h2>'
         '<p>MCP and CLI work without the viewer running. The viewer is just the local UI.</p>'
         f'<ul class="command-list">{_command_row(onboard_command)}</ul></article>'
-        '<article class="onboard-step" data-state="next"><span>4</span><h2>Start the loop</h2>'
+        '<article class="onboard-step" data-state="next"><span>5</span><h2>Start the loop</h2>'
         '<p>Brief before work, ingest sources, then review what should become durable memory.</p>'
         f'<ul class="command-list">{_command_row(brief_command)}{_command_row(ingest_command)}{_command_row(memory_inbox_command)}</ul></article>'
         "</section>"
@@ -123,7 +128,7 @@ def render_onboard_page(
     body = (
         '<div class="breadcrumb"><a href="/">Link</a> / onboard</div>'
         "<h1>Onboard</h1>"
-        '<p class="summary">One local checklist for first-run setup: health, first memory, agent wiring, and the daily prompt loop.</p>'
+        '<p class="summary">One local checklist for first-run setup: health, project context, first memory, agent wiring, and the daily prompt loop.</p>'
         f"{stats}"
         f"{setup_cards}"
         '<section><div class="section-heading"><h2>Agent Wiring</h2><a href="/prompts">starter prompts</a></div>'

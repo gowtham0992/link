@@ -155,8 +155,8 @@ http://127.0.0.1:3000/health
 ```
 
 Use `/onboard` when you want the same first-run checklist in the local UI:
-readiness, first memory, agent wiring, and starter prompts. The web viewer is
-for local use only. It binds to `127.0.0.1`, has no user
+readiness, project context seeding, first memory, agent wiring, and starter
+prompts. The web viewer is for local use only. It binds to `127.0.0.1`, has no user
 accounts or authentication, and should not be exposed to the internet unless you
 add your own auth layer.
 

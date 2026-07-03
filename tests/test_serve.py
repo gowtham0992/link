@@ -577,7 +577,10 @@ class ServeTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertIn("Onboard", html)
-        self.assertIn("One local checklist", html)
+        self.assertIn("project context", html)
+        self.assertIn("Seed this project", html)
+        self.assertIn("--seed-project", html)
+        self.assertIn("lnk seed .", html)
         self.assertIn("MCP and CLI work without the viewer running", html)
         self.assertIn("lnk health", html)
         self.assertIn("lnk onboard", html)

@@ -36,9 +36,12 @@ def test_render_onboard_page_shows_first_run_loop(tmp_path):
     )
 
     assert "<title>Onboard</title>" in html
-    assert "One local checklist" in html
+    assert "project context" in html
     assert '<span class="label">ready</span>' in html
     assert "Check readiness" in html
+    assert "Seed this project" in html
+    assert "--seed-project" in html
+    assert "lnk seed ." in html
     assert "Seed one memory" in html
     assert "Connect an agent" in html
     assert "MCP and CLI work without the viewer running" in html
