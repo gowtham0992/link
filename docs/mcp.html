@@ -162,7 +162,7 @@ link://health
 link://brief
 link://profile
 link://project</code></pre>
-        <p><code>link_start</code> and <code>link://instructions</code> carry the portable startup loop for clients that support native prompts or resource attachment: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads. <code>link_session_end</code> carries the matching review-gated shutdown loop: capture useful session notes, return proposals, and wait for user approval before durable memory writes.</p>
+        <p><code>link_start</code> and <code>link://instructions</code> carry the portable startup loop for clients that support native prompts or resource attachment: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads. If recall finds no useful project context, agents can call <code>admin(action="seed_project", arguments="{&quot;project_root&quot;:&quot;/absolute/project/path&quot;}")</code> or ask the user to run <code>lnk seed . ~/link</code> from the repo before retrying recall. <code>link_session_end</code> carries the matching review-gated shutdown loop: capture useful session notes, return proposals, and wait for user approval before durable memory writes.</p>
         <p>Full compatibility tool set available with <code>--surface full</code>:</p>
         <pre><code>link_status
 link_operations

@@ -90,7 +90,9 @@ def _instructions(surface: str) -> str:
             "Use review for memory inbox, explain, archive, restore, forget, "
             "profile, audit, and log workflows. Use admin for less common "
             "maintenance such as backup, migrate, validate, rebuild, pages, "
-            "backlinks, graph export, captures, and advanced updates. Never "
+            "backlinks, graph export, project seeding, captures, and advanced updates. "
+            "If recall returns no useful project context and you are in a repo, "
+            "use admin(action='seed_project') before broad file reads. Never "
             "silently save durable memory; propose or review first when unsure."
         )
     return (
@@ -230,6 +232,9 @@ from link_core.query import (
 )
 from link_core.prompts import (
     starter_prompt_payload as _core_starter_prompt_payload,
+)
+from link_core.project_seed import (
+    seed_project_context as _core_seed_project_context,
 )
 from link_core.validation import (
     validate_wiki as _core_validate_wiki,
@@ -936,6 +941,9 @@ def link_start_prompt(task: str = "") -> str:
         "Then call recall(query='', mode='brief', limit=6) once to prime local memory. "
         f"If {task_text!r} may depend on user preferences, project decisions, or prior context, call "
         f"recall(query={task_text!r}, budget='micro') and read recall_capsule before broad file reads. "
+        "If recall has no useful project context and you know the project root, call "
+        "admin(action='seed_project', arguments='{\"project_root\":\"/absolute/project/path\",\"limit\":12}') once, "
+        "then retry recall with a small budget. "
         "Do not write durable memory unless the user explicitly asks or approves it."
     )
 
@@ -1258,7 +1266,7 @@ def admin(action: str, arguments: str = "{}") -> str:
 
     Pass action plus a JSON object string in arguments. Common actions include:
     backup, migrate, validate, operations, search, context, pages, backlinks,
-    graph_summary, graph, rebuild_index, rebuild_backlinks, propose_memories,
+    graph_summary, graph, rebuild_index, rebuild_backlinks, seed_project, propose_memories,
     capture_session, session_end, capture_inbox, accept_capture, redact_capture,
     delete_capture, update_memory, and set_visibility.
     """
@@ -1314,6 +1322,23 @@ def admin(action: str, arguments: str = "{}") -> str:
             return rebuild_index()
         if clean_action == "rebuild_backlinks":
             return rebuild_backlinks()
+        if clean_action in {"seed_project", "project_seed"}:
+            project_root = Path(_str_arg(payload, "project_root") or _str_arg(payload, "path") or ".")
+            seed_payload = _core_seed_project_context(
+                WIKI_DIR.parent,
+                project_root,
+                project_name=_str_arg(payload, "project"),
+                overwrite=_bool_arg(payload, "overwrite", False),
+                dry_run=_bool_arg(payload, "dry_run", False),
+                limit=_int_arg(payload, "limit", 12),
+                include_git_log=_bool_arg(payload, "include_git_log", True),
+                git_log_limit=_int_arg(payload, "git_log_limit", 20),
+            )
+            seed_payload["surface"] = "slim"
+            seed_payload["tool"] = "admin"
+            seed_payload["action"] = clean_action
+            _clear_cache()
+            return json.dumps(seed_payload, ensure_ascii=False)
         if clean_action == "propose_memories":
             return propose_memories(
                 _str_arg(payload, "text"),
@@ -1369,7 +1394,7 @@ def admin(action: str, arguments: str = "{}") -> str:
         "supported_actions": [
             "backup", "migrate", "validate", "operations", "prompts",
             "search", "context", "pages", "backlinks", "graph_summary", "graph",
-            "rebuild_index", "rebuild_backlinks", "propose_memories",
+            "rebuild_index", "rebuild_backlinks", "seed_project", "propose_memories",
             "capture_session", "session_end", "capture_inbox", "accept_capture", "redact_capture",
             "delete_capture", "update_memory", "set_visibility",
         ],

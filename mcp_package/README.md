@@ -122,7 +122,10 @@ Link also exposes MCP prompts `link_start`, `link_brief`, `link_remember`,
 `link://project` for clients that support prompt/resource attachment.
 `link_start` and `link://instructions` are the portable startup loop: check
 readiness, run a brief recall once, then use bounded recall before broad context
-reads. `link_session_end` is the matching proposal-only shutdown loop: capture
+reads. If recall finds no useful project context, agents can call
+`admin(action="seed_project", arguments="{\"project_root\":\"/absolute/project/path\"}")`
+or ask the user to run `lnk seed . ~/link` from the repo before retrying recall.
+`link_session_end` is the matching proposal-only shutdown loop: capture
 useful session notes, return memory candidates, and wait for user approval
 before durable writes.
 
@@ -131,11 +134,12 @@ Slim agents should call:
 1. `status(include_validation=true)` when connecting or troubleshooting.
 2. `recall(query="", mode="brief")` once at the first substantive turn of a session.
 3. `recall(query="<question>", budget="micro"|"small")` before broad file reads or asking the user to repeat durable context.
-4. `ingest(action="status")` when the user drops files into `raw/`.
-5. `remember(...)` only when the user explicitly approves saving durable memory.
-6. `admin(action="session_end", arguments="{...}")` at session end to propose memory without silently saving it.
-7. `review(action="inbox"|"audit"|"profile"|"explain"|...)` for memory lifecycle review.
-8. `admin(action, arguments)` for backup, migrate, validate, graph export, captures, rebuilds, and compatibility actions.
+4. `admin(action="seed_project", arguments="{...}")` when startup recall has no useful project context and the project root is known.
+5. `ingest(action="status")` when the user drops files into `raw/`.
+6. `remember(...)` only when the user explicitly approves saving durable memory.
+7. `admin(action="session_end", arguments="{...}")` at session end to propose memory without silently saving it.
+8. `review(action="inbox"|"audit"|"profile"|"explain"|...)` for memory lifecycle review.
+9. `admin(action, arguments)` for backup, migrate, validate, graph export, captures, rebuilds, and compatibility actions.
 
 Add `review_after` for memories that should return to the review inbox after a
 date, or `expires_at` for temporary context that should leave default recall

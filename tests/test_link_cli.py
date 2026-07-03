@@ -1404,6 +1404,31 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(payload["brief"]["relevant_memories"][0]["name"], "prefer-local-personal-memory")
         self.assertIn("query", payload["commands"])
         self.assertIn("agent_loop", payload)
+        self.assertFalse(payload["project_seed"]["recommended"])
+
+    def test_start_recommends_project_seed_for_empty_workspace(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-start-test-"))
+        target = tmp / "empty-link"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.start(target, task="shipping this project", json_output=True)
+
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["status"]["ready"])
+        self.assertTrue(payload["project_seed"]["recommended"])
+        self.assertIn("seed .", payload["project_seed"]["command"])
+        self.assertEqual(payload["project_seed"]["command"], payload["commands"]["seed_project"])
+
+        text_out = StringIO()
+        with redirect_stdout(text_out):
+            text_code = link_cli.start(target, task="shipping this project")
+        self.assertEqual(text_code, 0)
+        self.assertIn("Seed project context:", text_out.getvalue())
+        self.assertIn("Run from the project repo", text_out.getvalue())
 
     def test_query_builds_context_packet(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-query-test-"))

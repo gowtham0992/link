@@ -1884,6 +1884,11 @@ def start(
         _capture_review_summary(target, project=project_name),
     )
     query_text = task or "your current task"
+    relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
+    project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
+        status_payload.get("content_page_count") or 0
+    )
+    seed_command = _display_command(["link", "seed", ".", str(target)])
     payload = {
         "target": str(target),
         "wiki": str(wiki_dir),
@@ -1897,6 +1902,20 @@ def start(
             "brief": _display_command(["link", "brief", query_text, str(target)]),
             "remember": _display_command(["link", "remember", "<approved memory>", str(target)]),
             "review": _display_command(["link", "memory-inbox", str(target)]),
+            "seed_project": seed_command,
+        },
+        "project_seed": {
+            "recommended": project_seed_recommended,
+            "reason": (
+                "No source-backed project context or relevant memory found in this startup packet."
+                if project_seed_recommended
+                else ""
+            ),
+            "command": seed_command,
+            "safety": (
+                "Run from the project repo. Link reads allowlisted project docs/rules, "
+                "secret-scans them, and writes source-backed wiki context without creating durable memory."
+            ),
         },
         "agent_loop": [
             "Use this brief before asking the user to repeat durable context.",

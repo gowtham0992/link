@@ -75,6 +75,7 @@ def render_start_text(payload: Mapping[str, object]) -> tuple[int, str]:
         lines.extend(["", brief_text])
 
     commands = payload.get("commands") if isinstance(payload.get("commands"), Mapping) else {}
+    project_seed = payload.get("project_seed") if isinstance(payload.get("project_seed"), Mapping) else {}
     if not status.get("ready"):
         lines.extend(["", "Needs attention"])
         next_actions = status.get("next_actions")
@@ -89,6 +90,16 @@ def render_start_text(payload: Mapping[str, object]) -> tuple[int, str]:
             "",
             "Next",
         ])
+        if project_seed.get("recommended"):
+            command = project_seed.get("command") or commands.get("seed_project")
+            if command:
+                lines.append(f"- Seed project context: {command}")
+            reason = str(project_seed.get("reason") or "").strip()
+            if reason:
+                lines.append(f"  {reason}")
+            safety = str(project_seed.get("safety") or "").strip()
+            if safety:
+                lines.append(f"  {safety}")
         if isinstance(commands, Mapping) and commands.get("query"):
             lines.append(f"- Need more context: {commands['query']}")
         if isinstance(commands, Mapping) and commands.get("review"):

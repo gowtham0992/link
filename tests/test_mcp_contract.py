@@ -335,6 +335,7 @@ class McpContractTests(unittest.TestCase):
     def test_mcp_prompts_and_resources_contract(self):
         self.assertIn("recall(query='', mode='brief'", self.server.link_start_prompt("release work"))
         self.assertIn("recall_capsule", self.server.link_start_prompt("release work"))
+        self.assertIn("admin(action='seed_project'", self.server.link_start_prompt("release work"))
         self.assertIn("recall(query=", self.server.link_brief_prompt("release work"))
         self.assertIn("remember", self.server.link_remember_prompt("I prefer short notes"))
         self.assertIn("admin(action='session_end'", self.server.link_session_end_prompt("we kept memory reviewed"))
@@ -355,6 +356,28 @@ class McpContractTests(unittest.TestCase):
         self.assertIn("relevant_memories", brief)
         self.assertGreaterEqual(profile["memory_count"], 1)
         self.assertIn("prompts", project)
+
+    def test_slim_admin_can_seed_project_context(self):
+        project = self.target.parent / "client-app"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nThis project keeps local agent memory reviewable.\n",
+            encoding="utf-8",
+        )
+
+        payload = json.loads(self.server.admin("seed_project", json.dumps({
+            "project_root": str(project),
+            "project": "Client App",
+            "include_git_log": False,
+        })))
+
+        self.assertEqual(payload["surface"], "slim")
+        self.assertEqual(payload["tool"], "admin")
+        self.assertEqual(payload["action"], "seed_project")
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["wrote"])
+        self.assertTrue((self.target / "raw/project-seeds/client-app/project-context.md").exists())
+        self.assertTrue((self.target / "wiki/sources/project-seed-client-app.md").exists())
 
     def test_missing_wiki_message_points_to_current_setup_paths(self):
         previous_argv = sys.argv[:]

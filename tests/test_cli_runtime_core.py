@@ -93,6 +93,38 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("Link memory brief: release work", text)
         self.assertIn("lnk query", text)
 
+    def test_render_start_text_recommends_project_seed_when_context_is_empty(self):
+        code, text = render_start_text({
+            "target": "/tmp/link",
+            "task": "new repo work",
+            "status": {
+                "ready": True,
+                "content_page_count": 0,
+                "page_count": 2,
+                "active_memory_count": 0,
+                "needs_review_count": 0,
+                "search_backend": "sqlite-fts",
+                "validation": {"checked": True, "passed": True},
+            },
+            "brief_text": "Link memory brief: new repo work\nNo directly relevant memory found.",
+            "commands": {
+                "query": "lnk query 'new repo work' /tmp/link --budget micro",
+                "review": "lnk memory-inbox /tmp/link",
+            },
+            "project_seed": {
+                "recommended": True,
+                "command": "lnk seed . /tmp/link",
+                "reason": "No source-backed project context or relevant memory found.",
+                "safety": "Run from the project repo.",
+            },
+        })
+
+        self.assertEqual(code, 0)
+        self.assertIn("Seed project context: lnk seed . /tmp/link", text)
+        self.assertIn("No source-backed project context", text)
+        self.assertIn("Run from the project repo.", text)
+        self.assertLess(text.index("Seed project context"), text.index("Need more context"))
+
     def test_render_demo_text(self):
         code, text = render_demo_text(
             target="/tmp/link-demo",
