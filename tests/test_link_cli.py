@@ -114,8 +114,10 @@ class LinkCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(payload["project"], "client-launch")
-        self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
-        self.assertEqual(payload["prompts"][3]["prompt"], "what does Link remember about this project?")
+        prompts = [item["prompt"] for item in payload["prompts"]]
+        self.assertIn("seed this project into Link", prompts)
+        self.assertTrue(any("this project uses Link" in prompt for prompt in prompts))
+        self.assertIn("what does Link remember about this project?", prompts)
 
     def test_proof_creates_and_recalls_cross_agent_memory(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-proof-test-"))
@@ -160,6 +162,30 @@ class LinkCliTests(unittest.TestCase):
             "remember that I prefer concise release notes",
             [item["prompt"] for item in payload["prompts"]],
         )
+
+    def test_seed_project_initializes_workspace_and_writes_source_context(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-seed-test-"))
+        project = tmp / "client-app"
+        target = tmp / "my-link"
+        project.mkdir()
+        (project / "README.md").write_text(
+            "# Client App\n\nThis project manages private agent memory for finance workflows.\n",
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.seed_project(target, project, project_name="Client App", json_output=True)
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["wrote"])
+        self.assertTrue((target / "link.py").exists())
+        self.assertTrue((target / "serve.py").exists())
+        self.assertTrue((target / payload["raw_path"]).exists())
+        self.assertTrue((target / payload["source_page"]).exists())
+        self.assertTrue((target / "wiki/_backlinks.json").exists())
 
     def test_welcome_prints_short_first_use_path(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-welcome-test-"))

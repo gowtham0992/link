@@ -83,6 +83,36 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.port, 3456)
         self.assertTrue(args.json)
 
+    def test_seed_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "seed",
+            "/tmp/project",
+            "/tmp/link",
+            "--project-name",
+            "Client App",
+            "--overwrite",
+            "--dry-run",
+            "--limit",
+            "3",
+            "--no-git-log",
+            "--git-log-limit",
+            "5",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "seed")
+        self.assertEqual(args.project, "/tmp/project")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.project_name, "Client App")
+        self.assertTrue(args.overwrite)
+        self.assertTrue(args.dry_run)
+        self.assertEqual(args.limit, 3)
+        self.assertTrue(args.no_git_log)
+        self.assertEqual(args.git_log_limit, 5)
+        self.assertTrue(args.json)
+
     def test_operations_limit_and_json_options(self):
         parser = build_cli_parser()
 
@@ -552,6 +582,42 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["project"], "alpha")
         self.assertEqual(calls[0][1]["port"], 3456)
         self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_seed_arguments(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "seed",
+            "/tmp/project",
+            "/tmp/link",
+            "--project-name",
+            "Client App",
+            "--overwrite",
+            "--dry-run",
+            "--limit",
+            "3",
+            "--no-git-log",
+            "--git-log-limit",
+            "5",
+            "--json",
+        ])
+        calls = []
+
+        def seed_handler(target, project_root, **kwargs):
+            calls.append((target, project_root, kwargs))
+            return 7
+
+        code = dispatch_cli_command(args, {"seed": seed_handler})
+
+        self.assertEqual(code, 7)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], Path("/tmp/project"))
+        self.assertEqual(calls[0][2]["project_name"], "Client App")
+        self.assertTrue(calls[0][2]["overwrite"])
+        self.assertTrue(calls[0][2]["dry_run"])
+        self.assertEqual(calls[0][2]["limit"], 3)
+        self.assertFalse(calls[0][2]["include_git_log"])
+        self.assertEqual(calls[0][2]["git_log_limit"], 5)
+        self.assertTrue(calls[0][2]["json_output"])
 
     def test_dispatch_routes_operations_arguments(self):
         parser = build_cli_parser()

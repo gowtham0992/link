@@ -556,7 +556,9 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["project"], "client-launch")
         self.assertEqual(payload["prompts"][0]["prompt"], "is Link ready?")
-        self.assertIn("this project uses Link", payload["prompts"][2]["prompt"])
+        prompts = [item["prompt"] for item in payload["prompts"]]
+        self.assertIn("seed this project into Link", prompts)
+        self.assertTrue(any("this project uses Link" in prompt for prompt in prompts))
         self.assertIn("Starter Prompts", html)
         self.assertIn("Ask Your Agent", html)
         self.assertIn("Local Checks", html)

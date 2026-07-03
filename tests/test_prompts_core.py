@@ -27,8 +27,10 @@ class PromptsCoreTests(unittest.TestCase):
         self.assertEqual(payload["project"], "")
         self.assertIn("remember that I prefer local-first agent memory", prompts)
         self.assertIn("what does Link know about me?", prompts)
+        self.assertIn("seed this project into Link", prompts)
         self.assertIn("propose memories from raw/<file>", prompts)
         self.assertTrue(str(payload["shortcut"]).startswith("lnk next "))
+        self.assertTrue(any(command.startswith("lnk seed . ") for command in payload["commands"]))
         self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
         self.assertTrue(any(str(root.resolve()) in command for command in payload["commands"]))
 

@@ -14,6 +14,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `lnk session-end` (alias `lnk end`) as the agent-agnostic end-of-session lifecycle command: it stores proposal-only session notes, returns a small set of memory candidates, and refuses to create durable memory without user approval.
 - Added MCP `link_session_end` prompt guidance and `admin(action="session_end")` support so MCP clients can run the same proposal-only shutdown loop without adding another default slim tool.
 - Updated official skills, installed agent instructions, README, CLI docs, MCP docs, and package README around the portable loop: start with bounded recall, end with review-gated memory proposals.
+- Added `lnk seed [project-dir] [target]` to create a source-backed project context page from allowlisted repo files such as `README.md`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, and editor rule files, with secret scanning and no silent durable-memory writes.
 
 - Added a slim MCP surface for LLM-native clients so agents can rely on a smaller default set of high-signal tools while the full tool surface remains available for compatibility.
 - Added MCP prompt and resource coverage so clients can expose Link recall, remember, ingest, and review workflows as native agent actions instead of requiring users to memorize tool names.

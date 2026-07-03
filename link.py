@@ -8,6 +8,7 @@ Usage:
   python link.py try [target]
   python link.py proof [target]
   python link.py onboard [target]
+  python link.py seed [project-dir] [target]
   python link.py welcome [target]
   python link.py prompts [target]
   python link.py status [target]
@@ -263,6 +264,10 @@ from link_core.mcp_connect import (
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
     render_import_obsidian_text as _core_render_import_obsidian_text,
+)
+from link_core.project_seed import (
+    render_seed_project_text as _core_render_seed_project_text,
+    seed_project_context as _core_seed_project_context,
 )
 from link_core.operations import (
     operation_report as _core_operation_report,
@@ -2167,6 +2172,71 @@ def onboard(
     return code
 
 
+def seed_project(
+    target: Path,
+    project_root: Path,
+    *,
+    project_name: str | None = None,
+    overwrite: bool = False,
+    dry_run: bool = False,
+    limit: int = 12,
+    include_git_log: bool = True,
+    git_log_limit: int = 20,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    project_root = project_root.expanduser().resolve()
+    if limit < 0:
+        print("--limit must be 0 or greater")
+        return 1
+    if git_log_limit < 0:
+        print("--git-log-limit must be 0 or greater")
+        return 1
+
+    target.mkdir(parents=True, exist_ok=True)
+    _copy_runtime_files(target)
+    _apply_doctor_fixes(target)
+    payload = _core_seed_project_context(
+        target,
+        project_root,
+        project_name=project_name,
+        overwrite=overwrite,
+        dry_run=dry_run,
+        limit=limit,
+        include_git_log=include_git_log,
+        git_log_limit=git_log_limit,
+    )
+    status_value = str(payload.get("status") or "")
+    if status_value == "already_seeded":
+        payload["next_commands"] = [
+            _display_command(["link", "seed", str(project_root), str(target), "--overwrite"]),
+            _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+            _display_command(["link", "health", str(target)]),
+        ]
+    elif status_value == "needs_attention":
+        payload["next_commands"] = [
+            "redact blocked project files, then rerun: "
+            + _display_command(["link", "seed", str(project_root), str(target)])
+        ]
+    elif status_value == "empty":
+        payload["next_commands"] = [
+            "add README.md, AGENTS.md, CLAUDE.md, .cursorrules, or agent rule files, then rerun seed"
+        ]
+    else:
+        payload["next_commands"] = [
+            _display_command(["link", "query", "what is this project about?", str(target), "--budget", "small"]),
+            _display_command(["link", "brief", f"working on {payload.get('project_title') or 'this project'}", str(target)]),
+            _display_command(["link", "health", str(target)]),
+        ]
+    if json_output:
+        print(json.dumps(payload, indent=2, default=str))
+        return 0 if payload.get("status") in {"ok", "partial", "already_seeded"} else 1
+
+    code, text = _core_render_seed_project_text(payload)
+    _print_text(text)
+    return code
+
+
 def starter_prompts(target: Path, project: str | None = None, json_output: bool = False) -> int:
     payload = _core_starter_prompt_payload(target, project=project)
     if json_output:
@@ -2476,6 +2546,7 @@ def main(argv: list[str] | None = None) -> int:
             "try": try_link,
             "proof": proof,
             "onboard": onboard,
+            "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,
             "status": status,

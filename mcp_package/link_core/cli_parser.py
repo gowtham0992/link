@@ -61,6 +61,17 @@ def build_cli_parser(
     onboard_cmd.add_argument("--port", type=int, default=3000, help="local viewer port to print")
     onboard_cmd.add_argument("--json", action="store_true", help="print machine-readable onboarding data")
 
+    seed_cmd = sub.add_parser("seed", help="seed Link with source-backed context from this project")
+    seed_cmd.add_argument("project", nargs="?", default=".", help="project directory to inspect")
+    seed_cmd.add_argument("target", nargs="?", default="~/link", help="Link workspace to seed")
+    seed_cmd.add_argument("--project-name", default=None, help="display name/project slug for the generated seed")
+    seed_cmd.add_argument("--overwrite", action="store_true", help="replace the generated seed source if it already exists")
+    seed_cmd.add_argument("--dry-run", action="store_true", help="show what would be seeded without writing files")
+    seed_cmd.add_argument("--limit", type=int, default=12, help="maximum allowlisted project files to inspect")
+    seed_cmd.add_argument("--no-git-log", action="store_true", help="do not include recent git commit summaries")
+    seed_cmd.add_argument("--git-log-limit", type=int, default=20, help="maximum recent git commits to include")
+    seed_cmd.add_argument("--json", action="store_true", help="print machine-readable seed status")
+
     welcome_cmd = sub.add_parser("welcome", help="print the shortest first-use path for Link")
     welcome_cmd.add_argument("target", nargs="?", default=".")
     welcome_cmd.add_argument("--project", default=None, help="project slug for project-scoped prompt examples")
@@ -403,6 +414,18 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             first_memory=args.first_memory,
             project=args.project,
             port=args.port,
+            json_output=args.json,
+        )
+    if command == "seed":
+        return handlers["seed"](
+            Path(args.target),
+            Path(args.project),
+            project_name=args.project_name,
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+            limit=args.limit,
+            include_git_log=not args.no_git_log,
+            git_log_limit=args.git_log_limit,
             json_output=args.json,
         )
     if command == "welcome":

@@ -126,6 +126,20 @@ prompts to try, and previews MCP wiring for Codex, Claude Code, Cursor, Kiro,
 VS Code, Copilot, Antigravity, and other supported clients. It only writes an
 agent config when you pass `--write`.
 
+Then seed your current repo so the first real recall is not empty:
+
+```bash
+cd /path/to/your/project
+lnk seed . ~/link
+lnk query "what is this project about?" ~/link --budget small
+```
+
+`lnk seed` reads allowlisted project files such as `README.md`, `AGENTS.md`,
+`CLAUDE.md`, `.cursorrules`, and editor rule files, blocks secret-looking
+values, writes a source-backed project page, and rebuilds the graph. It does
+not create durable memories; agents should still use reviewed memory proposals
+for preferences and decisions.
+
 The Homebrew formula is maintained in the public
 [`gowtham0992/homebrew-link`](https://github.com/gowtham0992/homebrew-link) tap.
 
@@ -270,6 +284,7 @@ Then ask your agent:
 ```text
 is Link ready?
 start with Link before we continue
+seed this project into Link
 ingest raw/notes.md into Link
 remember that I prefer short release notes
 query Link for the release process
@@ -280,6 +295,7 @@ end this session with Link memory proposals
 For CLI-first agents or Link skills, use the same startup loop directly:
 
 ```bash
+lnk seed . ~/link
 lnk start ~/link --task "working on Link release"
 lnk session-end session-notes.md ~/link --limit 3
 ```

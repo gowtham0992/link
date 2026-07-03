@@ -11,20 +11,25 @@ Use bounded CLI commands so the agent does not dump the whole wiki into context.
    ```bash
    lnk health [link-root]
    ```
-2. For most questions, use a compact query packet:
+2. If the user is inside a project repo and Link has no project context yet, seed allowlisted source-backed context before broad searching:
+   ```bash
+   lnk seed . [link-root]
+   ```
+   This reads project docs/rule files, blocks secret-looking values, and does not create durable memories.
+3. For most questions, use a compact query packet:
    ```bash
    lnk query "<question or task>" [link-root] --budget micro
    ```
    Read `recall_capsule` first. Increase to `--budget small`, `--budget medium`, or `--budget large` only when the packet says more context is needed.
-3. Before longer work, prime from memory:
+4. Before longer work, prime from memory:
    ```bash
    lnk brief "<current task>" [link-root]
    ```
-4. For graph context, stay bounded:
+5. For graph context, stay bounded:
    ```bash
    lnk graph-summary "<topic>" [link-root] --limit 40 --depth 1
    ```
-5. For performance checks, use:
+6. For performance checks, use:
    ```bash
    lnk benchmark "<topic>" [link-root] --budget small
    ```

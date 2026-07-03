@@ -40,6 +40,11 @@ def starter_prompt_payload(target: Path, project: str | None = None) -> dict[str
             "when": "at the start of a session or task",
         },
         {
+            "label": "Seed project context",
+            "prompt": "seed this project into Link",
+            "when": "after install inside a repo, before the first real project recall",
+        },
+        {
             "label": "Save explicit memory",
             "prompt": remember_prompt,
             "when": "when you want future agents to remember a preference, decision, or project fact",
@@ -66,6 +71,7 @@ def starter_prompt_payload(target: Path, project: str | None = None) -> dict[str
         "shortcut": display_command(["link", "next", command_target]),
         "prompts": prompts,
         "commands": [
+            display_command(["link", "seed", ".", command_target]),
             display_command(["link", "health", command_target]),
             display_command(["link", "ingest-status", command_target]),
             display_command(["link", "memory-inbox", command_target]),
