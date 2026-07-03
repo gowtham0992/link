@@ -557,6 +557,50 @@ def render_capture_session_text(payload: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def render_session_end_text(payload: dict[str, object]) -> str:
+    """Render the agent-friendly session-end proposal output."""
+    proposals = payload.get("proposals") if isinstance(payload.get("proposals"), dict) else {}
+    proposal_items = proposals.get("proposals") if isinstance(proposals.get("proposals"), list) else []
+    lines = [
+        "Link session end",
+        "Captured proposal-only session notes for review.",
+        f"Path: {payload.get('path')}",
+    ]
+    if payload.get("project"):
+        lines.append(f"Project: {payload.get('project')}")
+    secret_warnings = payload.get("secret_warnings") if isinstance(payload.get("secret_warnings"), list) else []
+    if secret_warnings:
+        lines.append("Secret-looking content: " + ", ".join(str(label) for label in secret_warnings))
+    lines.append(f"Memory proposals: {proposals.get('count', 0)}")
+    if not proposal_items:
+        lines.extend([
+            "No durable memory candidates found.",
+            "",
+            "Next:",
+            "  Continue without saving memory.",
+        ])
+        return "\n".join(lines)
+    for index, proposal in enumerate(proposal_items, start=1):
+        if not isinstance(proposal, dict):
+            continue
+        lines.extend([
+            "",
+            f"{index}. {proposal.get('title')} [{proposal.get('confidence')}]",
+            f"   Type: {proposal.get('memory_type')} | Scope: {proposal.get('scope')}",
+        ])
+        if proposal.get("project"):
+            lines.append(f"   Project: {proposal.get('project')}")
+        lines.append(f"   Action: {proposal.get('suggested_action')}")
+        lines.append(f"   Memory: {proposal.get('memory')}")
+    lines.extend([
+        "",
+        "Next:",
+        "  Ask the user which proposals to remember, update, archive, or discard.",
+        "  Do not save durable memory without approval.",
+    ])
+    return "\n".join(lines)
+
+
 def capture_review_summary(
     root: Path,
     limit: int = 3,

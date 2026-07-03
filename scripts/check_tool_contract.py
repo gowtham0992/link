@@ -21,6 +21,7 @@ EXPECTED_CLI_COMMANDS = {
     "delete-capture",
     "demo",
     "doctor",
+    "end",
     "explain-memory",
     "forget-memory",
     "graph-summary",
@@ -52,6 +53,7 @@ EXPECTED_CLI_COMMANDS = {
     "review-memory",
     "serve",
     "set-memory-visibility",
+    "session-end",
     "share",
     "snapshot",
     "start",
@@ -119,6 +121,7 @@ EXPECTED_MCP_PROMPTS = {
     "link_ingest",
     "link_remember",
     "link_review",
+    "link_session_end",
     "link_start",
 }
 
@@ -130,7 +133,7 @@ EXPECTED_MCP_RESOURCES = {
     "link://project",
 }
 
-DOCS_CLI_COMMANDS = EXPECTED_CLI_COMMANDS - {"query-link"}
+DOCS_CLI_COMMANDS = EXPECTED_CLI_COMMANDS - {"end", "query-link"}
 CLI_DOC_PATH = Path("docs/cli.html")
 MCP_DOC_PATHS = (
     Path("docs/mcp.html"),

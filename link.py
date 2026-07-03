@@ -26,6 +26,7 @@ Usage:
   python link.py import-obsidian <vault> [target]
   python link.py remember "memory text" [target]
   python link.py propose-memories <file-or-text> [target]
+  python link.py session-end <file-or-text> [target]
   python link.py capture-inbox [target]
   python link.py update-memory <name-or-title> "new memory text" [target]
   python link.py query "task or question" [target]
@@ -232,6 +233,7 @@ from link_core.capture import (
     render_capture_inbox_text as _core_render_capture_inbox_text,
     render_delete_capture_text as _core_render_delete_capture_text,
     render_redact_capture_text as _core_render_redact_capture_text,
+    render_session_end_text as _core_render_session_end_text,
     redact_capture_file as _core_redact_capture_file,
     write_session_capture as _core_write_session_capture,
 )
@@ -1083,6 +1085,8 @@ def remember(
 
 def _read_proposal_input(target: Path, value: str) -> tuple[str, str]:
     raw = value.strip()
+    if raw == "-":
+        return sys.stdin.read(), "stdin"
     candidates = [Path(raw).expanduser()]
     target_path = target.expanduser()
     if not Path(raw).is_absolute():
@@ -1197,6 +1201,75 @@ def capture_session(
         return 0
 
     _print_text(_core_render_capture_session_text(payload))
+    return 0
+
+
+def session_end(
+    target: Path,
+    source_input: str,
+    title: str | None = None,
+    limit: int = 3,
+    project: str | None = None,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+
+    text, source = _read_proposal_input(root, source_input)
+    if not text.strip():
+        print("Session-end input is required", file=sys.stderr)
+        return 1
+
+    project_name = project or _default_project(root)
+    capture_record = _core_write_session_capture(
+        root,
+        text=text,
+        source=source,
+        title=title or "Session end",
+        project=project_name,
+        default_source="session-end",
+        path_source=True,
+    )
+    rel_path = str(capture_record["path"])
+    result = _propose_memories_from_text(
+        wiki_dir,
+        text,
+        source=rel_path,
+        limit=max(1, min(limit, 10)),
+        project=project_name,
+        command_target=root,
+    )
+    payload = {
+        "captured": True,
+        "path": rel_path,
+        "source_input": source,
+        "title": capture_record["title"],
+        "project": capture_record["project"],
+        "secret_warnings": capture_record["secret_warnings"],
+        "proposals": result,
+    }
+    _append_log(
+        wiki_dir,
+        str(capture_record["timestamp"]),
+        "session-end",
+        f"Captured proposal-only session end notes at {rel_path}",
+        [
+            f"Source input: {source}",
+            f"Project: {capture_record['project'] or 'none'}",
+            f"Secret warnings: {', '.join(capture_record['secret_warnings']) if capture_record['secret_warnings'] else 'none'}",
+            f"Proposals: {result['count']}",
+        ],
+    )
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    _print_text(_core_render_session_end_text(payload))
     return 0
 
 
@@ -2422,6 +2495,7 @@ def main(argv: list[str] | None = None) -> int:
             "remember": remember,
             "propose-memories": propose_memories,
             "capture-session": capture_session,
+            "session-end": session_end,
             "capture-inbox": capture_inbox,
             "accept-capture": accept_capture,
             "redact-capture": redact_capture,

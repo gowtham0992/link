@@ -135,6 +135,34 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(args.project, "link")
         self.assertTrue(args.json)
 
+    def test_session_end_command_options(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args([
+            "session-end",
+            "session-notes.md",
+            "/tmp/link",
+            "--title",
+            "Release session",
+            "--limit",
+            "2",
+            "--project",
+            "link",
+            "--json",
+        ])
+
+        self.assertEqual(args.command, "session-end")
+        self.assertEqual(args.source_input, "session-notes.md")
+        self.assertEqual(args.target, "/tmp/link")
+        self.assertEqual(args.title, "Release session")
+        self.assertEqual(args.limit, 2)
+        self.assertEqual(args.project, "link")
+        self.assertTrue(args.json)
+
+        alias = parser.parse_args(["end", "notes.md", "/tmp/link"])
+        self.assertEqual(alias.command, "end")
+        self.assertEqual(alias.source_input, "notes.md")
+
     def test_connect_command_options(self):
         parser = build_cli_parser()
 
@@ -423,6 +451,36 @@ class CliParserCoreTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["limit"], 4)
         self.assertEqual(calls[0][1]["project"], "link")
         self.assertTrue(calls[0][1]["json_output"])
+
+    def test_dispatch_routes_session_end_to_session_end_handler(self):
+        parser = build_cli_parser()
+        args = parser.parse_args([
+            "session-end",
+            "session-notes.md",
+            "/tmp/link",
+            "--title",
+            "Release session",
+            "--limit",
+            "2",
+            "--project",
+            "link",
+            "--json",
+        ])
+        calls = []
+
+        def session_end_handler(target, source_input, **kwargs):
+            calls.append((target, source_input, kwargs))
+            return 9
+
+        code = dispatch_cli_command(args, {"session-end": session_end_handler})
+
+        self.assertEqual(code, 9)
+        self.assertEqual(calls[0][0], Path("/tmp/link"))
+        self.assertEqual(calls[0][1], "session-notes.md")
+        self.assertEqual(calls[0][2]["title"], "Release session")
+        self.assertEqual(calls[0][2]["limit"], 2)
+        self.assertEqual(calls[0][2]["project"], "link")
+        self.assertTrue(calls[0][2]["json_output"])
 
     def test_dispatch_routes_try_arguments(self):
         parser = build_cli_parser()

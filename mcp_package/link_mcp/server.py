@@ -874,8 +874,10 @@ def link_instructions_resource() -> str:
         "`recall(query=\"<task>\", budget=\"micro\")` and read `recall_capsule` first.\n"
         "4. Use `ingest(action=\"status\")` when the user adds files to `raw/`.\n"
         "5. Use `remember` only when the user explicitly asks or approves durable memory.\n"
-        "6. Use `review` for inbox, explain, archive, restore, forget, profile, audit, and log workflows.\n"
-        "7. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "6. At session end, use `admin(action=\"session_end\", arguments=\"{...}\")` or `capture_session` "
+        "to save proposal-only notes for user review.\n"
+        "7. Use `review` for inbox, explain, archive, restore, forget, profile, audit, and log workflows.\n"
+        "8. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
         "Never silently save durable memory. Prefer reviewed memories and source-backed wiki pages, and cite "
         "provenance when explaining why Link knows something.\n"
     )
@@ -962,6 +964,21 @@ def link_remember_prompt(memory: str = "") -> str:
     return (
         "Save this only if the user asked Link to remember it. "
         f"Use remember(text={memory_text!r}) and handle duplicate/conflict responses by updating or reviewing existing memory."
+    )
+
+
+@mcp.prompt(
+    name="link_session_end",
+    title="Link: end a session",
+    description="Capture session notes as proposal-only memory candidates.",
+)
+def link_session_end_prompt(summary: str = "") -> str:
+    summary_text = summary.strip() or "<short session summary or transcript>"
+    return (
+        "End this session with Link without silently saving durable memory. "
+        f"Use admin(action='session_end', arguments='{{\"text\": {json.dumps(summary_text)}, \"limit\": 3}}') "
+        "or capture_session with the session notes. Show the returned proposals to the user and only call "
+        "remember after the user approves a proposal."
     )
 
 
@@ -1242,7 +1259,7 @@ def admin(action: str, arguments: str = "{}") -> str:
     Pass action plus a JSON object string in arguments. Common actions include:
     backup, migrate, validate, operations, search, context, pages, backlinks,
     graph_summary, graph, rebuild_index, rebuild_backlinks, propose_memories,
-    capture_session, capture_inbox, accept_capture, redact_capture,
+    capture_session, session_end, capture_inbox, accept_capture, redact_capture,
     delete_capture, update_memory, and set_visibility.
     """
     clean_action = (_clean_text_input(action, max_len=100) or "").lower().replace("-", "_")
@@ -1304,12 +1321,12 @@ def admin(action: str, arguments: str = "{}") -> str:
                 limit=_int_arg(payload, "limit", 10),
                 project=_str_arg(payload, "project"),
             )
-        if clean_action == "capture_session":
+        if clean_action in {"capture_session", "session_end"}:
             return capture_session(
                 _str_arg(payload, "text"),
                 title=_str_arg(payload, "title"),
-                source=_str_arg(payload, "source", "mcp"),
-                limit=_int_arg(payload, "limit", 10),
+                source=_str_arg(payload, "source", clean_action),
+                limit=_int_arg(payload, "limit", 3 if clean_action == "session_end" else 10),
                 project=_str_arg(payload, "project"),
             )
         if clean_action == "capture_inbox":
@@ -1353,7 +1370,7 @@ def admin(action: str, arguments: str = "{}") -> str:
             "backup", "migrate", "validate", "operations", "prompts",
             "search", "context", "pages", "backlinks", "graph_summary", "graph",
             "rebuild_index", "rebuild_backlinks", "propose_memories",
-            "capture_session", "capture_inbox", "accept_capture", "redact_capture",
+            "capture_session", "session_end", "capture_inbox", "accept_capture", "redact_capture",
             "delete_capture", "update_memory", "set_visibility",
         ],
     })

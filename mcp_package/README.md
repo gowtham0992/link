@@ -117,11 +117,14 @@ New MCP configs should expose Link through six model-facing tools:
    validate, graph export, pages, captures, rebuilds, and advanced updates.
 
 Link also exposes MCP prompts `link_start`, `link_brief`, `link_remember`,
-`link_ingest`, and `link_review`, plus resources `link://instructions`,
-`link://health`, `link://brief`, `link://profile`, and `link://project` for
-clients that support prompt/resource attachment. `link_start` and
-`link://instructions` are the portable startup loop: check readiness, run a
-brief recall once, then use bounded recall before broad context reads.
+`link_session_end`, `link_ingest`, and `link_review`, plus resources
+`link://instructions`, `link://health`, `link://brief`, `link://profile`, and
+`link://project` for clients that support prompt/resource attachment.
+`link_start` and `link://instructions` are the portable startup loop: check
+readiness, run a brief recall once, then use bounded recall before broad context
+reads. `link_session_end` is the matching proposal-only shutdown loop: capture
+useful session notes, return memory candidates, and wait for user approval
+before durable writes.
 
 Slim agents should call:
 
@@ -130,13 +133,15 @@ Slim agents should call:
 3. `recall(query="<question>", budget="micro"|"small")` before broad file reads or asking the user to repeat durable context.
 4. `ingest(action="status")` when the user drops files into `raw/`.
 5. `remember(...)` only when the user explicitly approves saving durable memory.
-6. `review(action="inbox"|"audit"|"profile"|"explain"|...)` for memory lifecycle review.
-7. `admin(action, arguments)` for backup, migrate, validate, graph export, captures, rebuilds, and compatibility actions.
+6. `admin(action="session_end", arguments="{...}")` at session end to propose memory without silently saving it.
+7. `review(action="inbox"|"audit"|"profile"|"explain"|...)` for memory lifecycle review.
+8. `admin(action, arguments)` for backup, migrate, validate, graph export, captures, rebuilds, and compatibility actions.
 
 Add `review_after` for memories that should return to the review inbox after a
 date, or `expires_at` for temporary context that should leave default recall
 after a date. Use `admin(action="propose_memories")` or
-`admin(action="capture_session")` for proposal-only review.
+`admin(action="capture_session")` / `admin(action="session_end")` for
+proposal-only review.
 For local CLI setup checks, `link verify-mcp --json` returns structured
 `issues` and `next_actions` that agents and scripts can consume without parsing
 terminal text.

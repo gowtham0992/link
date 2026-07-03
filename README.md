@@ -223,7 +223,8 @@ when the web viewer is not running.
 
 Prefer skills instead of MCP? Link ships small, lazy-loadable CLI skills under
 `skills/`. They let an agent use `lnk health`, `lnk query`, `lnk ingest-status`,
-and `lnk remember` directly, without MCP setup or a running web viewer.
+`lnk session-end`, and `lnk remember` directly, without MCP setup or a running
+web viewer.
 
 ```text
 skills/link-health/SKILL.md
@@ -273,12 +274,14 @@ ingest raw/notes.md into Link
 remember that I prefer short release notes
 query Link for the release process
 what does Link remember about local personal memory?
+end this session with Link memory proposals
 ```
 
 For CLI-first agents or Link skills, use the same startup loop directly:
 
 ```bash
 lnk start ~/link --task "working on Link release"
+lnk session-end session-notes.md ~/link --limit 3
 ```
 
 If you want one guided setup for a real workspace and an agent, use

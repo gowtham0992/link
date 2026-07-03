@@ -15,18 +15,23 @@ Use this skill after important user-approved decisions, preference changes, proj
    ```bash
    lnk recall "<topic>" [link-root]
    ```
-3. Save an explicit memory:
+3. End a session with proposal-only memory candidates:
+   ```bash
+   lnk session-end <session-notes-or-transcript> [link-root] --limit 3
+   ```
+   Use `-` as the input when piping a transcript on stdin. Show the proposals to the user; do not save durable memory until the user approves one.
+4. Save an explicit memory:
    ```bash
    lnk remember "<user-approved memory>" [link-root] --type note --scope user
    ```
    Use `--project <slug>` for project-scoped memory, `--visibility private|project|team` for sharing intent, `--review-after YYYY-MM-DD` for stale-risk memories, and `--expires-at YYYY-MM-DD` for temporary context.
-4. Review and explain before trusting uncertain memory:
+5. Review and explain before trusting uncertain memory:
    ```bash
    lnk memory-inbox [link-root]
    lnk explain-memory <name-or-title> [link-root]
    lnk review-memory <name-or-title> [link-root]
    ```
-5. Change lifecycle safely:
+6. Change lifecycle safely:
    ```bash
    lnk update-memory <name-or-title> "<new text>" [link-root]
    lnk archive-memory <name-or-title> [link-root] --reason "<why>"

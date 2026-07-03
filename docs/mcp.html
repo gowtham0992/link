@@ -136,6 +136,7 @@ python3 -m link_mcp --version</code></pre>
           <li>Call <code>recall(query, budget="micro")</code> before broad file reads or asking the user to repeat durable context.</li>
           <li>Call <code>ingest</code> when the user drops files into <code>raw/</code>.</li>
           <li>Call <code>remember</code> only after the user explicitly approves durable memory.</li>
+          <li>At session end, call <code>admin(action="session_end")</code> or <code>capture_session</code> to propose memory candidates without saving them silently.</li>
           <li>Call <code>review</code> for memory inbox, profile, audit, explain, archive, restore, forget, and visibility workflows.</li>
           <li>Call <code>admin</code> for backup, migrate, validate, rebuild, graph export, pages, captures, and advanced updates.</li>
         </ol>
@@ -152,6 +153,7 @@ admin</code></pre>
         <pre><code>link_start
 link_brief
 link_remember
+link_session_end
 link_ingest
 link_review</code></pre>
         <p>MCP resources exposed by Link:</p>
@@ -160,7 +162,7 @@ link://health
 link://brief
 link://profile
 link://project</code></pre>
-        <p><code>link_start</code> and <code>link://instructions</code> carry the portable startup loop for clients that support native prompts or resource attachment: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads.</p>
+        <p><code>link_start</code> and <code>link://instructions</code> carry the portable startup loop for clients that support native prompts or resource attachment: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads. <code>link_session_end</code> carries the matching review-gated shutdown loop: capture useful session notes, return proposals, and wait for user approval before durable memory writes.</p>
         <p>Full compatibility tool set available with <code>--surface full</code>:</p>
         <pre><code>link_status
 link_operations

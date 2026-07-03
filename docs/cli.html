@@ -60,7 +60,7 @@
           <img src="assets/link-cli-tour.gif" alt="Animated tour of Link CLI readiness, query, brief, and benchmark commands">
           <figcaption>Status, query, brief, and benchmark are the core terminal loop.</figcaption>
         </figure>
-        <p>The CLI is independent of the web viewer. Use <code>lnk start</code>, <code>lnk query</code>, <code>lnk brief</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
+        <p>The CLI is independent of the web viewer. Use <code>lnk start</code>, <code>lnk query</code>, <code>lnk brief</code>, <code>lnk session-end</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
         <p>Use <code>lnk try</code> when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command.</p>
         <p>Use <code>lnk proof</code> when you want to prove the cross-agent memory loop directly: one clean local workspace, one reviewed memory, and one bounded recall packet shared by CLI, skills, and MCP.</p>
         <p>Use <code>lnk onboard</code> when you want to set up a real <code>~/link</code> workspace: safe repair, health check, optional first memory, first prompts, and optional agent MCP wiring in one guided command. If the local viewer is running, <code>/onboard</code> mirrors that flow with copy buttons.</p>
@@ -72,6 +72,7 @@ lnk proof
 lnk welcome
 lnk next
 lnk start ~/link --task "working on Link release"
+lnk session-end session-notes.md ~/link --limit 3
 lnk health
 lnk ingest-status
 lnk remember "User prefers feature branches for Link work." --type preference --scope project --project link --visibility project --review-after 2026-08-01
@@ -93,8 +94,10 @@ lnk validate</code></pre>
         </div>
 
         <h2 id="captures">Capture Workflow</h2>
-        <p>Use captures for longer chat notes or session summaries that should be reviewed before becoming durable memory.</p>
-        <pre><code>lnk capture-session session-notes.md --project link
+        <p>Use <code>lnk session-end</code> at the end of a work session when an agent has notes or a transcript and should propose memory without saving it silently. Use lower-level captures for saved review inbox workflows.</p>
+        <pre><code>lnk session-end session-notes.md ~/link --project link --limit 3
+cat transcript.md | lnk session-end - ~/link --project link
+lnk capture-session session-notes.md --project link
 lnk capture-inbox --project link
 lnk accept-capture raw/memory-captures/&lt;capture&gt;.md --index 1
 lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
@@ -150,6 +153,7 @@ lnk ingest-status
 lnk import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
 lnk remember "text" [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD]
 lnk propose-memories &lt;file-or-text&gt; [--project slug]
+lnk session-end &lt;file-or-text-or-&gt; [dir] [--project slug] [--limit 3]
 lnk capture-session &lt;file-or-text&gt; [--project slug]
 lnk capture-inbox [--project slug]
 lnk accept-capture &lt;capture&gt; [--index N] [--visibility private|project|team]

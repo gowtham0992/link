@@ -11,6 +11,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added per-memory recall `confidence` labels (`strong`, `moderate`, `weak`) based on significant-token coverage, so agents can tell a real preference match from an incidental shared word before acting on it.
 - Added lightweight suffix stemming to memory recall scoring so close paraphrases like "commits" still find memories phrased with "committing", without embeddings or external services.
 - Added weak-match guidance to recall packets and CLI recall output: when every matched memory is a weak lexical match, Link now says so and tells the agent to verify with the user instead of presenting it as a known preference.
+- Added `lnk session-end` (alias `lnk end`) as the agent-agnostic end-of-session lifecycle command: it stores proposal-only session notes, returns a small set of memory candidates, and refuses to create durable memory without user approval.
+- Added MCP `link_session_end` prompt guidance and `admin(action="session_end")` support so MCP clients can run the same proposal-only shutdown loop without adding another default slim tool.
+- Updated official skills, installed agent instructions, README, CLI docs, MCP docs, and package README around the portable loop: start with bounded recall, end with review-gated memory proposals.
 
 - Added a slim MCP surface for LLM-native clients so agents can rely on a smaller default set of high-signal tools while the full tool surface remains available for compatibility.
 - Added MCP prompt and resource coverage so clients can expose Link recall, remember, ingest, and review workflows as native agent actions instead of requiring users to memorize tool names.

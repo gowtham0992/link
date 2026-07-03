@@ -1550,6 +1550,38 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(len(after_memories), len(before_memories))
         self.assertIn("capture-session", log_text)
 
+    def test_session_end_writes_proposal_only_capture(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-session-end-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        before_memories = list((target / "wiki/memories").glob("*.md"))
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.session_end(
+                target,
+                "We decided Link session-end should propose memories but never save them without approval.",
+                project="link",
+                json_output=True,
+            )
+
+        payload = json.loads(out.getvalue())
+        capture_path = target / payload["path"]
+        after_memories = list((target / "wiki/memories").glob("*.md"))
+        capture_text = capture_path.read_text(encoding="utf-8")
+        log_text = (target / "wiki/log.md").read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["captured"])
+        self.assertEqual(payload["project"], "link")
+        self.assertTrue(payload["path"].startswith("raw/memory-captures/"))
+        self.assertIn("Session end", capture_text)
+        self.assertIn("proposal-only", capture_text)
+        self.assertGreaterEqual(payload["proposals"]["count"], 1)
+        self.assertEqual(len(after_memories), len(before_memories))
+        self.assertIn("session-end", log_text)
+        self.assertNotIn("remember-memory", log_text)
+
     def test_capture_inbox_lists_captures_without_secret_values(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-memory-test-"))
         target = tmp / "demo"

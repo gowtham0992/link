@@ -9,7 +9,7 @@ EXPECTED_SKILLS = {
     "link-health": ("lnk health", "lnk operations", "lnk backup", "lnk validate"),
     "link-retrieve": ("lnk query", "lnk brief", "lnk graph-summary", "lnk benchmark"),
     "link-ingest": ("lnk ingest-status", "lnk propose-memories", "lnk rebuild-index", "lnk validate"),
-    "link-memory": ("lnk brief", "lnk recall", "lnk remember", "lnk memory-inbox"),
+    "link-memory": ("lnk brief", "lnk recall", "lnk session-end", "lnk remember", "lnk memory-inbox"),
 }
 
 

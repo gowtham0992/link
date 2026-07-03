@@ -45,6 +45,7 @@ EXPECTED_PROMPTS = {
     "link_ingest",
     "link_remember",
     "link_review",
+    "link_session_end",
     "link_start",
 }
 
@@ -92,6 +93,10 @@ async def _assert_prompt_and_resource_contract(session: Any) -> None:
     start_text = getattr(start_prompt.messages[0].content, "text", "") if start_prompt.messages else ""
     if "recall(query='', mode='brief'" not in start_text or "recall_capsule" not in start_text:
         raise RuntimeError("link_start prompt did not render startup recall guidance")
+    end_prompt = await session.get_prompt("link_session_end", {"summary": "we decided to keep memory review-gated"})
+    end_text = getattr(end_prompt.messages[0].content, "text", "") if end_prompt.messages else ""
+    if "admin(action='session_end'" not in end_text or "without silently saving durable memory" not in end_text:
+        raise RuntimeError("link_session_end prompt did not render proposal-only guidance")
 
     resources = await session.list_resources()
     resource_uris = {str(resource.uri) for resource in resources.resources}

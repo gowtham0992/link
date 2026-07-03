@@ -335,10 +335,13 @@ class McpContractTests(unittest.TestCase):
         self.assertIn("recall_capsule", self.server.link_start_prompt("release work"))
         self.assertIn("recall(query=", self.server.link_brief_prompt("release work"))
         self.assertIn("remember", self.server.link_remember_prompt("I prefer short notes"))
+        self.assertIn("admin(action='session_end'", self.server.link_session_end_prompt("we kept memory reviewed"))
+        self.assertIn("without silently saving durable memory", self.server.link_session_end_prompt())
         self.assertIn("ingest(action='status')", self.server.link_ingest_prompt("raw/notes.md"))
         self.assertIn("review(action='inbox')", self.server.link_review_prompt())
 
         instructions = self.server.link_instructions_resource()
+        self.assertIn("session_end", instructions)
         health = json.loads(self.server.link_health_resource())
         brief = json.loads(self.server.link_brief_resource())
         profile = json.loads(self.server.link_profile_resource())

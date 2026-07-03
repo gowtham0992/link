@@ -187,6 +187,14 @@ def build_cli_parser(
     capture_cmd.add_argument("--project", default=None, help="project key for proposal checks")
     capture_cmd.add_argument("--json", action="store_true", help="print machine-readable capture details")
 
+    session_end_cmd = sub.add_parser("session-end", aliases=["end"], help="end a session by saving proposal-only notes and memory candidates")
+    session_end_cmd.add_argument("source_input", help="text, path, or '-' for stdin session notes")
+    session_end_cmd.add_argument("target", nargs="?", default=".")
+    session_end_cmd.add_argument("--title", default=None, help="title for the raw session-end note")
+    session_end_cmd.add_argument("--limit", type=int, default=3, help="maximum memory proposals to return")
+    session_end_cmd.add_argument("--project", default=None, help="project key for proposal checks")
+    session_end_cmd.add_argument("--json", action="store_true", help="print machine-readable session-end details")
+
     capture_inbox_cmd = sub.add_parser("capture-inbox", help="list saved raw session captures")
     capture_inbox_cmd.add_argument("target", nargs="?", default=".")
     capture_inbox_cmd.add_argument("--limit", type=int, default=20)
@@ -503,6 +511,15 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         )
     if command == "capture-session":
         return handlers["capture-session"](
+            Path(args.target),
+            args.source_input,
+            title=args.title,
+            limit=args.limit,
+            project=args.project,
+            json_output=args.json,
+        )
+    if command in {"session-end", "end"}:
+        return handlers["session-end"](
             Path(args.target),
             args.source_input,
             title=args.title,
