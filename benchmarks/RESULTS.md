@@ -71,6 +71,13 @@ Full suite, Apple M4, macOS 26.5.1, Python 3.14, run 2026-07-08, Link
   The zero-overlap ceiling is the static-embedding paradigm itself, which is
   why the quality tier uses a contextual model instead of a bigger static one.
 - **potion-base-32M**: marginal over 8M; not worth 4× the size as a default.
+- **Token-level late interaction (MaxSim over static token vectors)**: worse
+  than blob embeddings on both groups (zero-overlap hit@5 0.160 vs 0.202) —
+  static per-token vectors are too noisy for ColBERT-style matching.
+- **Corpus-mined PMI query expansion** (learning the user's vocabulary from
+  their own wiki): cannot help zero-overlap queries by construction (there is
+  no shared token to expand from) and slightly hurt token-overlap hit@1 by
+  pulling in competing memories. Rejected.
 
 ## Track 2: LoCoMo third-party retrieval
 
