@@ -3064,6 +3064,68 @@ class AgentHookCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
 
+    def test_session_end_explain_prints_decision_trail(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-explain-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "user", "message": {"role": "user", "content":
+                "Link memory (local, source-backed) · injected brief echo"}}) + "\n" +
+            json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}}),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end", explain=True)
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("dropped 1 carrying Link's own output", text)
+        self.assertIn("trivial session", text)
+
+    def test_conflict_output_offers_supersede_command(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-supersede-ux-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+            link_cli.remember(target, "Releases ship weekly on Thursdays", title="Weekly releases",
+                              memory_type="decision")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.remember(
+                target, "Releases do not ship weekly on Thursdays anymore",
+                title="No weekly releases", memory_type="decision",
+            )
+
+        self.assertEqual(code, 0)
+        self.assertIn("--supersedes weekly-releases", out.getvalue())
+
+    def test_recall_text_shows_applicability_and_steps(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-recall-text-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+            link_cli.remember(
+                target, "1. Cut branch 2. Cherry-pick 3. Deploy from tag",
+                title="Hotfix procedure", memory_type="procedure",
+                trigger="hotfixing production",
+                applies_when="project:acme",
+            )
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.recall(target, "hotfixing production", project="other")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("out of context here", text)
+        self.assertIn("When: hotfixing production", text)
+        self.assertIn("1. Cut branch", text)
+
     def test_connect_hooks_rejects_unsupported_agent(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
         target = tmp / "demo"

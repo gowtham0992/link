@@ -179,7 +179,15 @@ def build_cli_parser(
     obsidian_cmd.add_argument("--limit", type=int, default=None, help="maximum notes to scan/import")
     obsidian_cmd.add_argument("--json", action="store_true", help="print machine-readable import status")
 
-    remember_cmd = sub.add_parser("remember", help="save a local agent memory")
+    remember_cmd = sub.add_parser(
+        "remember",
+        help="save a local agent memory",
+        epilog=(
+            "one rule for the knobs: finding it -> --trigger · fencing it -> --applies-when · "
+            "owning it -> --scope/--project/--visibility · replacing it -> --supersedes (name or title) · "
+            "aging it -> --review-after/--expires-at. When in doubt, use none; every knob can be added later."
+        ),
+    )
     remember_cmd.add_argument("text", help="memory text to save")
     remember_cmd.add_argument("target", nargs="?", default=".")
     remember_cmd.add_argument("--title", default=None, help="memory page title")
@@ -320,6 +328,11 @@ def build_cli_parser(
     hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
     hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     hook_cmd.add_argument(
+        "--explain",
+        action="store_true",
+        help="session-end: print the decision trail (what was dropped as echo/noise and why)",
+    )
+    hook_cmd.add_argument(
         "--emit",
         choices=["text", "cursor"],
         default="text",
@@ -423,7 +436,13 @@ def build_cli_parser(
     connect_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also configure session hooks so new sessions start with the Link brief (Claude Code)",
+        help="also configure session hooks so new sessions start with the Link brief (Claude Code, Codex, Cursor)",
+    )
+    connect_cmd.add_argument(
+        "--hooks-settings",
+        default=None,
+        dest="hooks_settings",
+        help="override the hooks settings file, e.g. .claude/settings.json inside a repo for project-scoped hooks",
     )
     connect_cmd.add_argument("--json", action="store_true", help="print machine-readable connection plan")
 
@@ -713,6 +732,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             limit=args.limit,
             project=args.project,
             emit=args.emit,
+            explain=args.explain,
         )
     if command == "recipes":
         return handlers["recipes"](Path(args.target), project=args.project, limit=args.limit, json_output=args.json)
@@ -765,6 +785,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             config_path=args.config,
             python_cmd=args.python,
             hooks=args.hooks,
+            hooks_settings=args.hooks_settings,
             json_output=args.json,
         )
     raise ValueError(f"unknown command: {command}")

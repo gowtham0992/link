@@ -347,6 +347,7 @@ def extract_transcript_text(
     *,
     max_chars: int = 6000,
     max_message_chars: int = 800,
+    stats: dict[str, int] | None = None,
 ) -> str:
     """Extract bounded conversation text from an agent transcript JSONL file.
 
@@ -379,7 +380,11 @@ def extract_transcript_text(
         if not text:
             continue
         if any(marker in text for marker in LINK_ECHO_MARKERS):
+            if stats is not None:
+                stats["dropped_link_output"] = stats.get("dropped_link_output", 0) + 1
             continue
+        if stats is not None:
+            stats["kept_messages"] = stats.get("kept_messages", 0) + 1
         if len(text) > max_message_chars:
             text = text[: max_message_chars].rstrip() + " …"
         role = "User" if entry.get("type") == "user" else "Assistant"

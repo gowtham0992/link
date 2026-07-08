@@ -66,8 +66,11 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
             ]
             first = _first_candidate_name(result.get("conflict_candidates", []))
             if first:
-                lines.append(f"  {_shell_words('python3', 'link.py', 'explain-memory', first, target)}")
-            lines.append("  Update/archive the old memory, or use --allow-conflict only if both should coexist.")
+                lines.append(
+                    f"  Replace the old memory (archives it with lineage): rerun this remember with --supersedes {first}"
+                )
+                lines.append(f"  Inspect it first: {_shell_words('python3', 'link.py', 'explain-memory', first, target)}")
+            lines.append("  Or update/archive the old memory manually; use --allow-conflict only if both should truly coexist.")
             return 0, "\n".join(lines)
 
         lines = [
@@ -98,6 +101,8 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
     ]
     if result.get("project"):
         lines.append(f"Project: {result['project']}")
+    if result.get("supersedes"):
+        lines.append(f"Supersedes: {result['supersedes']} (archived with lineage)")
     if result.get("review_after"):
         lines.append(f"Review after: {result['review_after']}")
     if result.get("expires_at"):
@@ -227,6 +232,20 @@ def render_recall_text(
     for record in results:
         lines.append(f"- {record['title']} ({record['memory_type']} · {record['scope']})")
         lines.append(f"  {record['path']}")
+        applicability = str(record.get("applicability") or "")
+        if applicability == "out_of_context":
+            lines.append("  Applies: out of context here — verify with the user before applying this memory.")
+        elif applicability == "matched":
+            lines.append("  Applies: conditions match this context.")
+        trigger = str(record.get("trigger") or "").strip()
+        if trigger:
+            lines.append(f"  When: {trigger}")
+        steps = str(record.get("steps") or "").strip()
+        if steps:
+            for step_line in steps.splitlines()[:4]:
+                lines.append(f"    {step_line}")
+            if len(steps.splitlines()) > 4:
+                lines.append("    …")
         recall = record.get("recall") if isinstance(record.get("recall"), Mapping) else {}
         confidence = str(record.get("confidence") or "")
         if recall.get("state"):

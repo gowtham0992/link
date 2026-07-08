@@ -2190,12 +2190,26 @@ def _session_notes_fingerprint(notes: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, project: str | None) -> int:
+def _hook_session_end(
+    target: Path, hook_event: dict[str, object], limit: int, project: str | None,
+    explain: bool = False,
+) -> int:
+    def _trace(message: str) -> None:
+        if explain:
+            print(f"[session-end] {message}")
+
     transcript_value = str(hook_event.get("transcript_path") or "").strip()
     if not transcript_value:
+        _trace("no transcript_path in the hook event; nothing to capture.")
         return 0
-    notes = _core_extract_transcript_text(Path(transcript_value).expanduser())
+    extraction_stats: dict[str, int] = {}
+    notes = _core_extract_transcript_text(Path(transcript_value).expanduser(), stats=extraction_stats)
+    _trace(
+        f"transcript: kept {extraction_stats.get('kept_messages', 0)} messages, "
+        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own output (echo guard, layer 1)."
+    )
     if len(notes.strip()) < 200:
+        _trace("skipped: under 200 characters of conversation — nothing memory-worthy in a trivial session.")
         return 0
     # Skip duplicate firings for the same conversation content (e.g. /clear
     # immediately followed by exit, or repeated end events).
@@ -2203,6 +2217,7 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
     fingerprint = _session_notes_fingerprint(notes)
     try:
         if state_path.exists() and state_path.read_text(encoding="utf-8").strip() == fingerprint:
+            _trace("skipped: identical conversation content was already captured (duplicate end event).")
             return 0
     except OSError:
         pass
@@ -2225,20 +2240,29 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
         command_target=root,
     )
     proposals = preview.get("proposals") if isinstance(preview.get("proposals"), list) else []
+    _trace(f"extraction found {len(proposals)} memory proposal(s).")
     # Echo guard, second layer: a proposal that merely restates an existing
     # active memory — a strong duplicate, or a framing-diluted restatement
     # caught by containment — is Link hearing itself through the agent.
     # Automatic capture keeps only fresh or conflicting proposals; deliberate
     # refinements still flow through manual `lnk session-end`.
     records = _memory_records(wiki_dir)
-    fresh = [
-        proposal for proposal in proposals
-        if isinstance(proposal, dict)
-        and not proposal.get("duplicate_candidates")
-        and not _core_is_existing_memory_echo(records, str(proposal.get("memory") or ""))
-    ]
+    fresh = []
+    for proposal in proposals:
+        if not isinstance(proposal, dict):
+            continue
+        title = str(proposal.get("title") or "")[:60]
+        if proposal.get("duplicate_candidates"):
+            _trace(f"dropped '{title}': strong duplicate of an existing memory.")
+            continue
+        if _core_is_existing_memory_echo(records, str(proposal.get("memory") or "")):
+            _trace(f"dropped '{title}': restates an existing memory (echo guard, layer 2).")
+            continue
+        fresh.append(proposal)
     if not fresh:
+        _trace("no fresh proposals left; no capture stored.")
         return 0
+    _trace(f"storing a proposal-only capture with {len(fresh)} fresh proposal(s) for review.")
     code = session_end(
         target,
         notes,
@@ -2256,7 +2280,8 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
 
 
 def run_agent_hook(
-    target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text"
+    target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text",
+    explain: bool = False,
 ) -> int:
     """Run an installed agent session hook; never fail the agent session."""
     target = target.expanduser().resolve()
@@ -2265,7 +2290,7 @@ def run_agent_hook(
         if event == "session-start":
             return _hook_session_start(target, hook_event, limit, project, emit)
         if event == "session-end":
-            return _hook_session_end(target, hook_event, limit, project)
+            return _hook_session_end(target, hook_event, limit, project, explain=explain)
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
@@ -2368,6 +2393,7 @@ def connect_mcp(
     config_path: str | None = None,
     python_cmd: str | None = None,
     hooks: bool = False,
+    hooks_settings: str | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -2411,6 +2437,7 @@ def connect_mcp(
             agent=agent,
             runtime_script=runtime_script,
             python_cmd=sys.executable,
+            settings_path=hooks_settings,
             write=write,
         )
         if runtime_note:
@@ -2999,6 +3026,10 @@ def try_link(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Short-lived CLI: prefer the instant-load semantic tier so interactive
+    # commands never pay a multi-second model load. Explicit provider wins;
+    # the MCP server (its own entry point) still prefers the quality tier.
+    os.environ.setdefault("LINK_SEMANTIC_SURFACE", "cli")
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
     _configure_link_command_display()

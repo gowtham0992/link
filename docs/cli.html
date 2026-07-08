@@ -91,9 +91,11 @@ lnk query "what should I know before changing the MCP tools?" --budget small --p
 lnk validate</code></pre>
 
         <h2 id="memory">Memory Commands</h2>
+        <p><strong>One rule for the memory knobs.</strong> <em>Finding it</em> → <code>--trigger</code> (a phrase that helps task-shaped recall find a recipe). <em>Fencing it</em> → <code>--applies-when</code> (conditions that demote or hide a memory outside its context). <em>Owning it</em> → <code>--scope</code>/<code>--project</code>/<code>--visibility</code> (whose memory it is and who may see it). <em>Replacing it</em> → <code>--supersedes</code> (archive the old claim with lineage; accepts the memory name or its title). <em>Aging it</em> → <code>--review-after</code>/<code>--expires-at</code>. When in doubt, save with none of them — every knob can be added later through review.</p>
         <div class="grid">
           <article class="panel"><h3><code>lnk remember</code></h3><p>Save a local agent memory. Strong duplicates and likely conflicts are refused unless explicitly allowed.</p></article>
-          <article class="panel"><h3><code>lnk recall</code></h3><p>Search local memories with recall readiness and project-aware filtering.</p></article>
+          <article class="panel"><h3><code>lnk recall</code></h3><p>Search local memories with recall readiness, project-aware filtering, type filters, and <code>--as-of</code> temporal recall.</p></article>
+          <article class="panel"><h3><code>lnk recipes</code></h3><p>List saved procedure memories with their triggers and first steps.</p></article>
           <article class="panel"><h3><code>lnk explain-memory</code></h3><p>Show provenance, lifecycle, graph links, review issues, and recall readiness.</p></article>
           <article class="panel"><h3><code>lnk update-memory</code></h3><p>Merge new text into an existing memory and reset review state.</p></article>
           <article class="panel"><h3><code>lnk archive-memory</code></h3><p>Reversibly hide a stale or wrong memory from default recall.</p></article>
@@ -164,7 +166,7 @@ lnk share &lt;page-or-memory&gt; [dir] [--port 3000]
 lnk snapshot [dir] [--output link-snapshot] [--include-memories] [--include-private-memories] [--force]
 lnk ingest-status
 lnk import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
-lnk remember "text" [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD]
+lnk remember "text" [--type note|preference|decision|project|fact|procedure] [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD] [--trigger "..."] [--applies-when "..."] [--supersedes name-or-title]
 lnk propose-memories &lt;file-or-text&gt; [--project slug]
 lnk session-end &lt;file-or-text-or-&gt; [dir] [--project slug] [--limit 3]
 lnk capture-session &lt;file-or-text&gt; [--project slug]
@@ -180,7 +182,7 @@ lnk brief "task" [--project slug]
 lnk memory-audit [--project slug]
 lnk consolidate [dir] [--project slug] [--limit N]
 lnk semantic [dir] [--setup] [--rebuild]
-lnk recall "query" [--project slug]
+lnk recall "query" [--project slug] [--type TYPE] [--as-of YYYY-MM-DD] [--include-archived]
 lnk recipes [dir] [--project slug]
 lnk profile [--project slug]
 lnk wins [--project slug]

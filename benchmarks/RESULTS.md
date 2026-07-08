@@ -120,8 +120,11 @@ memory-free noise sessions — every event ground-truth labeled, no LLM):
   echo containment drops restatements, duplicates are refused, detected
   contradictions resolve by supersession with lineage.
 - **ungated** — the same extractor and retrieval with governance off: every
-  candidate stored, duplicates and contradictions coexist. Architecturally,
-  this is what unsupervised LLM-extraction memory does on every message.
+  candidate stored, duplicates and contradictions coexist. This is a
+  **governance ablation of Link itself**, not a reimplementation of any
+  competitor — though architecturally it mirrors what unsupervised
+  LLM-extraction memory does on every message. Maintainers of other systems
+  are invited to run the same event stream through their pipelines.
 
 | metric | gated (Link) | ungated |
 |---|---|---|
@@ -139,8 +142,14 @@ stores junk or loses to the ungated baseline.
 
 Honest notes: gated contradiction exposure is 0.333, not zero — Link only
 supersedes contradictions its deterministic detector catches (8 of 12
-authored revision shapes today), and this benchmark now grades that detector;
-improving it moved the number from 0.417 during development. Current-truth
+authored revision shapes today), and this benchmark now grades that detector.
+Full disclosure: the revision-shape detection rule was developed against this
+same authored set (it moved the number from 0.417 during development), so
+8/12 is a fit, not a blind score — contributed revision cases the detector
+has never seen are the real test, and we welcome them. "Zero junk by
+construction" means zero *self-inflicted* junk through automatic capture
+(echoes, self-briefs, noise); a user can still approve a bad memory — review
+gates shape what is proposed, not what humans decide. Current-truth
 precision ties because both pipelines share the same retrieval; the gated
 advantage there appears exactly when the outdated version would otherwise
 outrank the current one (the exposure metric).

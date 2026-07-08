@@ -59,6 +59,10 @@ _MODEL_CACHE: dict[str, object] = {}
 # - "model2vec" (fast): tiny static embeddings. ~100 ms load, ideal for
 #   short-lived CLI calls and session-start hooks.
 SEMANTIC_PROVIDER_ENV = "LINK_SEMANTIC_PROVIDER"
+# Set by entry points: short-lived CLI commands prefer the instant-load fast
+# tier; the long-lived MCP server prefers the quality tier. An explicit
+# LINK_SEMANTIC_PROVIDER always wins.
+SEMANTIC_SURFACE_ENV = "LINK_SEMANTIC_SURFACE"
 DEFAULT_FASTEMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
@@ -89,6 +93,11 @@ def semantic_provider() -> str | None:
         return "fastembed" if _fastembed_installed() else None
     if override == "model2vec":
         return "model2vec" if _model2vec_installed() else None
+    surface = os.environ.get(SEMANTIC_SURFACE_ENV, "").strip().lower()
+    if surface == "cli" and _model2vec_installed():
+        # Interactive commands stay instant; the MCP server still gets the
+        # quality tier. LINK_SEMANTIC_PROVIDER overrides this split.
+        return "model2vec"
     if _fastembed_installed():
         return "fastembed"
     if _model2vec_installed():

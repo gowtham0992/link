@@ -1207,6 +1207,9 @@ def remember(
     reviewing, or archiving existing memory instead of forcing a new page.
     Use memory_type="procedure" with a short `trigger` phrase for reusable
     how-to memory (steps for a recurring task) the user has approved.
+    Field rule: trigger helps recall FIND a recipe; applies_when FENCES a
+    memory to a context; scope/project/visibility say whose memory it is;
+    supersedes REPLACES an old claim with lineage. When unsure, omit them.
     """
     try:
         result = _write_mcp_memory_page(
