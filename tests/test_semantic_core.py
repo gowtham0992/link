@@ -23,9 +23,10 @@ from link_core.semantic import (  # noqa: E402
 
 # Tiny deterministic embedder: maps known concepts onto fixed axes so
 # paraphrases ("structure my pull requests" / "commit style") land close
-# together without any model. Stopwords are dropped and unknown tokens get a
-# small hashed component so unrelated texts stay well below the cosine floor,
-# which is how a real embedding model behaves.
+# together without any model. It ABSTAINS on text it does not recognize
+# (zero vector), like an honest weak model: it can add signal only where it
+# has knowledge and can never inject ranking noise elsewhere. CI uses it to
+# exercise the full hybrid pipeline with a hard no-regression gate.
 _CONCEPTS = {
     0: {"commit", "commits", "committing", "pr", "prs", "pull", "requests", "structure", "structured", "style"},
     1: {"deploy", "deploys", "release", "releases", "ship", "shipping"},
@@ -51,8 +52,6 @@ def fake_embedder(texts: list[str]) -> list[list[float]]:
                 if token in concepts:
                     vector[axis] += 1.0
                     break
-            else:
-                vector[3 + (hash(token) % (_DIM - 3))] += 0.05
         vectors.append(vector)
     return vectors
 

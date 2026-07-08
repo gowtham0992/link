@@ -39,6 +39,7 @@ parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--wiki", default=None)
 parser.add_argument("--surface", choices=("full", "slim"), default=None)
 parser.add_argument("--version", action="store_true")
+parser.add_argument("--semantic-setup", action="store_true")
 args, _ = parser.parse_known_args()
 
 if args.version:
@@ -49,6 +50,37 @@ if args.wiki:
     WIKI_DIR = Path(args.wiki).expanduser().resolve()
 else:
     WIKI_DIR = Path.home() / "link" / "wiki"
+
+if args.semantic_setup:
+    # One-time explicit opt-in for MCP-only installs (no `lnk` CLI): fetch
+    # the local embedding model and build the semantic index, then exit.
+    # This is the only link-mcp entry point allowed to touch the network.
+    from link_core.memory import memory_records as _setup_memory_records
+    from link_core.semantic import (
+        load_embedder as _setup_load_embedder,
+        refresh_memory_index as _setup_refresh_index,
+        semantic_model_name as _setup_model_name,
+    )
+
+    if not WIKI_DIR.exists():
+        print(f"[link-mcp] Wiki not found at {WIKI_DIR}; pass --wiki /path/to/wiki.", file=sys.stderr)
+        sys.exit(2)
+    print(
+        f"[link-mcp] Setting up semantic recall: this may download {_setup_model_name()} "
+        "once. Recall itself never uses the network."
+    )
+    setup_embedder = _setup_load_embedder(allow_download=True)
+    if setup_embedder is None:
+        print(
+            "[link-mcp] Semantic provider unavailable. Install it first: "
+            "pip install \"link-mcp[semantic]\"",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    setup_index = _setup_refresh_index(WIKI_DIR.parent, _setup_memory_records(WIKI_DIR), embedder=setup_embedder)
+    setup_items = setup_index.get("items") if isinstance(setup_index.get("items"), dict) else {}
+    print(f"[link-mcp] Semantic recall ready: indexed {len(setup_items)} memories.")
+    sys.exit(0)
 
 MCP_SURFACE = (args.surface or os.environ.get("LINK_MCP_SURFACE") or "slim").strip().lower()
 if MCP_SURFACE not in {"full", "slim"}:

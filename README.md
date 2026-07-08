@@ -352,11 +352,15 @@ labels so agents verify before trusting them.
 pip install "link-mcp[semantic]"
 lnk semantic ~/link --setup   # one-time model fetch, with your approval
 lnk semantic ~/link           # status: lexical only vs hybrid
+python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs
 ```
 
-Measured on the bundled recall eval (`scripts/eval_recall_quality.py`):
-exact-token queries stay perfect, paraphrase hit@1 improves from 0.50 to 0.62
-and hit@3 from 0.62 to 0.75 with the local model.
+Measured, not asserted: on the bundled 1,176-case benchmark over a
+62-memory corpus, hybrid recall lifts token-overlap hit@1 from 0.589 to
+0.703 and roughly doubles-to-triples pure-paraphrase (zero token overlap)
+hit@3/hit@5, at ~2.8 ms per recall with no service or vector database.
+Full methodology, honest limitations, and reproduction steps:
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 <details>
 <summary>MCP-only install</summary>
