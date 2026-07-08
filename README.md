@@ -73,6 +73,29 @@ Link follows Andrej Karpathy's
 keep knowledge outside the chat window, make claims inspectable, and let context
 compound over time.
 
+## Why Link Is Different
+
+Every other agent-memory system stores memory as embeddings in a vector
+database or as an LLM-extracted graph. Link made four architectural
+commitments those designs cannot bolt on:
+
+1. **Memory you can read.** Every memory is a plain Markdown file — open it,
+   grep it, git-diff it. If Link disappeared tomorrow, your memory is still yours.
+2. **Review-gated writes.** Agents propose; you approve. Even the automatic
+   session hooks capture proposals, never facts.
+3. **No LLM in the memory layer.** Ingestion and recall are deterministic —
+   nothing can hallucinate a fact into your memory, because there is no model
+   in the write path.
+4. **Provably local.** CI blocks outbound network code in the runtime, and the
+   optional semantic models load offline-only after one explicit setup.
+
+And the claims are measured, not asserted: a reproducible 1,176-case recall
+benchmark plus a third-party LoCoMo retrieval track, with published miss rates
+and a CI gate against regressions —
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md). Named comparisons against
+Mem0/OpenMemory, Zep/Graphiti, and Letta:
+[Why Link?](https://gowtham0992.github.io/link/why-link.html)
+
 ## Quick Start
 
 Start with the memory proof. It creates a clean local workspace, writes one
@@ -445,15 +468,18 @@ model-facing tools. CLI and skill workflows call the same core behavior through
   next actions.
 - `recall`: the one read path for startup briefs, answer-ready query packets,
   wiki search, graph context, token budgets, and follow-up actions. Every
-  recalled memory carries a `confidence` label (`strong`, `moderate`, `weak`),
-  so agents verify weak lexical matches with the user instead of trusting them.
+  recalled memory carries a `confidence` label (`strong`, `moderate`, `weak`)
+  and a `match` field (`lexical`, `semantic`, `hybrid` when the optional local
+  semantic tier is installed), so agents verify weak or paraphrase matches with
+  the user instead of trusting them.
 - `remember`: durable local memory only after explicit user approval, with
   duplicate/conflict checks, provenance, review state, visibility, optional
   `review_after`, and optional `expires_at`.
 - `ingest`: exact next steps for raw files, source safety, stale ingest
   detection, validation, and rebuild checks.
 - `review`: memory inbox, profile, audit, log, explain, archive, restore,
-  forget, and lifecycle review workflows.
+  forget, and lifecycle review workflows — plus `review(action="consolidate")`,
+  a read-only backlog plan applied only with per-action user approval.
 - `admin`: the escape hatch for backup, migrate, validate, graph export, pages,
   captures, rebuilds, compatibility actions, and advanced updates.
 
@@ -553,6 +579,11 @@ Link itself is local-first:
   checks. `lnk validate` and `lnk doctor` also fail if secret-looking values
   are found inside wiki pages before they can be served through the local UI or
   returned through agent context.
+- Optional semantic recall stays local: models load offline-only at recall
+  time (only the explicit `lnk semantic --setup` may fetch a model, once), and
+  embeddings live in plain JSON under `.link-cache/`.
+- Automatic session hooks store proposal-only notes; transcript extraction
+  skips tool calls and outputs, and no durable memory is written without review.
 - The local web server binds to `127.0.0.1` and is not meant to be exposed to
   the internet without additional auth.
 

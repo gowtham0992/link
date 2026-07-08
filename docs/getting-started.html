@@ -55,6 +55,8 @@
         <a href="#memory">Save one memory</a>
         <a href="#ingest">Ask the agent to ingest</a>
         <a href="#verify">Verify the loop</a>
+        <a href="#hooks">Make it automatic</a>
+        <a href="#semantic">Semantic recall</a>
       </aside>
       <article class="doc-content">
         <h2 id="demo">1. Prove The Memory Loop</h2>
@@ -104,7 +106,8 @@ lnk health link-demo</code></pre>
 lnk onboard --first-memory "I prefer concise release notes"
 lnk onboard --seed-project .
 lnk onboard --agent codex
-lnk onboard --agent codex --write</code></pre>
+lnk onboard --agent codex --write
+lnk onboard --agent claude-code --hooks --write</code></pre>
         <p>From source, use <code>python3 link.py onboard</code> on macOS/Linux or <code>py link.py onboard</code> on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs. Add <code>--seed-project .</code> from inside a repo when you want onboarding to create the first source-backed project page. If the local viewer is running, <code>http://127.0.0.1:3000/onboard</code> shows the same setup loop with copy buttons.</p>
 
         <h2 id="seed">3. Seed Project Context</h2>
@@ -190,6 +193,20 @@ lnk verify-mcp</code></pre>
         <p><code>lnk verify-mcp</code> should report <code>Result: ready</code> when you use MCP. Then ask your agent:</p>
         <pre><code>query Link for first Link memory</code></pre>
         <p>If the answer comes from Link, local agent memory is working.</p>
+              <h2 id="hooks">9. Make The Loop Automatic (Session Hooks)</h2>
+        <p>Agents with session-hook support — Claude Code, Codex, and Cursor — can run the memory loop without being asked. <code>--hooks</code> installs hooks that inject a bounded memory brief at the start of every new session and store proposal-only session notes at session end. Empty sessions are skipped, duplicate end events are deduplicated, and durable memory still requires your approval. When the review backlog grows, the injected brief nudges the agent to offer a read-only <code>lnk consolidate</code> pass.</p>
+        <pre><code>lnk connect claude-code ~/link --hooks --write
+lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no session-end event)
+lnk connect cursor ~/link --hooks --write</code></pre>
+        <p>Codex and Cursor hook support is new and follows those vendors' documented hook schemas; if a hook misbehaves there, please open an issue.</p>
+
+        <h2 id="semantic">10. Optional: Hybrid Semantic Recall</h2>
+        <p>Lexical recall is always the default and the fallback. Two optional local tiers add paraphrase recall — "how should I structure my pull requests" finds a memory about commit style. The models load offline-only at recall time (a query can never trigger a download), embeddings are plain JSON under <code>.link-cache/</code>, and there is no vector database or service.</p>
+        <pre><code>pip install "link-mcp[semantic]"          # fast tier: tiny static model, instant load
+pip install "link-mcp[semantic-quality]"  # quality tier: contextual model, best recall
+lnk semantic ~/link --setup               # explicit one-time model fetch
+python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs</code></pre>
+        <p>Recall quality is measured, not asserted: see <a href="https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md">benchmarks/RESULTS.md</a> for the full methodology, numbers, and honest limitations.</p>
       </article>
     </div>
   </main>

@@ -103,7 +103,11 @@ lnk verify-mcp ~/link</code></pre>
 
         <h2 id="mcp-only">MCP Only</h2>
         <pre><code>python3 -m pip install --upgrade link-mcp
-python3 -m link_mcp --version</code></pre>
+python3 -m link_mcp --version
+# optional local semantic recall (fast or quality tier):
+python3 -m pip install "link-mcp[semantic-quality]"
+python3 -m link_mcp --semantic-setup --wiki ~/link/wiki</code></pre>
+        <p>The semantic extras stay fully local: the embedding model is fetched once by the explicit <code>--semantic-setup</code> command, and the serving path loads it offline-only — a recall can never download anything.</p>
         <pre><code>{
   "mcpServers": {
     "link": {
@@ -128,6 +132,7 @@ python3 -m link_mcp --version</code></pre>
 }</code></pre>
 
         <h2 id="workflow">Predictable Agent Workflow</h2>
+        <p>If Link session hooks are installed for the agent (<code>lnk connect &lt;agent&gt; --hooks --write</code>), the startup brief is injected automatically — agents should skip the manual brief call and go straight to bounded task recall. When a brief reports a memory backlog, <code>review(action="consolidate")</code> returns a read-only consolidation plan to walk through with the user.</p>
         <p>New MCP configs use the slim surface by default so agents see one obvious read tool and one obvious write tool instead of a long menu of overlapping helpers. The full compatibility surface remains available with <code>--surface full</code>.</p>
         <p>Slim agents should use Link in this order:</p>
         <ol>
