@@ -28,7 +28,7 @@ from .wiki import (
 )
 
 
-MEMORY_TYPES = ("preference", "decision", "project", "fact", "note")
+MEMORY_TYPES = ("preference", "decision", "project", "fact", "note", "procedure")
 MEMORY_SCOPES = ("user", "project", "global")
 MEMORY_VISIBILITIES = ("private", "project", "team")
 MEMORY_REVIEW_STATUSES = ("pending", "reviewed", "needs_update")
@@ -219,6 +219,9 @@ def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
     title = str(record.get("title", "")).lower()
     tldr = str(record.get("tldr", "")).lower()
     tags = " ".join(str(tag).lower() for tag in record.get("tags", []))
+    trigger = str(record.get("trigger") or "").lower()
+    if trigger:
+        tldr = f"{tldr} {trigger}".strip()
     body = str(record.get("body", "")).lower()
     if q and (q in title or q in tldr):
         return "strong"
@@ -288,6 +291,21 @@ def _extract_preference_pairs(value: str) -> list[tuple[set[str], set[str]]]:
 
 def slim_memory(record: Mapping[str, object]) -> dict[str, object]:
     return {key: value for key, value in record.items() if key != "body"}
+
+
+def procedure_steps_excerpt(body: str, max_chars: int = 800) -> str:
+    """Bounded steps text for a procedure memory (its Memory section)."""
+    text = str(body or "")
+    marker = "## Memory"
+    start = text.find(marker)
+    if start >= 0:
+        start += len(marker)
+        end = text.find("\n## ", start)
+        text = text[start:end] if end > start else text[start:]
+    text = text.strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + " …"
+    return text
 
 
 def is_active_memory(record: Mapping[str, object]) -> bool:
@@ -385,6 +403,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "review_after": meta.get("review_after", ""),
         "expires_at": meta.get("expires_at", ""),
         "review_note": meta.get("review_note", ""),
+        "trigger": str(meta.get("trigger") or ""),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -1335,6 +1354,7 @@ def write_memory_page(
     visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
+    trigger: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
@@ -1345,6 +1365,9 @@ def write_memory_page(
         raise ValueError(f"memory_type must be one of: {', '.join(MEMORY_TYPES)}")
     if scope not in MEMORY_SCOPES:
         raise ValueError(f"scope must be one of: {', '.join(MEMORY_SCOPES)}")
+    clean_trigger = " ".join(str(trigger or "").split())
+    if clean_trigger and len(clean_trigger) > 200:
+        raise ValueError("trigger must be 200 characters or fewer")
     clean_visibility = normalize_memory_visibility(scope, visibility)
 
     clean_text = text.strip()
@@ -1416,6 +1439,19 @@ def write_memory_page(
     project_line = f'project: "{frontmatter_string(clean_project)}"\n' if clean_project else ""
     review_after_line = f'review_after: "{frontmatter_string(clean_review_after)}"\n' if clean_review_after else ""
     expires_at_line = f'expires_at: "{frontmatter_string(clean_expires_at)}"\n' if clean_expires_at else ""
+    trigger_line = f'trigger: "{frontmatter_string(clean_trigger)}"\n' if clean_trigger else ""
+
+    if memory_type == "procedure":
+        use_when = (
+            f"- {clean_trigger}" if clean_trigger
+            else "- An agent starts a task this procedure covers."
+        )
+        use_when += "\n- Follow the steps in order; confirm with the user before deviating."
+    else:
+        use_when = (
+            f"- An agent needs relevant {scope} context for future work.\n"
+            f"- A future answer depends on this {memory_type}."
+        )
 
     page = f"""---
 type: memory
@@ -1427,7 +1463,7 @@ visibility: {clean_visibility}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
-{review_after_line}{expires_at_line}reviewed_at: ""
+{review_after_line}{expires_at_line}{trigger_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1441,8 +1477,7 @@ tags: {yaml_list(tag_values)}
 
 ## Use This When
 
-- An agent needs relevant {scope} context for future work.
-- A future answer depends on this {memory_type}.
+{use_when}
 
 ## Source
 
@@ -1909,6 +1944,11 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     tldr = str(record.get("tldr", "")).lower()
     body = str(record.get("body", "")).lower()
     tags = " ".join(str(tag).lower() for tag in record.get("tags", []))
+    # A procedure's trigger phrase describes when it applies; score it like
+    # the intent-bearing head fields so task-shaped queries find recipes.
+    trigger = str(record.get("trigger") or "").lower()
+    if trigger:
+        tldr = f"{tldr} {trigger}".strip()
     title_tokens = memory_tokens(title)
     tldr_tokens = memory_tokens(tldr)
     body_tokens = memory_tokens(body)
@@ -1916,7 +1956,7 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     score = 0
     if q and q in title:
         score += 20
-    if q and q in tldr:
+    if q and (q in tldr or (trigger and q in trigger)):
         score += 12
     if q and q in tags:
         score += 8
@@ -2003,7 +2043,7 @@ def memory_temporal_boost(record: Mapping[str, object]) -> int:
         elif age_days > 730:
             boost -= 2
     memory_type = str(record.get("memory_type") or "").lower()
-    if memory_type in {"preference", "decision", "project"}:
+    if memory_type in {"preference", "decision", "project", "procedure"}:
         boost += 1
     return boost
 
@@ -2060,6 +2100,10 @@ def recall_memories(
             slim["confidence"] = (
                 memory_recall_confidence(record, q) if lexical_hit else semantic_confidence_cap(semantic_match)
             )
+            if str(record.get("memory_type") or "") == "procedure":
+                # The steps are the value of a recipe; carry a bounded excerpt
+                # so agents can follow it without another file read.
+                slim["steps"] = procedure_steps_excerpt(str(record.get("body") or ""))
             slim["recall"] = recall_state(record, issues)
             slim["review_issue_count"] = len(issues)
             slim["highest_review_severity"] = (
@@ -2481,6 +2525,44 @@ def confidence_label(score: int) -> str:
     return "low"
 
 
+PROCEDURE_STEP_RE = re.compile(r"^\s*(?:\d+[.)]\s+|step\s+\d+\b)", re.IGNORECASE)
+
+
+def extract_procedure_candidates(text: str, max_candidates: int = 3) -> list[dict[str, str]]:
+    """Find numbered step sequences that look like reusable procedures.
+
+    A candidate is three or more consecutive numbered step lines. The nearest
+    preceding non-step line becomes the trigger ("To cut a release:") so the
+    recipe is recalled by task shape, not just by its words.
+    """
+    lines = str(text or "").splitlines()
+    candidates: list[dict[str, str]] = []
+    index = 0
+    while index < len(lines) and len(candidates) < max_candidates:
+        if not PROCEDURE_STEP_RE.match(lines[index]):
+            index += 1
+            continue
+        start = index
+        while index < len(lines) and (PROCEDURE_STEP_RE.match(lines[index]) or not lines[index].strip()):
+            index += 1
+        steps = [line.strip() for line in lines[start:index] if PROCEDURE_STEP_RE.match(line)]
+        if len(steps) < 3:
+            continue
+        trigger = ""
+        for back in range(start - 1, -1, -1):
+            previous = lines[back].strip()
+            if previous:
+                if 3 <= len(previous) <= 160 and not PROCEDURE_STEP_RE.match(previous):
+                    trigger = previous.rstrip(":").strip()
+                    trigger = re.sub(r"^(?:user|assistant)\s*:\s*", "", trigger, flags=re.IGNORECASE)
+                break
+        body = ("\n".join([trigger + ":"] if trigger else []) + "\n" + "\n".join(steps)).strip()
+        if len(body) > 1500:
+            body = body[:1500].rstrip() + " …"
+        candidates.append({"memory": body, "trigger": trigger[:200]})
+    return candidates
+
+
 def propose_memories_from_text(
     text: str,
     records: Iterable[Mapping[str, object]],
@@ -2495,6 +2577,42 @@ def propose_memories_from_text(
     proposals: list[dict[str, object]] = []
     seen: set[str] = set()
     skipped = 0
+    for candidate in extract_procedure_candidates(text):
+        memory = candidate["memory"]
+        dedupe_key = compact_memory_text(memory)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        memory_type = "procedure"
+        scope = "project" if project_name else "user"
+        title = proposal_title(candidate["trigger"] or memory, memory_type)
+        duplicate_candidates = memory_duplicate_candidates(
+            record_list, memory, title, memory_type, scope, project=project_name,
+        )
+        conflict_candidates = memory_conflict_candidates(
+            record_list, memory, title, memory_type, scope, project=project_name,
+        )
+        proposal = {
+            "title": title,
+            "memory": memory,
+            "memory_type": memory_type,
+            "scope": scope,
+            "project": project_name if scope == "project" else "",
+            "trigger": candidate["trigger"],
+            "confidence": confidence_label(80),
+            "confidence_score": 80,
+            "reason": "Matched a numbered step sequence that looks like a reusable procedure.",
+            "source": source,
+            "duplicate_candidates": duplicate_candidates,
+            "conflict_candidates": conflict_candidates,
+            "suggested_action": "update-memory" if duplicate_candidates else (
+                "review-conflict" if conflict_candidates else "remember"
+            ),
+        }
+        proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
+        proposals.append(proposal)
+        if len(proposals) >= limit:
+            break
     for segment in memory_proposal_segments(text):
         classified = classify_memory_segment(segment)
         if not classified:

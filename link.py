@@ -680,6 +680,7 @@ def _write_memory_page(
     visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
+    trigger: str | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -690,6 +691,7 @@ def _write_memory_page(
         visibility=visibility,
         review_after=review_after,
         expires_at=expires_at,
+        trigger=trigger,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -1091,6 +1093,7 @@ def remember(
     visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
+    trigger: str | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -1111,6 +1114,7 @@ def remember(
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
+            trigger=trigger,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)

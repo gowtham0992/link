@@ -80,6 +80,7 @@ lnk health
 lnk ingest-status
 lnk remember "User prefers feature branches for Link work." --type preference --scope project --project link --visibility project --review-after 2026-08-01
 lnk remember "Temporary launch branch is release/one-off." --type project --project link --expires-at 2026-09-01
+lnk remember "1. Bump version 2. Run tests 3. Tag and publish" --type procedure --trigger "cutting a release"
 lnk share "Prefer local memory"
 lnk snapshot ~/link --output link-snapshot
 lnk brief "working on Link release" --project link

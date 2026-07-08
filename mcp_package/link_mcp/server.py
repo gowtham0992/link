@@ -885,7 +885,7 @@ def _write_mcp_memory_page(
     text: str, title: str = "", memory_type: str = "note",
     scope: str = "user", tags: str = "", source: str = "mcp",
     allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
-    visibility: str = "", review_after: str = "", expires_at: str = "",
+    visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -898,6 +898,7 @@ def _write_mcp_memory_page(
         visibility=_clean_text_input(visibility, max_len=40) or None,
         review_after=_clean_text_input(review_after, max_len=40) or None,
         expires_at=_clean_text_input(expires_at, max_len=40) or None,
+        trigger=_clean_text_input(trigger, max_len=200) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -934,7 +935,10 @@ def link_instructions_resource() -> str:
         "If Link session hooks are installed for this agent, the startup brief is injected automatically — "
         "skip step 2 and go straight to bounded task recall.\n"
         "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
-        "confidence) as hints to verify, not facts to act on.\n\n"
+        "confidence) as hints to verify, not facts to act on.\n"
+        "After a notable multi-step task, offer to save a reusable recipe: propose a `procedure` memory "
+        "with a short `trigger` phrase, and save only after approval. Approved procedures return from "
+        "recall with their steps.\n\n"
         "Never silently save durable memory. Prefer reviewed memories and source-backed wiki pages, and cite "
         "provenance when explaining why Link knows something.\n"
     )
@@ -1182,6 +1186,7 @@ def remember(
     visibility: str = "",
     review_after: str = "",
     expires_at: str = "",
+    trigger: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
 ) -> str:
@@ -1190,6 +1195,8 @@ def remember(
     Use only when the user asks Link to remember something or approves a memory
     proposal. Duplicate and conflict candidates should be resolved by updating,
     reviewing, or archiving existing memory instead of forcing a new page.
+    Use memory_type="procedure" with a short `trigger` phrase for reusable
+    how-to memory (steps for a recurring task) the user has approved.
     """
     try:
         result = _write_mcp_memory_page(
@@ -1205,6 +1212,7 @@ def remember(
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
+            trigger=trigger,
         )
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})
@@ -1915,6 +1923,7 @@ def remember_memory(
     visibility: str = "",
     review_after: str = "",
     expires_at: str = "",
+    trigger: str = "",
 ) -> str:
     """Save a local agent memory as a Markdown page.
 
@@ -1922,13 +1931,14 @@ def remember_memory(
     is written under wiki/memories/, indexed, logged, and kept local. Strong
     duplicates are refused unless allow_duplicate is true.
     Potential conflicts are refused unless allow_conflict is true.
-    memory_type: preference, decision, project, fact, or note.
+    memory_type: preference, decision, project, fact, note, or procedure.
     scope: user, project, or global.
     visibility: private, project, or team. Defaults to private for user/global and project for project-scoped memories.
     project: optional project key for project-scoped memories.
     tags: optional comma-separated tags.
     review_after: optional YYYY-MM-DD date when this memory should be checked again.
     expires_at: optional YYYY-MM-DD date when this memory should leave default recall.
+    trigger: optional short phrase describing when this memory applies (recommended for procedure).
     """
     try:
         result = _write_mcp_memory_page(
@@ -1944,6 +1954,7 @@ def remember_memory(
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
+            trigger=trigger,
         )
     except ValueError as exc:
         return json.dumps({"created": False, "error": str(exc)})

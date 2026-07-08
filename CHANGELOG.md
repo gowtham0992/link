@@ -6,6 +6,14 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added (procedural memory — feature branch)
+
+- Added `procedure` as a memory type: reusable how-to memory (recipes) with an optional `trigger` phrase describing when it applies. Procedures are plain Markdown like every other memory, review-gated, and shared across agents.
+- Trigger phrases are scored like the intent-bearing head fields in recall and included in semantic embeddings, so task-shaped queries ("how do I prepare a release") find recipes phrased differently; recalled procedures carry a bounded `steps` excerpt in recall packets so agents can follow them without another file read.
+- Added `--trigger` to `lnk remember` and `trigger` to the MCP `remember`/`remember_memory` tools.
+- Session-end proposals now detect numbered step sequences in session notes and propose them as `procedure` memories with the preceding goal line as the trigger; accepting a capture carries the trigger through. Saving still requires explicit approval.
+- Updated installed agent instructions, MCP instructions, LINK.md, and docs so agents offer to save a recipe after notable multi-step work.
+
 ### Added
 
 - Added `lnk connect <agent> --hooks` to install agent session hooks alongside MCP config for Claude Code, Codex, and Cursor: every new session starts with a bounded Link memory brief injected automatically, and session end stores proposal-only session notes with memory candidates, so the memory loop no longer depends on the agent remembering to call Link. Codex has no session-end hook event, so it gets the session-start brief only; Cursor uses its flat `hooks.json` schema and JSON `additional_context` envelope.

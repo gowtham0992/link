@@ -194,6 +194,7 @@ def memory_embedding_text(record: Mapping[str, object]) -> str:
     parts = [
         str(record.get("title") or ""),
         str(record.get("tldr") or ""),
+        str(record.get("trigger") or ""),
         tags,
         str(record.get("body") or "")[:1000],
     ]

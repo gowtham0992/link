@@ -39,4 +39,6 @@ If Link session hooks are installed for this agent, the session-start memory bri
 
 When the user says **"remember"**, **"recall"**, **"ingest"**, **"query"**, **"lint"**, or **"research"**, read `LINK.md` for instructions and follow the protocol.
 
+After completing a notable multi-step task (a release, a tricky deploy, a recovery), offer to save it as a reusable recipe: propose a `procedure` memory with a short `trigger` phrase describing when it applies, and save it only after the user approves. When starting a recurring task, recall first — approved procedures return with their steps.
+
 Otherwise, keep working normally after the cheap first recall; do not save durable memory unless the user asks or approves it.

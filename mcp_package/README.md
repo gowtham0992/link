@@ -109,7 +109,9 @@ New MCP configs should expose Link through six model-facing tools:
 1. `status(include_validation?)` checks readiness and safe next actions.
 2. `recall(query, budget?, project?, mode?, limit?)` is the one read tool for
    briefs, answer-ready context packets, wiki search, and graph context.
-3. `remember(text, ...)` writes only explicit user-approved durable memories.
+3. `remember(text, ...)` writes only explicit user-approved durable memories,
+   including `memory_type="procedure"` recipes with a `trigger` phrase that
+   return from recall with their steps.
 4. `ingest(action?, strict?)` checks or validates raw-source ingest work.
 5. `review(action?, ...)` handles memory inbox, profile, audit, log, explain,
    archive, restore, forget, visibility, and read-only `consolidate` (backlog
