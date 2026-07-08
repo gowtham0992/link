@@ -47,6 +47,7 @@
     <div class="section-inner doc-grid">
       <aside class="toc">
         <strong>On this page</strong>
+        <a href="#architecture">Architecture</a>
         <a href="#fit">Best fit</a>
         <a href="#loop">Session loop</a>
         <a href="#compare">How to choose</a>
@@ -55,6 +56,16 @@
         <a href="#boundaries">Boundaries</a>
       </aside>
       <article class="doc-content">
+        <h2 id="architecture">The Architecture Is the Product</h2>
+        <p>Every other agent-memory system — Mem0/OpenMemory, Zep/Graphiti, Letta — stores memory as embeddings in a vector database or as an LLM-extracted graph. You cannot read your own memory, and a model sits inside the write path. Link made four architectural commitments that cannot be bolted onto those designs:</p>
+        <div class="grid two-up">
+          <article class="panel"><h3>Memory you can read</h3><p>Every memory is a plain Markdown file. Open it, grep it, git-diff it, back it up. If Link disappeared tomorrow, your memory is still yours.</p></article>
+          <article class="panel"><h3>Review-gated writes</h3><p>No durable memory is created without your approval. Agents propose; you decide. Automatic session hooks capture proposals — never facts.</p></article>
+          <article class="panel"><h3>No LLM in the memory layer</h3><p>Ingestion and recall are deterministic. An extraction model can hallucinate facts into a knowledge graph; Link's memory layer cannot, because there is no model in the write path.</p></article>
+          <article class="panel"><h3>Provably local</h3><p>CI blocks outbound network code in the runtime. The optional semantic models load offline-only after one explicit setup. "Local-first" here is enforced, not promised.</p></article>
+        </div>
+        <p>Recall quality is measured, not asserted: a 1,176-case reproducible benchmark plus a third-party LoCoMo retrieval track, with published miss rates and a CI gate against regressions. See <a href="https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md">benchmarks/RESULTS.md</a>.</p>
+
         <h2 id="fit">Best Fit</h2>
         <p>Use Link when you want one local memory layer that multiple agents can share. It is strongest for developer and power-user workflows where privacy, provenance, and inspectable files matter.</p>
         <div class="grid two-up">
@@ -89,11 +100,11 @@
         <div class="choice-table">
           <div><strong>Alternative</strong><strong>Where Link wins</strong><strong>Where they win</strong></div>
           <div><span>Obsidian</span><span>Agent-ready memory lifecycle, MCP/CLI retrieval, validation, source-backed query packets.</span><span>Human-first note editing, mobile sync, plugins, and a mature visual graph.</span></div>
-          <div><span>Mem0</span><span>No hosted account, local Markdown storage, cross-agent desktop use, inspectable provenance.</span><span>Managed cloud APIs, hosted dashboards, and team/app integration primitives.</span></div>
+          <div><span>Mem0 / OpenMemory</span><span>Readable Markdown storage instead of a vector database, review-gated writes instead of silent extraction, no LLM in the memory layer, hooks-guaranteed session loop, published benchmark with miss rates.</span><span>Managed cloud APIs, hosted dashboards, larger community, and team/app integration primitives.</span></div>
           <div><span>Letta</span><span>Works beside existing agents instead of becoming the agent runtime; simpler local file model.</span><span>Full stateful-agent runtime, managed execution loop, and hosted deployment options.</span></div>
-          <div><span>Graphiti</span><span>Personal/project memory with reviewable Markdown and simple local operations.</span><span>Temporal knowledge graphs, automatic extraction, and enterprise graph use cases.</span></div>
+          <div><span>Zep / Graphiti</span><span>Deterministic memory with no LLM extraction cost or hallucination risk, reviewable Markdown, millisecond local recall, review/expiry lifecycle for time-sensitive memory.</span><span>Bi-temporal knowledge graphs, automatic entity extraction, multi-user business data, and enterprise graph use cases.</span></div>
           <div><span>Built-in agent memory</span><span>One memory layer shared across Codex, Claude, Cursor, Kiro, VS Code, Antigravity, and local agents.</span><span>Zero setup inside one vendor's product.</span></div>
-          <div><span>Plain RAG or vector search</span><span>Reviewable memory, source files, graph context, lifecycle controls, and bounded agent packets.</span><span>Semantic retrieval quality, embedding connectors, and application-specific pipelines.</span></div>
+          <div><span>Plain RAG or vector search</span><span>Reviewable memory, source files, graph context, lifecycle controls, bounded agent packets — plus optional local hybrid semantic recall with measured quality and honest confidence labels.</span><span>Cloud-scale embedding models, connectors, and application-specific pipelines over huge corpora.</span></div>
         </div>
 
         <h2 id="trust">Trust Model</h2>

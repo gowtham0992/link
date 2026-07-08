@@ -188,6 +188,31 @@ class SemanticCoreTests(unittest.TestCase):
         self.assertEqual(semantic_confidence_cap({"strength": 0.7}), "moderate")
         self.assertEqual(semantic_confidence_cap(None), "weak")
 
+    def test_provider_override_requires_installed_package(self):
+        import os
+        from link_core import semantic
+
+        # Neither provider package is installed in CI: overrides must not
+        # invent a provider, and detection must return None.
+        for override in ("fastembed", "model2vec"):
+            os.environ[semantic.SEMANTIC_PROVIDER_ENV] = override
+            try:
+                installed = (
+                    semantic._fastembed_installed() if override == "fastembed"
+                    else semantic._model2vec_installed()
+                )
+                if not installed:
+                    self.assertIsNone(semantic.semantic_provider())
+            finally:
+                os.environ.pop(semantic.SEMANTIC_PROVIDER_ENV, None)
+
+    def test_model_key_is_provider_qualified(self):
+        from link_core import semantic
+
+        key = semantic.semantic_model_key()
+        self.assertIn(":", key)
+        self.assertTrue(key.startswith(("none:", "fastembed:", "model2vec:")))
+
     def test_status_without_provider_reports_lexical_only(self):
         with tempfile.TemporaryDirectory() as temp:
             payload = build_semantic_status(Path(temp), memory_count=3, command_target=temp)

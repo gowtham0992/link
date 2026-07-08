@@ -52,16 +52,29 @@ Embedder = Callable[[list[str]], list[list[float]]]
 
 _MODEL_CACHE: dict[str, object] = {}
 
+# Two provider tiers, both fully local:
+# - "fastembed" (quality): contextual ONNX sentence embeddings. Best recall;
+#   ~5 s one-time model load, so it shines in long-lived processes like the
+#   MCP server. Preferred automatically when installed.
+# - "model2vec" (fast): tiny static embeddings. ~100 ms load, ideal for
+#   short-lived CLI calls and session-start hooks.
+SEMANTIC_PROVIDER_ENV = "LINK_SEMANTIC_PROVIDER"
+DEFAULT_FASTEMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-def semantic_model_name() -> str:
-    return os.environ.get(SEMANTIC_MODEL_ENV, "").strip() or DEFAULT_SEMANTIC_MODEL
+
+def _provider_override() -> str:
+    return os.environ.get(SEMANTIC_PROVIDER_ENV, "").strip().lower()
 
 
-def semantic_disabled() -> bool:
-    return os.environ.get(SEMANTIC_DISABLE_ENV, "").strip().lower() in {"0", "off", "false", "no"}
+def _fastembed_installed() -> bool:
+    try:
+        import fastembed  # noqa: F401
+    except Exception:
+        return False
+    return True
 
 
-def provider_installed() -> bool:
+def _model2vec_installed() -> bool:
     try:
         import model2vec  # noqa: F401
     except Exception:
@@ -69,38 +82,87 @@ def provider_installed() -> bool:
     return True
 
 
-def _load_model(allow_download: bool = False):
-    """Load the static embedding model; offline unless setup explicitly allows."""
-    model_name = semantic_model_name()
-    cache_key = f"{model_name}:{allow_download}"
-    cached = _MODEL_CACHE.get(model_name)
-    if cached is not None:
-        return cached
+def semantic_provider() -> str | None:
+    """Return the active provider name, or None when nothing is installed."""
+    override = _provider_override()
+    if override == "fastembed":
+        return "fastembed" if _fastembed_installed() else None
+    if override == "model2vec":
+        return "model2vec" if _model2vec_installed() else None
+    if _fastembed_installed():
+        return "fastembed"
+    if _model2vec_installed():
+        return "model2vec"
+    return None
+
+
+def semantic_model_name() -> str:
+    override = os.environ.get(SEMANTIC_MODEL_ENV, "").strip()
+    if override:
+        return override
+    if semantic_provider() == "fastembed":
+        return DEFAULT_FASTEMBED_MODEL
+    return DEFAULT_SEMANTIC_MODEL
+
+
+def semantic_model_key() -> str:
+    """Provider-qualified model id; changing provider or model rebuilds the index."""
+    return f"{semantic_provider() or 'none'}:{semantic_model_name()}"
+
+
+def semantic_disabled() -> bool:
+    return os.environ.get(SEMANTIC_DISABLE_ENV, "").strip().lower() in {"0", "off", "false", "no"}
+
+
+def provider_installed() -> bool:
+    return semantic_provider() is not None
+
+
+def _set_offline_guard(allow_download: bool) -> None:
     if not allow_download:
         # Force offline so recall can never silently reach the network.
         os.environ["HF_HUB_OFFLINE"] = "1"
     else:
         os.environ.pop("HF_HUB_OFFLINE", None)
-    from model2vec import StaticModel
 
-    model = StaticModel.from_pretrained(model_name)
-    _MODEL_CACHE[model_name] = model
-    del cache_key
+
+def _load_model(allow_download: bool = False):
+    """Load the embedding model; offline unless setup explicitly allows."""
+    provider = semantic_provider()
+    model_name = semantic_model_name()
+    cache_key = f"{provider}:{model_name}"
+    cached = _MODEL_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    _set_offline_guard(allow_download)
+    if provider == "fastembed":
+        from fastembed import TextEmbedding
+
+        model = TextEmbedding(model_name)
+    else:
+        from model2vec import StaticModel
+
+        model = StaticModel.from_pretrained(model_name)
+    _MODEL_CACHE[cache_key] = model
     return model
 
 
 def load_embedder(allow_download: bool = False) -> Embedder | None:
     """Return a batch embedding callable, or None when unavailable."""
-    if semantic_disabled() or not provider_installed():
+    provider = semantic_provider()
+    if semantic_disabled() or provider is None:
         return None
     try:
         model = _load_model(allow_download=allow_download)
     except Exception:
         return None
 
-    def _embed(texts: list[str]) -> list[list[float]]:
-        vectors = model.encode(texts)
-        return [[float(value) for value in vector] for vector in vectors]
+    if provider == "fastembed":
+        def _embed(texts: list[str]) -> list[list[float]]:
+            return [[float(value) for value in vector] for vector in model.embed(texts)]
+    else:
+        def _embed(texts: list[str]) -> list[list[float]]:
+            return [[float(value) for value in vector] for vector in model.encode(texts)]
 
     return _embed
 
@@ -165,7 +227,7 @@ def refresh_memory_index(
     model_name: str | None = None,
 ) -> dict[str, object]:
     """Embed new or changed memories; prune deleted ones. Returns the index."""
-    model = model_name or semantic_model_name()
+    model = model_name or semantic_model_key()
     path = semantic_index_path(root)
     index = _load_index(path)
     items = index.get("items") if isinstance(index.get("items"), dict) else {}
@@ -299,7 +361,8 @@ def build_semantic_status(
     command_target: str | Path = ".",
 ) -> dict[str, object]:
     """Readiness report for the optional semantic recall layer."""
-    installed = provider_installed()
+    provider = semantic_provider()
+    installed = provider is not None
     disabled = semantic_disabled()
     ready = False
     index_items = 0
@@ -314,17 +377,29 @@ def build_semantic_status(
     if disabled:
         next_actions.append(f"unset {SEMANTIC_DISABLE_ENV} to re-enable semantic recall")
     elif not installed:
-        next_actions.append('pip install "link-mcp[semantic]"')
+        next_actions.append('pip install "link-mcp[semantic]"  # fast tier (tiny static model)')
+        next_actions.append('pip install "link-mcp[semantic-quality]"  # quality tier (contextual model)')
         next_actions.append(f"lnk semantic {command_target} --setup")
     elif not ready:
         next_actions.append(f"lnk semantic {command_target} --setup")
     elif index_items < memory_count:
         next_actions.append(f"lnk semantic {command_target} --rebuild")
+    if installed and provider == "model2vec" and not _fastembed_installed():
+        next_actions.append(
+            'optional quality upgrade: pip install "link-mcp[semantic-quality]" then rerun --setup'
+        )
+
+    tier = None
+    if provider == "fastembed":
+        tier = "quality (contextual embeddings; ~5s load, best for the MCP server)"
+    elif provider == "model2vec":
+        tier = "fast (static embeddings; instant load, best for CLI and hooks)"
 
     return {
         "enabled": ready,
         "disabled_by_env": disabled,
-        "provider": "model2vec" if installed else None,
+        "provider": provider,
+        "tier": tier,
         "model": semantic_model_name(),
         "model_available_offline": ready,
         "index_path": str(semantic_index_path(root)),
@@ -344,7 +419,8 @@ def render_semantic_status_text(payload: Mapping[str, object]) -> tuple[int, str
         "Link semantic recall",
         "",
         f"Mode: {payload.get('mode')}",
-        f"Provider: {payload.get('provider') or 'not installed'}",
+        f"Provider: {payload.get('provider') or 'not installed'}"
+        + (f" · {payload.get('tier')}" if payload.get("tier") else ""),
         f"Model: {payload.get('model')}",
         f"Indexed memories: {payload.get('indexed_memories')} of {payload.get('memory_count')}",
         f"Index: {payload.get('index_path')}",

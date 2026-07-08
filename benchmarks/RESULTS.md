@@ -2,116 +2,130 @@
 
 Link's recall is measured, not asserted. This document holds the current
 numbers, exactly how they were produced, and how to reproduce them on your
-own machine. The benchmark is deterministic and fully local: no LLM calls,
-no network, no randomness — every memory and query is authored text checked
-into this repository.
+own machine. There are two tracks:
 
-## What is measured
+1. **Link recall benchmark** — our own deterministic, fully auditable
+   dataset (checked into this repo; no LLM, no network, no randomness).
+2. **LoCoMo third-party track** — the retrieval stage of the long-term
+   conversational memory benchmark the hosted-memory industry quotes
+   (Maharana et al., ACL 2024, Snap Research), using only its third-party
+   questions and evidence annotations.
 
-Given a personal-memory corpus and a query, Link's `recall` ranks memories.
-We measure whether the correct memory appears at rank 1 / top 3 / top 5
-(hit@1, hit@3, hit@5) and the mean reciprocal rank (MRR@5), comparing:
+## Semantic tiers
 
-- **lexical-only** — Link's default recall: token matching with stemming,
-  synonym groups, and rank boosts. Zero dependencies.
-- **hybrid** — lexical plus the optional local semantic layer
-  (`pip install "link-mcp[semantic]"`, model2vec `potion-base-8M`,
-  ~30 MB static embeddings, loaded offline-only).
+Lexical recall is always the default and the fallback (zero dependencies).
+Two optional local semantic tiers upgrade it — both load offline-only at
+recall time, keep embeddings in plain JSON under `.link-cache/`, and use no
+vector database or service:
 
-## Dataset
+| tier | install | model | load time | best for |
+|---|---|---|---|---|
+| fast | `pip install "link-mcp[semantic]"` | model2vec potion-base-8M (~30 MB) | ~0.1 s | CLI, session-start hooks |
+| quality | `pip install "link-mcp[semantic-quality]"` | all-MiniLM-L6-v2 ONNX (~90 MB) | ~5 s | MCP server, long-lived agents |
 
-`scripts/recall_dataset.py`:
+The quality tier is preferred automatically when installed
+(`LINK_SEMANTIC_PROVIDER` overrides).
 
-- **62 memories** across six domains (tooling, process, infra, data,
-  preferences, project facts), including 20 distractor memories with no
-  queries, so ranking competes against realistic noise. This corpus size
-  reflects real personal agent memory (dozens to hundreds of memories, not
-  millions of documents).
-- **1,176 cases** in the full suite: 294 authored queries (7 per intent,
-  mixing natural token-matching phrasings and true paraphrases) plus 882
-  deterministic phrasing variants ("quick question: …", "remind me: …") that
-  test framing robustness. The small suite (294 authored cases) is what CI
-  runs.
-- **Honest grouping**: queries are classified by *measured* overlap, not by
-  authorship. A query counts as `zero-overlap` only if it provably shares no
-  significant stemmed token with any text of its target memory — i.e. pure
-  paraphrases that token matching cannot reach directly.
+## Track 1: Link recall benchmark
 
-## Results
+Dataset (`scripts/recall_dataset.py`): 62 memories across six domains
+including 20 distractors; 1,176 cases (294 authored queries + deterministic
+phrasing variants). Queries are grouped by *measured* overlap: a case counts
+as `zero-overlap` only if it provably shares no significant stemmed token
+with its target memory — pure paraphrases that token matching cannot reach.
 
-Full suite (1,176 cases), model2vec potion-base-8M, Apple M4, macOS 26.5.1,
-Python 3.14. Run date: 2026-07-07, Link `develop` (post-1.5.0).
+Full suite, Apple M4, macOS 26.5.1, Python 3.14, run 2026-07-08, Link
+`develop` (post-1.5.0).
 
 ### Token-overlap queries (800 cases)
 
-| metric | lexical-only | hybrid | change |
+| metric | lexical | fast tier | quality tier |
 |---|---|---|---|
-| hit@1 | 0.589 | **0.703** | +11.4 pp |
-| hit@3 | 0.729 | **0.833** | +10.4 pp |
-| hit@5 | 0.815 | **0.880** | +6.5 pp |
-| MRR@5 | 0.668 | **0.769** | +0.101 |
-
-Semantic evidence helps even when tokens match: it disambiguates between
-several memories that share words with the query.
+| hit@1 | 0.589 | 0.703 | **0.749** |
+| hit@3 | 0.729 | 0.833 | **0.886** |
+| hit@5 | 0.815 | 0.880 | **0.926** |
+| MRR@5 | 0.668 | 0.769 | **0.818** |
 
 ### Zero-overlap queries — pure paraphrases (376 cases)
 
-| metric | lexical-only | hybrid | change |
+| metric | lexical | fast tier | quality tier |
 |---|---|---|---|
-| hit@1 | 0.048 | **0.074** | 1.5× |
-| hit@3 | 0.064 | **0.136** | 2.1× |
-| hit@5 | 0.082 | **0.202** | 2.5× |
-| MRR@5 | 0.058 | **0.115** | 2.0× |
+| hit@1 | 0.048 | 0.074 | **0.120** (2.5×) |
+| hit@3 | 0.064 | 0.136 | **0.255** (4.0×) |
+| hit@5 | 0.082 | 0.202 | **0.338** (4.1×) |
+| MRR@5 | 0.058 | 0.115 | **0.191** (3.3×) |
 
-### Latency (per recall over the 62-memory corpus)
+### Latency (per recall, 62-memory corpus, model load excluded)
 
-| mode | p50 | p95 | mean |
-|---|---|---|---|
-| lexical-only | 1.33 ms | 1.85 ms | 1.32 ms |
-| hybrid | 2.76 ms | 3.31 ms | 2.79 ms |
+| mode | p50 | mean |
+|---|---|---|
+| lexical | 1.3 ms | 1.3 ms |
+| fast tier | 2.8 ms | 2.8 ms |
+| quality tier | 9.3 ms | 10.0 ms |
 
-In-process, no service, no vector database. The one-time model load
-(~100 ms) is excluded; embedding-index refresh is incremental and
-content-hash keyed.
+### Ablations we ran and rejected
 
-### Model size ablation (authored 294-case suite)
+- **potion-retrieval-32M** (retrieval-tuned static model) and **multi-view
+  embeddings** (title/tldr/body embedded separately, max-similarity): both
+  improved token-overlap slightly but did not move zero-overlap paraphrases.
+  The zero-overlap ceiling is the static-embedding paradigm itself, which is
+  why the quality tier uses a contextual model instead of a bigger static one.
+- **potion-base-32M**: marginal over 8M; not worth 4× the size as a default.
 
-| model | size | zero-overlap hit@3 | hit@5 | hybrid mean latency |
-|---|---|---|---|---|
-| none (lexical) | 0 | 0.064 | 0.074 | 1.15 ms |
-| potion-base-8M (default) | ~30 MB | 0.149 | 0.234 | 2.62 ms |
-| potion-base-32M | ~120 MB | 0.160 | 0.266 | 3.73 ms |
+## Track 2: LoCoMo third-party retrieval
 
-The 32M model buys little over 8M on this task, which is why 8M is the
-default (`LINK_SEMANTIC_MODEL` overrides it).
+Every dialog turn of a LoCoMo conversation becomes one memory record; every
+evidence-annotated question (adversarial category excluded) becomes a recall
+query; we measure whether Link ranks the annotated evidence turns highly.
+10 conversations, 5,882 turn-memories (~590 per conversation), 1,536
+third-party queries. No LLM anywhere: this isolates the retrieval stage with
+third-party queries and third-party gold labels.
+
+| metric | lexical | hybrid (quality tier) |
+|---|---|---|
+| any-evidence hit@1 | 0.290 | **0.309** |
+| any-evidence hit@5 | 0.496 | **0.540** |
+| any-evidence hit@10 | 0.578 | **0.685** |
+| evidence recall@10 | 0.517 | **0.608** |
+| latency p50 / mean | 16 ms | 45 ms / 61 ms |
+
+**Not comparable to published LoCoMo QA scores** (mem0, Zep, etc. report
+end-to-end LLM answer quality with server-side pipelines). This track scores
+deterministic local ranking only — no answer generation, no LLM judging, no
+network. The dataset is CC BY-NC 4.0 © Snap Inc. and is not redistributed
+here; the script prints the download command.
 
 ## Honest limitations
 
-- **Pure paraphrases remain hard.** Hybrid recall doubles-to-triples
-  zero-overlap performance, but the majority of pure paraphrases still miss
-  the top 5 at this corpus size with a 30 MB static model. Link labels
-  every semantic-only match (`match: semantic`, capped confidence) so agents
-  verify before trusting — we consider honest uncertainty a feature, and we
-  publish the miss rate rather than hiding it.
-- **The dataset is authored by the Link project.** It was written before
-  tuning was finalized and the scoring gate fails the build if hybrid ever
-  regresses lexical, but it is not an independent third-party benchmark.
-  Contributions of adversarial cases are welcome — the format is five lines
-  per intent in `scripts/recall_dataset.py`.
-- **Not comparable to hosted-memory benchmark numbers** (e.g. DMR/LoCoMo
-  scores from cloud systems): those measure LLM answer quality with
-  server-side embeddings or knowledge graphs and per-ingestion LLM calls.
-  Link's benchmark measures deterministic local ranking with zero network
-  and zero LLM involvement — a different, stricter privacy contract.
+- **Pure paraphrases are much better, not solved.** The quality tier
+  quadruples zero-overlap hit@3/hit@5 over lexical, yet roughly two thirds
+  of pure paraphrases still miss the top 5 on our corpus. Link labels every
+  semantic-only match (`match: semantic`, capped confidence) so agents
+  verify before trusting — we publish the miss rate rather than hiding it.
+- **Track 1 is self-authored.** It is deterministic, auditable, and gated
+  against regressions in CI, but it was written by the Link project.
+  Track 2 exists precisely to complement it with third-party data;
+  adversarial case contributions to Track 1 are welcome (five lines per
+  intent in `scripts/recall_dataset.py`).
+- **The quality tier costs a ~5 s model load**, so short-lived CLI calls
+  and session-start hooks default to the fast tier unless you opt in.
 
 ## Reproduce
 
 ```bash
 git clone https://github.com/gowtham0992/link && cd link
-python3 -m venv /tmp/linkbench && /tmp/linkbench/bin/pip install model2vec
-/tmp/linkbench/bin/python scripts/eval_recall_quality.py --suite full --mode real --allow-download
-# lexical baseline only (no dependencies):
+
+# Track 1 (lexical baseline needs nothing):
 python3 scripts/eval_recall_quality.py --suite full --mode off
+python3 -m venv /tmp/linkbench
+/tmp/linkbench/bin/pip install model2vec            # fast tier
+/tmp/linkbench/bin/pip install fastembed            # quality tier (preferred when present)
+/tmp/linkbench/bin/python scripts/eval_recall_quality.py --suite full --mode real --allow-download
+
+# Track 2 (download the dataset yourself; CC BY-NC 4.0 © Snap Inc.):
+curl -L -o /tmp/locomo10.json https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json
+python3 scripts/eval_locomo.py /tmp/locomo10.json --mode off
+/tmp/linkbench/bin/python scripts/eval_locomo.py /tmp/locomo10.json --mode real
 ```
 
 `--mode fake` runs a deterministic no-model embedder; CI uses it with a

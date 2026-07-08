@@ -349,17 +349,20 @@ with no vector database, and semantic-only matches carry capped confidence
 labels so agents verify before trusting them.
 
 ```bash
-pip install "link-mcp[semantic]"
+pip install "link-mcp[semantic]"          # fast tier: tiny static model, instant load
+pip install "link-mcp[semantic-quality]"  # quality tier: contextual model, best recall
 lnk semantic ~/link --setup   # one-time model fetch, with your approval
-lnk semantic ~/link           # status: lexical only vs hybrid
+lnk semantic ~/link           # status: lexical only vs hybrid, active tier
 python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs
 ```
 
-Measured, not asserted: on the bundled 1,176-case benchmark over a
-62-memory corpus, hybrid recall lifts token-overlap hit@1 from 0.589 to
-0.703 and roughly doubles-to-triples pure-paraphrase (zero token overlap)
-hit@3/hit@5, at ~2.8 ms per recall with no service or vector database.
-Full methodology, honest limitations, and reproduction steps:
+Measured, not asserted: on the bundled 1,176-case benchmark, the quality
+tier lifts token-overlap hit@1 from 0.589 to 0.749 and pure-paraphrase
+(zero token overlap) hit@3/hit@5 by ~4×, at ~10 ms per recall with no
+service or vector database. On the third-party LoCoMo retrieval track
+(1,536 evidence-annotated questions over 5,882 conversation turns), hybrid
+recall lifts any-evidence hit@10 from 0.578 to 0.685. Full methodology,
+honest limitations, and reproduction steps:
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 <details>

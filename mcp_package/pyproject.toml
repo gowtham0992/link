@@ -26,6 +26,7 @@ classifiers = [
 
 [project.optional-dependencies]
 semantic = ["model2vec>=0.3"]
+semantic-quality = ["fastembed>=0.5"]
 
 [project.urls]
 Homepage = "https://github.com/gowtham0992/link"
