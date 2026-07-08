@@ -3,6 +3,16 @@
 Hooks let supported agents run the Link memory loop automatically:
 a session-start hook injects a bounded memory brief into new sessions,
 and a session-end hook stores proposal-only session notes for review.
+
+Supported agents differ in mechanism, so each config records its schema:
+- Claude Code: nested hook groups inside `~/.claude/settings.json`;
+  session-start stdout becomes model context; SessionEnd gets a transcript.
+- Codex: the same nested hook schema in `~/.codex/hooks.json`; stdout becomes
+  model context; there is no session-end event (Stop fires per turn, which
+  would be too noisy for capture), so only session-start is installed.
+- Cursor: a flat `~/.cursor/hooks.json` with `version: 1`; session-start must
+  print a JSON envelope with `additional_context`; sessionEnd is fire-and-forget
+  and only captures when Cursor provides a readable transcript path.
 """
 from __future__ import annotations
 
@@ -26,10 +36,12 @@ class AgentHookConfig:
     display_name: str
     aliases: tuple[str, ...]
     default_settings: str
+    schema: str = "nested"  # "nested" (Claude Code, Codex) or "flat" (Cursor)
     start_event: str = "SessionStart"
-    end_event: str = "SessionEnd"
+    end_event: str | None = "SessionEnd"
     # Skip "resume": the resumed context already carries the earlier brief.
-    start_matcher: str = "startup|clear|compact"
+    start_matcher: str | None = "startup|clear|compact"
+    start_emit: str = "text"  # "text" stdout-to-context, or "cursor" JSON envelope
     restart_hint: str = "Restart the agent; new sessions will start with the Link memory brief."
 
 
@@ -39,6 +51,28 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         display_name="Claude Code",
         aliases=("claude-code", "claude", "claude-code-cli"),
         default_settings="~/.claude/settings.json",
+    ),
+    AgentHookConfig(
+        name="codex",
+        display_name="Codex",
+        aliases=("codex",),
+        default_settings="~/.codex/hooks.json",
+        end_event=None,
+        restart_hint=(
+            "Restart Codex and approve the hook when Codex asks you to trust it; "
+            "new sessions will then start with the Link memory brief."
+        ),
+    ),
+    AgentHookConfig(
+        name="cursor",
+        display_name="Cursor",
+        aliases=("cursor",),
+        default_settings="~/.cursor/hooks.json",
+        schema="flat",
+        start_event="sessionStart",
+        end_event="sessionEnd",
+        start_matcher=None,
+        start_emit="cursor",
     ),
 )
 
@@ -75,12 +109,25 @@ def _settings_path(default_settings: str, override: str | None) -> Path:
     return path
 
 
-def _hook_command(python_cmd: str, runtime_script: Path, event: str, target: Path) -> str:
-    return display_command([python_cmd, str(runtime_script), "hook", event, str(target)])
+def _hook_command(
+    python_cmd: str,
+    runtime_script: Path,
+    event: str,
+    target: Path,
+    emit: str = "text",
+) -> str:
+    parts = [python_cmd, str(runtime_script), "hook", event, str(target)]
+    if emit != "text":
+        parts.extend(["--emit", emit])
+    return display_command(parts)
 
 
-def _hook_entry(command: str, timeout: int) -> dict[str, object]:
+def _nested_entry(command: str, timeout: int) -> dict[str, object]:
     return {"type": "command", "command": command, "timeout": timeout}
+
+
+def _flat_entry(command: str, timeout: int) -> dict[str, object]:
+    return {"command": command, "timeout": timeout}
 
 
 def _is_link_hook_command(command: object, event: str) -> bool:
@@ -89,7 +136,7 @@ def _is_link_hook_command(command: object, event: str) -> bool:
     return _HOOK_SCRIPT_MARKER in command and f" hook {event}" in command
 
 
-def _merge_hook_event(
+def _merge_nested_event(
     settings: dict[str, Any],
     event_name: str,
     event: str,
@@ -122,31 +169,93 @@ def _merge_hook_event(
     hooks[event_name] = groups
 
 
-def _hooks_snippet(config: AgentHookConfig, start_entry: dict[str, object], end_entry: dict[str, object]) -> str:
-    return json.dumps(
-        {
-            "hooks": {
-                config.start_event: [{"matcher": config.start_matcher, "hooks": [start_entry]}],
-                config.end_event: [{"hooks": [end_entry]}],
-            }
-        },
-        indent=2,
-    )
-
-
-def _write_hooks(
-    path: Path,
-    config: AgentHookConfig,
-    start_entry: dict[str, object],
-    end_entry: dict[str, object],
+def _merge_flat_event(
+    settings: dict[str, Any],
+    event_name: str,
+    event: str,
+    entry: dict[str, object],
 ) -> None:
+    settings.setdefault("version", 1)
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+        settings["hooks"] = hooks
+    entries = hooks.get(event_name)
+    if not isinstance(entries, list):
+        entries = []
+    replaced = False
+    for index, existing in enumerate(entries):
+        if isinstance(existing, dict) and _is_link_hook_command(existing.get("command"), event):
+            entries[index] = dict(entry)
+            replaced = True
+    if not replaced:
+        entries.append(dict(entry))
+    hooks[event_name] = entries
+
+
+def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, target: Path) -> list[dict[str, object]]:
+    """Return the ordered event entries this agent should install."""
+    make_entry = _nested_entry if config.schema == "nested" else _flat_entry
+    plan: list[dict[str, object]] = [
+        {
+            "event_name": config.start_event,
+            "event": "session-start",
+            "matcher": config.start_matcher,
+            "entry": make_entry(
+                _hook_command(python_cmd, runtime_script, "session-start", target, emit=config.start_emit),
+                SESSION_START_TIMEOUT_SECONDS,
+            ),
+        }
+    ]
+    if config.end_event:
+        plan.append({
+            "event_name": config.end_event,
+            "event": "session-end",
+            "matcher": None,
+            "entry": make_entry(
+                _hook_command(python_cmd, runtime_script, "session-end", target),
+                SESSION_END_TIMEOUT_SECONDS,
+            ),
+        })
+    return plan
+
+
+def _hooks_snippet(config: AgentHookConfig, plan: list[dict[str, object]]) -> str:
+    hooks: dict[str, object] = {}
+    for item in plan:
+        entry = item["entry"]
+        if config.schema == "nested":
+            group: dict[str, object] = {"hooks": [entry]}
+            if item["matcher"]:
+                group["matcher"] = item["matcher"]
+            hooks[str(item["event_name"])] = [group]
+        else:
+            hooks[str(item["event_name"])] = [entry]
+    payload: dict[str, object] = {"hooks": hooks}
+    if config.schema == "flat":
+        payload = {"version": 1, "hooks": hooks}
+    return json.dumps(payload, indent=2)
+
+
+def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, object]]) -> None:
     settings: dict[str, Any] = {}
     if path.exists() and path.read_text(encoding="utf-8", errors="replace").strip():
         settings = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         if not isinstance(settings, dict):
             raise ValueError(f"{path} must contain a JSON object")
-    _merge_hook_event(settings, config.start_event, "session-start", start_entry, matcher=config.start_matcher)
-    _merge_hook_event(settings, config.end_event, "session-end", end_entry)
+    for item in plan:
+        entry = item["entry"]
+        assert isinstance(entry, dict)
+        if config.schema == "nested":
+            _merge_nested_event(
+                settings,
+                str(item["event_name"]),
+                str(item["event"]),
+                entry,
+                matcher=item["matcher"] if isinstance(item["matcher"], str) else None,
+            )
+        else:
+            _merge_flat_event(settings, str(item["event_name"]), str(item["event"]), entry)
     atomic_write_json(path, settings)
 
 
@@ -162,33 +271,41 @@ def build_agent_hooks_payload(
     """Build or write session-hook configuration for a supported local agent."""
     config = _hook_agent_by_name(agent)
     path = _settings_path(config.default_settings, settings_path)
-    start_command = _hook_command(python_cmd, runtime_script, "session-start", target)
-    end_command = _hook_command(python_cmd, runtime_script, "session-end", target)
-    start_entry = _hook_entry(start_command, SESSION_START_TIMEOUT_SECONDS)
-    end_entry = _hook_entry(end_command, SESSION_END_TIMEOUT_SECONDS)
+    plan = _event_plan(config, python_cmd, runtime_script, target)
     write_status: dict[str, object] = {"requested": write, "ok": False, "message": "preview only"}
     if write:
         try:
-            _write_hooks(path, config, start_entry, end_entry)
+            _write_hooks(path, config, plan)
             write_status = {"requested": True, "ok": True, "message": f"updated {path}"}
         except Exception as exc:
             write_status = {"requested": True, "ok": False, "message": str(exc)}
+
+    entry_commands = {
+        str(item["event_name"]): str(item["entry"]["command"])  # type: ignore[index]
+        for item in plan
+    }
+    behavior = [
+        f"{config.start_event}: injects a bounded Link memory brief into new agent sessions.",
+    ]
+    if config.end_event:
+        behavior.append(
+            f"{config.end_event}: stores proposal-only session notes locally; durable memory still requires review."
+        )
+    else:
+        behavior.append(
+            f"{config.display_name} has no session-end hook event; end sessions with `lnk session-end` "
+            "or the MCP session_end action to capture memory proposals."
+        )
 
     return {
         "agent": config.name,
         "display_name": config.display_name,
         "target": str(target),
         "settings_path": str(path),
-        "events": {
-            config.start_event: start_command,
-            config.end_event: end_command,
-        },
-        "snippet": _hooks_snippet(config, start_entry, end_entry),
+        "events": entry_commands,
+        "snippet": _hooks_snippet(config, plan),
         "write": write_status,
-        "behavior": [
-            f"{config.start_event}: injects a bounded Link memory brief into new agent sessions.",
-            f"{config.end_event}: stores proposal-only session notes locally; durable memory still requires review.",
-        ],
+        "behavior": behavior,
         "restart_hint": config.restart_hint,
     }
 

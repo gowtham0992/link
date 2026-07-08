@@ -309,6 +309,18 @@ def build_cli_parser(
     hook_cmd.add_argument("target", nargs="?", default=".")
     hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
     hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
+    hook_cmd.add_argument(
+        "--emit",
+        choices=["text", "cursor"],
+        default="text",
+        help="session-start output envelope: plain text (Claude Code, Codex) or Cursor additional_context JSON",
+    )
+
+    consolidate_cmd = sub.add_parser("consolidate", help="print a read-only plan for the capture and review backlog")
+    consolidate_cmd.add_argument("target", nargs="?", default=".")
+    consolidate_cmd.add_argument("--limit", type=int, default=50, help="maximum captures and review items to include")
+    consolidate_cmd.add_argument("--project", default=None, help="restrict the plan to one project's captures and memories")
+    consolidate_cmd.add_argument("--json", action="store_true", help="print machine-readable consolidation plan")
 
     profile_cmd = sub.add_parser("profile", help="show what Link remembers")
     profile_cmd.add_argument("target", nargs="?", default=".")
@@ -672,7 +684,10 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             args.event,
             limit=args.limit,
             project=args.project,
+            emit=args.emit,
         )
+    if command == "consolidate":
+        return handlers["consolidate"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":

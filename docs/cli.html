@@ -131,7 +131,8 @@ lnk connect codex ~/link --write
 lnk connect kiro ~/link --write
 lnk connect claude-code ~/link --hooks --write
 lnk verify-mcp ~/link</code></pre>
-        <p>Add <code>--hooks</code> (Claude Code) to also install session hooks: every new session then starts with a bounded Link memory brief injected automatically, and session end stores proposal-only notes with memory candidates for later review — no durable memory is written without approval. The hooks run <code>lnk hook session-start</code> and <code>lnk hook session-end</code>, which you can also invoke directly to inspect what they inject or capture.</p>
+        <p>Add <code>--hooks</code> (Claude Code, Codex, Cursor) to also install session hooks: every new session then starts with a bounded Link memory brief injected automatically, and session end stores proposal-only notes with memory candidates for later review — no durable memory is written without approval. Codex has no session-end event, so it gets the session-start brief only. Sessions without memory-worthy content are skipped and duplicate end events are deduplicated, so the capture inbox does not fill with noise. The hooks run <code>lnk hook session-start</code> and <code>lnk hook session-end</code>, which you can also invoke directly to inspect what they inject or capture.</p>
+        <p>Use <code>lnk consolidate</code> when the capture or review backlog builds up. It is read-only: it counts pending captures and memories needing review, groups duplicate captures, and prints paste-safe accept/discard/review commands to run with the user. When the backlog crosses a threshold, the injected session-start brief nudges the agent to offer a consolidation pass, and MCP agents can request the same plan through <code>review(action="consolidate")</code>.</p>
         <p>From a source checkout, use the synthetic large-wiki smoke when you want local scale evidence without touching your real wiki. The script prints the exact <code>lnk serve</code> command and graph URL for the generated fixture.</p>
         <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
 
@@ -171,6 +172,7 @@ lnk benchmark ["query"] [--budget micro|small|medium|large] [--project slug]
 lnk start [dir] [--task "task"] [--project slug]
 lnk brief "task" [--project slug]
 lnk memory-audit [--project slug]
+lnk consolidate [dir] [--project slug] [--limit N]
 lnk recall "query" [--project slug]
 lnk profile [--project slug]
 lnk wins [--project slug]

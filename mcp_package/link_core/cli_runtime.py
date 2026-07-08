@@ -525,6 +525,17 @@ def render_session_start_hook_text(payload: Mapping[str, object]) -> tuple[int, 
             "No project context or relevant memory yet. To seed source-backed project context "
             f"from this repo's docs, suggest: {display_command(['lnk', 'seed', '.', target])}",
         ])
+    backlog = payload.get("backlog") if isinstance(payload.get("backlog"), Mapping) else {}
+    if backlog.get("backlog"):
+        lines.extend([
+            "",
+            (
+                f"Memory backlog: {backlog.get('pending_captures', 0)} pending captures · "
+                f"{backlog.get('needs_review_memories', 0)} memories need review. "
+                "Offer the user a short consolidation pass this session; "
+                f"{backlog.get('command')} prints a read-only plan with approve/discard commands."
+            ),
+        ])
     lines.extend([
         "",
         "Use this brief before asking the user to repeat durable context. "

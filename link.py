@@ -52,6 +52,7 @@ Usage:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -266,6 +267,11 @@ from link_core.agent_hooks import (
     extract_transcript_text as _core_extract_transcript_text,
     hook_supported_agents as _core_hook_supported_agents,
     supports_agent_hooks as _core_supports_agent_hooks,
+)
+from link_core.consolidate import (
+    build_consolidation_plan as _core_build_consolidation_plan,
+    memory_backlog_summary as _core_memory_backlog_summary,
+    render_consolidate_text as _core_render_consolidate_text,
 )
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
@@ -1970,16 +1976,75 @@ def _read_hook_stdin() -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _hook_session_start(target: Path, hook_event: dict[str, object], limit: int, project: str | None) -> int:
+def _memory_backlog_summary(target: Path, wiki_dir: Path) -> dict[str, object]:
+    """Workspace-wide backlog signal (unscoped: consolidation is a workspace chore)."""
+    root = _resolve_link_root(target)
+    captures = _capture_review_summary(target, project=None, limit=1)
+    inbox = _memory_inbox(wiki_dir, limit=50)
+    return _core_memory_backlog_summary(
+        capture_count=int(captures.get("count") or 0),
+        needs_review_count=int(inbox.get("review_count") or 0),
+        command_target=root,
+    )
+
+
+def consolidate(target: Path, limit: int = 50, project: str | None = None, json_output: bool = False) -> int:
+    """Print a read-only consolidation plan for capture and review backlogs."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Link: wiki missing at {wiki_dir}; run {_display_command(['lnk', 'init', str(target)])} to restore it.")
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    captures_payload = _core_capture_inbox(
+        root,
+        limit=max(1, min(limit, 50)),
+        project=project,
+        commands_for=lambda rel_path: _core_cli_capture_commands(rel_path, root),
+    )
+    inbox_payload = _memory_inbox(wiki_dir, limit=max(1, min(limit, 50)), project=project)
+    payload = _core_build_consolidation_plan(
+        captures_payload=captures_payload,
+        inbox_payload=inbox_payload,
+        command_target=root,
+        project=project,
+    )
+    return _emit_json_or_text(payload, json_output, _core_render_consolidate_text)
+
+
+def _hook_project_dir(hook_event: dict[str, object]) -> str:
+    """Return the project directory the hook fired in, across agent schemas."""
+    hook_cwd = str(hook_event.get("cwd") or "").strip()
+    if hook_cwd:
+        return hook_cwd
+    roots = hook_event.get("workspace_roots")
+    if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0].strip():
+        return roots[0].strip()
+    return ""
+
+
+def _emit_session_start(text: str, emit: str) -> None:
+    if emit == "cursor":
+        print(json.dumps({"additional_context": text}))
+        return
+    print(text)
+
+
+def _hook_session_start(
+    target: Path, hook_event: dict[str, object], limit: int, project: str | None, emit: str
+) -> int:
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        _emit_session_start(
+            f"Link: wiki missing at {wiki_dir}; run {_display_command(['lnk', 'init', str(target)])} to restore it.",
+            emit,
+        )
         return 0
     project_name = project
     if not project_name:
-        hook_cwd = str(hook_event.get("cwd") or "").strip()
-        if hook_cwd:
-            project_name = _default_project(Path(hook_cwd))
+        project_dir = _hook_project_dir(hook_event)
+        if project_dir:
+            project_name = _default_project(Path(project_dir))
     if not project_name:
         project_name = _default_project(target)
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=False)
@@ -1999,9 +2064,19 @@ def _hook_session_start(target: Path, hook_event: dict[str, object], limit: int,
         "status": status_payload,
         "brief_text": brief_text,
         "project_seed_recommended": project_seed_recommended,
+        "backlog": _memory_backlog_summary(target, wiki_dir),
     })
-    print(text)
+    _emit_session_start(text, emit)
     return 0
+
+
+def _session_end_hook_state_path(target: Path) -> Path:
+    return _resolve_link_root(target) / ".link-cache" / "session-end-hook.hash"
+
+
+def _session_notes_fingerprint(notes: str) -> str:
+    normalized = " ".join(notes.split()).lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, project: str | None) -> int:
@@ -2011,27 +2086,60 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
     notes = _core_extract_transcript_text(Path(transcript_value).expanduser())
     if len(notes.strip()) < 200:
         return 0
+    # Skip duplicate firings for the same conversation content (e.g. /clear
+    # immediately followed by exit, or repeated end events).
+    state_path = _session_end_hook_state_path(target)
+    fingerprint = _session_notes_fingerprint(notes)
+    try:
+        if state_path.exists() and state_path.read_text(encoding="utf-8").strip() == fingerprint:
+            return 0
+    except OSError:
+        pass
     project_name = project
     if not project_name:
-        hook_cwd = str(hook_event.get("cwd") or "").strip()
-        if hook_cwd:
-            project_name = _default_project(Path(hook_cwd))
-    return session_end(
+        project_dir = _hook_project_dir(hook_event)
+        if project_dir:
+            project_name = _default_project(Path(project_dir))
+    # Only store a capture when the session produced memory-worthy candidates;
+    # otherwise every session would add review-inbox noise.
+    wiki_dir = _resolve_wiki_dir(target)
+    root = _resolve_link_root(target)
+    proposal_limit = max(1, min(limit, 10))
+    preview = _propose_memories_from_text(
+        wiki_dir,
+        notes,
+        source="agent-session-hook",
+        limit=proposal_limit,
+        project=project_name,
+        command_target=root,
+    )
+    if not int(preview.get("count") or 0):
+        return 0
+    code = session_end(
         target,
         notes,
         title="Agent session notes",
-        limit=max(1, min(limit, 10)),
+        limit=proposal_limit,
         project=project_name,
     )
+    if code == 0:
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(fingerprint, encoding="utf-8")
+        except OSError:
+            pass
+    return code
 
 
-def run_agent_hook(target: Path, event: str, limit: int = 5, project: str | None = None) -> int:
+def run_agent_hook(
+    target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text"
+) -> int:
     """Run an installed agent session hook; never fail the agent session."""
     target = target.expanduser().resolve()
     hook_event = _read_hook_stdin()
     try:
         if event == "session-start":
-            return _hook_session_start(target, hook_event, limit, project)
+            return _hook_session_start(target, hook_event, limit, project, emit)
         if event == "session-end":
             return _hook_session_end(target, hook_event, limit, project)
         print(f"Unknown hook event: {event}", file=sys.stderr)
@@ -2782,6 +2890,7 @@ def main(argv: list[str] | None = None) -> int:
             "brief": brief,
             "start": start,
             "hook": run_agent_hook,
+            "consolidate": consolidate,
             "profile": profile,
             "wins": memory_wins,
             "memory-audit": memory_audit,

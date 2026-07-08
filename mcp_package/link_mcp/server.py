@@ -205,6 +205,9 @@ from link_core.capture import (
     redact_capture_file as _core_redact_capture_file,
     write_session_capture as _core_write_session_capture,
 )
+from link_core.consolidate import (
+    build_consolidation_plan as _core_build_consolidation_plan,
+)
 from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
 )
@@ -1218,8 +1221,10 @@ def review(
     """Review, explain, and manage local memory lifecycle.
 
     Supported actions: inbox, audit, profile, log, wins, explain, reviewed,
-    archive, restore, forget. Prefer archive over forget unless the user asks
-    for permanent deletion.
+    archive, restore, forget, consolidate. Prefer archive over forget unless
+    the user asks for permanent deletion. Use consolidate for a read-only plan
+    when the capture or review backlog builds up; apply its actions only after
+    the user approves each one.
     """
     clean_action = (_clean_text_input(action, max_len=80) or "inbox").lower().replace("-", "_")
     parsed_limit = _parse_limit(limit, default=20, max_limit=50)
@@ -1245,12 +1250,19 @@ def review(
             payload = _set_memory_status(identifier, "active")
         elif clean_action == "forget":
             payload = _forget_memory(identifier, confirm=confirm)
+        elif clean_action == "consolidate":
+            payload = _core_build_consolidation_plan(
+                captures_payload=_capture_inbox(limit=parsed_limit, project=clean_project),
+                inbox_payload=_memory_inbox(limit=parsed_limit, project=clean_project),
+                command_target=WIKI_DIR.parent,
+                project=clean_project,
+            )
         else:
             return json.dumps({
                 "surface": "slim",
                 "tool": "review",
                 "error": f"unsupported action: {clean_action}",
-                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "explain", "reviewed", "archive", "restore", "forget"],
+                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "explain", "reviewed", "archive", "restore", "forget", "consolidate"],
             })
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "review", "updated": False, "error": str(exc)})
