@@ -210,7 +210,7 @@ from link_core.memory import (
     normalize_project as _core_normalize_project,
     memory_review_issues as _core_memory_review_issues,
     propose_memories_from_text as _core_propose_memories_from_text,
-    recall_memories as _core_recall_memories,
+    recall_memories as _core_recall_memory_results,
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
@@ -549,7 +549,7 @@ def _memory_audit(limit: int = 10, project: str = "") -> dict[str, object]:
     )
 
 
-def _recall_memories(
+def _recall_memory_results(
     query: str,
     limit: int = 10,
     include_archived: bool = False,
@@ -557,7 +557,7 @@ def _recall_memories(
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
     records = _memory_records()
-    return _core_recall_memories(
+    return _core_recall_memory_results(
         records,
         query,
         limit=limit,
@@ -1162,7 +1162,7 @@ def recall(
     if clean_mode == "memory":
         if not clean_query:
             return json.dumps({"surface": "slim", "tool": "recall", "error": "query required for memory mode"})
-        memories = _recall_memories(clean_query, limit=parsed_limit, project=clean_project)
+        memories = _recall_memory_results(clean_query, limit=parsed_limit, project=clean_project)
         return json.dumps({
             "surface": "slim",
             "tool": "recall",
@@ -1640,7 +1640,7 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
     if not query:
         return json.dumps({"error": "query required", "query": "", "count": 0, "memories": []})
     project_name = _resolve_project(project)
-    memories = _recall_memories(query, limit=limit, include_archived=include_archived, project=project_name)
+    memories = _recall_memory_results(query, limit=limit, include_archived=include_archived, project=project_name)
     return json.dumps({
         "query": query,
         "count": len(memories),

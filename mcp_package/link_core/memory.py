@@ -4,7 +4,7 @@ from __future__ import annotations
 import fnmatch
 import re
 import urllib.parse
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -2218,6 +2218,48 @@ def memory_rank_score(record: Mapping[str, object], match_score: int, project: s
     return max(1, rank_score)
 
 
+def list_recipes(
+    records: Iterable[Mapping[str, object]],
+    project: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    """Active procedure memories, newest first, with their triggers."""
+    project_name = normalize_project(project)
+    recipes = [
+        slim_memory(record) | {"steps": procedure_steps_excerpt(str(record.get("body") or ""))}
+        for record in records
+        if str(record.get("memory_type") or "") == "procedure"
+        and is_active_memory(record)
+        and memory_visible_for_project(record, project_name)
+    ]
+    recipes.sort(key=lambda item: str(item.get("updated_at") or item.get("date_captured") or ""), reverse=True)
+    return recipes[: max(1, min(limit, 50))]
+
+
+def render_recipes_text(recipes: Sequence[Mapping[str, object]], target: object = ".") -> tuple[int, str]:
+    lines = ["Link recipes (procedural memory)"]
+    if not recipes:
+        lines.extend([
+            "",
+            "No recipes yet. Save one after a multi-step task:",
+            f"  {display_command(['lnk', 'remember', '<steps>', str(target), '--type', 'procedure', '--trigger', '<when to use>'])}",
+        ])
+        return 0, "\n".join(lines)
+    lines.append(f"{len(recipes)} recipe{'s' if len(recipes) != 1 else ''}")
+    for recipe in recipes:
+        lines.append("")
+        lines.append(f"- {recipe.get('title')}")
+        trigger = str(recipe.get("trigger") or "").strip()
+        if trigger:
+            lines.append(f"  When: {trigger}")
+        lines.append(f"  {recipe.get('path')}")
+        steps = str(recipe.get("steps") or "").strip()
+        if steps:
+            preview = steps.splitlines()[0][:100]
+            lines.append(f"  First step: {preview}")
+    return 0, "\n".join(lines)
+
+
 def recall_memories(
     records: Iterable[Mapping[str, object]],
     query: str,
@@ -2227,6 +2269,7 @@ def recall_memories(
     semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
     context_path: str | None = None,
     as_of: str | None = None,
+    memory_type: str | None = None,
 ) -> list[dict[str, object]]:
     q = query.strip()
     if not q:
@@ -2238,6 +2281,8 @@ def recall_memories(
     severity_rank = {"high": 0, "medium": 1, "low": 2}
     for record in records:
         if not memory_visible_for_project(record, project_name):
+            continue
+        if memory_type and str(record.get("memory_type") or "") != memory_type:
             continue
         if as_of:
             # Temporal recall: reconstruct what was active on that date from

@@ -8,8 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.capture import capture_accept_memory_args  # noqa: E402
+from link_core.consolidate import _recurring_theme_groups  # noqa: E402
 from link_core.memory import (  # noqa: E402
     extract_procedure_candidates,
+    list_recipes,
     memory_records,
     procedure_steps_excerpt,
     propose_memories_from_text,
@@ -112,6 +114,46 @@ class ProcedureMemoryTests(unittest.TestCase):
         args = capture_accept_memory_args({"proposal": proposal, "project": "", "capture": "raw/x.md"})
         self.assertEqual(args["trigger"], "Here is how we hotfix production")
         self.assertEqual(args["memory_type"], "procedure")
+
+    def test_list_recipes_returns_active_procedures_with_triggers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            wiki = self._wiki(temp)
+            _write_procedure(wiki)
+            write_memory_page(
+                wiki, "Plain note.", title="Not a recipe", memory_type="note", scope="user",
+                tags=None, source="test", timestamp="2026-07-08T00:00:00Z",
+            )
+            recipes = list_recipes(memory_records(wiki))
+
+        self.assertEqual(len(recipes), 1)
+        self.assertEqual(recipes[0]["trigger"], "cutting or preparing a new release")
+        self.assertIn("Bump the version", str(recipes[0]["steps"]))
+
+    def test_recall_type_filter_returns_only_procedures(self):
+        with tempfile.TemporaryDirectory() as temp:
+            wiki = self._wiki(temp)
+            _write_procedure(wiki)
+            write_memory_page(
+                wiki, "Release notes stay short.", title="Release notes", memory_type="preference",
+                scope="user", tags=None, source="test", timestamp="2026-07-08T00:00:00Z",
+            )
+            records = memory_records(wiki)
+            all_hits = recall_memories(records, "release")
+            procedures_only = recall_memories(records, "release", memory_type="procedure")
+
+        self.assertGreater(len(all_hits), len(procedures_only))
+        self.assertEqual([r["memory_type"] for r in procedures_only], ["procedure"])
+
+    def test_recurring_theme_detection_clusters_related_captures(self):
+        captures = [
+            {"path": "raw/a.md", "snippet": "Run the large wiki smoke before cutting any release build today"},
+            {"path": "raw/b.md", "snippet": "Reminded again to run the large wiki smoke before the release build"},
+            {"path": "raw/c.md", "snippet": "Unrelated notes about database schema migrations and alembic files"},
+        ]
+        themes = _recurring_theme_groups(captures)
+        self.assertEqual(len(themes), 1)
+        self.assertEqual(themes[0]["sessions"], 2)
+        self.assertEqual(themes[0]["captures"], ["raw/a.md", "raw/b.md"])
 
     def test_steps_excerpt_extracts_memory_section(self):
         body = "# T\n\n> **TLDR:** t\n\n## Memory\n\n1. a\n2. b\n\n## Source\n\nx"

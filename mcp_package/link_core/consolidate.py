@@ -87,6 +87,50 @@ def _duplicate_capture_groups(captures: list[dict[str, object]]) -> list[dict[st
     return groups
 
 
+THEME_JACCARD_LOW = 0.45
+
+
+def _recurring_theme_groups(captures: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Clusters of related-but-not-duplicate captures: a recurring theme.
+
+    Two captures whose snippets overlap between the theme floor and the
+    duplicate threshold are the same topic showing up across sessions —
+    the signal that one durable memory (often a preference or recipe)
+    should replace scattered captures. Detection is deterministic; writing
+    anything remains the user's call.
+    """
+    themes: list[dict[str, object]] = []
+    used: set[str] = set()
+    items = [(capture, _snippet_tokens(capture)) for capture in captures if _snippet_tokens(capture)]
+    for index, (capture, tokens) in enumerate(items):
+        path = str(capture.get("path"))
+        if path in used:
+            continue
+        members = [capture]
+        for other, other_tokens in items[index + 1:]:
+            other_path = str(other.get("path"))
+            if other_path in used:
+                continue
+            union = tokens | other_tokens
+            similarity = len(tokens & other_tokens) / len(union) if union else 0.0
+            if THEME_JACCARD_LOW <= similarity < DUPLICATE_JACCARD:
+                members.append(other)
+                used.add(other_path)
+        if len(members) >= 2:
+            used.add(path)
+            themes.append({
+                "sessions": len(members),
+                "snippet": str(capture.get("snippet") or "")[:140],
+                "captures": [str(item.get("path")) for item in members],
+                "suggestion": (
+                    "This theme recurs across sessions. Propose one durable memory "
+                    "(a preference, or a procedure with a trigger) to the user, then "
+                    "accept it and discard the scattered captures."
+                ),
+            })
+    return themes
+
+
 def build_consolidation_plan(
     *,
     captures_payload: dict[str, object],
@@ -99,8 +143,10 @@ def build_consolidation_plan(
     capture_count = int(captures_payload.get("count") or len(captures))
     review_items = inbox_payload.get("items") if isinstance(inbox_payload.get("items"), list) else []
     needs_review_count = int(inbox_payload.get("review_count") or len(review_items))
-    duplicate_groups = _duplicate_capture_groups([c for c in captures if isinstance(c, dict)])
+    capture_dicts = [c for c in captures if isinstance(c, dict)]
+    duplicate_groups = _duplicate_capture_groups(capture_dicts)
     duplicate_count = sum(len(group["duplicates"]) for group in duplicate_groups)
+    recurring_themes = _recurring_theme_groups(capture_dicts)
 
     capture_plan = []
     duplicate_paths = {
@@ -146,6 +192,7 @@ def build_consolidation_plan(
         "needs_review_memories": needs_review_count,
         "duplicate_groups": duplicate_groups,
         "duplicate_capture_count": duplicate_count,
+        "recurring_themes": recurring_themes,
         "captures": capture_plan,
         "review_queue": review_plan,
         "safety": (
@@ -184,6 +231,17 @@ def render_consolidate_text(payload: dict[str, object]) -> tuple[int, str]:
                     lines.append(f"  Duplicate: {item.get('path')}")
                     if item.get("delete_command"):
                         lines.append(f"    {item.get('delete_command')}")
+
+    themes = payload.get("recurring_themes") if isinstance(payload.get("recurring_themes"), list) else []
+    if themes:
+        lines.extend(["", "Recurring themes (candidates for one durable memory):"])
+        for theme in themes:
+            if not isinstance(theme, dict):
+                continue
+            lines.append(f"- Seen in {theme.get('sessions')} sessions: {theme.get('snippet')}")
+            for capture_path in theme.get("captures", []):
+                lines.append(f"    {capture_path}")
+            lines.append(f"  {theme.get('suggestion')}")
 
     captures = payload.get("captures") if isinstance(payload.get("captures"), list) else []
     unique_captures = [c for c in captures if isinstance(c, dict) and not c.get("duplicate")]

@@ -122,6 +122,8 @@ if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
 from link_core.memory import (
+    list_recipes as _core_list_recipes,
+    render_recipes_text as _core_render_recipes_text,
     is_existing_memory_echo as _core_is_existing_memory_echo,
     add_capture_review_to_brief as _core_add_capture_review_to_brief,
     count_values as _core_count_values,
@@ -514,6 +516,7 @@ def _recall_memories(
     include_archived: bool = False,
     project: str | None = None,
     as_of: str | None = None,
+    memory_type: str | None = None,
 ) -> list[dict[str, object]]:
     records = _memory_records(wiki_dir)
     return _core_recall_memories(
@@ -525,6 +528,7 @@ def _recall_memories(
         semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
         context_path=str(Path.cwd()),
         as_of=as_of,
+        memory_type=memory_type,
     )
 
 
@@ -1611,6 +1615,7 @@ def recall(
     include_archived: bool = False,
     project: str | None = None,
     as_of: str | None = None,
+    memory_type: str | None = None,
 ) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
@@ -1625,6 +1630,7 @@ def recall(
             include_archived=include_archived,
             project=project_name,
             as_of=as_of,
+            memory_type=memory_type,
         )
     except ValueError as exc:
         print(f"Could not recall: {exc}", file=sys.stderr)
@@ -2068,6 +2074,22 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
     if action_error:
         print(action_error, file=sys.stderr)
         code = 1
+    _print_text(text)
+    return code
+
+
+def recipes(target: Path, project: str | None = None, limit: int = 50, json_output: bool = False) -> int:
+    """List saved procedure memories with their triggers."""
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    project_name = project or _default_project(target)
+    items = _core_list_recipes(_memory_records(wiki_dir), project=project_name, limit=limit)
+    if json_output:
+        print(json.dumps({"count": len(items), "project": project_name, "recipes": items}, indent=2))
+        return 0
+    code, text = _core_render_recipes_text(items, target=target)
     _print_text(text)
     return code
 
@@ -3023,6 +3045,7 @@ def main(argv: list[str] | None = None) -> int:
             "start": start,
             "hook": run_agent_hook,
             "consolidate": consolidate,
+            "recipes": recipes,
             "semantic": semantic,
             "profile": profile,
             "wins": memory_wins,

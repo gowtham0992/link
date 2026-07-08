@@ -48,6 +48,7 @@ EXPECTED_CLI_COMMANDS = {
     "rebuild-index",
     "rebuild-backlinks",
     "recall",
+    "recipes",
     "redact-capture",
     "remember",
     "restore-backup",

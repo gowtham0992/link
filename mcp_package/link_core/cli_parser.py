@@ -274,6 +274,7 @@ def build_cli_parser(
     recall_cmd.add_argument("--limit", type=int, default=10)
     recall_cmd.add_argument("--include-archived", action="store_true", help="include archived and stale memories")
     recall_cmd.add_argument("--as-of", default=None, dest="as_of", help="YYYY-MM-DD: recall what was active on that date (temporal recall)")
+    recall_cmd.add_argument("--type", choices=MEMORY_TYPES, default=None, dest="memory_type", help="only recall memories of this type")
     recall_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     recall_cmd.add_argument("--json", action="store_true", help="print machine-readable results")
 
@@ -330,6 +331,12 @@ def build_cli_parser(
     semantic_cmd.add_argument("--setup", action="store_true", help="fetch the local embedding model once and build the index")
     semantic_cmd.add_argument("--rebuild", action="store_true", help="rebuild the semantic index offline")
     semantic_cmd.add_argument("--json", action="store_true", help="print machine-readable semantic status")
+
+    recipes_cmd = sub.add_parser("recipes", help="list saved procedure memories (recipes) with their triggers")
+    recipes_cmd.add_argument("target", nargs="?", default=".")
+    recipes_cmd.add_argument("--project", default=None, help="include user/global recipes plus this project's recipes")
+    recipes_cmd.add_argument("--limit", type=int, default=50)
+    recipes_cmd.add_argument("--json", action="store_true", help="print machine-readable recipes")
 
     consolidate_cmd = sub.add_parser("consolidate", help="print a read-only plan for the capture and review backlog")
     consolidate_cmd.add_argument("target", nargs="?", default=".")
@@ -662,6 +669,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             include_archived=args.include_archived,
             project=args.project,
             as_of=args.as_of,
+            memory_type=args.memory_type,
         )
     if command in {"query", "query-link"}:
         return handlers["query"](
@@ -706,6 +714,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             project=args.project,
             emit=args.emit,
         )
+    if command == "recipes":
+        return handlers["recipes"](Path(args.target), project=args.project, limit=args.limit, json_output=args.json)
     if command == "consolidate":
         return handlers["consolidate"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "semantic":
