@@ -35,3 +35,5 @@ Use bounded CLI commands so the agent does not dump the whole wiki into context.
    ```
 
 Do not enumerate every page, grep raw files, or request the full graph unless the user explicitly asks for an export or exhaustive audit, or the compact packet is insufficient and tells you which follow-up to use.
+
+Recalled memories carry `confidence` labels and, when the optional local semantic tier is installed, a `match` field: `lexical`, `hybrid`, or `semantic`. Treat `semantic` matches (paraphrase similarity, capped confidence) and `weak` matches as hints to verify with the user, not facts to act on.

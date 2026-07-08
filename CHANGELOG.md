@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+- Completed 1.6 coverage across the second-tier docs and shipped skills: the official CLI skills now teach the hooks-installed rule, the consolidation pass, semantic match labels, and the `lnk semantic` status check; the memory contract documents the hooked loop and honest recall signals; concepts covers hybrid retrieval and the automatic lifecycle; troubleshooting gains "hooks not firing" and "semantic recall not working" sections; and the scale page links the measured benchmarks.
+
 ### Added
 
 - Added `lnk connect <agent> --hooks` to install agent session hooks alongside MCP config for Claude Code, Codex, and Cursor: every new session starts with a bounded Link memory brief injected automatically, and session end stores proposal-only session notes with memory candidates, so the memory loop no longer depends on the agent remembering to call Link. Codex has no session-end hook event, so it gets the session-start brief only; Cursor uses its flat `hooks.json` schema and JSON `additional_context` envelope.
