@@ -886,7 +886,7 @@ def _write_mcp_memory_page(
     scope: str = "user", tags: str = "", source: str = "mcp",
     allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
     visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
-    applies_when: str = "",
+    applies_when: str = "", supersedes: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -901,6 +901,7 @@ def _write_mcp_memory_page(
         expires_at=_clean_text_input(expires_at, max_len=40) or None,
         trigger=_clean_text_input(trigger, max_len=200) or None,
         applies_when=_clean_text_input(applies_when, max_len=200) or None,
+        supersedes=_clean_text_input(supersedes, max_len=200) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -938,6 +939,8 @@ def link_instructions_resource() -> str:
         "skip step 2 and go straight to bounded task recall.\n"
         "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
         "confidence) as hints to verify, not facts to act on.\n"
+        "When a new memory contradicts an existing one, prefer remember(..., supersedes=\"<old-name>\") "
+        "with user approval: the old memory is archived with lineage instead of coexisting.\n"
         "Memories may carry an `applicability` label: `out_of_context` means the memory's declared "
         "conditions do not fit here — do not apply it without asking. Scope situational memories with "
         "`applies_when` (project:/path:/task: conditions).\n"
@@ -1193,6 +1196,7 @@ def remember(
     expires_at: str = "",
     trigger: str = "",
     applies_when: str = "",
+    supersedes: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
 ) -> str:
@@ -1220,6 +1224,7 @@ def remember(
             expires_at=expires_at,
             trigger=trigger,
             applies_when=applies_when,
+            supersedes=supersedes,
         )
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})

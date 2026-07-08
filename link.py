@@ -513,6 +513,7 @@ def _recall_memories(
     limit: int = 10,
     include_archived: bool = False,
     project: str | None = None,
+    as_of: str | None = None,
 ) -> list[dict[str, object]]:
     records = _memory_records(wiki_dir)
     return _core_recall_memories(
@@ -523,6 +524,7 @@ def _recall_memories(
         project=project,
         semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
         context_path=str(Path.cwd()),
+        as_of=as_of,
     )
 
 
@@ -688,6 +690,7 @@ def _write_memory_page(
     expires_at: str | None = None,
     trigger: str | None = None,
     applies_when: str | None = None,
+    supersedes: str | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -700,6 +703,7 @@ def _write_memory_page(
         expires_at=expires_at,
         trigger=trigger,
         applies_when=applies_when,
+        supersedes=supersedes,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -1103,6 +1107,7 @@ def remember(
     expires_at: str | None = None,
     trigger: str | None = None,
     applies_when: str | None = None,
+    supersedes: str | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -1125,6 +1130,7 @@ def remember(
             expires_at=expires_at,
             trigger=trigger,
             applies_when=applies_when,
+            supersedes=supersedes,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
@@ -1604,19 +1610,25 @@ def recall(
     json_output: bool = False,
     include_archived: bool = False,
     project: str | None = None,
+    as_of: str | None = None,
 ) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
-    results = _recall_memories(
-        wiki_dir,
-        query,
-        limit=limit,
-        include_archived=include_archived,
-        project=project_name,
-    )
+    try:
+        results = _recall_memories(
+            wiki_dir,
+            query,
+            limit=limit,
+            include_archived=include_archived,
+            project=project_name,
+            as_of=as_of,
+        )
+    except ValueError as exc:
+        print(f"Could not recall: {exc}", file=sys.stderr)
+        return 1
 
     if json_output:
         print(json.dumps({
@@ -1624,6 +1636,7 @@ def recall(
             "count": len(results),
             "include_archived": include_archived,
             "project": project_name,
+            "as_of": as_of or "",
             "memories": results,
         }, indent=2))
         return 0

@@ -193,6 +193,7 @@ def build_cli_parser(
     remember_cmd.add_argument("--expires-at", default=None, help="YYYY-MM-DD date when this memory should leave default recall")
     remember_cmd.add_argument("--trigger", default=None, help="short phrase describing when this memory applies (recommended for --type procedure)")
     remember_cmd.add_argument("--applies-when", default=None, dest="applies_when", help='scoping conditions, e.g. "project:link, task:cutting a release, path:*repo*" (OR semantics)')
+    remember_cmd.add_argument("--supersedes", default=None, help="name of the active memory this one replaces; the old memory is archived with lineage")
     remember_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
     remember_cmd.add_argument("--allow-conflict", action="store_true", help="create a memory even if it may conflict with an active memory")
     remember_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
@@ -272,6 +273,7 @@ def build_cli_parser(
     recall_cmd.add_argument("target", nargs="?", default=".")
     recall_cmd.add_argument("--limit", type=int, default=10)
     recall_cmd.add_argument("--include-archived", action="store_true", help="include archived and stale memories")
+    recall_cmd.add_argument("--as-of", default=None, dest="as_of", help="YYYY-MM-DD: recall what was active on that date (temporal recall)")
     recall_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     recall_cmd.add_argument("--json", action="store_true", help="print machine-readable results")
 
@@ -567,6 +569,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             expires_at=args.expires_at,
             trigger=args.trigger,
             applies_when=args.applies_when,
+            supersedes=args.supersedes,
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
             json_output=args.json,
@@ -658,6 +661,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
             include_archived=args.include_archived,
             project=args.project,
+            as_of=args.as_of,
         )
     if command in {"query", "query-link"}:
         return handlers["query"](

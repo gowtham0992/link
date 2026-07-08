@@ -294,6 +294,21 @@ def slim_memory(record: Mapping[str, object]) -> dict[str, object]:
     return {key: value for key, value in record.items() if key != "body"}
 
 
+def memory_claim_text(record: Mapping[str, object]) -> str:
+    """The memory's core claim: head fields plus the `## Memory` section.
+
+    Similarity checks (duplicates, conflicts, echoes) must compare claims,
+    not whole pages: the page template's boilerplate sections dilute token
+    overlap and let real duplicates and contradictions slip through.
+    """
+    return " ".join([
+        str(record.get("title") or ""),
+        str(record.get("tldr") or ""),
+        str(record.get("snippet") or ""),
+        procedure_steps_excerpt(str(record.get("body") or ""), max_chars=1200),
+    ])
+
+
 def procedure_steps_excerpt(body: str, max_chars: int = 800) -> str:
     """Bounded steps text for a procedure memory (its Memory section)."""
     text = str(body or "")
@@ -332,6 +347,27 @@ def _parse_expires_date(value: object) -> date | None:
 
 def _today(today: str | None = None) -> date:
     return _parse_review_date(today) if today else date.today()
+
+
+def memory_active_at(record: Mapping[str, object], as_of: str) -> bool:
+    """Whether this memory was active on a given YYYY-MM-DD date.
+
+    Reconstructs history from existing lifecycle fields: capture date,
+    archive date (supersession archives the predecessor), and expiry.
+    Archived records without an archive date cannot be placed in time and
+    are treated as inactive.
+    """
+    day = _parse_date_field(as_of, "as_of")
+    captured = _memory_date(record.get("date_captured"))
+    if captured is not None and captured.date() > day:
+        return False
+    if str(record.get("status") or "active").lower() == "archived":
+        archived = _memory_date(record.get("archived_at"))
+        if archived is None or archived.date() <= day:
+            return False
+    if memory_expired(record, today=as_of):
+        return False
+    return True
 
 
 def memory_expired(record: Mapping[str, object], today: str | None = None) -> bool:
@@ -406,6 +442,8 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "review_note": meta.get("review_note", ""),
         "trigger": str(meta.get("trigger") or ""),
         "applies_when": str(meta.get("applies_when") or ""),
+        "supersedes": str(meta.get("supersedes") or ""),
+        "superseded_by": str(meta.get("superseded_by") or ""),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -841,9 +879,48 @@ def memory_explanation(
         "inbound": sorted(backlinks.get("backlinks", {}).get(name, [])),
         "wikilinks": extract_wikilinks(body),
     }
+    lineage: list[dict[str, str]] = []
+    by_name = {str(item.get("name") or ""): item for item in record_list}
+    seen_chain: set[str] = set()
+    cursor = record
+    while cursor is not None and str(cursor.get("supersedes") or "") and len(lineage) < 10:
+        previous_name = str(cursor.get("supersedes"))
+        if previous_name in seen_chain:
+            break
+        seen_chain.add(previous_name)
+        previous = by_name.get(previous_name)
+        lineage.insert(0, {
+            "name": previous_name,
+            "title": str(previous.get("title")) if previous else "",
+            "status": str(previous.get("status")) if previous else "missing",
+            "relation": "superseded",
+        })
+        cursor = previous
+    lineage.append({
+        "name": name,
+        "title": str(record.get("title") or ""),
+        "status": str(record.get("status") or "active"),
+        "relation": "current" if not str(record.get("superseded_by") or "") else "superseded",
+    })
+    cursor = record
+    while cursor is not None and str(cursor.get("superseded_by") or "") and len(lineage) < 12:
+        next_name = str(cursor.get("superseded_by"))
+        if next_name in seen_chain:
+            break
+        seen_chain.add(next_name)
+        successor = by_name.get(next_name)
+        lineage.append({
+            "name": next_name,
+            "title": str(successor.get("title")) if successor else "",
+            "status": str(successor.get("status")) if successor else "missing",
+            "relation": "successor",
+        })
+        cursor = successor
+
     return {
         "found": True,
         "memory": slim_memory(record),
+        "lineage": lineage if len(lineage) > 1 else [],
         "recall": recall_state(record, issues),
         "review": {
             "status": record.get("review_status", "pending"),
@@ -1358,6 +1435,7 @@ def write_memory_page(
     expires_at: str | None = None,
     trigger: str | None = None,
     applies_when: str | None = None,
+    supersedes: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
@@ -1394,6 +1472,48 @@ def write_memory_page(
     if len(summary) > 180:
         summary = summary[:177].rstrip() + "..."
     record_list = [dict(record) for record in records] if records is not None else memory_records(wiki_dir)
+    superseded_path: Path | None = None
+    superseded_record: dict[str, object] | None = None
+    if supersedes:
+        superseded_path, superseded_record, supersede_error = resolve_memory_page(
+            wiki_dir, supersedes, records=record_list
+        )
+        if supersede_error:
+            raise ValueError(f"supersedes: {supersede_error}")
+        assert superseded_path is not None and superseded_record is not None
+        if not is_active_memory(superseded_record):
+            raise ValueError("supersedes target must be an active memory")
+    superseded_name = str(superseded_record.get("name")) if superseded_record else ""
+    conflict_candidates = memory_conflict_candidates(
+        record_list,
+        clean_text,
+        title,
+        memory_type,
+        scope,
+        project=clean_project,
+    )
+    if superseded_name:
+        conflict_candidates = [
+            candidate for candidate in conflict_candidates
+            if str(candidate.get("name")) != superseded_name
+        ]
+    if conflict_candidates and not allow_conflict:
+        return {
+            "created": False,
+            "conflict": True,
+            "message": (
+                "This memory may conflict with an active memory. If it replaces an outdated "
+                "memory, rerun with supersedes=<name> to archive the old one with lineage; "
+                "review or update the existing memory, or pass allow_conflict if both should coexist."
+            ),
+            "title": memory_title_value,
+            "memory_type": memory_type,
+            "scope": scope,
+            "visibility": clean_visibility,
+            "project": clean_project,
+            "conflict_candidates": conflict_candidates,
+        }
+
     duplicate_candidates = memory_duplicate_candidates(
         record_list,
         clean_text,
@@ -1402,6 +1522,19 @@ def write_memory_page(
         scope,
         project=clean_project,
     )
+    if superseded_name:
+        duplicate_candidates = [
+            candidate for candidate in duplicate_candidates
+            if str(candidate.get("name")) != superseded_name
+        ]
+    # A claim cannot be both the same and opposing: records already identified
+    # as conflicts are handled by the conflict path (with supersede guidance)
+    # and must not also block the write as duplicates.
+    conflict_names = {str(candidate.get("name")) for candidate in conflict_candidates}
+    duplicate_candidates = [
+        candidate for candidate in duplicate_candidates
+        if str(candidate.get("name")) not in conflict_names
+    ]
     if duplicate_candidates and not allow_duplicate:
         return {
             "created": False,
@@ -1414,27 +1547,6 @@ def write_memory_page(
             "project": clean_project,
             "candidates": duplicate_candidates,
         }
-    conflict_candidates = memory_conflict_candidates(
-        record_list,
-        clean_text,
-        title,
-        memory_type,
-        scope,
-        project=clean_project,
-    )
-    if conflict_candidates and not allow_conflict:
-        return {
-            "created": False,
-            "conflict": True,
-            "message": "This memory may conflict with an active memory. Review or update the existing memory, archive stale memory, or pass allow_conflict if both should coexist.",
-            "title": memory_title_value,
-            "memory_type": memory_type,
-            "scope": scope,
-            "visibility": clean_visibility,
-            "project": clean_project,
-            "conflict_candidates": conflict_candidates,
-        }
-
     memories_dir = wiki_dir / "memories"
     memories_dir.mkdir(parents=True, exist_ok=True)
     page_path = unique_page_path(memories_dir, slugify(memory_title_value))
@@ -1451,6 +1563,8 @@ def write_memory_page(
     applies_when_line = (
         f'applies_when: "{frontmatter_string(clean_applies_when)}"\n' if clean_applies_when else ""
     )
+    supersedes_line = f'supersedes: "{frontmatter_string(superseded_name)}"\n' if superseded_name else ""
+
 
     if memory_type == "procedure":
         use_when = (
@@ -1474,7 +1588,7 @@ visibility: {clean_visibility}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
-{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}reviewed_at: ""
+{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}{supersedes_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1494,30 +1608,52 @@ tags: {yaml_list(tag_values)}
 
 {clean_source}
 """
+    journal_paths = [f"wiki/memories/{page_path.name}", "wiki/index.md", "wiki/_backlinks.json", "wiki/log.md"]
+    if superseded_path is not None:
+        journal_paths.insert(1, f"wiki/memories/{superseded_path.name}")
     with operation_journal(
         wiki_dir,
         "remember",
         memory_title_value,
         timestamp=timestamp,
-        paths=[f"wiki/memories/{page_path.name}", "wiki/index.md", "wiki/_backlinks.json", "wiki/log.md"],
+        paths=journal_paths,
     ):
         atomic_write_text(page_path, page)
+        if superseded_path is not None and superseded_record is not None:
+            # Supersession is one atomic story: the successor records what it
+            # replaces, and the predecessor is archived with forward lineage
+            # instead of silently coexisting or being deleted.
+            old_text = superseded_path.read_text(encoding="utf-8", errors="replace")
+            atomic_write_text(superseded_path, update_frontmatter_fields(
+                old_text,
+                {
+                    "status": "archived",
+                    "archived_at": f'"{timestamp}"',
+                    "archive_reason": f'"{frontmatter_string(f"superseded by {page_name}")}"',
+                    "superseded_by": f'"{frontmatter_string(page_name)}"',
+                },
+                remove={"restored_at"},
+            ))
         update_memory_index(wiki_dir / "index.md", page_name, memory_title_value, summary, memory_type, scope)
         if log_writer:
+            log_lines = [
+                f"Created: memories/{page_path.name}",
+                f"Type: {memory_type}",
+                f"Scope: {scope}",
+                f"Visibility: {clean_visibility}",
+            ]
+            if superseded_name:
+                log_lines.append(f"Supersedes: {superseded_name} (archived)")
             log_writer(
                 timestamp,
                 "remember",
                 memory_title_value,
-                [
-                    f"Created: memories/{page_path.name}",
-                    f"Type: {memory_type}",
-                    f"Scope: {scope}",
-                    f"Visibility: {clean_visibility}",
-                ],
+                log_lines,
             )
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
     return {
         "created": True,
+        "supersedes": superseded_name,
         "name": page_name,
         "path": f"wiki/memories/{page_path.name}",
         "title": memory_title_value,
@@ -2090,17 +2226,25 @@ def recall_memories(
     project: str | None = None,
     semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
     context_path: str | None = None,
+    as_of: str | None = None,
 ) -> list[dict[str, object]]:
     q = query.strip()
     if not q:
         return []
+    if as_of:
+        _parse_date_field(as_of, "as_of")
     project_name = normalize_project(project)
     scored: list[tuple[int, int, str, dict[str, object]]] = []
     severity_rank = {"high": 0, "medium": 1, "low": 2}
     for record in records:
         if not memory_visible_for_project(record, project_name):
             continue
-        if not include_archived and not is_active_memory(record):
+        if as_of:
+            # Temporal recall: reconstruct what was active on that date from
+            # lifecycle fields (capture, supersession/archive, expiry).
+            if not memory_active_at(record, as_of):
+                continue
+        elif not include_archived and not is_active_memory(record):
             continue
         lexical_score = score_memory(record, q)
         semantic_match = None
@@ -2285,12 +2429,7 @@ def memory_duplicate_candidates(
         reasons: list[str] = []
         score = 0
         record_title = compact_memory_text(str(record.get("title") or ""))
-        record_text = compact_memory_text(
-            " ".join(
-                str(record.get(field) or "")
-                for field in ("title", "tldr", "snippet", "body")
-            )
-        )
+        record_text = compact_memory_text(memory_claim_text(record))
         record_tokens = memory_tokens(record_text)
 
         if str(record.get("name") or "") == new_slug:
@@ -2364,10 +2503,7 @@ def memory_conflict_candidates(
         if scope != record_scope and "global" not in {scope, record_scope}:
             continue
 
-        record_text = " ".join(
-            str(record.get(field) or "")
-            for field in ("title", "tldr", "snippet", "body")
-        )
+        record_text = memory_claim_text(record)
         record_all_tokens = memory_tokens(record_text)
         record_tokens = significant_memory_tokens(record_text)
         overlap = sorted(new_tokens & record_tokens)
@@ -2786,10 +2922,10 @@ def propose_memories_from_text(
             scope,
             project=project_name,
         )
-        if duplicate_candidates:
-            suggested_action = "update-memory"
-        elif conflict_candidates:
+        if conflict_candidates:
             suggested_action = "review-conflict"
+        elif duplicate_candidates:
+            suggested_action = "update-memory"
         else:
             suggested_action = "remember"
         proposal = {
