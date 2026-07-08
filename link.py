@@ -363,6 +363,18 @@ def _wiki_pages(wiki_dir: Path) -> list[Path]:
     )
 
 
+def _missing_wiki_error(wiki_dir: Path) -> int:
+    """Explain a missing wiki with a next step instead of a dead end."""
+    print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+    print(
+        "Point Link at your workspace (for example: "
+        f"{_display_command(['lnk', 'status', str(Path.home() / 'link')])}) "
+        f"or create one here with {_display_command(['lnk', 'init', '.'])}.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def _resolve_wiki_dir(target: Path) -> Path:
     target = target.expanduser().resolve()
     if target.name == "wiki" and (target / "index.md").exists():
@@ -959,8 +971,7 @@ def team_sync(target: Path, remote: str | None = None, json_output: bool = False
 def share(target: Path, identifier: str, port: int = 3000, host: str = "127.0.0.1", json_output: bool = False) -> int:
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_share_page_payload(wiki_dir, identifier, host=host, port=port)
     return _emit_json_or_text(payload, json_output, _core_render_share_text, json_code=0 if payload.get("found") else 1)
 
@@ -1033,8 +1044,7 @@ def import_obsidian(
 def rebuild_backlinks(target: Path) -> int:
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         backlinks = _build_backlinks(wiki_dir)
     except OSError as exc:
@@ -1056,8 +1066,7 @@ def rebuild_backlinks(target: Path) -> int:
 def rebuild_index(target: Path) -> int:
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         result = _core_rebuild_index(wiki_dir)
     except OSError as exc:
@@ -1142,8 +1151,7 @@ def propose_memories(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     text, source = _read_proposal_input(target, source_input)
     if not text.strip():
         print("Memory proposal input is required", file=sys.stderr)
@@ -1178,8 +1186,7 @@ def capture_session(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
 
     text, source = _read_proposal_input(root, source_input)
     if not text.strip():
@@ -1247,8 +1254,7 @@ def session_end(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
 
     text, source = _read_proposal_input(root, source_input)
     if not text.strip():
@@ -1324,8 +1330,7 @@ def capture_inbox(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_capture_inbox(
         root,
         limit=limit,
@@ -1372,8 +1377,7 @@ def accept_capture(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         selection = _core_capture_proposal_selection(
             root,
@@ -1457,8 +1461,7 @@ def redact_capture(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         payload = _core_redact_capture_file(
             root,
@@ -1499,8 +1502,7 @@ def delete_capture(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         payload = _core_delete_capture_file(root, capture, confirm=confirm)
     except ValueError:
@@ -1592,8 +1594,7 @@ def recall(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
     results = _recall_memories(
         wiki_dir,
@@ -1656,8 +1657,7 @@ def forget_memory(target: Path, identifier: str, confirm: bool = False, json_out
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
 
     def rebuild_memory_backlinks() -> bool:
         backlinks = _build_backlinks(wiki_dir)
@@ -1701,8 +1701,7 @@ def memory_inbox(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     inbox = _memory_inbox(wiki_dir, limit=limit, include_archived=include_archived, project=project)
 
     return _emit_json_or_text(
@@ -1720,8 +1719,7 @@ def memory_log(target: Path, limit: int = 50, include_captures: bool = True, jso
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_memory_log_payload(wiki_dir, limit=limit, include_captures=include_captures)
     return _emit_json_or_text(
         payload,
@@ -1734,8 +1732,7 @@ def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_o
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_memory_wins_payload(wiki_dir, limit=limit, project=project)
     return _emit_json_or_text(
         payload,
@@ -1758,8 +1755,7 @@ def explain_memory(target: Path, identifier: str, json_output: bool = False) -> 
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         explanation = _memory_explanation(wiki_dir, identifier)
     except ValueError as exc:
@@ -1785,8 +1781,7 @@ def query(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     query_text = _clean_text_input(query_text, max_len=500)
     project_name = project or _default_project(target)
     payload = _query_link(wiki_dir, query_text, budget=budget, project=project_name)
@@ -1809,8 +1804,7 @@ def graph_summary(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     topic = _clean_text_input(topic, max_len=500)
     cache = _core_build_wiki_cache(wiki_dir)
     payload = _core_graph_summary(
@@ -1840,8 +1834,7 @@ def benchmark(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     query_text = _clean_text_input(query_text, max_len=500)
     project_name = project or _default_project(target)
     payload = _core_build_benchmark_payload(
@@ -1870,8 +1863,7 @@ def brief(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     query = _clean_text_input(query, max_len=500)
     project_name = project or _default_project(target)
     payload = _memory_brief(wiki_dir, query=query, limit=limit, project=project_name)
@@ -1899,8 +1891,7 @@ def start(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     task = _clean_text_input(task, max_len=500)
     project_name = project or _default_project(target)
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
@@ -1995,8 +1986,7 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     records = _memory_records(wiki_dir)
     active_count = len([
         record for record in records
@@ -2061,8 +2051,7 @@ def consolidate(target: Path, limit: int = 50, project: str | None = None, json_
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     captures_payload = _core_capture_inbox(
         root,
         limit=max(1, min(limit, 50)),
@@ -2126,11 +2115,13 @@ def _hook_session_start(
         status_payload.get("content_page_count") or 0
     )
     _, brief_text = _core_render_brief_text(brief_payload, query="", project=project_name)
+    captures_payload = brief_payload.get("captures") if isinstance(brief_payload.get("captures"), dict) else {}
     _, text = _core_render_session_start_hook_text({
         "target": str(target),
         "project": project_name,
         "status": status_payload,
         "brief_text": brief_text,
+        "capture_count": int(captures_payload.get("count") or 0),
         "project_seed_recommended": project_seed_recommended,
         "backlog": brief_payload.get("backlog") or {},
     })
@@ -2220,8 +2211,7 @@ def profile(target: Path, limit: int = 10, project: str | None = None, json_outp
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
     profile_data = _memory_profile(wiki_dir, limit=limit, project=project_name)
 
@@ -2255,8 +2245,7 @@ def memory_audit(target: Path, limit: int = 10, project: str | None = None, json
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _memory_audit_payload(target, wiki_dir, limit=limit, project=project)
 
     if json_output:

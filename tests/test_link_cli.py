@@ -2795,6 +2795,34 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertIn("Relevant memories", text)
         self.assertIn("Save durable memory only after explicit user approval.", text)
 
+    def test_hook_session_start_empty_workspace_is_compact(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "empty"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"cwd": str(tmp)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-start")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("empty workspace, nothing to recall yet", text)
+        self.assertNotIn("Relevant memories", text)
+        self.assertLess(len(text.splitlines()), 6)
+
+    def test_missing_wiki_error_points_to_next_step(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+
+        err = StringIO()
+        with redirect_stderr(err):
+            code = link_cli.recall(tmp / "nowhere", "anything")
+
+        self.assertEqual(code, 1)
+        self.assertIn("Missing wiki directory", err.getvalue())
+        self.assertIn("init", err.getvalue())
+
     def test_hook_session_start_missing_wiki_exits_zero_with_guidance(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
         target = tmp / "missing"

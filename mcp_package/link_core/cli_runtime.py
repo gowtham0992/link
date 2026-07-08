@@ -535,6 +535,20 @@ def render_session_start_hook_text(payload: Mapping[str, object]) -> tuple[int, 
         ])
         return 0, "\n".join(lines)
 
+    # Empty workspace: inject two useful lines, not a skeleton of zeros.
+    if (
+        not int(status.get("active_memory_count") or 0)
+        and not int(status.get("content_page_count") or 0)
+        and not int(payload.get("capture_count") or 0)
+    ):
+        lines[0] += " — empty workspace, nothing to recall yet."
+        lines.extend([
+            "To give day-one recall real project context, seed allowlisted repo docs: "
+            f"{display_command(['lnk', 'seed', '.', target])} (source-backed, no durable memory).",
+            "Save durable memory only after the user explicitly approves it.",
+        ])
+        return 0, "\n".join(lines)
+
     brief_text = str(payload.get("brief_text") or "").strip()
     if brief_text:
         lines.extend(["", brief_text])
