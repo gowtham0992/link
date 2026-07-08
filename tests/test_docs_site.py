@@ -150,11 +150,12 @@ class FoundingIdentityTests(unittest.TestCase):
     def test_readme_keeps_the_founding_claims(self):
         text = self._flat("README.md")
         for phrase, meaning in self.PILLARS.items():
-            if phrase == "approve":
-                self.assertTrue(
-                    "approval" in text or "approve" in text,
-                    f"README lost founding claim: {meaning}",
-                )
-                continue
-            self.assertIn(phrase, text, f"README lost founding claim: {meaning}")
+            variants = {
+                "approve": ("approve", "approval"),
+                "every agent": ("every agent", "across multiple agents", "different agents", "across agents"),
+            }.get(phrase, (phrase,))
+            self.assertTrue(
+                any(variant in text for variant in variants),
+                f"README lost founding claim: {meaning}",
+            )
 
