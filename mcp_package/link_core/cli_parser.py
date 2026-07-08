@@ -304,6 +304,12 @@ def build_cli_parser(
     start_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
 
+    hook_cmd = sub.add_parser("hook", help="run an agent session hook (invoked by installed agent hooks)")
+    hook_cmd.add_argument("event", choices=["session-start", "session-end"], help="agent session lifecycle event")
+    hook_cmd.add_argument("target", nargs="?", default=".")
+    hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
+    hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
+
     profile_cmd = sub.add_parser("profile", help="show what Link remembers")
     profile_cmd.add_argument("target", nargs="?", default=".")
     profile_cmd.add_argument("--limit", type=int, default=10)
@@ -380,6 +386,11 @@ def build_cli_parser(
     connect_cmd.add_argument("--write", action="store_true", help="update the detected agent config file")
     connect_cmd.add_argument("--config", default=None, help="override the agent config file path")
     connect_cmd.add_argument("--python", default=None, help="Python executable for the MCP server")
+    connect_cmd.add_argument(
+        "--hooks",
+        action="store_true",
+        help="also configure session hooks so new sessions start with the Link brief (Claude Code)",
+    )
     connect_cmd.add_argument("--json", action="store_true", help="print machine-readable connection plan")
 
     return parser
@@ -655,6 +666,13 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             project=args.project,
             json_output=args.json,
         )
+    if command == "hook":
+        return handlers["hook"](
+            Path(args.target),
+            args.event,
+            limit=args.limit,
+            project=args.project,
+        )
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":
@@ -699,6 +717,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             write=args.write,
             config_path=args.config,
             python_cmd=args.python,
+            hooks=args.hooks,
             json_output=args.json,
         )
     raise ValueError(f"unknown command: {command}")

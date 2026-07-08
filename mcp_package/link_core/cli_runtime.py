@@ -464,3 +464,71 @@ def render_mcp_connect_text(payload: Mapping[str, object]) -> tuple[int, str]:
     if restart_hint:
         lines.append(f"  {restart_hint}")
     return code, "\n".join(lines)
+
+
+def render_agent_hooks_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render a session-hook configuration plan for a supported local agent."""
+    write_status = payload.get("write") if isinstance(payload.get("write"), Mapping) else {}
+    requested = bool(write_status.get("requested"))
+    ok = bool(write_status.get("ok"))
+    code = 0 if not requested or ok else 1
+    lines = [
+        f"Link session hooks: {payload.get('display_name')}",
+        "",
+        f"Settings: {payload.get('settings_path')}",
+    ]
+    behavior = payload.get("behavior")
+    if isinstance(behavior, Sequence) and not isinstance(behavior, (str, bytes)):
+        lines.append("")
+        lines.extend(f"  {item}" for item in behavior)
+    lines.append("")
+    if requested:
+        lines.append(f"Write: {'updated' if ok else 'failed'}")
+        message = write_status.get("message")
+        if message:
+            lines.append(f"  {message}")
+    else:
+        lines.append("Preview only. Rerun with --write to update the settings file.")
+    lines.extend(["", "Hooks snippet:"])
+    snippet = str(payload.get("snippet") or "")
+    lines.extend(f"  {line}" if line else "" for line in snippet.splitlines())
+    restart_hint = payload.get("restart_hint")
+    if restart_hint:
+        lines.extend(["", f"  {restart_hint}"])
+    return code, "\n".join(lines)
+
+
+def render_session_start_hook_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render the bounded memory-brief context block injected by session-start hooks."""
+    status = payload.get("status") if isinstance(payload.get("status"), Mapping) else {}
+    target = str(payload.get("target") or "")
+    project = str(payload.get("project") or "").strip()
+    lines = [
+        "Link memory (local, source-backed)"
+        + (f" · project {project}" if project else ""),
+    ]
+    if not status.get("ready"):
+        lines.extend([
+            "Link is not ready; skipping the memory brief.",
+            f"Check with: {display_command(['lnk', 'health', target])}",
+        ])
+        return 0, "\n".join(lines)
+
+    brief_text = str(payload.get("brief_text") or "").strip()
+    if brief_text:
+        lines.extend(["", brief_text])
+
+    seed_recommended = bool(payload.get("project_seed_recommended"))
+    if seed_recommended:
+        lines.extend([
+            "",
+            "No project context or relevant memory yet. To seed source-backed project context "
+            f"from this repo's docs, suggest: {display_command(['lnk', 'seed', '.', target])}",
+        ])
+    lines.extend([
+        "",
+        "Use this brief before asking the user to repeat durable context. "
+        f"For task-specific context: {display_command(['lnk', 'query', '<topic>', target, '--budget', 'micro'])} "
+        "or the Link MCP recall tool. Save durable memory only after explicit user approval.",
+    ])
+    return 0, "\n".join(lines)

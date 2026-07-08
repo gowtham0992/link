@@ -26,6 +26,7 @@ EXPECTED_CLI_COMMANDS = {
     "forget-memory",
     "graph-summary",
     "health",
+    "hook",
     "import-obsidian",
     "ingest-status",
     "init",

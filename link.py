@@ -261,6 +261,12 @@ from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
     supported_agents as _core_supported_agents,
 )
+from link_core.agent_hooks import (
+    build_agent_hooks_payload as _core_build_agent_hooks_payload,
+    extract_transcript_text as _core_extract_transcript_text,
+    hook_supported_agents as _core_hook_supported_agents,
+    supports_agent_hooks as _core_supports_agent_hooks,
+)
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
     render_import_obsidian_text as _core_render_import_obsidian_text,
@@ -289,9 +295,11 @@ from link_core.cli_query import (
     render_query_text as _core_render_query_text,
 )
 from link_core.cli_runtime import (
+    render_agent_hooks_text as _core_render_agent_hooks_text,
     render_demo_text as _core_render_demo_text,
     render_init_text as _core_render_init_text,
     render_mcp_connect_text as _core_render_mcp_connect_text,
+    render_session_start_hook_text as _core_render_session_start_hook_text,
     render_onboard_text as _core_render_onboard_text,
     render_proof_text as _core_render_proof_text,
     render_start_text as _core_render_start_text,
@@ -1945,6 +1953,93 @@ def start(
     return code
 
 
+def _read_hook_stdin() -> dict[str, object]:
+    """Read the agent hook event JSON from stdin, if one was piped in."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return {}
+    try:
+        raw = sys.stdin.read()
+    except OSError:
+        return {}
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _hook_session_start(target: Path, hook_event: dict[str, object], limit: int, project: str | None) -> int:
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Link: wiki missing at {wiki_dir}; run {_display_command(['lnk', 'init', str(target)])} to restore it.")
+        return 0
+    project_name = project
+    if not project_name:
+        hook_cwd = str(hook_event.get("cwd") or "").strip()
+        if hook_cwd:
+            project_name = _default_project(Path(hook_cwd))
+    if not project_name:
+        project_name = _default_project(target)
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=False)
+    brief_payload = _memory_brief(wiki_dir, query="", limit=limit, project=project_name)
+    brief_payload = _core_add_capture_review_to_brief(
+        brief_payload,
+        _capture_review_summary(target, project=project_name),
+    )
+    relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
+    project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
+        status_payload.get("content_page_count") or 0
+    )
+    _, brief_text = _core_render_brief_text(brief_payload, query="", project=project_name)
+    _, text = _core_render_session_start_hook_text({
+        "target": str(target),
+        "project": project_name,
+        "status": status_payload,
+        "brief_text": brief_text,
+        "project_seed_recommended": project_seed_recommended,
+    })
+    print(text)
+    return 0
+
+
+def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, project: str | None) -> int:
+    transcript_value = str(hook_event.get("transcript_path") or "").strip()
+    if not transcript_value:
+        return 0
+    notes = _core_extract_transcript_text(Path(transcript_value).expanduser())
+    if len(notes.strip()) < 200:
+        return 0
+    project_name = project
+    if not project_name:
+        hook_cwd = str(hook_event.get("cwd") or "").strip()
+        if hook_cwd:
+            project_name = _default_project(Path(hook_cwd))
+    return session_end(
+        target,
+        notes,
+        title="Agent session notes",
+        limit=max(1, min(limit, 10)),
+        project=project_name,
+    )
+
+
+def run_agent_hook(target: Path, event: str, limit: int = 5, project: str | None = None) -> int:
+    """Run an installed agent session hook; never fail the agent session."""
+    target = target.expanduser().resolve()
+    hook_event = _read_hook_stdin()
+    try:
+        if event == "session-start":
+            return _hook_session_start(target, hook_event, limit, project)
+        if event == "session-end":
+            return _hook_session_end(target, hook_event, limit, project)
+        print(f"Unknown hook event: {event}", file=sys.stderr)
+    except Exception as exc:
+        print(f"Link {event} hook failed: {exc}", file=sys.stderr)
+    return 0
+
+
 def profile(target: Path, limit: int = 10, project: str | None = None, json_output: bool = False) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
@@ -2042,10 +2137,15 @@ def connect_mcp(
     write: bool = False,
     config_path: str | None = None,
     python_cmd: str | None = None,
+    hooks: bool = False,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
+    if hooks and not _core_supports_agent_hooks(agent):
+        supported = ", ".join(_core_hook_supported_agents())
+        print(f"--hooks is not supported for {agent}. Session hooks are available for: {supported}", file=sys.stderr)
+        return 1
     payload = _core_build_mcp_connect_payload(
         target=target,
         wiki_dir=wiki_dir,
@@ -2057,14 +2157,36 @@ def connect_mcp(
         config_path=config_path,
         write=write,
     )
+    hooks_payload: dict[str, object] | None = None
+    if hooks:
+        runtime_script = target / "link.py"
+        if not runtime_script.exists():
+            runtime_script = ROOT / "link.py"
+        hooks_payload = _core_build_agent_hooks_payload(
+            target=target,
+            agent=agent,
+            runtime_script=runtime_script,
+            python_cmd=sys.executable,
+            write=write,
+        )
+        payload["session_hooks"] = hooks_payload
 
     if json_output:
         print(json.dumps(payload, indent=2))
         write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
-        return 0 if not write or bool(write_status.get("ok")) else 1
+        ok = not write or bool(write_status.get("ok"))
+        if write and hooks_payload is not None:
+            hooks_write = hooks_payload.get("write") if isinstance(hooks_payload.get("write"), dict) else {}
+            ok = ok and bool(hooks_write.get("ok"))
+        return 0 if ok else 1
 
     code, text = _core_render_mcp_connect_text(payload)
     _print_text(text)
+    if hooks_payload is not None:
+        hooks_code, hooks_text = _core_render_agent_hooks_text(hooks_payload)
+        print()
+        _print_text(hooks_text)
+        code = code or hooks_code
     return code
 
 
@@ -2659,6 +2781,7 @@ def main(argv: list[str] | None = None) -> int:
             "benchmark": benchmark,
             "brief": brief,
             "start": start,
+            "hook": run_agent_hook,
             "profile": profile,
             "wins": memory_wins,
             "memory-audit": memory_audit,

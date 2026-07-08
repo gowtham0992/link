@@ -6,6 +6,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- Added `lnk connect claude-code --hooks` to install agent session hooks alongside MCP config: every new Claude Code session starts with a bounded Link memory brief injected automatically, and session end stores proposal-only session notes with memory candidates, so the memory loop no longer depends on the agent remembering to call Link.
+- Added `lnk hook session-start` to print the bounded session-start memory brief (readiness, relevant memories with confidence, pending review and capture state, and retrieval guidance) for agent hook runtimes; it scopes the brief to the hook's working directory project and never fails the agent session.
+- Added `lnk hook session-end` to turn an agent transcript into review-gated memory: it extracts bounded user/assistant text (skipping tool calls and outputs), skips trivial sessions, and stores proposal-only session notes through the same duplicate/conflict-safe capture path as `lnk session-end`.
+- Added idempotent, non-destructive session-hook writing to `~/.claude/settings.json` that preserves existing user hooks and settings, replaces only Link's own hook entries on rerun, and skips re-injection on session resume.
+
 ## [1.5.0] - 2026-07-03
 
 ### Added

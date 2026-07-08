@@ -2775,5 +2775,125 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("service-account-prod.json", out.getvalue())
 
 
+class AgentHookCliTests(unittest.TestCase):
+    def _hook_stdin(self, payload: dict) -> StringIO:
+        return StringIO(json.dumps(payload))
+
+    def test_hook_session_start_prints_memory_brief(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"cwd": str(tmp), "source": "startup"})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-start")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("Link memory (local, source-backed)", text)
+        self.assertIn("Relevant memories", text)
+        self.assertIn("Save durable memory only after explicit user approval.", text)
+
+    def test_hook_session_start_missing_wiki_exits_zero_with_guidance(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "missing"
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"source": "startup"})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-start")
+
+        self.assertEqual(code, 0)
+        self.assertIn("wiki missing", out.getvalue())
+
+    def test_hook_session_end_captures_proposal_only_notes(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                json.dumps({
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": f"Decision {index}: we keep agent memory in reviewable local Markdown pages.",
+                    },
+                })
+                for index in range(6)
+            ),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"cwd": str(tmp), "transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(len(captures), 1)
+        self.assertIn("proposal-only", out.getvalue())
+
+    def test_hook_session_end_skips_trivial_sessions(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}}),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(captures, [])
+
+    def test_hook_session_end_without_stdin_payload_is_noop(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        with patch("sys.stdin", StringIO("")):
+            code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+
+    def test_connect_hooks_rejects_unsupported_agent(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        err = StringIO()
+        with redirect_stderr(err):
+            code = link_cli.connect_mcp(target, "codex", hooks=True)
+
+        self.assertEqual(code, 1)
+        self.assertIn("--hooks is not supported for codex", err.getvalue())
+
+    def test_connect_hooks_preview_includes_session_hooks_payload(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.connect_mcp(target, "claude-code", hooks=True, json_output=True)
+
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        session_hooks = payload["session_hooks"]
+        self.assertEqual(session_hooks["agent"], "claude-code")
+        self.assertFalse(session_hooks["write"]["ok"])
+        self.assertIn(" hook session-start ", session_hooks["events"]["SessionStart"])
+        self.assertIn(str(target / "link.py"), session_hooks["events"]["SessionStart"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -320,6 +320,17 @@ lnk connect kiro ~/link --write
 lnk verify-mcp ~/link
 ```
 
+For Claude Code, add `--hooks` to make the memory loop automatic: session
+hooks inject a bounded Link memory brief at the start of every new session and
+store proposal-only session notes at session end, so memory no longer depends
+on the agent remembering to call Link. Durable memory still requires explicit
+review and approval.
+
+```bash
+lnk connect claude-code ~/link --hooks
+lnk connect claude-code ~/link --hooks --write
+```
+
 <details>
 <summary>MCP-only install</summary>
 
