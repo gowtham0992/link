@@ -130,5 +130,32 @@ class ProjectSeedCoreTests(unittest.TestCase):
         self.assertFalse((target / "wiki").exists())
 
 
+
+
+class AdrDecisionMiningTests(unittest.TestCase):
+    def test_seed_mines_adr_decision_sections_as_proposals(self):
+        import tempfile
+        project = Path(tempfile.mkdtemp(prefix="link-adr-")).resolve() / "app"
+        (project / "docs" / "adr").mkdir(parents=True)
+        (project / "README.md").write_text("# App\n", encoding="utf-8")
+        (project / "docs/adr/0001-use-postgres.md").write_text(
+            "# 1. Use PostgreSQL for persistence\n\n## Status\nAccepted\n\n"
+            "## Decision\nWe will use PostgreSQL 16 on RDS; schema changes go through migrations only.\n",
+            encoding="utf-8",
+        )
+        (project / "docs/adr/0002-notes.md").write_text("# 2. Notes\nNo decision section.\n", encoding="utf-8")
+
+        result = seed_project_context(
+            Path(tempfile.mkdtemp(prefix="link-adr-root-")).resolve(), project, dry_run=True
+        )
+
+        candidates = result["decision_candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["path"], "docs/adr/0001-use-postgres.md")
+        self.assertIn("PostgreSQL 16", candidates[0]["memory"])
+        self.assertIn("Use PostgreSQL for persistence", candidates[0]["memory"])
+        # Proposal-only: dry run wrote nothing, and mining never writes memories.
+        self.assertFalse(result["wrote"])
+
 if __name__ == "__main__":
     unittest.main()
