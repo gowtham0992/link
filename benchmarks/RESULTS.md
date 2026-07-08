@@ -2,7 +2,7 @@
 
 Link's recall is measured, not asserted. This document holds the current
 numbers, exactly how they were produced, and how to reproduce them on your
-own machine. There are two tracks:
+own machine. There are three tracks:
 
 1. **Link recall benchmark** — our own deterministic, fully auditable
    dataset (checked into this repo; no LLM, no network, no randomness).
@@ -10,6 +10,9 @@ own machine. There are two tracks:
    conversational memory benchmark the hosted-memory industry quotes
    (Maharana et al., ACL 2024, Snap Research), using only its third-party
    questions and evidence annotations.
+3. **Memory hygiene over time** — a multi-month session simulation measuring
+   whether the store stays trustworthy: junk rate, contradiction exposure,
+   store growth, and temporal accuracy, gated vs ungated.
 
 ## Semantic tiers
 
@@ -101,6 +104,46 @@ end-to-end LLM answer quality with server-side pipelines). This track scores
 deterministic local ranking only — no answer generation, no LLM judging, no
 network. The dataset is CC BY-NC 4.0 © Snap Inc. and is not redistributed
 here; the script prints the download command.
+
+## Track 3: Memory hygiene over time
+
+Retrieval benchmarks measure a frozen store. This track measures whether the
+store stays *trustworthy* as sessions accumulate — the axis on which
+review-gated architecture differs from unsupervised extraction.
+
+`scripts/eval_memory_hygiene.py` drives two pipelines over the same
+deterministic stream of 112 authored session events (42 durable facts, 12
+mid-stream revisions, plus agent echoes, Link's own injected briefs, and
+memory-free noise sessions — every event ground-truth labeled, no LLM):
+
+- **gated** — Link's real pipeline: extraction drops Link-injected output,
+  echo containment drops restatements, duplicates are refused, detected
+  contradictions resolve by supersession with lineage.
+- **ungated** — the same extractor and retrieval with governance off: every
+  candidate stored, duplicates and contradictions coexist. Architecturally,
+  this is what unsupervised LLM-extraction memory does on every message.
+
+| metric | gated (Link) | ungated |
+|---|---|---|
+| junk stored (echo / self-brief / noise) | **0** (0.0%) | 16 (23.9%) |
+| contradiction exposure@3 after a revision | **0.333** | 0.833 |
+| active memories (ground truth: 54) | **40** | 67 |
+| as-of temporal accuracy (revised facts) | **1.00** | 1.00 |
+| current-truth precision@1 | 0.762 | 0.762 |
+
+The ungated junk rate mirrors what users measure in production LLM-extraction
+systems (a public mem0 audit found 97.8% junk after 32 days, over half of it
+the system's own prompt text re-ingested). Link's junk rate is zero **by
+construction**, and CI enforces it: the hygiene gate fails any change that
+stores junk or loses to the ungated baseline.
+
+Honest notes: gated contradiction exposure is 0.333, not zero — Link only
+supersedes contradictions its deterministic detector catches (8 of 12
+authored revision shapes today), and this benchmark now grades that detector;
+improving it moved the number from 0.417 during development. Current-truth
+precision ties because both pipelines share the same retrieval; the gated
+advantage there appears exactly when the outdated version would otherwise
+outrank the current one (the exposure metric).
 
 ## Honest limitations
 

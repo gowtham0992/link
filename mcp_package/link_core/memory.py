@@ -2401,6 +2401,13 @@ def is_existing_memory_echo(
             containment = len(view_tokens & candidate_tokens) / len(view_tokens)
             if containment >= threshold:
                 return True
+            # Mirrored test: a partial restatement contains little of the
+            # full claim, but nearly all of ITS OWN tokens live inside the
+            # claim — it adds nothing new, so it is still an echo.
+            if len(candidate_tokens) >= 4:
+                reverse = len(view_tokens & candidate_tokens) / len(candidate_tokens)
+                if reverse >= 0.8:
+                    return True
     return False
 
 
@@ -2515,6 +2522,33 @@ def memory_conflict_candidates(
         if new_negated != has_negation(record_text) and len(overlap) >= 1 and overlap_ratio >= 0.45:
             score = max(score, 92)
             reasons.append("opposite_negation")
+
+        # Revision shape: the new text carries a negation or revision cue
+        # ("... does not X anymore; we now Y") and covers most of the
+        # record's head claim (title + TLDR). Symmetric ratio misses this —
+        # revisions legitimately add replacement content — and negation-XOR
+        # misses it when the original claim also contains a negation.
+        revision_cue = new_negated or bool(
+            re.search(r"\b(?:anymore|no longer|instead of|replace[sd]?|settled on)\b", new_text, re.IGNORECASE)
+        )
+        if revision_cue:
+            # Compare subjects, not phrasing: memory boilerplate tokens
+            # ("decision", "project", "prefers", ...) appear in most claims
+            # and would connect unrelated memories.
+            cue_tokens = {
+                "decision", "decid", "project", "team", "user", "prefer",
+                "use", "agent", "memory", "through", "now", "anymore",
+            }
+            head_tokens = stemmed_memory_tokens(significant_memory_tokens(
+                " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")])
+            )) - cue_tokens
+            new_stemmed = stemmed_memory_tokens(new_tokens) - cue_tokens
+            head_overlap = head_tokens & new_stemmed
+            if len(head_tokens) >= 3 and len(head_overlap) >= 2 and (
+                len(head_overlap) / len(head_tokens) >= 0.5
+            ):
+                score = max(score, 90)
+                reasons.append("revises_existing_claim")
 
         record_groups = _extract_option_groups(record_text)
         for group, new_options in new_groups.items():
