@@ -122,6 +122,7 @@ if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
 from link_core.memory import (
+    is_existing_memory_echo as _core_is_existing_memory_echo,
     add_capture_review_to_brief as _core_add_capture_review_to_brief,
     count_values as _core_count_values,
     default_project_for_target as _core_default_project_for_target,
@@ -2176,7 +2177,20 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
         project=project_name,
         command_target=root,
     )
-    if not int(preview.get("count") or 0):
+    proposals = preview.get("proposals") if isinstance(preview.get("proposals"), list) else []
+    # Echo guard, second layer: a proposal that merely restates an existing
+    # active memory — a strong duplicate, or a framing-diluted restatement
+    # caught by containment — is Link hearing itself through the agent.
+    # Automatic capture keeps only fresh or conflicting proposals; deliberate
+    # refinements still flow through manual `lnk session-end`.
+    records = _memory_records(wiki_dir)
+    fresh = [
+        proposal for proposal in proposals
+        if isinstance(proposal, dict)
+        and not proposal.get("duplicate_candidates")
+        and not _core_is_existing_memory_echo(records, str(proposal.get("memory") or ""))
+    ]
+    if not fresh:
         return 0
     code = session_end(
         target,

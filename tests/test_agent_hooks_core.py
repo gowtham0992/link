@@ -238,6 +238,27 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertIn("message 49", text)
         self.assertNotIn("message 0:", text)
 
+    def test_extract_transcript_drops_link_injected_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            transcript = Path(temp) / "transcript.jsonl"
+            transcript.write_text(
+                "\n".join([
+                    # The session-start hook's injected brief, echoed in context
+                    _transcript_line("user", "Link memory (local, source-backed) · project demo\n"
+                                             "Relevant memories\n- Prefer small commits (preference · user)"),
+                    _transcript_line("assistant", "Link consolidation plan (read-only)\nPending captures: 3"),
+                    _transcript_line("user", "We decided to adopt trunk-based development."),
+                ]),
+                encoding="utf-8",
+            )
+
+            text = extract_transcript_text(transcript)
+
+        self.assertIn("trunk-based development", text)
+        self.assertNotIn("Relevant memories", text)
+        self.assertNotIn("Pending captures", text)
+        self.assertNotIn("Prefer small commits", text)
+
     def test_extract_transcript_handles_missing_file(self):
         self.assertEqual(extract_transcript_text(Path("/nonexistent/transcript.jsonl")), "")
 

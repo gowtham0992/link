@@ -13,6 +13,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `--trigger` to `lnk remember` and `trigger` to the MCP `remember`/`remember_memory` tools.
 - Session-end proposals now detect numbered step sequences in session notes and propose them as `procedure` memories with the preceding goal line as the trigger; accepting a capture carries the trigger through. Saving still requires explicit approval.
 - Updated installed agent instructions, MCP instructions, LINK.md, and docs so agents offer to save a recipe after notable multi-step work.
+- Added a two-layer echo guard to automatic session capture, so Link can never re-ingest its own voice: transcript extraction drops any message carrying Link-injected output (the session-start brief, consolidation plans, session-end output), and proposals that merely restate an existing active memory — including framing-diluted restatements caught by core-claim token containment — are discarded before a capture is stored. A production audit of a competing memory system found 97.8% of stored entries were junk, over half of it the system's own prompt text re-ingested; Link's re-ingestion rate is zero by construction, with tests proving both layers.
 
 ### Added
 

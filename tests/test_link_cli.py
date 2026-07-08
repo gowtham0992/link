@@ -2971,6 +2971,70 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertTrue(payload["captures"][0]["accept_command"])
         self.assertTrue(payload["captures"][0]["delete_command"])
 
+    def test_hook_session_end_never_recaptures_existing_memory(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-echo-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        # The demo wiki already holds "Keep agent memory in local Markdown".
+        # An agent restating that memory must not become a new capture.
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                json.dumps({
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": [{
+                        "type": "text",
+                        "text": "Per your saved preference, we decided agent memory stays in "
+                                "local Markdown files with no cloud sync. I will keep following that.",
+                    }]},
+                })
+                for _ in range(4)
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(StringIO()):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(captures, [])
+
+    def test_hook_session_end_ignores_injected_brief_but_keeps_new_decision(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-echo-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join([
+                json.dumps({"type": "user", "message": {"role": "user", "content":
+                    "Link memory (local, source-backed) · project demo\nRelevant memories\n"
+                    "- Prefer local personal memory (preference · user)"}}),
+                json.dumps({"type": "user", "message": {"role": "user", "content":
+                    "We decided to require signed commits on every branch from now on. "
+                    "Please remember this policy for all future work sessions."}}),
+                json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{
+                    "type": "text",
+                    "text": "Understood: signed commits are now required on every branch. "
+                            "I noted the policy and will verify signatures before pushing "
+                            "anything in our future sessions together."}]}}),
+            ]),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(len(captures), 1)
+        body = captures[0].read_text(encoding="utf-8")
+        self.assertIn("signed commits", body)
+        self.assertNotIn("Relevant memories", body)
+
     def test_hook_session_end_skips_trivial_sessions(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
         target = tmp / "demo"

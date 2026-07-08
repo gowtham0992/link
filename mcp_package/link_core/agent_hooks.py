@@ -328,6 +328,20 @@ def _content_text(content: object) -> str:
     return "\n".join(parts)
 
 
+# Text that Link itself injected into the session (the session-start brief,
+# consolidation plans, session-end output). Messages containing these markers
+# are Link's own voice: extracting them back into memory proposals would
+# create the re-ingestion loop that fills other memory systems with junk
+# (a mem0 production audit found 52.7% of stored entries were the system's
+# own prompt text). Echoes are dropped at extraction time, by construction.
+LINK_ECHO_MARKERS = (
+    "Link memory (local, source-backed)",
+    "Link memory brief",
+    "Link consolidation plan (read-only)",
+    "Link session end",
+)
+
+
 def extract_transcript_text(
     transcript_path: Path,
     *,
@@ -336,8 +350,10 @@ def extract_transcript_text(
 ) -> str:
     """Extract bounded conversation text from an agent transcript JSONL file.
 
-    Keeps user and assistant text blocks, skips tool calls/results and meta
-    entries, and returns the most recent messages within `max_chars`.
+    Keeps user and assistant text blocks, skips tool calls/results, meta
+    entries, and any message carrying Link's own injected output (see
+    LINK_ECHO_MARKERS), and returns the most recent messages within
+    `max_chars`.
     """
     try:
         raw = transcript_path.read_text(encoding="utf-8", errors="replace")
@@ -361,6 +377,8 @@ def extract_transcript_text(
             continue
         text = _content_text(message.get("content"))
         if not text:
+            continue
+        if any(marker in text for marker in LINK_ECHO_MARKERS):
             continue
         if len(text) > max_message_chars:
             text = text[: max_message_chars].rstrip() + " …"

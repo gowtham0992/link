@@ -2121,6 +2121,45 @@ def recall_memories(
     return [record for _, _, _, record in scored[:limit]]
 
 
+ECHO_CONTAINMENT = 0.7
+
+
+def is_existing_memory_echo(
+    records: Iterable[Mapping[str, object]],
+    text: str,
+    threshold: float = ECHO_CONTAINMENT,
+) -> bool:
+    """True when `text` mostly restates an existing active memory.
+
+    Duplicate detection uses symmetric overlap, which framing words dilute
+    ("Per your saved preference, we decided ..."). Echo detection asks the
+    asymmetric question instead: are most of an existing memory's significant
+    tokens contained in the candidate text? That is the shape of an agent
+    repeating stored memory back into the transcript.
+    """
+    candidate_tokens = stemmed_memory_tokens(significant_memory_tokens(text))
+    if not candidate_tokens:
+        return False
+    for record in records:
+        if not is_active_memory(record):
+            continue
+        # Compare against the memory's core claim (title + TLDR, and the
+        # `## Memory` section), not the whole page: template sections would
+        # dilute containment and let restatements through.
+        views = [
+            " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")]),
+            procedure_steps_excerpt(str(record.get("body") or ""), max_chars=600),
+        ]
+        for view in views:
+            view_tokens = stemmed_memory_tokens(significant_memory_tokens(view))
+            if len(view_tokens) < 4:
+                continue
+            containment = len(view_tokens & candidate_tokens) / len(view_tokens)
+            if containment >= threshold:
+                return True
+    return False
+
+
 def memory_duplicate_candidates(
     records: Iterable[Mapping[str, object]],
     text: str,
