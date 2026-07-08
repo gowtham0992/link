@@ -118,3 +118,37 @@ class DocsSiteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class FoundingIdentityTests(unittest.TestCase):
+    """New releases layer onto Link's founding story; they must never bury it.
+
+    These are the identity claims that made Link through 1.5.0. If a landing
+    or README rewrite drops one, this test fails and the author must decide
+    deliberately — not by accident of enthusiasm for the newest feature.
+    """
+
+    PILLARS = {
+        "source-backed": "provenance: memory that can say why it is known",
+        "Markdown": "inspectable plain-file storage",
+        "approve": "review-gated writes: agents propose, the user decides",
+        "your machine": "local-first: no hosted profile",
+        "every agent": "one memory shared across agents",
+        "proof": "the first-run proof loop (lnk proof)",
+    }
+
+    def test_landing_keeps_the_founding_claims(self):
+        text = (ROOT / "docs/index.html").read_text(encoding="utf-8")
+        for phrase, meaning in self.PILLARS.items():
+            self.assertIn(phrase, text, f"landing lost founding claim: {meaning}")
+
+    def test_readme_keeps_the_founding_claims(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        for phrase, meaning in self.PILLARS.items():
+            if phrase == "approve":
+                self.assertTrue(
+                    "approval" in text or "approve" in text,
+                    f"README lost founding claim: {meaning}",
+                )
+                continue
+            self.assertIn(phrase, text, f"README lost founding claim: {meaning}")
+
