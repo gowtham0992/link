@@ -78,3 +78,6 @@ id_rsa
 id_ed25519
 # Local design references
 Link Console Handoff.html
+
+# Local editor/agent tooling
+.claude/
