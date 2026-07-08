@@ -321,14 +321,14 @@ lnk verify-mcp ~/link
 ```
 
 For agents with session-hook support — Claude Code, Codex, and Cursor — add
-`--hooks` to make the memory loop automatic: session hooks inject a bounded
-Link memory brief at the start of every new session, and (where the agent has
-a session-end event) store proposal-only session notes at session end, so
-memory no longer depends on the agent remembering to call Link. Sessions with
-nothing memory-worthy are skipped, duplicate end events are deduplicated, and
-when the review backlog builds up the injected brief nudges the agent to offer
-a `lnk consolidate` pass. Durable memory still requires explicit review and
-approval; consolidation is a read-only plan.
+`--hooks` (works with `lnk onboard` too) to make the memory loop automatic:
+the brief is injected at session start and proposal-only notes are captured at
+session end, so memory no longer depends on the agent remembering to call
+Link. Empty sessions and duplicate end events are skipped, and when the
+backlog builds up the brief nudges the agent to offer a read-only
+`lnk consolidate` pass. Durable memory still requires your approval. Codex and
+Cursor hook support is new (wired to their documented schemas — report
+issues).
 
 ```bash
 lnk connect claude-code ~/link --hooks --write

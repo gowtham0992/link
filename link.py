@@ -256,6 +256,7 @@ from link_core.mcp_verify import (
     check_link_mcp_import as _core_check_link_mcp_import,
     display_command as _core_display_command,
     render_mcp_verify_text as _core_render_mcp_verify_text,
+    resolve_mcp_python as _core_resolve_mcp_python,
     set_link_command_override as _core_set_link_command_override,
 )
 from link_core.mcp_connect import (
@@ -270,7 +271,6 @@ from link_core.agent_hooks import (
 )
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
-    memory_backlog_summary as _core_memory_backlog_summary,
     render_consolidate_text as _core_render_consolidate_text,
 )
 from link_core.semantic import (
@@ -279,6 +279,7 @@ from link_core.semantic import (
     refresh_memory_index as _core_refresh_semantic_index,
     render_semantic_status_text as _core_render_semantic_status_text,
     semantic_memory_scores as _core_semantic_memory_scores,
+    semantic_provider as _core_semantic_provider,
 )
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
@@ -1907,6 +1908,7 @@ def start(
     brief_payload = _core_add_capture_review_to_brief(
         brief_payload,
         _capture_review_summary(target, project=project_name),
+        command_target=_resolve_link_root(target),
     )
     query_text = task or "your current task"
     relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
@@ -1996,26 +1998,46 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
         print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
         return 1
     records = _memory_records(wiki_dir)
+    active_count = len([
+        record for record in records
+        if str(record.get("status") or "active").lower() == "active"
+    ])
     action_error = ""
     action_result = ""
     if setup or rebuild:
         if setup and not json_output:
             _print_text(
-                "Setting up semantic recall: this may download the local embedding model once "
-                "(a small static-embedding model, tens of MB). Recall itself never uses the network."
+                "Setting up semantic recall: this may download the local embedding model once. "
+                "Recall itself never uses the network."
             )
         embedder = _core_load_semantic_embedder(allow_download=setup)
         if embedder is None:
+            install_hint = f'{sys.executable} -m pip install "link-mcp[semantic]"'
             action_error = (
-                "Semantic provider unavailable. Install it first: pip install \"link-mcp[semantic]\""
+                f"Semantic provider unavailable for {sys.executable}. Install it first: {install_hint}"
                 if setup
                 else "Semantic model not available offline. Run: lnk semantic --setup"
             )
+            mcp_python = _core_resolve_mcp_python(target, wiki_dir, None, default_python=sys.executable)
+            if mcp_python != sys.executable:
+                action_error += (
+                    f"\nYour Link MCP Python is {mcp_python}. If you installed the extra there, "
+                    f"set it up through the MCP runtime instead: "
+                    f"{mcp_python} -m link_mcp --semantic-setup --wiki {wiki_dir}"
+                )
         else:
             index = _core_refresh_semantic_index(root, records, embedder=embedder)
             items = index.get("items") if isinstance(index.get("items"), dict) else {}
             action_result = f"Indexed {len(items)} memories."
-    payload = _core_build_semantic_status(root, memory_count=len(records), command_target=root)
+            if setup and _core_semantic_provider() == "fastembed":
+                action_result += (
+                    " Quality tier active: expect a ~5s model load per short-lived CLI command; "
+                    "the MCP server loads it once and stays fast. Prefer instant CLI recall? "
+                    "Set LINK_SEMANTIC_PROVIDER=model2vec (fast tier)."
+                )
+    payload = _core_build_semantic_status(
+        root, memory_count=active_count, command_target=root, python_cmd=sys.executable
+    )
     if action_result:
         payload["action_result"] = action_result
     if action_error:
@@ -2031,18 +2053,6 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
         code = 1
     _print_text(text)
     return code
-
-
-def _memory_backlog_summary(target: Path, wiki_dir: Path) -> dict[str, object]:
-    """Workspace-wide backlog signal (unscoped: consolidation is a workspace chore)."""
-    root = _resolve_link_root(target)
-    captures = _capture_review_summary(target, project=None, limit=1)
-    inbox = _memory_inbox(wiki_dir, limit=50)
-    return _core_memory_backlog_summary(
-        capture_count=int(captures.get("count") or 0),
-        needs_review_count=int(inbox.get("review_count") or 0),
-        command_target=root,
-    )
 
 
 def consolidate(target: Path, limit: int = 50, project: str | None = None, json_output: bool = False) -> int:
@@ -2109,6 +2119,7 @@ def _hook_session_start(
     brief_payload = _core_add_capture_review_to_brief(
         brief_payload,
         _capture_review_summary(target, project=project_name),
+        command_target=_resolve_link_root(target),
     )
     relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
     project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
@@ -2121,7 +2132,7 @@ def _hook_session_start(
         "status": status_payload,
         "brief_text": brief_text,
         "project_seed_recommended": project_seed_recommended,
-        "backlog": _memory_backlog_summary(target, wiki_dir),
+        "backlog": brief_payload.get("backlog") or {},
     })
     _emit_session_start(text, emit)
     return 0
@@ -2175,7 +2186,7 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
     code = session_end(
         target,
         notes,
-        title="Agent session notes",
+        title="Agent session notes" + (f" — {project_name}" if project_name else ""),
         limit=proposal_limit,
         project=project_name,
     )
@@ -2325,7 +2336,21 @@ def connect_mcp(
     hooks_payload: dict[str, object] | None = None
     if hooks:
         runtime_script = target / "link.py"
-        if not runtime_script.exists():
+        runtime_note = ""
+        if runtime_script.exists():
+            # A workspace runtime copied before session hooks existed would
+            # make every installed hook fail with an argparse error.
+            if not (target / "link_core" / "agent_hooks.py").exists():
+                if write:
+                    _copy_runtime_files(target)
+                    runtime_note = f"Refreshed the Link runtime at {target}: it predated session hooks."
+                else:
+                    runtime_note = (
+                        f"The Link runtime at {target} predates session hooks; "
+                        "--write will refresh it automatically (or run "
+                        f"{_display_command(['lnk', 'init', str(target)])} first)."
+                    )
+        else:
             runtime_script = ROOT / "link.py"
         hooks_payload = _core_build_agent_hooks_payload(
             target=target,
@@ -2334,6 +2359,8 @@ def connect_mcp(
             python_cmd=sys.executable,
             write=write,
         )
+        if runtime_note:
+            hooks_payload["runtime_note"] = runtime_note
         payload["session_hooks"] = hooks_payload
 
     if json_output:
@@ -2382,6 +2409,7 @@ def onboard(
     agents: list[str] | None = None,
     all_agents: bool = False,
     write: bool = False,
+    hooks: bool = False,
     first_memory: str | None = None,
     seed_project: str | None = None,
     project: str | None = None,
@@ -2467,7 +2495,7 @@ def onboard(
     connections: list[dict[str, object]] = []
     for agent in _onboard_agent_names(agents, all_agents):
         try:
-            connections.append(_core_build_mcp_connect_payload(
+            connection = _core_build_mcp_connect_payload(
                 target=target,
                 wiki_dir=wiki_dir,
                 agent=agent,
@@ -2475,7 +2503,22 @@ def onboard(
                 init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
                 default_python=sys.executable,
                 write=write,
-            ))
+            )
+            if hooks and _core_supports_agent_hooks(agent):
+                connection["session_hooks"] = _core_build_agent_hooks_payload(
+                    target=target,
+                    agent=agent,
+                    runtime_script=(target / "link.py") if (target / "link.py").exists() else ROOT / "link.py",
+                    python_cmd=sys.executable,
+                    write=write,
+                )
+            elif hooks:
+                connection["session_hooks"] = {
+                    "agent": agent,
+                    "write": {"requested": False, "ok": False,
+                              "message": "session hooks are not available for this agent yet"},
+                }
+            connections.append(connection)
         except ValueError as exc:
             connections.append({
                 "agent": agent,

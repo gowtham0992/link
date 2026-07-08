@@ -27,6 +27,9 @@ When the user explicitly asks Link to remember something, use MCP `remember` whe
 At the end of a meaningful work session, propose memory instead of silently saving it. Use MCP `admin` action `session_end` with concise session notes when available, or run `lnk session-end <notes-or-transcript>`. Show the returned proposals to the user and save durable memory only after approval.
 
 Use MCP `review` for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows. Use MCP `admin` only for less-common maintenance and compatibility actions.
+If a memory brief reports a memory backlog (pending captures or reviews above threshold), offer the user a short consolidation pass: use MCP `review` with action `consolidate` when available, or run `lnk consolidate`. The plan is read-only; apply its accept/discard/review commands only after the user approves each action.
+
+If Link session hooks are installed for this agent, the session-start memory brief is injected automatically — do not run a second startup recall; go straight to bounded task recall. Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity with capped confidence) as hints to verify with the user, not facts to act on.
 
 When the user says **"remember"**, **"recall"**, **"ingest"**, **"query"**, **"lint"**, or **"research"**, read `~/link/LINK.md` for instructions and follow the protocol. Use terminal commands to access `~/link/` since it's outside the workspace.
 

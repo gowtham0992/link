@@ -477,7 +477,9 @@ def _memory_brief(query: str = "", limit: int = 6, project: str = "") -> dict[st
         command_target=WIKI_DIR.parent,
         semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, clean_query, records),
     )
-    return _core_add_capture_review_to_brief(payload, _capture_review_summary(project=project_name))
+    return _core_add_capture_review_to_brief(
+        payload, _capture_review_summary(project=project_name), command_target=WIKI_DIR.parent
+    )
 
 
 def _query_link(query: str, budget: str = "medium", project: str = "") -> dict[str, object]:
@@ -925,7 +927,14 @@ def link_instructions_resource() -> str:
         "6. At session end, use `admin(action=\"session_end\", arguments=\"{...}\")` or `capture_session` "
         "to save proposal-only notes for user review.\n"
         "7. Use `review` for inbox, explain, archive, restore, forget, profile, audit, and log workflows.\n"
-        "8. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "8. If a brief reports a memory backlog, offer the user a short consolidation pass: "
+        "`review(action=\"consolidate\")` returns a read-only plan; apply its accept/discard actions only "
+        "after the user approves each one.\n"
+        "9. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "If Link session hooks are installed for this agent, the startup brief is injected automatically — "
+        "skip step 2 and go straight to bounded task recall.\n"
+        "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
+        "confidence) as hints to verify, not facts to act on.\n\n"
         "Never silently save durable memory. Prefer reviewed memories and source-backed wiki pages, and cite "
         "provenance when explaining why Link knows something.\n"
     )

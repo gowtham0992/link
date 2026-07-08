@@ -359,6 +359,7 @@ def build_semantic_status(
     *,
     memory_count: int,
     command_target: str | Path = ".",
+    python_cmd: str | None = None,
 ) -> dict[str, object]:
     """Readiness report for the optional semantic recall layer."""
     provider = semantic_provider()
@@ -400,6 +401,7 @@ def build_semantic_status(
         "disabled_by_env": disabled,
         "provider": provider,
         "tier": tier,
+        "python": python_cmd,
         "model": semantic_model_name(),
         "model_available_offline": ready,
         "index_path": str(semantic_index_path(root)),
@@ -421,6 +423,7 @@ def render_semantic_status_text(payload: Mapping[str, object]) -> tuple[int, str
         f"Mode: {payload.get('mode')}",
         f"Provider: {payload.get('provider') or 'not installed'}"
         + (f" · {payload.get('tier')}" if payload.get("tier") else ""),
+        *( [f"Python: {payload.get('python')}"] if payload.get("python") else [] ),
         f"Model: {payload.get('model')}",
         f"Indexed memories: {payload.get('indexed_memories')} of {payload.get('memory_count')}",
         f"Index: {payload.get('index_path')}",

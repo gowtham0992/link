@@ -56,6 +56,11 @@ def build_cli_parser(
     onboard_cmd.add_argument("--agent", action="append", default=[], help="agent config to preview or write; repeatable")
     onboard_cmd.add_argument("--all-agents", action="store_true", help="preview or write all supported agent configs")
     onboard_cmd.add_argument("--write", action="store_true", help="update selected agent config files")
+    onboard_cmd.add_argument(
+        "--hooks",
+        action="store_true",
+        help="also configure session hooks for selected agents that support them (Claude Code, Codex, Cursor)",
+    )
     onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
     onboard_cmd.add_argument(
         "--seed-project",
@@ -447,6 +452,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             agents=args.agent,
             all_agents=args.all_agents,
             write=args.write,
+            hooks=args.hooks,
             first_memory=args.first_memory,
             seed_project=args.seed_project,
             project=args.project,

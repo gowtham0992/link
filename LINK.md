@@ -623,3 +623,9 @@ If the wiki is empty, start here:
 If the wiki already exists, read `wiki/index.md` and `wiki/log.md` first to understand current state before doing anything.
 
 To verify MCP access, run `python3 link.py verify-mcp .` when `link.py` is available. It checks whether `link_mcp` imports in the configured Python and prints the MCP client config for the current wiki.
+
+## Memory Maintenance
+
+- **Session hooks.** Agents with hook support (Claude Code, Codex, Cursor) can install Link session hooks (`python3 link.py connect <agent> . --hooks --write`): the memory brief is injected automatically at session start and proposal-only session notes are stored at session end. Durable memory always requires review.
+- **Consolidation.** When briefs report a memory backlog (pending captures or reviews above threshold), run `python3 link.py consolidate .` (or MCP `review(action="consolidate")`) for a read-only plan with accept/discard/review commands. Apply actions only after the user approves each one.
+- **Semantic recall (optional, local).** With `link-mcp[semantic]` or `link-mcp[semantic-quality]` installed and a one-time `python3 link.py semantic . --setup`, recall also finds paraphrases. Recalled memories then carry `match: lexical|semantic|hybrid`; treat semantic-only matches as hints to verify, not facts.

@@ -296,6 +296,11 @@ def build_agent_hooks_payload(
             f"{config.display_name} has no session-end hook event; end sessions with `lnk session-end` "
             "or the MCP session_end action to capture memory proposals."
         )
+    if config.name in {"codex", "cursor"}:
+        behavior.append(
+            f"New: {config.display_name} hook support follows the vendor's documented schema; "
+            "if a hook misbehaves, please open an issue."
+        )
 
     return {
         "agent": config.name,

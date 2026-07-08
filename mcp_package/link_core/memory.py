@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
 from .semantic import semantic_confidence_cap, semantic_match_points
 from .frontmatter import (
@@ -1776,8 +1777,9 @@ def memory_audit_next_actions(
 def add_capture_review_to_brief(
     payload: Mapping[str, object],
     captures: Mapping[str, object],
+    command_target: str | Path = ".",
 ) -> dict[str, object]:
-    """Attach raw-capture review state and guidance to a memory brief."""
+    """Attach raw-capture review state, backlog signal, and guidance to a brief."""
     result = dict(payload)
     capture_payload = dict(captures)
     guidance = [str(item) for item in result.get("agent_guidance", [])]
@@ -1794,6 +1796,18 @@ def add_capture_review_to_brief(
         guidance.append("Redact raw captures with secret warnings before sharing snippets or using their contents.")
     if read_warning_count:
         guidance.append("Fix unreadable raw captures before deciding whether capture memory should be accepted or deleted.")
+    review = result.get("review") if isinstance(result.get("review"), Mapping) else {}
+    backlog = memory_backlog_summary(
+        capture_count=capture_count,
+        needs_review_count=int(review.get("count") or 0),
+        command_target=command_target,
+    )
+    result["backlog"] = backlog
+    if backlog.get("backlog"):
+        guidance.append(
+            "The memory backlog is above threshold; offer the user a short consolidation pass "
+            f"({backlog.get('command')} prints a read-only plan with approve/discard commands)."
+        )
     result["agent_guidance"] = guidance
     return result
 

@@ -38,25 +38,39 @@ def memory_backlog_summary(
     }
 
 
-def _normalized_snippet(capture: dict[str, object]) -> str:
-    snippet = re.sub(r"\s+", " ", str(capture.get("snippet") or "")).strip().lower()
-    return snippet
+DUPLICATE_JACCARD = 0.8
+
+
+def _snippet_tokens(capture: dict[str, object]) -> set[str]:
+    snippet = str(capture.get("snippet") or "").lower()
+    return set(re.findall(r"[a-z0-9]{3,}", snippet))
 
 
 def _duplicate_capture_groups(captures: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Group captures with identical normalized snippets; newest is kept."""
-    by_snippet: dict[str, list[dict[str, object]]] = {}
-    for capture in captures:
-        snippet = _normalized_snippet(capture)
-        if not snippet:
+    """Cluster near-duplicate captures by snippet token overlap; newest is kept.
+
+    Exact duplicates have Jaccard 1.0, so one similarity clustering covers
+    both identical and lightly reworded captures of the same session content.
+    """
+    clusters: list[dict[str, object]] = []
+    for capture in captures:  # capture_records sorts newest first
+        tokens = _snippet_tokens(capture)
+        if not tokens:
             continue
-        by_snippet.setdefault(snippet, []).append(capture)
+        for cluster in clusters:
+            keep_tokens: set[str] = cluster["tokens"]  # type: ignore[assignment]
+            union = tokens | keep_tokens
+            if union and len(tokens & keep_tokens) / len(union) >= DUPLICATE_JACCARD:
+                cluster["members"].append(capture)  # type: ignore[union-attr]
+                break
+        else:
+            clusters.append({"tokens": tokens, "keep": capture, "members": []})
     groups: list[dict[str, object]] = []
-    for snippet, members in by_snippet.items():
-        if len(members) < 2:
+    for cluster in clusters:
+        members = cluster["members"]
+        if not members:
             continue
-        # capture_records sorts newest first; keep the newest, mark the rest.
-        keep, *duplicates = members
+        keep = cluster["keep"]
         groups.append({
             "keep": {"path": keep.get("path"), "title": keep.get("title")},
             "duplicates": [
@@ -67,7 +81,7 @@ def _duplicate_capture_groups(captures: list[dict[str, object]]) -> list[dict[st
                     if isinstance(item.get("commands"), dict)
                     else "",
                 }
-                for item in duplicates
+                for item in members
             ],
         })
     return groups

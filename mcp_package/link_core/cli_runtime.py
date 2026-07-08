@@ -122,6 +122,14 @@ def render_start_text(payload: Mapping[str, object]) -> tuple[int, str]:
             lines.append(f"- Need more context: {commands['query']}")
         if isinstance(commands, Mapping) and commands.get("review"):
             lines.append(f"- Review pending memory: {commands['review']}")
+        brief = payload.get("brief") if isinstance(payload.get("brief"), Mapping) else {}
+        backlog = brief.get("backlog") if isinstance(brief.get("backlog"), Mapping) else {}
+        if backlog.get("backlog"):
+            lines.append(
+                f"- Memory backlog ({backlog.get('pending_captures', 0)} captures · "
+                f"{backlog.get('needs_review_memories', 0)} reviews): offer a consolidation pass — "
+                f"{backlog.get('command')}"
+            )
         lines.append("- Save memory only after explicit user approval.")
     return 0 if status.get("ready") else 1, "\n".join(lines)
 
@@ -301,9 +309,19 @@ def _first_mapping_items(value: object, limit: int) -> list[Mapping[str, object]
 
 def _connection_state(connection: Mapping[str, object]) -> str:
     write_status = connection.get("write") if isinstance(connection.get("write"), Mapping) else {}
+    state = "preview"
     if write_status.get("requested"):
-        return "updated" if write_status.get("ok") else "failed"
-    return "preview"
+        state = "updated" if write_status.get("ok") else "failed"
+    session_hooks = connection.get("session_hooks")
+    if isinstance(session_hooks, Mapping):
+        hooks_write = session_hooks.get("write") if isinstance(session_hooks.get("write"), Mapping) else {}
+        if hooks_write.get("requested"):
+            state += " · hooks " + ("updated" if hooks_write.get("ok") else "failed")
+        elif hooks_write.get("message"):
+            state += f" · hooks: {hooks_write.get('message')}"
+        else:
+            state += " · hooks preview"
+    return state
 
 
 def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
@@ -481,6 +499,9 @@ def render_agent_hooks_text(payload: Mapping[str, object]) -> tuple[int, str]:
     if isinstance(behavior, Sequence) and not isinstance(behavior, (str, bytes)):
         lines.append("")
         lines.extend(f"  {item}" for item in behavior)
+    runtime_note = str(payload.get("runtime_note") or "").strip()
+    if runtime_note:
+        lines.extend(["", f"  {runtime_note}"])
     lines.append("")
     if requested:
         lines.append(f"Write: {'updated' if ok else 'failed'}")
