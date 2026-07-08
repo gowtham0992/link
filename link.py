@@ -273,6 +273,13 @@ from link_core.consolidate import (
     memory_backlog_summary as _core_memory_backlog_summary,
     render_consolidate_text as _core_render_consolidate_text,
 )
+from link_core.semantic import (
+    build_semantic_status as _core_build_semantic_status,
+    load_embedder as _core_load_semantic_embedder,
+    refresh_memory_index as _core_refresh_semantic_index,
+    render_semantic_status_text as _core_render_semantic_status_text,
+    semantic_memory_scores as _core_semantic_memory_scores,
+)
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
     render_import_obsidian_text as _core_render_import_obsidian_text,
@@ -454,13 +461,15 @@ def _memory_profile(wiki_dir: Path, limit: int = 10, project: str | None = None)
 
 
 def _memory_brief(wiki_dir: Path, query: str = "", limit: int = 6, project: str | None = None) -> dict[str, object]:
+    records = _memory_records(wiki_dir)
     return _core_memory_brief(
-        _memory_records(wiki_dir),
+        records,
         query=query,
         limit=limit,
         review_command="review-memory",
         project=project,
         command_target=wiki_dir.parent,
+        semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
     )
 
 
@@ -487,12 +496,14 @@ def _recall_memories(
     include_archived: bool = False,
     project: str | None = None,
 ) -> list[dict[str, object]]:
+    records = _memory_records(wiki_dir)
     return _core_recall_memories(
-        _memory_records(wiki_dir),
+        records,
         query,
         limit=limit,
         include_archived=include_archived,
         project=project,
+        semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
     )
 
 
@@ -1976,6 +1987,52 @@ def _read_hook_stdin() -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
+def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_output: bool = False) -> int:
+    """Show, set up, or rebuild the optional local semantic recall layer."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+        return 1
+    records = _memory_records(wiki_dir)
+    action_error = ""
+    action_result = ""
+    if setup or rebuild:
+        if setup and not json_output:
+            _print_text(
+                "Setting up semantic recall: this may download the local embedding model once "
+                "(a small static-embedding model, tens of MB). Recall itself never uses the network."
+            )
+        embedder = _core_load_semantic_embedder(allow_download=setup)
+        if embedder is None:
+            action_error = (
+                "Semantic provider unavailable. Install it first: pip install \"link-mcp[semantic]\""
+                if setup
+                else "Semantic model not available offline. Run: lnk semantic --setup"
+            )
+        else:
+            index = _core_refresh_semantic_index(root, records, embedder=embedder)
+            items = index.get("items") if isinstance(index.get("items"), dict) else {}
+            action_result = f"Indexed {len(items)} memories."
+    payload = _core_build_semantic_status(root, memory_count=len(records), command_target=root)
+    if action_result:
+        payload["action_result"] = action_result
+    if action_error:
+        payload["action_error"] = action_error
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 1 if action_error else 0
+    code, text = _core_render_semantic_status_text(payload)
+    if action_result:
+        _print_text(action_result)
+    if action_error:
+        print(action_error, file=sys.stderr)
+        code = 1
+    _print_text(text)
+    return code
+
+
 def _memory_backlog_summary(target: Path, wiki_dir: Path) -> dict[str, object]:
     """Workspace-wide backlog signal (unscoped: consolidation is a workspace chore)."""
     root = _resolve_link_root(target)
@@ -2891,6 +2948,7 @@ def main(argv: list[str] | None = None) -> int:
             "start": start,
             "hook": run_agent_hook,
             "consolidate": consolidate,
+            "semantic": semantic,
             "profile": profile,
             "wins": memory_wins,
             "memory-audit": memory_audit,

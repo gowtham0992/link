@@ -316,6 +316,12 @@ def build_cli_parser(
         help="session-start output envelope: plain text (Claude Code, Codex) or Cursor additional_context JSON",
     )
 
+    semantic_cmd = sub.add_parser("semantic", help="show or set up optional local semantic recall")
+    semantic_cmd.add_argument("target", nargs="?", default=".")
+    semantic_cmd.add_argument("--setup", action="store_true", help="fetch the local embedding model once and build the index")
+    semantic_cmd.add_argument("--rebuild", action="store_true", help="rebuild the semantic index offline")
+    semantic_cmd.add_argument("--json", action="store_true", help="print machine-readable semantic status")
+
     consolidate_cmd = sub.add_parser("consolidate", help="print a read-only plan for the capture and review backlog")
     consolidate_cmd.add_argument("target", nargs="?", default=".")
     consolidate_cmd.add_argument("--limit", type=int, default=50, help="maximum captures and review items to include")
@@ -688,6 +694,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         )
     if command == "consolidate":
         return handlers["consolidate"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
+    if command == "semantic":
+        return handlers["semantic"](Path(args.target), setup=args.setup, rebuild=args.rebuild, json_output=args.json)
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":

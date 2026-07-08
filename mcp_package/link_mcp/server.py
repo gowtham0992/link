@@ -208,6 +208,9 @@ from link_core.capture import (
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
 )
+from link_core.semantic import (
+    semantic_memory_scores as _core_semantic_memory_scores,
+)
 from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
 )
@@ -434,10 +437,13 @@ def _memory_profile(limit: int = 10, project: str = "") -> dict[str, object]:
 
 def _memory_brief(query: str = "", limit: int = 6, project: str = "") -> dict[str, object]:
     project_name = _resolve_project(project)
+    clean_query = _clean_text_input(query, max_len=500)
+    records = _memory_records()
     payload = _core_memory_brief(
-        _memory_records(), query=_clean_text_input(query, max_len=500),
+        records, query=clean_query,
         limit=limit, review_command="review_memory", project=project_name,
         command_target=WIKI_DIR.parent,
+        semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, clean_query, records),
     )
     return _core_add_capture_review_to_brief(payload, _capture_review_summary(project=project_name))
 
@@ -516,12 +522,14 @@ def _recall_memories(
     project: str = "",
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
+    records = _memory_records()
     return _core_recall_memories(
-        _memory_records(),
+        records,
         query,
         limit=limit,
         include_archived=include_archived,
         project=_resolve_project(project),
+        semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, query, records),
     )
 
 

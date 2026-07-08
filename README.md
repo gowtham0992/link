@@ -337,6 +337,27 @@ lnk connect cursor ~/link --hooks --write
 lnk consolidate ~/link                      # read-only backlog plan, apply only with approval
 ```
 
+### Optional: hybrid semantic recall (still fully local)
+
+Lexical recall is always the default and the fallback. Installing the optional
+semantic extra adds a small local static-embedding model so paraphrased
+queries also find memories phrased differently — "how should I structure my
+pull requests" finds a memory about commit style. Recall never touches the
+network: the model loads offline-only after a one-time explicit setup,
+embeddings live in plain JSON under `.link-cache/`, similarity runs in-process
+with no vector database, and semantic-only matches carry capped confidence
+labels so agents verify before trusting them.
+
+```bash
+pip install "link-mcp[semantic]"
+lnk semantic ~/link --setup   # one-time model fetch, with your approval
+lnk semantic ~/link           # status: lexical only vs hybrid
+```
+
+Measured on the bundled recall eval (`scripts/eval_recall_quality.py`):
+exact-token queries stay perfect, paraphrase hit@1 improves from 0.50 to 0.62
+and hit@3 from 0.62 to 0.75 with the local model.
+
 <details>
 <summary>MCP-only install</summary>
 

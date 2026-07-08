@@ -54,6 +54,7 @@ EXPECTED_CLI_COMMANDS = {
     "restore-memory",
     "review-memory",
     "seed",
+    "semantic",
     "serve",
     "set-memory-visibility",
     "session-end",

@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .files import atomic_write_text
+from .semantic import semantic_confidence_cap, semantic_match_points
 from .frontmatter import (
     csv_values,
     frontmatter_int,
@@ -1804,6 +1805,7 @@ def memory_brief(
     review_command: str = "review-memory",
     project: str | None = None,
     command_target: str | Path = ".",
+    semantic_scores: Mapping[str, float] | None = None,
 ) -> dict[str, object]:
     """Return the compact memory payload an agent should read before work."""
     limit = max(1, min(limit, 20))
@@ -1823,7 +1825,9 @@ def memory_brief(
     )
 
     if q:
-        relevant = recall_memories(record_list, q, limit=limit, project=project_name)
+        relevant = recall_memories(
+            record_list, q, limit=limit, project=project_name, semantic_scores=semantic_scores
+        )
         selection = "query"
     else:
         relevant = []
@@ -2007,6 +2011,7 @@ def recall_memories(
     limit: int = 10,
     include_archived: bool = False,
     project: str | None = None,
+    semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
 ) -> list[dict[str, object]]:
     q = query.strip()
     if not q:
@@ -2019,14 +2024,28 @@ def recall_memories(
             continue
         if not include_archived and not is_active_memory(record):
             continue
-        score = score_memory(record, q)
+        lexical_score = score_memory(record, q)
+        semantic_match = None
+        if semantic_scores:
+            semantic_match = semantic_scores.get(str(record.get("name") or ""))
+        score = lexical_score + semantic_match_points(semantic_match)
         if score >= MEMORY_RECALL_MIN_SCORE:
+            lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
             rank_score = memory_rank_score(record, score, project=project_name)
             issues = memory_review_issues(record)
             slim = slim_memory(record)
             slim["score"] = score
             slim["rank_score"] = rank_score
-            slim["confidence"] = memory_recall_confidence(record, q)
+            slim["match"] = (
+                "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
+            )
+            if semantic_match:
+                slim["semantic_similarity"] = float(semantic_match.get("cosine") or 0.0)
+            # A match with no lexical evidence is honest about its basis: a
+            # close paraphrase is at most moderate confidence, never strong.
+            slim["confidence"] = (
+                memory_recall_confidence(record, q) if lexical_hit else semantic_confidence_cap(semantic_match)
+            )
             slim["recall"] = recall_state(record, issues)
             slim["review_issue_count"] = len(issues)
             slim["highest_review_severity"] = (
