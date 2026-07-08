@@ -474,7 +474,10 @@ def _memory_profile(wiki_dir: Path, limit: int = 10, project: str | None = None)
     )
 
 
-def _memory_brief(wiki_dir: Path, query: str = "", limit: int = 6, project: str | None = None) -> dict[str, object]:
+def _memory_brief(
+    wiki_dir: Path, query: str = "", limit: int = 6, project: str | None = None,
+    context_path: str | None = None,
+) -> dict[str, object]:
     records = _memory_records(wiki_dir)
     return _core_memory_brief(
         records,
@@ -484,6 +487,7 @@ def _memory_brief(wiki_dir: Path, query: str = "", limit: int = 6, project: str 
         project=project,
         command_target=wiki_dir.parent,
         semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
+        context_path=context_path,
     )
 
 
@@ -518,6 +522,7 @@ def _recall_memories(
         include_archived=include_archived,
         project=project,
         semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
+        context_path=str(Path.cwd()),
     )
 
 
@@ -682,6 +687,7 @@ def _write_memory_page(
     review_after: str | None = None,
     expires_at: str | None = None,
     trigger: str | None = None,
+    applies_when: str | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -693,6 +699,7 @@ def _write_memory_page(
         review_after=review_after,
         expires_at=expires_at,
         trigger=trigger,
+        applies_when=applies_when,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -1095,6 +1102,7 @@ def remember(
     review_after: str | None = None,
     expires_at: str | None = None,
     trigger: str | None = None,
+    applies_when: str | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -1116,6 +1124,7 @@ def remember(
             review_after=review_after,
             expires_at=expires_at,
             trigger=trigger,
+            applies_when=applies_when,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
@@ -2109,7 +2118,10 @@ def _hook_session_start(
     if not project_name:
         project_name = _default_project(target)
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=False)
-    brief_payload = _memory_brief(wiki_dir, query="", limit=limit, project=project_name)
+    brief_payload = _memory_brief(
+        wiki_dir, query="", limit=limit, project=project_name,
+        context_path=_hook_project_dir(hook_event) or None,
+    )
     brief_payload = _core_add_capture_review_to_brief(
         brief_payload,
         _capture_review_summary(target, project=project_name),

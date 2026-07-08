@@ -111,7 +111,8 @@ New MCP configs should expose Link through six model-facing tools:
    briefs, answer-ready context packets, wiki search, and graph context.
 3. `remember(text, ...)` writes only explicit user-approved durable memories,
    including `memory_type="procedure"` recipes with a `trigger` phrase that
-   return from recall with their steps.
+   return from recall with their steps, and situational memories scoped with
+   `applies_when` conditions that recall demotes and labels out of context.
 4. `ingest(action?, strict?)` checks or validates raw-source ingest work.
 5. `review(action?, ...)` handles memory inbox, profile, audit, log, explain,
    archive, restore, forget, visibility, and read-only `consolidate` (backlog

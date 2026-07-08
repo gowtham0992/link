@@ -886,6 +886,7 @@ def _write_mcp_memory_page(
     scope: str = "user", tags: str = "", source: str = "mcp",
     allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
     visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
+    applies_when: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -899,6 +900,7 @@ def _write_mcp_memory_page(
         review_after=_clean_text_input(review_after, max_len=40) or None,
         expires_at=_clean_text_input(expires_at, max_len=40) or None,
         trigger=_clean_text_input(trigger, max_len=200) or None,
+        applies_when=_clean_text_input(applies_when, max_len=200) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -936,6 +938,9 @@ def link_instructions_resource() -> str:
         "skip step 2 and go straight to bounded task recall.\n"
         "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
         "confidence) as hints to verify, not facts to act on.\n"
+        "Memories may carry an `applicability` label: `out_of_context` means the memory's declared "
+        "conditions do not fit here — do not apply it without asking. Scope situational memories with "
+        "`applies_when` (project:/path:/task: conditions).\n"
         "After a notable multi-step task, offer to save a reusable recipe: propose a `procedure` memory "
         "with a short `trigger` phrase, and save only after approval. Approved procedures return from "
         "recall with their steps.\n\n"
@@ -1187,6 +1192,7 @@ def remember(
     review_after: str = "",
     expires_at: str = "",
     trigger: str = "",
+    applies_when: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
 ) -> str:
@@ -1213,6 +1219,7 @@ def remember(
             review_after=review_after,
             expires_at=expires_at,
             trigger=trigger,
+            applies_when=applies_when,
         )
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})

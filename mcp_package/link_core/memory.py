@@ -1,6 +1,7 @@
 """Shared memory logic for Link CLI, HTTP, and MCP runtimes."""
 from __future__ import annotations
 
+import fnmatch
 import re
 import urllib.parse
 from collections.abc import Callable, Iterable, Mapping
@@ -404,6 +405,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "expires_at": meta.get("expires_at", ""),
         "review_note": meta.get("review_note", ""),
         "trigger": str(meta.get("trigger") or ""),
+        "applies_when": str(meta.get("applies_when") or ""),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -1355,6 +1357,7 @@ def write_memory_page(
     review_after: str | None = None,
     expires_at: str | None = None,
     trigger: str | None = None,
+    applies_when: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
@@ -1368,6 +1371,11 @@ def write_memory_page(
     clean_trigger = " ".join(str(trigger or "").split())
     if clean_trigger and len(clean_trigger) > 200:
         raise ValueError("trigger must be 200 characters or fewer")
+    clean_applies_when = " ".join(str(applies_when or "").split())
+    if clean_applies_when:
+        if len(clean_applies_when) > 200:
+            raise ValueError("applies_when must be 200 characters or fewer")
+        parse_applies_when(clean_applies_when)
     clean_visibility = normalize_memory_visibility(scope, visibility)
 
     clean_text = text.strip()
@@ -1440,6 +1448,9 @@ def write_memory_page(
     review_after_line = f'review_after: "{frontmatter_string(clean_review_after)}"\n' if clean_review_after else ""
     expires_at_line = f'expires_at: "{frontmatter_string(clean_expires_at)}"\n' if clean_expires_at else ""
     trigger_line = f'trigger: "{frontmatter_string(clean_trigger)}"\n' if clean_trigger else ""
+    applies_when_line = (
+        f'applies_when: "{frontmatter_string(clean_applies_when)}"\n' if clean_applies_when else ""
+    )
 
     if memory_type == "procedure":
         use_when = (
@@ -1463,7 +1474,7 @@ visibility: {clean_visibility}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
-{review_after_line}{expires_at_line}{trigger_line}reviewed_at: ""
+{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1855,6 +1866,7 @@ def memory_brief(
     project: str | None = None,
     command_target: str | Path = ".",
     semantic_scores: Mapping[str, float] | None = None,
+    context_path: str | None = None,
 ) -> dict[str, object]:
     """Return the compact memory payload an agent should read before work."""
     limit = max(1, min(limit, 20))
@@ -1875,7 +1887,8 @@ def memory_brief(
 
     if q:
         relevant = recall_memories(
-            record_list, q, limit=limit, project=project_name, semantic_scores=semantic_scores
+            record_list, q, limit=limit, project=project_name,
+            semantic_scores=semantic_scores, context_path=context_path,
         )
         selection = "query"
     else:
@@ -1890,6 +1903,12 @@ def memory_brief(
                     continue
                 if str(record.get("memory_type") or "") != memory_type:
                     continue
+                if memory_applicability(
+                    record, query="", project=project_name, context_path=context_path
+                ) == "out_of_context":
+                    # Conditional memories stay out of startup briefs unless
+                    # their context matches; they surface via task recall.
+                    continue
                 relevant.append(slim_memory(record))
                 seen.add(name)
                 if len(relevant) >= limit:
@@ -1900,6 +1919,10 @@ def memory_brief(
             for record in recent_memories(record_list):
                 name = str(record.get("name") or "")
                 if name in seen or not is_active_memory(record):
+                    continue
+                if memory_applicability(
+                    record, query="", project=project_name, context_path=context_path
+                ) == "out_of_context":
                     continue
                 relevant.append(slim_memory(record))
                 seen.add(name)
@@ -2066,6 +2089,7 @@ def recall_memories(
     include_archived: bool = False,
     project: str | None = None,
     semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
+    context_path: str | None = None,
 ) -> list[dict[str, object]]:
     q = query.strip()
     if not q:
@@ -2086,10 +2110,21 @@ def recall_memories(
         if score >= MEMORY_RECALL_MIN_SCORE:
             lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
             rank_score = memory_rank_score(record, score, project=project_name)
+            applicability = memory_applicability(
+                record, query=q, project=project_name, context_path=context_path
+            )
+            if applicability == "matched":
+                rank_score += 4
+            elif applicability == "out_of_context":
+                # Conditional memory outside its context: still findable,
+                # but demoted and labeled so agents do not apply it blindly.
+                rank_score = max(1, rank_score - 10)
             issues = memory_review_issues(record)
             slim = slim_memory(record)
             slim["score"] = score
             slim["rank_score"] = rank_score
+            if applicability != "unconditional":
+                slim["applicability"] = applicability
             slim["match"] = (
                 "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
             )
@@ -2119,6 +2154,71 @@ def recall_memories(
     scored.sort(key=lambda item: item[2], reverse=True)
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return [record for _, _, _, record in scored[:limit]]
+
+
+APPLICABILITY_CONDITION_KINDS = ("project", "path", "task")
+
+
+def parse_applies_when(value: object) -> list[tuple[str, str]]:
+    """Parse an applies_when string into (kind, argument) conditions.
+
+    Format: comma-separated `kind:argument` conditions with OR semantics,
+    e.g. "project:link, task:cutting a release, path:*picochat*".
+    Raises ValueError for unknown kinds or empty arguments.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return []
+    conditions: list[tuple[str, str]] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        kind, _, argument = part.partition(":")
+        kind = kind.strip().lower()
+        argument = argument.strip()
+        if kind not in APPLICABILITY_CONDITION_KINDS or not argument:
+            raise ValueError(
+                "applies_when conditions must look like project:<slug>, path:<glob>, or task:<phrase>"
+            )
+        conditions.append((kind, argument))
+    return conditions
+
+
+def memory_applicability(
+    record: Mapping[str, object],
+    *,
+    query: str = "",
+    project: str | None = None,
+    context_path: str | None = None,
+) -> str:
+    """Deterministically judge whether a memory applies in this context.
+
+    Returns "unconditional" (no applies_when), "matched" (any condition
+    matches: OR semantics), or "out_of_context". Conditions the current
+    context cannot evaluate (a path: condition with no known path) simply
+    do not match; they never raise.
+    """
+    try:
+        conditions = parse_applies_when(record.get("applies_when"))
+    except ValueError:
+        return "unconditional"
+    if not conditions:
+        return "unconditional"
+    query_tokens = stemmed_memory_tokens(significant_memory_tokens(query))
+    for kind, argument in conditions:
+        if kind == "project" and normalize_project(argument) and (
+            normalize_project(argument) == normalize_project(project or "")
+        ):
+            return "matched"
+        if kind == "path" and context_path:
+            if fnmatch.fnmatch(str(context_path).lower(), argument.lower()):
+                return "matched"
+        if kind == "task" and query_tokens:
+            condition_tokens = stemmed_memory_tokens(significant_memory_tokens(argument))
+            if condition_tokens and condition_tokens <= query_tokens:
+                return "matched"
+    return "out_of_context"
 
 
 ECHO_CONTAINMENT = 0.7
