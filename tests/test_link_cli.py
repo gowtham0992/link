@@ -3206,7 +3206,11 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertEqual(session_hooks["agent"], "claude-code")
         self.assertFalse(session_hooks["write"]["ok"])
         self.assertIn(" hook session-start ", session_hooks["events"]["SessionStart"])
-        self.assertIn(str(target / "link.py"), session_hooks["events"]["SessionStart"])
+        # The command must point at the demo's own runtime script. Compare the
+        # stable path tail: on Windows the temp dir in the command is resolved
+        # to its long form (runneradmin) while mkdtemp returns the 8.3 short
+        # form (RUNNER~1), so the absolute prefix differs.
+        self.assertIn(str(Path(target.name) / "link.py"), session_hooks["events"]["SessionStart"])
 
 
 if __name__ == "__main__":
