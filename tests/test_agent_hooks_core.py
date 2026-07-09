@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -122,8 +123,11 @@ class AgentHooksCoreTests(unittest.TestCase):
         events = payload["events"]
         self.assertIn(" hook session-start ", str(events["SessionStart"]))
         self.assertIn(" hook session-end ", str(events["SessionEnd"]))
-        # Paths with spaces must stay shell-safe in the written command.
-        self.assertIn("'/tmp/my link/link.py'", str(events["SessionStart"]))
+        # Paths with spaces must stay shell-safe in the written command:
+        # shlex single quotes on POSIX, list2cmdline double quotes on Windows.
+        script = str(Path("/tmp/my link/link.py"))
+        quoted = f'"{script}"' if os.name == "nt" else f"'{script}'"
+        self.assertIn(quoted, str(events["SessionStart"]))
         snippet = json.loads(str(payload["snippet"]))
         self.assertIn("SessionStart", snippet["hooks"])
         self.assertIn("SessionEnd", snippet["hooks"])
