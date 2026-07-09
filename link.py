@@ -2594,7 +2594,7 @@ def onboard(
             "is injected at session start and proposals are captured at session end, so no agent "
             "has to remember to call Link. Example:\n"
             f"  {_display_command(['link', 'onboard', str(target), '--agent', 'claude-code', '--hooks', '--write'])}"
-        ) if hooks_agents or not connections else "",
+        ) if (hooks_agents or not connections) and not hooks else "",
         "url": f"http://127.0.0.1:{port}",
     }
 
