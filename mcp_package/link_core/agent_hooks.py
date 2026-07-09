@@ -347,15 +347,20 @@ def extract_transcript_text(
     *,
     max_chars: int = 6000,
     max_message_chars: int = 800,
+    roles: tuple[str, ...] = ("user", "assistant"),
     stats: dict[str, int] | None = None,
 ) -> str:
     """Extract bounded conversation text from an agent transcript JSONL file.
 
-    Keeps user and assistant text blocks, skips tool calls/results, meta
-    entries, and any message carrying Link's own injected output (see
-    LINK_ECHO_MARKERS), and returns the most recent messages within
-    `max_chars`.
+    Keeps text blocks for the given `roles` (default user + assistant), skips
+    tool calls/results, meta entries, and any message carrying Link's own
+    injected output (see LINK_ECHO_MARKERS), and returns the most recent
+    messages within `max_chars`. Pass roles=("user",) to mine only what the
+    user said — memory proposals should come from the user's own words, not the
+    assistant's prose, which would otherwise be mis-attributed as user
+    preferences.
     """
+    role_set = set(roles)
     try:
         raw = transcript_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -371,7 +376,7 @@ def extract_transcript_text(
             continue
         if not isinstance(entry, dict) or entry.get("isMeta"):
             continue
-        if entry.get("type") not in {"user", "assistant"}:
+        if entry.get("type") not in role_set:
             continue
         message = entry.get("message")
         if not isinstance(message, dict):

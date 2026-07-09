@@ -259,6 +259,30 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertNotIn("Pending captures", text)
         self.assertNotIn("Prefer small commits", text)
 
+    def test_extract_transcript_can_keep_user_turns_only(self):
+        # Memory proposals must come from the user's words, not the assistant's
+        # prose (which dogfooding showed gets mis-attributed as user preferences).
+        with tempfile.TemporaryDirectory() as temp:
+            transcript = Path(temp) / "transcript.jsonl"
+            transcript.write_text(
+                "\n".join([
+                    _transcript_line("user", "ok go ahead"),
+                    _transcript_line("assistant", [{"type": "text",
+                        "text": "Tests pass on broken things; eyes don't. I prefer small commits."}]),
+                    _transcript_line("user", "We decided to require signed commits on every branch."),
+                ]),
+                encoding="utf-8",
+            )
+
+            both = extract_transcript_text(transcript)
+            user_only = extract_transcript_text(transcript, roles=("user",))
+
+        self.assertIn("Tests pass on broken things", both)
+        self.assertNotIn("Tests pass on broken things", user_only)
+        self.assertNotIn("I prefer small commits", user_only)
+        self.assertIn("signed commits", user_only)
+        self.assertIn("ok go ahead", user_only)
+
     def test_extract_transcript_handles_missing_file(self):
         self.assertEqual(extract_transcript_text(Path("/nonexistent/transcript.jsonl")), "")
 

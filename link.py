@@ -1272,6 +1272,7 @@ def session_end(
     title: str | None = None,
     limit: int = 3,
     project: str | None = None,
+    proposal_text: str | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -1296,9 +1297,12 @@ def session_end(
         path_source=True,
     )
     rel_path = str(capture_record["path"])
+    # The raw capture keeps the full session for review context, but memory
+    # proposals are mined from proposal_text when given (the user's turns only)
+    # so the assistant's prose is never proposed as the user's preference.
     result = _propose_memories_from_text(
         wiki_dir,
-        text,
+        proposal_text if proposal_text is not None else text,
         source=rel_path,
         limit=max(1, min(limit, 10)),
         project=project_name,
@@ -2202,8 +2206,9 @@ def _hook_session_end(
     if not transcript_value:
         _trace("no transcript_path in the hook event; nothing to capture.")
         return 0
+    transcript_path = Path(transcript_value).expanduser()
     extraction_stats: dict[str, int] = {}
-    notes = _core_extract_transcript_text(Path(transcript_value).expanduser(), stats=extraction_stats)
+    notes = _core_extract_transcript_text(transcript_path, stats=extraction_stats)
     _trace(
         f"transcript: kept {extraction_stats.get('kept_messages', 0)} messages, "
         f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own output (echo guard, layer 1)."
@@ -2211,6 +2216,11 @@ def _hook_session_end(
     if len(notes.strip()) < 200:
         _trace("skipped: under 200 characters of conversation — nothing memory-worthy in a trivial session.")
         return 0
+    # Memory proposals come from the user's own turns only. The assistant's
+    # prose is help, not the user's preferences; mining it would attribute the
+    # assistant's words to the user (found in dogfooding). The raw capture below
+    # still keeps the full transcript for review context.
+    user_notes = _core_extract_transcript_text(transcript_path, roles=("user",))
     # Skip duplicate firings for the same conversation content (e.g. /clear
     # immediately followed by exit, or repeated end events).
     state_path = _session_end_hook_state_path(target)
@@ -2226,14 +2236,14 @@ def _hook_session_end(
         project_dir = _hook_project_dir(hook_event)
         if project_dir:
             project_name = _default_project(Path(project_dir))
-    # Only store a capture when the session produced memory-worthy candidates;
-    # otherwise every session would add review-inbox noise.
+    # Only store a capture when the user's turns produced memory-worthy
+    # candidates; otherwise every session would add review-inbox noise.
     wiki_dir = _resolve_wiki_dir(target)
     root = _resolve_link_root(target)
     proposal_limit = max(1, min(limit, 10))
     preview = _propose_memories_from_text(
         wiki_dir,
-        notes,
+        user_notes,
         source="agent-session-hook",
         limit=proposal_limit,
         project=project_name,
@@ -2269,6 +2279,7 @@ def _hook_session_end(
         title="Agent session notes" + (f" — {project_name}" if project_name else ""),
         limit=proposal_limit,
         project=project_name,
+        proposal_text=user_notes,
     )
     if code == 0:
         try:
