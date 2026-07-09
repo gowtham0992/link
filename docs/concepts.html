@@ -87,6 +87,7 @@ query Link for the release process</code></pre>
         <p>Raw files do not silently personalize future agents. Ingest creates source-backed wiki knowledge. Explicit <code>remember</code> creates durable user or project memory.</p>
 
         <h2 id="memory">Memory Lifecycle</h2>
+        <p>The lifecycle can run automatically: session hooks inject the memory brief at session start and store proposal-only notes at session end, and when the review backlog grows, briefs nudge the agent to offer a read-only <code>lnk consolidate</code> pass. Every write still requires explicit user approval — automation changes when memory is <em>proposed</em>, never who decides.</p>
         <p>A memory is a Markdown page with status, scope, visibility, source, review state, optional <code>review_after</code> and <code>expires_at</code> dates, graph links, and local log entries. It can be proposed, remembered, reviewed, updated, archived, restored, explained, or forgotten.</p>
         <div class="grid">
           <article class="feature"><h3>Propose</h3><p>Generate candidate memories from chat notes or raw captures without writing durable memory.</p></article>
@@ -97,6 +98,7 @@ query Link for the release process</code></pre>
         </div>
 
         <h2 id="query">Smart Query Packets</h2>
+        <p>Retrieval is lexical by default (token matching, stemming, SQLite FTS) and optionally <em>hybrid</em>: two local embedding tiers (a tiny static model for instant CLI use, a contextual model for the MCP server) add paraphrase recall while staying fully offline at query time. Semantic matches are labeled and confidence-capped so agents verify before trusting them; measured results live in <a href="https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md">benchmarks/RESULTS.md</a>.</p>
         <p><code>recall</code> is designed for agents. It returns a compact packet with a <code>recall_capsule</code>, relevant memory, ranked wiki pages, graph context, provenance, budget reports, estimated size, and follow-up actions.</p>
         <p>Budget tiers keep context predictable:</p>
         <ul>

@@ -29,6 +29,18 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Fixed a latent similarity bug: duplicate, conflict, and echo checks now compare memory core claims (title, TLDR, and the `## Memory` section) instead of full templated pages, whose boilerplate diluted token overlap and let real duplicates and contradictions slip past detection on real pages. Conflicts are evaluated before duplicates, and a record identified as a conflict is never also treated as a duplicate, so `allow_conflict` and supersession behave correctly.
 - Added conditional memory: scope situational memories with `applies_when` conditions (`project:<slug>`, `path:<glob>`, `task:<phrase>`; OR semantics, validated at write time) via `lnk remember --applies-when` and the MCP remember tools. Recall demotes out-of-context matches and labels every conditional memory with `applicability: matched|out_of_context` so agents never apply one project's conventions in another; startup briefs exclude out-of-context memories entirely. Session hooks evaluate `path:` conditions against the session's working directory. Research context: memory mis-scoping is a documented top failure mode of agent memory systems; Link's conditions are deterministic frontmatter, not classifier guesses.
 - Added a two-layer echo guard to automatic session capture, so Link can never re-ingest its own voice: transcript extraction drops any message carrying Link-injected output (the session-start brief, consolidation plans, session-end output), and proposals that merely restate an existing active memory — including framing-diluted restatements caught by core-claim token containment — are discarded before a capture is stored. A production audit of a competing memory system found 97.8% of stored entries were junk, over half of it the system's own prompt text re-ingested; Link's re-ingestion rate is zero by construction, with tests proving both layers.
+## [1.6.0] - 2026-07-09
+
+- Added an animated "aha" demo to the Getting Started page: a self-contained SVG (`docs/assets/link-aha.svg`, plain text, no external runtime, animates in any browser) showing the two moments Link is built for — recall that matches by meaning rather than keywords, and memory injected into a new agent session automatically. The README shows the matching recorded GIF (`docs/assets/link-aha.gif`), rendered from real `lnk` commands via a checked-in charmbracelet vhs tape (`docs/media/link-aha.tape`) so it is reproducible, not synthetic.
+
+- Fixed first-ten-minutes friction found by walking Link cold as a brand-new user:
+  - `lnk onboard` now surfaces the automatic-memory path: it explains `--hooks` and prints the ready-to-run `--agent <hook-capable> --hooks --write` command, and each hook-capable agent preview offers "Make memory automatic (recommended)". Previously the flagship 1.6 feature was invisible in the guided setup.
+  - A recall that finds nothing while memories exist now tells the user paraphrase matching (semantic recall) is off by default and how to turn it on, instead of a bare "No matching memories found". The README's paraphrase example is reframed as opt-in so it never reads like a broken default, and the landing hero calls hybrid recall optional.
+  - Generated commands in source-checkout mode use a friendly `python3 link.py` instead of the raw interpreter path (e.g. `python@3.14`); Homebrew users still see plain `lnk`.
+  - `lnk proof` now says its workspace is a throwaway demo and points to `lnk onboard` for real memory, with a plain "what this means for you" line.
+  - `scripts/prepare_release.py` reminds maintainers to bump the Homebrew tap so `brew install` never serves an older Link than the docs describe.
+
+- Completed 1.6 coverage across the second-tier docs and shipped skills: the official CLI skills now teach the hooks-installed rule, the consolidation pass, semantic match labels, and the `lnk semantic` status check; the memory contract documents the hooked loop and honest recall signals; concepts covers hybrid retrieval and the automatic lifecycle; troubleshooting gains "hooks not firing" and "semantic recall not working" sections; and the scale page links the measured benchmarks.
 
 ### Added
 
@@ -58,6 +70,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- `python -m link_mcp --help` now prints usage and the MCP config snippet instead of silently starting the stdio server (which hung in a terminal with no output). The parser still ignores unknown arguments so an agent launch config can never crash the server.
 - Automatic session-end capture now mines memory proposals from the user's own turns only, not the assistant's replies. Dogfooding showed the assistant's prose (e.g. a summary line like "you prefer small commits") was being extracted and proposed as the user's own preference. The raw capture still keeps the full transcript for review context; only the proposal candidates are restricted to what the user actually said (`extract_transcript_text(..., roles=("user",))`).
 
 ## [1.5.0] - 2026-07-03

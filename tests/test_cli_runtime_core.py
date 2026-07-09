@@ -240,7 +240,8 @@ class CliRuntimeCoreTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Cross-agent memory continuity works", text)
-        self.assertIn("Workspace: created local Markdown wiki", text)
+        self.assertIn("throwaway demo wiki", text)
+        self.assertIn("What this means for you", text)
         self.assertIn("Memory: created and reviewed", text)
         self.assertIn("same bounded recall path used by CLI, skills, and MCP", text)
         self.assertIn("Try it with two agents", text)

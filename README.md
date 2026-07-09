@@ -48,6 +48,11 @@ The wiki is the storage layer. The product is durable memory that stays on your
 machine, remains readable in plain files, and can be shared across multiple
 agents instead of locked inside one vendor profile.
 
+<p align="center">
+  <img src="docs/assets/link-aha.gif" alt="lnk recall finds a memory saved in completely different words — matched by meaning, not keywords" width="760">
+</p>
+<p align="center"><em>Ask in your own words; Link matches by meaning, not keywords. All local, all plain files.</em></p>
+
 ## How It Works
 
 Link gives agents four simple moves:
@@ -362,10 +367,12 @@ lnk consolidate ~/link                      # read-only backlog plan, apply only
 
 ### Optional: hybrid semantic recall (still fully local)
 
-Lexical recall is always the default and the fallback. Installing the optional
-semantic extra adds a small local static-embedding model so paraphrased
-queries also find memories phrased differently — "how should I structure my
-pull requests" finds a memory about commit style. Recall never touches the
+Lexical recall is always the default and the fallback. Paraphrase matching is
+opt-in: after the two setup commands below, "how should I structure my pull
+requests" finds a memory saved about commit style. Until then, recall matches
+on shared words, and a miss tells you how to turn paraphrase matching on.
+Installing the optional semantic extra adds a small local static-embedding
+model. Recall never touches the
 network: the model loads offline-only after a one-time explicit setup,
 embeddings live in plain JSON under `.link-cache/`, similarity runs in-process
 with no vector database, and semantic-only matches carry capped confidence

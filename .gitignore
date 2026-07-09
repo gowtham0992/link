@@ -79,5 +79,8 @@ id_ed25519
 # Local design references
 Link Console Handoff.html
 
-# Local editor/preview tooling config (not part of the project)
+# Local editor/agent tooling
 .claude/
+
+# vhs demo render workspace
+docs/media/.aha-demo/

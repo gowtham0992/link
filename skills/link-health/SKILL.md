@@ -32,3 +32,9 @@ Use the `lnk` CLI. Load this skill before trusting a new or changed Link wiki, a
    ```
 
 If the user asks whether MCP is ready, run `lnk verify-mcp [link-root]`. Do not start `lnk serve` for MCP or CLI work.
+
+To check whether optional local semantic recall is active (lexical is always the fallback):
+```bash
+lnk semantic [link-root]
+```
+It reports the provider tier, model, and index state, and prints the exact setup command when the layer is available but not yet enabled.

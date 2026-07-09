@@ -35,6 +35,22 @@ from pathlib import Path
 from link_core.version import LINK_VERSION
 
 # ── Resolve wiki directory ────────────────────────────────────────────
+# The parser keeps add_help=False and parse_known_args so an agent launch
+# config with unexpected args can never crash the server. Handle --help
+# explicitly first: without this, `python -m link_mcp --help` would start
+# the stdio server and hang silently waiting for MCP messages.
+if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+    print(__doc__.strip())
+    print(
+        "\nOptions:\n"
+        "  --wiki PATH        wiki directory (default: ~/link/wiki)\n"
+        "  --surface SURFACE  tool surface: slim (recommended) or full\n"
+        "  --version          print the link-mcp version and exit\n"
+        "  --semantic-setup   one-time semantic model fetch + index build\n"
+        "  -h, --help         show this help and exit"
+    )
+    sys.exit(0)
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--wiki", default=None)
 parser.add_argument("--surface", choices=("full", "slim"), default=None)
