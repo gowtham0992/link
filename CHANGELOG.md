@@ -45,6 +45,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- `python -m link_mcp --help` now prints usage and the MCP config snippet instead of silently starting the stdio server (which hung in a terminal with no output). The parser still ignores unknown arguments so an agent launch config can never crash the server.
 - Automatic session-end capture now mines memory proposals from the user's own turns only, not the assistant's replies. Dogfooding showed the assistant's prose (e.g. a summary line like "you prefer small commits") was being extracted and proposed as the user's own preference. The raw capture still keeps the full transcript for review context; only the proposal candidates are restricted to what the user actually said (`extract_transcript_text(..., roles=("user",))`).
 
 ## [1.5.0] - 2026-07-03
