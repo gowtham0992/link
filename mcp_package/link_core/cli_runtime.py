@@ -275,9 +275,15 @@ def render_proof_text(payload: Mapping[str, object]) -> tuple[int, str]:
         "Cross-agent memory continuity works" if ready else "Cross-agent memory proof needs attention",
         "",
         "What happened",
-        f"1. Workspace: {'created' if created else 'reused'} local Markdown wiki.",
+        f"1. Workspace: {'created' if created else 'reused'} a throwaway demo wiki (not your real memory).",
         f"2. Memory: {memory_status}: {title}",
         f"3. Recall: {recall_status} through the same bounded recall path used by CLI, skills, and MCP.",
+        "",
+        "What this means for you",
+        "- Save something once; any of your agents can recall it later, from plain local files.",
+        "- Ready for real use? Create your durable workspace and wire an agent:",
+        f"    {display_command(['lnk', 'onboard'])}",
+        "    (this proof workspace is a demo — your memory will live at ~/link)",
         "",
         "Try it with two agents",
         f"Agent A: {prompts.get('agent_a', 'remember that this project uses Link')}",
@@ -402,6 +408,8 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
                     if action.get("label") == "write config":
                         lines.append(f"  Write when ready: {action.get('command_text')}")
                         break
+                if connection.get("hooks_command"):
+                    lines.append(f"  Make memory automatic (recommended): {connection.get('hooks_command')}")
                 if restart_hint:
                     lines.append(f"  After writing: {restart_hint}")
             elif state == "updated":
@@ -417,6 +425,9 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
             lines.append("- not connected yet. Preview an agent config with:")
             for command in payload.get("agent_examples", []):
                 lines.append(f"  {command}")
+    hooks_hint = str(payload.get("hooks_hint") or "").strip()
+    if hooks_hint:
+        lines.extend(["", *hooks_hint.splitlines()])
 
     prompts = _first_mapping_items(payload.get("prompts"), 4)
     lines.extend(["", "Ask your agent"])

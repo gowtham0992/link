@@ -6,6 +6,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+- Fixed first-ten-minutes friction found by walking Link cold as a brand-new user:
+  - `lnk onboard` now surfaces the automatic-memory path: it explains `--hooks` and prints the ready-to-run `--agent <hook-capable> --hooks --write` command, and each hook-capable agent preview offers "Make memory automatic (recommended)". Previously the flagship 1.6 feature was invisible in the guided setup.
+  - A recall that finds nothing while memories exist now tells the user paraphrase matching (semantic recall) is off by default and how to turn it on, instead of a bare "No matching memories found". The README's paraphrase example is reframed as opt-in so it never reads like a broken default, and the landing hero calls hybrid recall optional.
+  - Generated commands in source-checkout mode use a friendly `python3 link.py` instead of the raw interpreter path (e.g. `python@3.14`); Homebrew users still see plain `lnk`.
+  - `lnk proof` now says its workspace is a throwaway demo and points to `lnk onboard` for real memory, with a plain "what this means for you" line.
+  - `scripts/prepare_release.py` reminds maintainers to bump the Homebrew tap so `brew install` never serves an older Link than the docs describe.
+
 - Completed 1.6 coverage across the second-tier docs and shipped skills: the official CLI skills now teach the hooks-installed rule, the consolidation pass, semantic match labels, and the `lnk semantic` status check; the memory contract documents the hooked loop and honest recall signals; concepts covers hybrid retrieval and the automatic lifecycle; troubleshooting gains "hooks not firing" and "semantic recall not working" sections; and the scale page links the measured benchmarks.
 
 ### Added

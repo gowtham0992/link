@@ -3030,5 +3030,64 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertIn(str(target / "link.py"), session_hooks["events"]["SessionStart"])
 
 
+class NewUserFrictionTests(unittest.TestCase):
+    def test_recall_miss_hints_at_semantic_when_memories_exist(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-miss-hint-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+            link_cli.remember(target, "I prefer short PR descriptions with a one-line summary first",
+                              memory_type="preference")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.recall(target, "how do I like my pull requests written")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("No matching memories found", text)
+        # The whole point: a paraphrase miss must point the user at semantic.
+        self.assertIn("semantic recall", text.lower())
+        self.assertIn("--setup", text)
+
+    def test_recall_miss_on_empty_wiki_gives_no_semantic_hint(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-miss-empty-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.recall(target, "anything at all")
+
+        self.assertEqual(code, 0)
+        # No memories yet: don't nag about semantic, just say add one.
+        self.assertNotIn("semantic recall", out.getvalue().lower())
+
+    def test_onboard_surfaces_the_hooks_path(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-hooks-"))
+        target = tmp / "link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(target)
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("Make memory automatic", text)
+        self.assertIn("--hooks", text)
+
+    def test_onboard_agent_preview_offers_hooks(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-agent-hooks-"))
+        target = tmp / "link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(target, agents=["claude-code"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("Make memory automatic (recommended)", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

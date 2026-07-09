@@ -362,10 +362,12 @@ lnk consolidate ~/link                      # read-only backlog plan, apply only
 
 ### Optional: hybrid semantic recall (still fully local)
 
-Lexical recall is always the default and the fallback. Installing the optional
-semantic extra adds a small local static-embedding model so paraphrased
-queries also find memories phrased differently — "how should I structure my
-pull requests" finds a memory about commit style. Recall never touches the
+Lexical recall is always the default and the fallback. Paraphrase matching is
+opt-in: after the two setup commands below, "how should I structure my pull
+requests" finds a memory saved about commit style. Until then, recall matches
+on shared words, and a miss tells you how to turn paraphrase matching on.
+Installing the optional semantic extra adds a small local static-embedding
+model. Recall never touches the
 network: the model loads offline-only after a one-time explicit setup,
 embeddings live in plain JSON under `.link-cache/`, similarity runs in-process
 with no vector database, and semantic-only matches carry capped confidence

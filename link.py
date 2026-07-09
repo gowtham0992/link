@@ -1614,12 +1614,32 @@ def recall(
         }, indent=2))
         return 0
 
+    miss_hint = ""
+    if not results:
+        records = _memory_records(wiki_dir)
+        if records:
+            if _core_semantic_provider() is None:
+                miss_hint = (
+                    "These memories exist but your words did not match any. Paraphrase matching "
+                    "(semantic recall) is off by default. Turn it on to find memories phrased "
+                    "differently:\n"
+                    "  pip install \"link-mcp[semantic]\"\n"
+                    f"  {_display_command(['link', 'semantic', str(target), '--setup'])}"
+                )
+            elif _core_load_semantic_embedder() is None:
+                miss_hint = (
+                    "These memories exist but your words did not match any. Finish enabling "
+                    "paraphrase matching (semantic recall):\n"
+                    f"  {_display_command(['link', 'semantic', str(target), '--setup'])}"
+                )
+
     code, text = _core_render_recall_text(
         query=query,
         results=results,
         include_archived=include_archived,
         project=project_name,
         target=target,
+        miss_hint=miss_hint,
     )
     _print_text(text)
     return code
@@ -2265,7 +2285,10 @@ def _configure_link_command_display() -> None:
     if os.environ.get("LINK_CLI_COMMAND"):
         _core_set_link_command_override(None)
     else:
-        _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
+        # Source-checkout runs: show a friendly `python3 link.py` in generated
+        # commands, not the raw interpreter path (e.g. python@3.14). The
+        # absolute link.py path stays for paste-safety from any directory.
+        _core_set_link_command_override(["python3", str(ROOT / "link.py")])
 
 
 def verify_mcp(
@@ -2517,6 +2540,19 @@ def onboard(
                 "next_actions": [],
             })
 
+    # Surface the automatic-memory (hooks) path: without this, users who follow
+    # the guided onboarding never discover the flagship 1.6 feature.
+    for connection in connections:
+        agent_name = str(connection.get("agent") or "")
+        if agent_name and _core_supports_agent_hooks(agent_name) and "session_hooks" not in connection:
+            connection["hooks_command"] = _display_command(
+                ["link", "onboard", str(target), "--agent", agent_name, "--hooks", "--write"]
+            )
+    hooks_agents = [
+        agent for agent in _onboard_agent_names(agents, all_agents)
+        if _core_supports_agent_hooks(agent)
+    ]
+
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
     starter_payload = _core_starter_prompt_payload(target, project=project)
     prompts = starter_payload.get("prompts", [])
@@ -2553,6 +2589,12 @@ def onboard(
             _display_command(["link", "onboard", str(target), "--agent", agent])
             for agent in ("codex", "claude-code", "cursor")
         ],
+        "hooks_hint": (
+            "Make memory automatic — add --hooks (Claude Code, Codex, Cursor): the memory brief "
+            "is injected at session start and proposals are captured at session end, so no agent "
+            "has to remember to call Link. Example:\n"
+            f"  {_display_command(['link', 'onboard', str(target), '--agent', 'claude-code', '--hooks', '--write'])}"
+        ) if hooks_agents or not connections else "",
         "url": f"http://127.0.0.1:{port}",
     }
 
