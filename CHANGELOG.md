@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+- Added an animated "aha" demo to the Getting Started page: a self-contained SVG (`docs/assets/link-aha.svg`, plain text, no external runtime, animates in any browser) showing the two moments Link is built for — recall that matches by meaning rather than keywords, and memory injected into a new agent session automatically. Ships a charmbracelet vhs tape (`docs/media/link-aha.tape`) that renders the matching README GIF from real `lnk` commands.
+
 - Fixed first-ten-minutes friction found by walking Link cold as a brand-new user:
   - `lnk onboard` now surfaces the automatic-memory path: it explains `--hooks` and prints the ready-to-run `--agent <hook-capable> --hooks --write` command, and each hook-capable agent preview offers "Make memory automatic (recommended)". Previously the flagship 1.6 feature was invisible in the guided setup.
   - A recall that finds nothing while memories exist now tells the user paraphrase matching (semantic recall) is off by default and how to turn it on, instead of a bare "No matching memories found". The README's paraphrase example is reframed as opt-in so it never reads like a broken default, and the landing hero calls hybrid recall optional.

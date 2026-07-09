@@ -27,6 +27,7 @@ REQUIRED_ASSETS = {
     "link-cli.png",
     "link-mcp.png",
     "link-memory-flow.svg",
+    "link-aha.svg",
     "link-ui-tour.gif",
     "link-cli-tour.gif",
     "link-mcp-agent-chat.gif",

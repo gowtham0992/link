@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img"
+     aria-label="Link demo: recall finds a memory phrased in different words, and a new agent session is greeted with memory automatically.">
+  <style>
+    .win { fill:#221c12; stroke:#3b342a; }
+    text { font-family:'SF Mono','Menlo','Consolas',ui-monospace,monospace; font-size:15px; opacity:0; }
+    .cmd { font-weight:500; }
+    .caret { fill:#e0955f; animation:blink 1000ms steps(1) infinite; }
+    @keyframes blink { 0%,50%{opacity:1} 50.01%,100%{opacity:0} }
+    @keyframes a_l1 {
+  0%,3.564% { opacity:0; clip-path:inset(0 100% 0 0); }
+  3.571% { opacity:1; clip-path:inset(0 100% 0 0); }
+  10.0% { opacity:1; clip-path:inset(0 0 0 0); }
+  43.571% { opacity:1; clip-path:inset(0 0 0 0); }
+  46.286%,100% { opacity:0; clip-path:inset(0 0 0 0); }
+}
+@keyframes a_l2 {
+  0%,11.421% { opacity:0; }
+  13.714% { opacity:1; }
+  43.571% { opacity:1; }
+  46.286%,100% { opacity:0; }
+}
+@keyframes a_l3 {
+  0%,17.85% { opacity:0; clip-path:inset(0 100% 0 0); }
+  17.857% { opacity:1; clip-path:inset(0 100% 0 0); }
+  25.0% { opacity:1; clip-path:inset(0 0 0 0); }
+  43.571% { opacity:1; clip-path:inset(0 0 0 0); }
+  46.286%,100% { opacity:0; clip-path:inset(0 0 0 0); }
+}
+@keyframes a_l4 {
+  0%,27.136% { opacity:0; }
+  29.429% { opacity:1; }
+  43.571% { opacity:1; }
+  46.286%,100% { opacity:0; }
+}
+@keyframes a_l5 {
+  0%,31.421% { opacity:0; }
+  33.714% { opacity:1; }
+  43.571% { opacity:1; }
+  46.286%,100% { opacity:0; }
+}
+@keyframes a_s1 {
+  0%,49.993% { opacity:0; }
+  52.286% { opacity:1; }
+  94.286% { opacity:1; }
+  97.0%,100% { opacity:0; }
+}
+@keyframes a_s2 {
+  0%,56.421% { opacity:0; }
+  58.714% { opacity:1; }
+  94.286% { opacity:1; }
+  97.0%,100% { opacity:0; }
+}
+@keyframes a_s3 {
+  0%,62.136% { opacity:0; }
+  64.429% { opacity:1; }
+  94.286% { opacity:1; }
+  97.0%,100% { opacity:0; }
+}
+@keyframes a_s4 {
+  0%,67.136% { opacity:0; }
+  69.429% { opacity:1; }
+  94.286% { opacity:1; }
+  97.0%,100% { opacity:0; }
+}
+@keyframes a_s5 {
+  0%,75.707% { opacity:0; }
+  78.0% { opacity:1; }
+  94.286% { opacity:1; }
+  97.0%,100% { opacity:0; }
+}
+  </style>
+  <rect class="win" x="1" y="1" width="718" height="298" rx="12"/>
+  <rect x="1" y="1" width="718" height="34" rx="12" fill="#1a150d"/>
+  <circle cx="24" cy="18" r="5" fill="#e06c60"/>
+  <circle cx="44" cy="18" r="5" fill="#e0b34f"/>
+  <circle cx="64" cy="18" r="5" fill="#7fae8f"/>
+  <text x="360" y="23" text-anchor="middle" fill="#8a8174" style="font-size:12px;opacity:1;letter-spacing:.08em;">lnk · local agent memory</text>
+    <text x="30" y="78" class="cmd" fill="#f3ece0" style="animation:a_l1 14000ms infinite;">$ lnk remember "feat/short-topic branch names"</text>
+  <text x="30" y="106" class="out" fill="#86c79a" style="animation:a_l2 14000ms infinite;">✓ saved to local memory</text>
+  <text x="30" y="150" class="cmd" fill="#f3ece0" style="animation:a_l3 14000ms infinite;">$ lnk recall "how should I name my git branches"</text>
+  <text x="30" y="178" class="out" fill="#86c79a" style="animation:a_l4 14000ms infinite;">✓ feat/short-topic branch names</text>
+  <text x="52" y="204" class="note" fill="#e0955f" style="animation:a_l5 14000ms infinite;">→ matched by meaning, not keywords</text>
+  <text x="30" y="96" class="dim" fill="#8a8174" style="animation:a_s1 14000ms infinite;">— you open a new agent session —</text>
+  <text x="30" y="140" class="out" fill="#e0955f" style="animation:a_s2 14000ms infinite;">Link memory · injected automatically</text>
+  <text x="30" y="168" class="out" fill="#f3ece0" style="animation:a_s3 14000ms infinite;">• prefers feat/short-topic branch names</text>
+  <text x="30" y="196" class="out" fill="#f3ece0" style="animation:a_s4 14000ms infinite;">• keep PR descriptions short</text>
+  <text x="52" y="240" class="note" fill="#e0955f" style="animation:a_s5 14000ms infinite;">no one asked. it just remembered.</text>
+  <rect class="caret" x="30" y="270" width="9" height="16"/>
+</svg>
