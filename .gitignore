@@ -81,3 +81,6 @@ Link Console Handoff.html
 
 # Local editor/agent tooling
 .claude/
+
+# vhs demo render workspace
+docs/media/.aha-demo/

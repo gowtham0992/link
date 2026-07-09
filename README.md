@@ -48,6 +48,11 @@ The wiki is the storage layer. The product is durable memory that stays on your
 machine, remains readable in plain files, and can be shared across multiple
 agents instead of locked inside one vendor profile.
 
+<p align="center">
+  <img src="docs/assets/link-aha.gif" alt="lnk recall finds a memory saved in completely different words — matched by meaning, not keywords" width="760">
+</p>
+<p align="center"><em>Ask in your own words; Link matches by meaning, not keywords. All local, all plain files.</em></p>
+
 ## How It Works
 
 Link gives agents four simple moves:
