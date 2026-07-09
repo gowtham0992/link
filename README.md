@@ -48,6 +48,11 @@ The wiki is the storage layer. The product is durable memory that stays on your
 machine, remains readable in plain files, and can be shared across multiple
 agents instead of locked inside one vendor profile.
 
+<p align="center">
+  <img src="docs/assets/link-aha.gif" alt="lnk recall finds a memory saved in completely different words — matched by meaning, not keywords" width="760">
+</p>
+<p align="center"><em>Ask in your own words; Link matches by meaning, not keywords. All local, all plain files.</em></p>
+
 ## How It Works
 
 Link gives agents four simple moves:
@@ -72,6 +77,29 @@ Link follows Andrej Karpathy's
 [LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
 keep knowledge outside the chat window, make claims inspectable, and let context
 compound over time.
+
+## Why Link Is Different
+
+Every other agent-memory system stores memory as embeddings in a vector
+database or as an LLM-extracted graph. Link made four architectural
+commitments those designs cannot bolt on:
+
+1. **Memory you can read.** Every memory is a plain Markdown file — open it,
+   grep it, git-diff it. If Link disappeared tomorrow, your memory is still yours.
+2. **Review-gated writes.** Agents propose; you approve. Even the automatic
+   session hooks capture proposals, never facts.
+3. **No LLM in the memory layer.** Ingestion and recall are deterministic —
+   nothing can hallucinate a fact into your memory, because there is no model
+   in the write path.
+4. **Provably local.** CI blocks outbound network code in the runtime, and the
+   optional semantic models load offline-only after one explicit setup.
+
+And the claims are measured, not asserted: a reproducible 1,176-case recall
+benchmark plus a third-party LoCoMo retrieval track, with published miss rates
+and a CI gate against regressions —
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md). Named comparisons against
+Mem0/OpenMemory, Zep/Graphiti, and Letta:
+[Why Link?](https://gowtham0992.github.io/link/why-link.html)
 
 ## Quick Start
 
@@ -320,6 +348,53 @@ lnk connect kiro ~/link --write
 lnk verify-mcp ~/link
 ```
 
+For agents with session-hook support — Claude Code, Codex, and Cursor — add
+`--hooks` (works with `lnk onboard` too) to make the memory loop automatic:
+the brief is injected at session start and proposal-only notes are captured at
+session end, so memory no longer depends on the agent remembering to call
+Link. Empty sessions and duplicate end events are skipped, and when the
+backlog builds up the brief nudges the agent to offer a read-only
+`lnk consolidate` pass. Durable memory still requires your approval. Codex and
+Cursor hook support is new (wired to their documented schemas — report
+issues).
+
+```bash
+lnk connect claude-code ~/link --hooks --write
+lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no session-end event)
+lnk connect cursor ~/link --hooks --write
+lnk consolidate ~/link                      # read-only backlog plan, apply only with approval
+```
+
+### Optional: hybrid semantic recall (still fully local)
+
+Lexical recall is always the default and the fallback. Paraphrase matching is
+opt-in: after the two setup commands below, "how should I structure my pull
+requests" finds a memory saved about commit style. Until then, recall matches
+on shared words, and a miss tells you how to turn paraphrase matching on.
+Installing the optional semantic extra adds a small local static-embedding
+model. Recall never touches the
+network: the model loads offline-only after a one-time explicit setup,
+embeddings live in plain JSON under `.link-cache/`, similarity runs in-process
+with no vector database, and semantic-only matches carry capped confidence
+labels so agents verify before trusting them.
+
+```bash
+pip install "link-mcp[semantic]"          # fast tier: tiny static model, instant load
+pip install "link-mcp[semantic-quality]"  # quality tier: contextual model, best recall
+lnk semantic ~/link --setup   # one-time model fetch, with your approval
+lnk semantic ~/link           # status: lexical only vs hybrid, active tier
+python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs
+```
+
+Measured, not asserted: on the bundled 1,176-case benchmark, the quality
+tier lifts token-overlap hit@1 from 0.589 to 0.749 and pure-paraphrase
+(zero token overlap) hit@3/hit@5 by ~4×, at ~10 ms per recall with no
+service or vector database. On the third-party LoCoMo retrieval track
+(1,536 evidence-annotated questions over 5,882 conversation turns), hybrid
+recall lifts any-evidence hit@10 from 0.578 to 0.685. Full methodology,
+honest limitations, and reproduction steps:
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+
 <details>
 <summary>MCP-only install</summary>
 
@@ -400,15 +475,18 @@ model-facing tools. CLI and skill workflows call the same core behavior through
   next actions.
 - `recall`: the one read path for startup briefs, answer-ready query packets,
   wiki search, graph context, token budgets, and follow-up actions. Every
-  recalled memory carries a `confidence` label (`strong`, `moderate`, `weak`),
-  so agents verify weak lexical matches with the user instead of trusting them.
+  recalled memory carries a `confidence` label (`strong`, `moderate`, `weak`)
+  and a `match` field (`lexical`, `semantic`, `hybrid` when the optional local
+  semantic tier is installed), so agents verify weak or paraphrase matches with
+  the user instead of trusting them.
 - `remember`: durable local memory only after explicit user approval, with
   duplicate/conflict checks, provenance, review state, visibility, optional
   `review_after`, and optional `expires_at`.
 - `ingest`: exact next steps for raw files, source safety, stale ingest
   detection, validation, and rebuild checks.
 - `review`: memory inbox, profile, audit, log, explain, archive, restore,
-  forget, and lifecycle review workflows.
+  forget, and lifecycle review workflows — plus `review(action="consolidate")`,
+  a read-only backlog plan applied only with per-action user approval.
 - `admin`: the escape hatch for backup, migrate, validate, graph export, pages,
   captures, rebuilds, compatibility actions, and advanced updates.
 
@@ -508,6 +586,11 @@ Link itself is local-first:
   checks. `lnk validate` and `lnk doctor` also fail if secret-looking values
   are found inside wiki pages before they can be served through the local UI or
   returned through agent context.
+- Optional semantic recall stays local: models load offline-only at recall
+  time (only the explicit `lnk semantic --setup` may fetch a model, once), and
+  embeddings live in plain JSON under `.link-cache/`.
+- Automatic session hooks store proposal-only notes; transcript extraction
+  skips tool calls and outputs, and no durable memory is written without review.
 - The local web server binds to `127.0.0.1` and is not meant to be exposed to
   the internet without additional auth.
 

@@ -112,7 +112,8 @@ New MCP configs should expose Link through six model-facing tools:
 3. `remember(text, ...)` writes only explicit user-approved durable memories.
 4. `ingest(action?, strict?)` checks or validates raw-source ingest work.
 5. `review(action?, ...)` handles memory inbox, profile, audit, log, explain,
-   archive, restore, forget, and visibility review workflows.
+   archive, restore, forget, visibility, and read-only `consolidate` (backlog
+   plan) review workflows.
 6. `admin(action, arguments?)` is the escape hatch for backup, migrate,
    validate, graph export, pages, captures, rebuilds, and advanced updates.
 
@@ -139,7 +140,8 @@ Slim agents should call:
 6. `remember(...)` only when the user explicitly approves saving durable memory.
 7. `admin(action="session_end", arguments="{...}")` at session end to propose memory without silently saving it.
 8. `review(action="inbox"|"audit"|"profile"|"explain"|...)` for memory lifecycle review.
-9. `admin(action, arguments)` for backup, migrate, validate, graph export, captures, rebuilds, and compatibility actions.
+9. `review(action="consolidate")` when a brief reports a memory backlog: it returns a read-only plan; apply its actions only after the user approves each one.
+10. `admin(action, arguments)` for backup, migrate, validate, graph export, captures, rebuilds, and compatibility actions.
 
 Add `review_after` for memories that should return to the review inbox after a
 date, or `expires_at` for temporary context that should leave default recall
@@ -151,6 +153,33 @@ For local CLI setup checks, `link verify-mcp --json` returns structured
 terminal text.
 In the local web proposal picker, unreadable raw files are surfaced as
 `Fix access` instead of being loaded as empty proposal text.
+
+## Automatic Session Hooks
+
+Agents with session-hook support (Claude Code, Codex, Cursor) can run the
+memory loop automatically: `lnk connect <agent> --hooks --write` (from a Link
+checkout or installer) installs hooks that inject a bounded memory brief into
+every new session and store proposal-only session notes at session end.
+Sessions with nothing memory-worthy are skipped, duplicate end events are
+deduplicated, and durable memory still requires explicit review. If hooks are
+installed, agents should skip the manual startup brief call.
+
+## Optional Semantic Recall (still fully local)
+
+Lexical recall is the default and the fallback. Two optional local tiers add
+paraphrase recall:
+
+```bash
+pip install "link-mcp[semantic]"          # fast tier: tiny static model
+pip install "link-mcp[semantic-quality]"  # quality tier: contextual ONNX model
+python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # explicit one-time model fetch
+```
+
+The models load offline-only at recall time (a query can never trigger a
+download), embeddings live in plain JSON under `.link-cache/`, and there is no
+vector database or service. Semantic-only matches are labeled
+(`match: semantic`, capped confidence) so agents verify before trusting them.
+Measured results: <https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md>.
 
 ## Privacy and Scale
 

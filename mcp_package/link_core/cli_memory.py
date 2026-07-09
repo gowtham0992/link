@@ -207,6 +207,7 @@ def render_recall_text(
     include_archived: bool = False,
     project: str | None = None,
     target: object = ".",
+    miss_hint: str = "",
 ) -> tuple[int, str]:
     lines = [f"Link memory recall: {query}"]
     if project:
@@ -215,8 +216,10 @@ def render_recall_text(
         lines.append("Including archived/stale memories")
     lines.append("")
     if not results:
+        lines.append("No matching memories found.")
+        if miss_hint:
+            lines.extend(["", miss_hint])
         lines.extend([
-            "No matching memories found.",
             "",
             "Next:",
             f"  Add one: {_shell_words('python3', 'link.py', 'remember', 'Memory to keep', target)}",

@@ -56,6 +56,11 @@ def build_cli_parser(
     onboard_cmd.add_argument("--agent", action="append", default=[], help="agent config to preview or write; repeatable")
     onboard_cmd.add_argument("--all-agents", action="store_true", help="preview or write all supported agent configs")
     onboard_cmd.add_argument("--write", action="store_true", help="update selected agent config files")
+    onboard_cmd.add_argument(
+        "--hooks",
+        action="store_true",
+        help="also configure session hooks for selected agents that support them (Claude Code, Codex, Cursor)",
+    )
     onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
     onboard_cmd.add_argument(
         "--seed-project",
@@ -304,6 +309,30 @@ def build_cli_parser(
     start_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
 
+    hook_cmd = sub.add_parser("hook", help="run an agent session hook (invoked by installed agent hooks)")
+    hook_cmd.add_argument("event", choices=["session-start", "session-end"], help="agent session lifecycle event")
+    hook_cmd.add_argument("target", nargs="?", default=".")
+    hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
+    hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
+    hook_cmd.add_argument(
+        "--emit",
+        choices=["text", "cursor"],
+        default="text",
+        help="session-start output envelope: plain text (Claude Code, Codex) or Cursor additional_context JSON",
+    )
+
+    semantic_cmd = sub.add_parser("semantic", help="show or set up optional local semantic recall")
+    semantic_cmd.add_argument("target", nargs="?", default=".")
+    semantic_cmd.add_argument("--setup", action="store_true", help="fetch the local embedding model once and build the index")
+    semantic_cmd.add_argument("--rebuild", action="store_true", help="rebuild the semantic index offline")
+    semantic_cmd.add_argument("--json", action="store_true", help="print machine-readable semantic status")
+
+    consolidate_cmd = sub.add_parser("consolidate", help="print a read-only plan for the capture and review backlog")
+    consolidate_cmd.add_argument("target", nargs="?", default=".")
+    consolidate_cmd.add_argument("--limit", type=int, default=50, help="maximum captures and review items to include")
+    consolidate_cmd.add_argument("--project", default=None, help="restrict the plan to one project's captures and memories")
+    consolidate_cmd.add_argument("--json", action="store_true", help="print machine-readable consolidation plan")
+
     profile_cmd = sub.add_parser("profile", help="show what Link remembers")
     profile_cmd.add_argument("target", nargs="?", default=".")
     profile_cmd.add_argument("--limit", type=int, default=10)
@@ -380,6 +409,11 @@ def build_cli_parser(
     connect_cmd.add_argument("--write", action="store_true", help="update the detected agent config file")
     connect_cmd.add_argument("--config", default=None, help="override the agent config file path")
     connect_cmd.add_argument("--python", default=None, help="Python executable for the MCP server")
+    connect_cmd.add_argument(
+        "--hooks",
+        action="store_true",
+        help="also configure session hooks so new sessions start with the Link brief (Claude Code)",
+    )
     connect_cmd.add_argument("--json", action="store_true", help="print machine-readable connection plan")
 
     return parser
@@ -418,6 +452,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             agents=args.agent,
             all_agents=args.all_agents,
             write=args.write,
+            hooks=args.hooks,
             first_memory=args.first_memory,
             seed_project=args.seed_project,
             project=args.project,
@@ -655,6 +690,18 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             project=args.project,
             json_output=args.json,
         )
+    if command == "hook":
+        return handlers["hook"](
+            Path(args.target),
+            args.event,
+            limit=args.limit,
+            project=args.project,
+            emit=args.emit,
+        )
+    if command == "consolidate":
+        return handlers["consolidate"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
+    if command == "semantic":
+        return handlers["semantic"](Path(args.target), setup=args.setup, rebuild=args.rebuild, json_output=args.json)
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":
@@ -699,6 +746,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             write=args.write,
             config_path=args.config,
             python_cmd=args.python,
+            hooks=args.hooks,
             json_output=args.json,
         )
     raise ValueError(f"unknown command: {command}")

@@ -52,6 +52,7 @@ Usage:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -255,11 +256,30 @@ from link_core.mcp_verify import (
     check_link_mcp_import as _core_check_link_mcp_import,
     display_command as _core_display_command,
     render_mcp_verify_text as _core_render_mcp_verify_text,
+    resolve_mcp_python as _core_resolve_mcp_python,
     set_link_command_override as _core_set_link_command_override,
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
     supported_agents as _core_supported_agents,
+)
+from link_core.agent_hooks import (
+    build_agent_hooks_payload as _core_build_agent_hooks_payload,
+    extract_transcript_text as _core_extract_transcript_text,
+    hook_supported_agents as _core_hook_supported_agents,
+    supports_agent_hooks as _core_supports_agent_hooks,
+)
+from link_core.consolidate import (
+    build_consolidation_plan as _core_build_consolidation_plan,
+    render_consolidate_text as _core_render_consolidate_text,
+)
+from link_core.semantic import (
+    build_semantic_status as _core_build_semantic_status,
+    load_embedder as _core_load_semantic_embedder,
+    refresh_memory_index as _core_refresh_semantic_index,
+    render_semantic_status_text as _core_render_semantic_status_text,
+    semantic_memory_scores as _core_semantic_memory_scores,
+    semantic_provider as _core_semantic_provider,
 )
 from link_core.obsidian import (
     import_obsidian_vault as _core_import_obsidian_vault,
@@ -289,9 +309,11 @@ from link_core.cli_query import (
     render_query_text as _core_render_query_text,
 )
 from link_core.cli_runtime import (
+    render_agent_hooks_text as _core_render_agent_hooks_text,
     render_demo_text as _core_render_demo_text,
     render_init_text as _core_render_init_text,
     render_mcp_connect_text as _core_render_mcp_connect_text,
+    render_session_start_hook_text as _core_render_session_start_hook_text,
     render_onboard_text as _core_render_onboard_text,
     render_proof_text as _core_render_proof_text,
     render_start_text as _core_render_start_text,
@@ -339,6 +361,18 @@ def _wiki_pages(wiki_dir: Path) -> list[Path]:
         md for md in wiki_dir.rglob("*.md")
         if not md.name.startswith(".")
     )
+
+
+def _missing_wiki_error(wiki_dir: Path) -> int:
+    """Explain a missing wiki with a next step instead of a dead end."""
+    print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
+    print(
+        "Point Link at your workspace (for example: "
+        f"{_display_command(['lnk', 'status', str(Path.home() / 'link')])}) "
+        f"or create one here with {_display_command(['lnk', 'init', '.'])}.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _resolve_wiki_dir(target: Path) -> Path:
@@ -440,13 +474,15 @@ def _memory_profile(wiki_dir: Path, limit: int = 10, project: str | None = None)
 
 
 def _memory_brief(wiki_dir: Path, query: str = "", limit: int = 6, project: str | None = None) -> dict[str, object]:
+    records = _memory_records(wiki_dir)
     return _core_memory_brief(
-        _memory_records(wiki_dir),
+        records,
         query=query,
         limit=limit,
         review_command="review-memory",
         project=project,
         command_target=wiki_dir.parent,
+        semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
     )
 
 
@@ -473,12 +509,14 @@ def _recall_memories(
     include_archived: bool = False,
     project: str | None = None,
 ) -> list[dict[str, object]]:
+    records = _memory_records(wiki_dir)
     return _core_recall_memories(
-        _memory_records(wiki_dir),
+        records,
         query,
         limit=limit,
         include_archived=include_archived,
         project=project,
+        semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
     )
 
 
@@ -933,8 +971,7 @@ def team_sync(target: Path, remote: str | None = None, json_output: bool = False
 def share(target: Path, identifier: str, port: int = 3000, host: str = "127.0.0.1", json_output: bool = False) -> int:
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_share_page_payload(wiki_dir, identifier, host=host, port=port)
     return _emit_json_or_text(payload, json_output, _core_render_share_text, json_code=0 if payload.get("found") else 1)
 
@@ -1007,8 +1044,7 @@ def import_obsidian(
 def rebuild_backlinks(target: Path) -> int:
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         backlinks = _build_backlinks(wiki_dir)
     except OSError as exc:
@@ -1030,8 +1066,7 @@ def rebuild_backlinks(target: Path) -> int:
 def rebuild_index(target: Path) -> int:
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         result = _core_rebuild_index(wiki_dir)
     except OSError as exc:
@@ -1116,8 +1151,7 @@ def propose_memories(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     text, source = _read_proposal_input(target, source_input)
     if not text.strip():
         print("Memory proposal input is required", file=sys.stderr)
@@ -1152,8 +1186,7 @@ def capture_session(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
 
     text, source = _read_proposal_input(root, source_input)
     if not text.strip():
@@ -1215,14 +1248,14 @@ def session_end(
     title: str | None = None,
     limit: int = 3,
     project: str | None = None,
+    proposal_text: str | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
 
     text, source = _read_proposal_input(root, source_input)
     if not text.strip():
@@ -1240,9 +1273,12 @@ def session_end(
         path_source=True,
     )
     rel_path = str(capture_record["path"])
+    # The raw capture keeps the full session for review context, but memory
+    # proposals are mined from proposal_text when given (the user's turns only)
+    # so the assistant's prose is never proposed as the user's preference.
     result = _propose_memories_from_text(
         wiki_dir,
-        text,
+        proposal_text if proposal_text is not None else text,
         source=rel_path,
         limit=max(1, min(limit, 10)),
         project=project_name,
@@ -1298,8 +1334,7 @@ def capture_inbox(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_capture_inbox(
         root,
         limit=limit,
@@ -1346,8 +1381,7 @@ def accept_capture(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         selection = _core_capture_proposal_selection(
             root,
@@ -1431,8 +1465,7 @@ def redact_capture(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         payload = _core_redact_capture_file(
             root,
@@ -1473,8 +1506,7 @@ def delete_capture(
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         payload = _core_delete_capture_file(root, capture, confirm=confirm)
     except ValueError:
@@ -1566,8 +1598,7 @@ def recall(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
     results = _recall_memories(
         wiki_dir,
@@ -1587,12 +1618,32 @@ def recall(
         }, indent=2))
         return 0
 
+    miss_hint = ""
+    if not results:
+        records = _memory_records(wiki_dir)
+        if records:
+            if _core_semantic_provider() is None:
+                miss_hint = (
+                    "These memories exist but your words did not match any. Paraphrase matching "
+                    "(semantic recall) is off by default. Turn it on to find memories phrased "
+                    "differently:\n"
+                    "  pip install \"link-mcp[semantic]\"\n"
+                    f"  {_display_command(['link', 'semantic', str(target), '--setup'])}"
+                )
+            elif _core_load_semantic_embedder() is None:
+                miss_hint = (
+                    "These memories exist but your words did not match any. Finish enabling "
+                    "paraphrase matching (semantic recall):\n"
+                    f"  {_display_command(['link', 'semantic', str(target), '--setup'])}"
+                )
+
     code, text = _core_render_recall_text(
         query=query,
         results=results,
         include_archived=include_archived,
         project=project_name,
         target=target,
+        miss_hint=miss_hint,
     )
     _print_text(text)
     return code
@@ -1630,8 +1681,7 @@ def forget_memory(target: Path, identifier: str, confirm: bool = False, json_out
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
 
     def rebuild_memory_backlinks() -> bool:
         backlinks = _build_backlinks(wiki_dir)
@@ -1675,8 +1725,7 @@ def memory_inbox(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     inbox = _memory_inbox(wiki_dir, limit=limit, include_archived=include_archived, project=project)
 
     return _emit_json_or_text(
@@ -1694,8 +1743,7 @@ def memory_log(target: Path, limit: int = 50, include_captures: bool = True, jso
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_memory_log_payload(wiki_dir, limit=limit, include_captures=include_captures)
     return _emit_json_or_text(
         payload,
@@ -1708,8 +1756,7 @@ def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_o
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _core_memory_wins_payload(wiki_dir, limit=limit, project=project)
     return _emit_json_or_text(
         payload,
@@ -1732,8 +1779,7 @@ def explain_memory(target: Path, identifier: str, json_output: bool = False) -> 
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     try:
         explanation = _memory_explanation(wiki_dir, identifier)
     except ValueError as exc:
@@ -1759,8 +1805,7 @@ def query(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     query_text = _clean_text_input(query_text, max_len=500)
     project_name = project or _default_project(target)
     payload = _query_link(wiki_dir, query_text, budget=budget, project=project_name)
@@ -1783,8 +1828,7 @@ def graph_summary(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     topic = _clean_text_input(topic, max_len=500)
     cache = _core_build_wiki_cache(wiki_dir)
     payload = _core_graph_summary(
@@ -1814,8 +1858,7 @@ def benchmark(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     query_text = _clean_text_input(query_text, max_len=500)
     project_name = project or _default_project(target)
     payload = _core_build_benchmark_payload(
@@ -1844,8 +1887,7 @@ def brief(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     query = _clean_text_input(query, max_len=500)
     project_name = project or _default_project(target)
     payload = _memory_brief(wiki_dir, query=query, limit=limit, project=project_name)
@@ -1873,8 +1915,7 @@ def start(
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     task = _clean_text_input(task, max_len=500)
     project_name = project or _default_project(target)
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
@@ -1882,6 +1923,7 @@ def start(
     brief_payload = _core_add_capture_review_to_brief(
         brief_payload,
         _capture_review_summary(target, project=project_name),
+        command_target=_resolve_link_root(target),
     )
     query_text = task or "your current task"
     relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
@@ -1945,12 +1987,262 @@ def start(
     return code
 
 
+def _read_hook_stdin() -> dict[str, object]:
+    """Read the agent hook event JSON from stdin, if one was piped in."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return {}
+    try:
+        raw = sys.stdin.read()
+    except OSError:
+        return {}
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_output: bool = False) -> int:
+    """Show, set up, or rebuild the optional local semantic recall layer."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    records = _memory_records(wiki_dir)
+    active_count = len([
+        record for record in records
+        if str(record.get("status") or "active").lower() == "active"
+    ])
+    action_error = ""
+    action_result = ""
+    if setup or rebuild:
+        if setup and not json_output:
+            _print_text(
+                "Setting up semantic recall: this may download the local embedding model once. "
+                "Recall itself never uses the network."
+            )
+        embedder = _core_load_semantic_embedder(allow_download=setup)
+        if embedder is None:
+            install_hint = f'{sys.executable} -m pip install "link-mcp[semantic]"'
+            action_error = (
+                f"Semantic provider unavailable for {sys.executable}. Install it first: {install_hint}"
+                if setup
+                else "Semantic model not available offline. Run: lnk semantic --setup"
+            )
+            mcp_python = _core_resolve_mcp_python(target, wiki_dir, None, default_python=sys.executable)
+            if mcp_python != sys.executable:
+                action_error += (
+                    f"\nYour Link MCP Python is {mcp_python}. If you installed the extra there, "
+                    f"set it up through the MCP runtime instead: "
+                    f"{mcp_python} -m link_mcp --semantic-setup --wiki {wiki_dir}"
+                )
+        else:
+            index = _core_refresh_semantic_index(root, records, embedder=embedder)
+            items = index.get("items") if isinstance(index.get("items"), dict) else {}
+            action_result = f"Indexed {len(items)} memories."
+            if setup and _core_semantic_provider() == "fastembed":
+                action_result += (
+                    " Quality tier active: expect a ~5s model load per short-lived CLI command; "
+                    "the MCP server loads it once and stays fast. Prefer instant CLI recall? "
+                    "Set LINK_SEMANTIC_PROVIDER=model2vec (fast tier)."
+                )
+    payload = _core_build_semantic_status(
+        root, memory_count=active_count, command_target=root, python_cmd=sys.executable
+    )
+    if action_result:
+        payload["action_result"] = action_result
+    if action_error:
+        payload["action_error"] = action_error
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 1 if action_error else 0
+    code, text = _core_render_semantic_status_text(payload)
+    if action_result:
+        _print_text(action_result)
+    if action_error:
+        print(action_error, file=sys.stderr)
+        code = 1
+    _print_text(text)
+    return code
+
+
+def consolidate(target: Path, limit: int = 50, project: str | None = None, json_output: bool = False) -> int:
+    """Print a read-only consolidation plan for capture and review backlogs."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    captures_payload = _core_capture_inbox(
+        root,
+        limit=max(1, min(limit, 50)),
+        project=project,
+        commands_for=lambda rel_path: _core_cli_capture_commands(rel_path, root),
+    )
+    inbox_payload = _memory_inbox(wiki_dir, limit=max(1, min(limit, 50)), project=project)
+    payload = _core_build_consolidation_plan(
+        captures_payload=captures_payload,
+        inbox_payload=inbox_payload,
+        command_target=root,
+        project=project,
+    )
+    return _emit_json_or_text(payload, json_output, _core_render_consolidate_text)
+
+
+def _hook_project_dir(hook_event: dict[str, object]) -> str:
+    """Return the project directory the hook fired in, across agent schemas."""
+    hook_cwd = str(hook_event.get("cwd") or "").strip()
+    if hook_cwd:
+        return hook_cwd
+    roots = hook_event.get("workspace_roots")
+    if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0].strip():
+        return roots[0].strip()
+    return ""
+
+
+def _emit_session_start(text: str, emit: str) -> None:
+    if emit == "cursor":
+        print(json.dumps({"additional_context": text}))
+        return
+    print(text)
+
+
+def _hook_session_start(
+    target: Path, hook_event: dict[str, object], limit: int, project: str | None, emit: str
+) -> int:
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        _emit_session_start(
+            f"Link: wiki missing at {wiki_dir}; run {_display_command(['lnk', 'init', str(target)])} to restore it.",
+            emit,
+        )
+        return 0
+    project_name = project
+    if not project_name:
+        project_dir = _hook_project_dir(hook_event)
+        if project_dir:
+            project_name = _default_project(Path(project_dir))
+    if not project_name:
+        project_name = _default_project(target)
+    status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=False)
+    brief_payload = _memory_brief(wiki_dir, query="", limit=limit, project=project_name)
+    brief_payload = _core_add_capture_review_to_brief(
+        brief_payload,
+        _capture_review_summary(target, project=project_name),
+        command_target=_resolve_link_root(target),
+    )
+    relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
+    project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
+        status_payload.get("content_page_count") or 0
+    )
+    _, brief_text = _core_render_brief_text(brief_payload, query="", project=project_name)
+    captures_payload = brief_payload.get("captures") if isinstance(brief_payload.get("captures"), dict) else {}
+    _, text = _core_render_session_start_hook_text({
+        "target": str(target),
+        "project": project_name,
+        "status": status_payload,
+        "brief_text": brief_text,
+        "capture_count": int(captures_payload.get("count") or 0),
+        "project_seed_recommended": project_seed_recommended,
+        "backlog": brief_payload.get("backlog") or {},
+    })
+    _emit_session_start(text, emit)
+    return 0
+
+
+def _session_end_hook_state_path(target: Path) -> Path:
+    return _resolve_link_root(target) / ".link-cache" / "session-end-hook.hash"
+
+
+def _session_notes_fingerprint(notes: str) -> str:
+    normalized = " ".join(notes.split()).lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, project: str | None) -> int:
+    transcript_value = str(hook_event.get("transcript_path") or "").strip()
+    if not transcript_value:
+        return 0
+    transcript_path = Path(transcript_value).expanduser()
+    notes = _core_extract_transcript_text(transcript_path)
+    if len(notes.strip()) < 200:
+        return 0
+    # Memory proposals come from the user's own turns only. The assistant's
+    # prose is help, not the user's preferences; mining it would attribute the
+    # assistant's words to the user (found in dogfooding). The raw capture below
+    # still keeps the full transcript for review context.
+    user_notes = _core_extract_transcript_text(transcript_path, roles=("user",))
+    # Skip duplicate firings for the same conversation content (e.g. /clear
+    # immediately followed by exit, or repeated end events).
+    state_path = _session_end_hook_state_path(target)
+    fingerprint = _session_notes_fingerprint(notes)
+    try:
+        if state_path.exists() and state_path.read_text(encoding="utf-8").strip() == fingerprint:
+            return 0
+    except OSError:
+        pass
+    project_name = project
+    if not project_name:
+        project_dir = _hook_project_dir(hook_event)
+        if project_dir:
+            project_name = _default_project(Path(project_dir))
+    # Only store a capture when the user's turns produced memory-worthy
+    # candidates; otherwise every session would add review-inbox noise.
+    wiki_dir = _resolve_wiki_dir(target)
+    root = _resolve_link_root(target)
+    proposal_limit = max(1, min(limit, 10))
+    preview = _propose_memories_from_text(
+        wiki_dir,
+        user_notes,
+        source="agent-session-hook",
+        limit=proposal_limit,
+        project=project_name,
+        command_target=root,
+    )
+    if not int(preview.get("count") or 0):
+        return 0
+    code = session_end(
+        target,
+        notes,
+        title="Agent session notes" + (f" — {project_name}" if project_name else ""),
+        limit=proposal_limit,
+        project=project_name,
+        proposal_text=user_notes,
+    )
+    if code == 0:
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(fingerprint, encoding="utf-8")
+        except OSError:
+            pass
+    return code
+
+
+def run_agent_hook(
+    target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text"
+) -> int:
+    """Run an installed agent session hook; never fail the agent session."""
+    target = target.expanduser().resolve()
+    hook_event = _read_hook_stdin()
+    try:
+        if event == "session-start":
+            return _hook_session_start(target, hook_event, limit, project, emit)
+        if event == "session-end":
+            return _hook_session_end(target, hook_event, limit, project)
+        print(f"Unknown hook event: {event}", file=sys.stderr)
+    except Exception as exc:
+        print(f"Link {event} hook failed: {exc}", file=sys.stderr)
+    return 0
+
+
 def profile(target: Path, limit: int = 10, project: str | None = None, json_output: bool = False) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
     profile_data = _memory_profile(wiki_dir, limit=limit, project=project_name)
 
@@ -1984,8 +2276,7 @@ def memory_audit(target: Path, limit: int = 10, project: str | None = None, json
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
-        print(f"Missing wiki directory: {wiki_dir}", file=sys.stderr)
-        return 1
+        return _missing_wiki_error(wiki_dir)
     payload = _memory_audit_payload(target, wiki_dir, limit=limit, project=project)
 
     if json_output:
@@ -2005,7 +2296,10 @@ def _configure_link_command_display() -> None:
     if os.environ.get("LINK_CLI_COMMAND"):
         _core_set_link_command_override(None)
     else:
-        _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
+        # Source-checkout runs: show a friendly `python3 link.py` in generated
+        # commands, not the raw interpreter path (e.g. python@3.14). The
+        # absolute link.py path stays for paste-safety from any directory.
+        _core_set_link_command_override(["python3", str(ROOT / "link.py")])
 
 
 def verify_mcp(
@@ -2042,10 +2336,15 @@ def connect_mcp(
     write: bool = False,
     config_path: str | None = None,
     python_cmd: str | None = None,
+    hooks: bool = False,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
+    if hooks and not _core_supports_agent_hooks(agent):
+        supported = ", ".join(_core_hook_supported_agents())
+        print(f"--hooks is not supported for {agent}. Session hooks are available for: {supported}", file=sys.stderr)
+        return 1
     payload = _core_build_mcp_connect_payload(
         target=target,
         wiki_dir=wiki_dir,
@@ -2057,14 +2356,52 @@ def connect_mcp(
         config_path=config_path,
         write=write,
     )
+    hooks_payload: dict[str, object] | None = None
+    if hooks:
+        runtime_script = target / "link.py"
+        runtime_note = ""
+        if runtime_script.exists():
+            # A workspace runtime copied before session hooks existed would
+            # make every installed hook fail with an argparse error.
+            if not (target / "link_core" / "agent_hooks.py").exists():
+                if write:
+                    _copy_runtime_files(target)
+                    runtime_note = f"Refreshed the Link runtime at {target}: it predated session hooks."
+                else:
+                    runtime_note = (
+                        f"The Link runtime at {target} predates session hooks; "
+                        "--write will refresh it automatically (or run "
+                        f"{_display_command(['lnk', 'init', str(target)])} first)."
+                    )
+        else:
+            runtime_script = ROOT / "link.py"
+        hooks_payload = _core_build_agent_hooks_payload(
+            target=target,
+            agent=agent,
+            runtime_script=runtime_script,
+            python_cmd=sys.executable,
+            write=write,
+        )
+        if runtime_note:
+            hooks_payload["runtime_note"] = runtime_note
+        payload["session_hooks"] = hooks_payload
 
     if json_output:
         print(json.dumps(payload, indent=2))
         write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
-        return 0 if not write or bool(write_status.get("ok")) else 1
+        ok = not write or bool(write_status.get("ok"))
+        if write and hooks_payload is not None:
+            hooks_write = hooks_payload.get("write") if isinstance(hooks_payload.get("write"), dict) else {}
+            ok = ok and bool(hooks_write.get("ok"))
+        return 0 if ok else 1
 
     code, text = _core_render_mcp_connect_text(payload)
     _print_text(text)
+    if hooks_payload is not None:
+        hooks_code, hooks_text = _core_render_agent_hooks_text(hooks_payload)
+        print()
+        _print_text(hooks_text)
+        code = code or hooks_code
     return code
 
 
@@ -2095,6 +2432,7 @@ def onboard(
     agents: list[str] | None = None,
     all_agents: bool = False,
     write: bool = False,
+    hooks: bool = False,
     first_memory: str | None = None,
     seed_project: str | None = None,
     project: str | None = None,
@@ -2180,7 +2518,7 @@ def onboard(
     connections: list[dict[str, object]] = []
     for agent in _onboard_agent_names(agents, all_agents):
         try:
-            connections.append(_core_build_mcp_connect_payload(
+            connection = _core_build_mcp_connect_payload(
                 target=target,
                 wiki_dir=wiki_dir,
                 agent=agent,
@@ -2188,7 +2526,22 @@ def onboard(
                 init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
                 default_python=sys.executable,
                 write=write,
-            ))
+            )
+            if hooks and _core_supports_agent_hooks(agent):
+                connection["session_hooks"] = _core_build_agent_hooks_payload(
+                    target=target,
+                    agent=agent,
+                    runtime_script=(target / "link.py") if (target / "link.py").exists() else ROOT / "link.py",
+                    python_cmd=sys.executable,
+                    write=write,
+                )
+            elif hooks:
+                connection["session_hooks"] = {
+                    "agent": agent,
+                    "write": {"requested": False, "ok": False,
+                              "message": "session hooks are not available for this agent yet"},
+                }
+            connections.append(connection)
         except ValueError as exc:
             connections.append({
                 "agent": agent,
@@ -2197,6 +2550,19 @@ def onboard(
                 "write": {"requested": write, "ok": False, "message": str(exc)},
                 "next_actions": [],
             })
+
+    # Surface the automatic-memory (hooks) path: without this, users who follow
+    # the guided onboarding never discover the flagship 1.6 feature.
+    for connection in connections:
+        agent_name = str(connection.get("agent") or "")
+        if agent_name and _core_supports_agent_hooks(agent_name) and "session_hooks" not in connection:
+            connection["hooks_command"] = _display_command(
+                ["link", "onboard", str(target), "--agent", agent_name, "--hooks", "--write"]
+            )
+    hooks_agents = [
+        agent for agent in _onboard_agent_names(agents, all_agents)
+        if _core_supports_agent_hooks(agent)
+    ]
 
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
     starter_payload = _core_starter_prompt_payload(target, project=project)
@@ -2234,6 +2600,12 @@ def onboard(
             _display_command(["link", "onboard", str(target), "--agent", agent])
             for agent in ("codex", "claude-code", "cursor")
         ],
+        "hooks_hint": (
+            "Make memory automatic — add --hooks (Claude Code, Codex, Cursor): the memory brief "
+            "is injected at session start and proposals are captured at session end, so no agent "
+            "has to remember to call Link. Example:\n"
+            f"  {_display_command(['link', 'onboard', str(target), '--agent', 'claude-code', '--hooks', '--write'])}"
+        ) if (hooks_agents or not connections) and not hooks else "",
         "url": f"http://127.0.0.1:{port}",
     }
 
@@ -2659,6 +3031,9 @@ def main(argv: list[str] | None = None) -> int:
             "benchmark": benchmark,
             "brief": brief,
             "start": start,
+            "hook": run_agent_hook,
+            "consolidate": consolidate,
+            "semantic": semantic,
             "profile": profile,
             "wins": memory_wins,
             "memory-audit": memory_audit,

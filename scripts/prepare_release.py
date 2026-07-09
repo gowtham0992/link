@@ -230,6 +230,12 @@ def main() -> int:
     print("After the PR merges and CI passes, publish with:")
     for command in release_commands(args.version):
         print(command)
+    print("")
+    print(
+        "Then bump the Homebrew tap (gowtham0992/homebrew-link) to "
+        f"{normalize_version(args.version)} so `brew install` serves this "
+        "version — otherwise new users get an older Link than the docs describe."
+    )
     return 0
 
 

@@ -91,6 +91,7 @@ ingest raw/notes.md into Link
 remember that I prefer short release notes</code></pre>
 
         <h2 id="rules">Rules For Agents</h2>
+        <p>Two additions with 1.6: if Link session hooks are installed, the startup brief arrives automatically — skip the manual brief and go straight to bounded task recall. And when a brief reports a memory backlog, offer the user a read-only <code>lnk consolidate</code> pass instead of letting captures pile up.</p>
         <ul>
           <li>Prefer <code>lnk health</code> when readiness is unclear, especially after an install, upgrade, restore, or broad wiki edit.</li>
           <li>Start with <code>lnk start</code> for readiness plus memory context, and use <code>lnk session-end</code> to capture proposal-only memory candidates at the end of meaningful work.</li>

@@ -7,7 +7,9 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
+from .semantic import semantic_confidence_cap, semantic_match_points
 from .frontmatter import (
     csv_values,
     frontmatter_int,
@@ -1775,8 +1777,9 @@ def memory_audit_next_actions(
 def add_capture_review_to_brief(
     payload: Mapping[str, object],
     captures: Mapping[str, object],
+    command_target: str | Path = ".",
 ) -> dict[str, object]:
-    """Attach raw-capture review state and guidance to a memory brief."""
+    """Attach raw-capture review state, backlog signal, and guidance to a brief."""
     result = dict(payload)
     capture_payload = dict(captures)
     guidance = [str(item) for item in result.get("agent_guidance", [])]
@@ -1793,6 +1796,18 @@ def add_capture_review_to_brief(
         guidance.append("Redact raw captures with secret warnings before sharing snippets or using their contents.")
     if read_warning_count:
         guidance.append("Fix unreadable raw captures before deciding whether capture memory should be accepted or deleted.")
+    review = result.get("review") if isinstance(result.get("review"), Mapping) else {}
+    backlog = memory_backlog_summary(
+        capture_count=capture_count,
+        needs_review_count=int(review.get("count") or 0),
+        command_target=command_target,
+    )
+    result["backlog"] = backlog
+    if backlog.get("backlog"):
+        guidance.append(
+            "The memory backlog is above threshold; offer the user a short consolidation pass "
+            f"({backlog.get('command')} prints a read-only plan with approve/discard commands)."
+        )
     result["agent_guidance"] = guidance
     return result
 
@@ -1804,6 +1819,7 @@ def memory_brief(
     review_command: str = "review-memory",
     project: str | None = None,
     command_target: str | Path = ".",
+    semantic_scores: Mapping[str, float] | None = None,
 ) -> dict[str, object]:
     """Return the compact memory payload an agent should read before work."""
     limit = max(1, min(limit, 20))
@@ -1823,7 +1839,9 @@ def memory_brief(
     )
 
     if q:
-        relevant = recall_memories(record_list, q, limit=limit, project=project_name)
+        relevant = recall_memories(
+            record_list, q, limit=limit, project=project_name, semantic_scores=semantic_scores
+        )
         selection = "query"
     else:
         relevant = []
@@ -2007,6 +2025,7 @@ def recall_memories(
     limit: int = 10,
     include_archived: bool = False,
     project: str | None = None,
+    semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
 ) -> list[dict[str, object]]:
     q = query.strip()
     if not q:
@@ -2019,14 +2038,28 @@ def recall_memories(
             continue
         if not include_archived and not is_active_memory(record):
             continue
-        score = score_memory(record, q)
+        lexical_score = score_memory(record, q)
+        semantic_match = None
+        if semantic_scores:
+            semantic_match = semantic_scores.get(str(record.get("name") or ""))
+        score = lexical_score + semantic_match_points(semantic_match)
         if score >= MEMORY_RECALL_MIN_SCORE:
+            lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
             rank_score = memory_rank_score(record, score, project=project_name)
             issues = memory_review_issues(record)
             slim = slim_memory(record)
             slim["score"] = score
             slim["rank_score"] = rank_score
-            slim["confidence"] = memory_recall_confidence(record, q)
+            slim["match"] = (
+                "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
+            )
+            if semantic_match:
+                slim["semantic_similarity"] = float(semantic_match.get("cosine") or 0.0)
+            # A match with no lexical evidence is honest about its basis: a
+            # close paraphrase is at most moderate confidence, never strong.
+            slim["confidence"] = (
+                memory_recall_confidence(record, q) if lexical_hit else semantic_confidence_cap(semantic_match)
+            )
             slim["recall"] = recall_state(record, issues)
             slim["review_issue_count"] = len(issues)
             slim["highest_review_severity"] = (

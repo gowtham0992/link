@@ -65,6 +65,7 @@
         </div>
 
         <h2 id="loop">Recommended Agent Loop</h2>
+        <p><strong>With session hooks installed</strong> (<code>lnk connect &lt;agent&gt; --hooks --write</code>), step one happens automatically: the bounded memory brief is injected at session start and proposal-only notes are captured at session end. Hooked agents skip the manual brief call and go straight to bounded task recall.</p>
         <ol>
           <li>Call <code>status</code>. If schema or validation needs attention, follow the safe action it returns.</li>
           <li>Call <code>recall</code> with an empty query once at the first substantive turn of a session.</li>
@@ -94,6 +95,8 @@ Agent: recall(query="release plan", budget="small")</code></pre>
             <tr><td>Maintenance</td><td><code>admin</code></td><td>Handles backup, migrate, validate, graph export, captures, pages, rebuilds, and compatibility actions.</td></tr>
           </tbody>
         </table>
+
+        <p>Recalled memories carry honest signals agents must respect: a <code>confidence</code> label (<code>strong</code>/<code>moderate</code>/<code>weak</code>) and, when the optional local semantic tier is installed, a <code>match</code> field (<code>lexical</code>/<code>hybrid</code>/<code>semantic</code>). Semantic-only matches are capped below strong confidence — verify them with the user before acting. When a brief reports a memory backlog, <code>review(action="consolidate")</code> (or <code>lnk consolidate</code>) returns a read-only plan; apply its actions only with per-item user approval.</p>
 
         <h2 id="writes">Write Rules</h2>
         <p>Agents should treat Link memory as durable state, not scratch space.</p>

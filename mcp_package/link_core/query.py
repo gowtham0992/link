@@ -16,6 +16,7 @@ from .memory import (
     normalize_project,
     recall_memories,
 )
+from .semantic import semantic_memory_scores
 from .wiki import context_for_topic, search_pages
 
 
@@ -415,11 +416,13 @@ def query_link(
             "context_packet": [],
         }
 
+    semantic_scores = semantic_memory_scores(wiki_dir.parent, q, record_list)
     raw_memories = recall_memories(
         record_list,
         q,
         limit=limits["memories"] + 1,
         project=project_name,
+        semantic_scores=semantic_scores,
     )
     memory_has_more = len(raw_memories) > limits["memories"]
     memories = [_compact_memory(memory) for memory in raw_memories[: limits["memories"]]]
@@ -429,6 +432,7 @@ def query_link(
         limit=limits["memories"],
         review_command=review_command,
         project=project_name,
+        semantic_scores=semantic_scores,
     )
     raw_search_results = search_pages(q, cache, limit=limits["search_results"] + 1)
     search_has_more = len(raw_search_results) > limits["search_results"]

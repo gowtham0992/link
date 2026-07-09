@@ -403,6 +403,35 @@ class McpContractTests(unittest.TestCase):
         finally:
             sys.argv = previous_argv
 
+    def test_help_flag_prints_usage_instead_of_starting_the_server(self):
+        # Without explicit handling, --help is swallowed by parse_known_args
+        # and the stdio server starts, hanging silently in a terminal — the
+        # first exploratory command a pip user runs must not dead-end.
+        previous_argv = sys.argv[:]
+        missing = Path(tempfile.mkdtemp(prefix="link-mcp-help-")) / "missing" / "wiki"
+        module_name = f"link_mcp_server_help_{id(missing)}"
+        try:
+            sys.argv = ["link_mcp.server", "--wiki", str(missing), "--help"]
+            spec = importlib.util.spec_from_file_location(module_name, ROOT / "mcp_package/link_mcp/server.py")
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            out = StringIO()
+            err = StringIO()
+            with redirect_stdout(out), redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                spec.loader.exec_module(module)
+
+            self.assertEqual(cm.exception.code, 0)
+            text = out.getvalue()
+            self.assertIn("Usage:", text)
+            self.assertIn("--wiki", text)
+            self.assertIn("--surface", text)
+            self.assertIn("--semantic-setup", text)
+            self.assertIn("mcpServers", text)
+            self.assertEqual(err.getvalue(), "")
+        finally:
+            sys.modules.pop(module_name, None)
+            sys.argv = previous_argv
+
     def test_version_flag_does_not_require_wiki_or_mcp_sdk(self):
         previous_argv = sys.argv[:]
         missing = Path(tempfile.mkdtemp(prefix="link-mcp-version-")) / "missing" / "wiki"

@@ -2775,5 +2775,376 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("service-account-prod.json", out.getvalue())
 
 
+class AgentHookCliTests(unittest.TestCase):
+    def _hook_stdin(self, payload: dict) -> StringIO:
+        return StringIO(json.dumps(payload))
+
+    def test_hook_session_start_prints_memory_brief(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"cwd": str(tmp), "source": "startup"})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-start")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("Link memory (local, source-backed)", text)
+        self.assertIn("Relevant memories", text)
+        self.assertIn("Save durable memory only after explicit user approval.", text)
+
+    def test_hook_session_start_empty_workspace_is_compact(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "empty"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"cwd": str(tmp)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-start")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("empty workspace, nothing to recall yet", text)
+        self.assertNotIn("Relevant memories", text)
+        self.assertLess(len(text.splitlines()), 6)
+
+    def test_missing_wiki_error_points_to_next_step(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+
+        err = StringIO()
+        with redirect_stderr(err):
+            code = link_cli.recall(tmp / "nowhere", "anything")
+
+        self.assertEqual(code, 1)
+        self.assertIn("Missing wiki directory", err.getvalue())
+        self.assertIn("init", err.getvalue())
+
+    def test_hook_session_start_missing_wiki_exits_zero_with_guidance(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "missing"
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"source": "startup"})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-start")
+
+        self.assertEqual(code, 0)
+        self.assertIn("wiki missing", out.getvalue())
+
+    def test_hook_session_end_captures_proposal_only_notes(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                json.dumps({
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": f"We decided {index}: deploy the staging site only from the tagged release branch.",
+                    },
+                })
+                for index in range(6)
+            ),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"cwd": str(tmp), "transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(len(captures), 1)
+        self.assertIn("proposal-only", out.getvalue())
+
+    def test_hook_session_start_cursor_emit_wraps_additional_context(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"workspace_roots": [str(tmp)]})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-start", emit="cursor")
+
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertIn("Link memory (local, source-backed)", payload["additional_context"])
+
+    def test_hook_session_end_skips_duplicate_transcript_content(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                json.dumps({
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": f"We decided {index}: deploy the staging site only from the tagged release branch.",
+                    },
+                })
+                for index in range(6)
+            ),
+            encoding="utf-8",
+        )
+
+        for _ in range(2):
+            out = StringIO()
+            with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+                with redirect_stdout(out):
+                    code = link_cli.run_agent_hook(target, "session-end")
+            self.assertEqual(code, 0)
+
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(len(captures), 1)
+
+    def test_hook_session_end_skips_sessions_without_memory_proposals(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                json.dumps({
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{
+                            "type": "text",
+                            "text": f"I looked at file number {index} and it seems fine to me over there.",
+                        }],
+                    },
+                })
+                for index in range(8)
+            ),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(captures, [])
+
+    def test_consolidate_prints_read_only_plan(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                json.dumps({
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": f"We decided {index}: deploy the staging site only from the tagged release branch.",
+                    },
+                })
+                for index in range(6)
+            ),
+            encoding="utf-8",
+        )
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(StringIO()):
+                link_cli.run_agent_hook(target, "session-end")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.consolidate(target, json_output=True)
+
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["pending_captures"], 1)
+        self.assertIn("Read-only plan", payload["safety"])
+        self.assertTrue(payload["captures"][0]["accept_command"])
+        self.assertTrue(payload["captures"][0]["delete_command"])
+
+    def test_hook_session_end_ignores_assistant_prose(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-assistant-prose-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        # Only the assistant states preference-shaped sentences; the user just
+        # acknowledges. Nothing should be captured.
+        transcript.write_text(
+            "\n".join([
+                json.dumps({"type": "user", "message": {"role": "user", "content": "ok go ahead"}}),
+                json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{
+                    "type": "text",
+                    "text": "Tests pass on broken things; eyes don't. These are shell commands. "
+                            "I prefer small commits and short PR descriptions for this project always."}]}}),
+                json.dumps({"type": "user", "message": {"role": "user", "content": "makes sense, nice"}}),
+            ]),
+            encoding="utf-8",
+        )
+
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(StringIO()):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(captures, [], "assistant prose must not become a capture")
+
+    def test_hook_session_end_captures_user_stated_decision(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-user-decision-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join([
+                json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{
+                    "type": "text", "text": "Here are some options for the release branch."}]}}),
+                json.dumps({"type": "user", "message": {"role": "user", "content":
+                    "For this project we decided to always cut releases from the develop branch, "
+                    "never straight to main, and to keep every commit without co-author trailers. "
+                    "Please treat that as the standing release convention from now on so we stay "
+                    "consistent across the whole team and every future release we ship together."}}),
+            ]),
+            encoding="utf-8",
+        )
+
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(StringIO()):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(len(captures), 1, "a user-stated decision should be captured")
+
+    def test_hook_session_end_skips_trivial_sessions(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}}),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(captures, [])
+
+    def test_hook_session_end_without_stdin_payload_is_noop(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        with patch("sys.stdin", StringIO("")):
+            code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+
+    def test_connect_hooks_rejects_unsupported_agent(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        err = StringIO()
+        with redirect_stderr(err):
+            code = link_cli.connect_mcp(target, "kiro", hooks=True)
+
+        self.assertEqual(code, 1)
+        self.assertIn("--hooks is not supported for kiro", err.getvalue())
+
+    def test_connect_hooks_preview_includes_session_hooks_payload(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.connect_mcp(target, "claude-code", hooks=True, json_output=True)
+
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        session_hooks = payload["session_hooks"]
+        self.assertEqual(session_hooks["agent"], "claude-code")
+        self.assertFalse(session_hooks["write"]["ok"])
+        self.assertIn(" hook session-start ", session_hooks["events"]["SessionStart"])
+        # The command must point at the demo's own runtime script. Compare the
+        # stable path tail: on Windows the temp dir in the command is resolved
+        # to its long form (runneradmin) while mkdtemp returns the 8.3 short
+        # form (RUNNER~1), so the absolute prefix differs.
+        self.assertIn(str(Path(target.name) / "link.py"), session_hooks["events"]["SessionStart"])
+
+
+class NewUserFrictionTests(unittest.TestCase):
+    def test_recall_miss_hints_at_semantic_when_memories_exist(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-miss-hint-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+            link_cli.remember(target, "I prefer short PR descriptions with a one-line summary first",
+                              memory_type="preference")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.recall(target, "how do I like my pull requests written")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("No matching memories found", text)
+        # The whole point: a paraphrase miss must point the user at semantic.
+        self.assertIn("semantic recall", text.lower())
+        self.assertIn("--setup", text)
+
+    def test_recall_miss_on_empty_wiki_gives_no_semantic_hint(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-miss-empty-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.recall(target, "anything at all")
+
+        self.assertEqual(code, 0)
+        # No memories yet: don't nag about semantic, just say add one.
+        self.assertNotIn("semantic recall", out.getvalue().lower())
+
+    def test_onboard_surfaces_the_hooks_path(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-hooks-"))
+        target = tmp / "link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(target)
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("Make memory automatic", text)
+        self.assertIn("--hooks", text)
+
+    def test_onboard_agent_preview_offers_hooks(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-agent-hooks-"))
+        target = tmp / "link"
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.onboard(target, agents=["claude-code"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("Make memory automatic (recommended)", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

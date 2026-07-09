@@ -35,10 +35,27 @@ from pathlib import Path
 from link_core.version import LINK_VERSION
 
 # ── Resolve wiki directory ────────────────────────────────────────────
+# The parser keeps add_help=False and parse_known_args so an agent launch
+# config with unexpected args can never crash the server. Handle --help
+# explicitly first: without this, `python -m link_mcp --help` would start
+# the stdio server and hang silently waiting for MCP messages.
+if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+    print(__doc__.strip())
+    print(
+        "\nOptions:\n"
+        "  --wiki PATH        wiki directory (default: ~/link/wiki)\n"
+        "  --surface SURFACE  tool surface: slim (recommended) or full\n"
+        "  --version          print the link-mcp version and exit\n"
+        "  --semantic-setup   one-time semantic model fetch + index build\n"
+        "  -h, --help         show this help and exit"
+    )
+    sys.exit(0)
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--wiki", default=None)
 parser.add_argument("--surface", choices=("full", "slim"), default=None)
 parser.add_argument("--version", action="store_true")
+parser.add_argument("--semantic-setup", action="store_true")
 args, _ = parser.parse_known_args()
 
 if args.version:
@@ -49,6 +66,37 @@ if args.wiki:
     WIKI_DIR = Path(args.wiki).expanduser().resolve()
 else:
     WIKI_DIR = Path.home() / "link" / "wiki"
+
+if args.semantic_setup:
+    # One-time explicit opt-in for MCP-only installs (no `lnk` CLI): fetch
+    # the local embedding model and build the semantic index, then exit.
+    # This is the only link-mcp entry point allowed to touch the network.
+    from link_core.memory import memory_records as _setup_memory_records
+    from link_core.semantic import (
+        load_embedder as _setup_load_embedder,
+        refresh_memory_index as _setup_refresh_index,
+        semantic_model_name as _setup_model_name,
+    )
+
+    if not WIKI_DIR.exists():
+        print(f"[link-mcp] Wiki not found at {WIKI_DIR}; pass --wiki /path/to/wiki.", file=sys.stderr)
+        sys.exit(2)
+    print(
+        f"[link-mcp] Setting up semantic recall: this may download {_setup_model_name()} "
+        "once. Recall itself never uses the network."
+    )
+    setup_embedder = _setup_load_embedder(allow_download=True)
+    if setup_embedder is None:
+        print(
+            "[link-mcp] Semantic provider unavailable. Install it first: "
+            "pip install \"link-mcp[semantic]\"",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    setup_index = _setup_refresh_index(WIKI_DIR.parent, _setup_memory_records(WIKI_DIR), embedder=setup_embedder)
+    setup_items = setup_index.get("items") if isinstance(setup_index.get("items"), dict) else {}
+    print(f"[link-mcp] Semantic recall ready: indexed {len(setup_items)} memories.")
+    sys.exit(0)
 
 MCP_SURFACE = (args.surface or os.environ.get("LINK_MCP_SURFACE") or "slim").strip().lower()
 if MCP_SURFACE not in {"full", "slim"}:
@@ -204,6 +252,12 @@ from link_core.capture import (
     mcp_capture_commands as _core_mcp_capture_commands,
     redact_capture_file as _core_redact_capture_file,
     write_session_capture as _core_write_session_capture,
+)
+from link_core.consolidate import (
+    build_consolidation_plan as _core_build_consolidation_plan,
+)
+from link_core.semantic import (
+    semantic_memory_scores as _core_semantic_memory_scores,
 )
 from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
@@ -431,12 +485,17 @@ def _memory_profile(limit: int = 10, project: str = "") -> dict[str, object]:
 
 def _memory_brief(query: str = "", limit: int = 6, project: str = "") -> dict[str, object]:
     project_name = _resolve_project(project)
+    clean_query = _clean_text_input(query, max_len=500)
+    records = _memory_records()
     payload = _core_memory_brief(
-        _memory_records(), query=_clean_text_input(query, max_len=500),
+        records, query=clean_query,
         limit=limit, review_command="review_memory", project=project_name,
         command_target=WIKI_DIR.parent,
+        semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, clean_query, records),
     )
-    return _core_add_capture_review_to_brief(payload, _capture_review_summary(project=project_name))
+    return _core_add_capture_review_to_brief(
+        payload, _capture_review_summary(project=project_name), command_target=WIKI_DIR.parent
+    )
 
 
 def _query_link(query: str, budget: str = "medium", project: str = "") -> dict[str, object]:
@@ -513,12 +572,14 @@ def _recall_memories(
     project: str = "",
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
+    records = _memory_records()
     return _core_recall_memories(
-        _memory_records(),
+        records,
         query,
         limit=limit,
         include_archived=include_archived,
         project=_resolve_project(project),
+        semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, query, records),
     )
 
 
@@ -882,7 +943,14 @@ def link_instructions_resource() -> str:
         "6. At session end, use `admin(action=\"session_end\", arguments=\"{...}\")` or `capture_session` "
         "to save proposal-only notes for user review.\n"
         "7. Use `review` for inbox, explain, archive, restore, forget, profile, audit, and log workflows.\n"
-        "8. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "8. If a brief reports a memory backlog, offer the user a short consolidation pass: "
+        "`review(action=\"consolidate\")` returns a read-only plan; apply its accept/discard actions only "
+        "after the user approves each one.\n"
+        "9. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "If Link session hooks are installed for this agent, the startup brief is injected automatically — "
+        "skip step 2 and go straight to bounded task recall.\n"
+        "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
+        "confidence) as hints to verify, not facts to act on.\n\n"
         "Never silently save durable memory. Prefer reviewed memories and source-backed wiki pages, and cite "
         "provenance when explaining why Link knows something.\n"
     )
@@ -1218,8 +1286,10 @@ def review(
     """Review, explain, and manage local memory lifecycle.
 
     Supported actions: inbox, audit, profile, log, wins, explain, reviewed,
-    archive, restore, forget. Prefer archive over forget unless the user asks
-    for permanent deletion.
+    archive, restore, forget, consolidate. Prefer archive over forget unless
+    the user asks for permanent deletion. Use consolidate for a read-only plan
+    when the capture or review backlog builds up; apply its actions only after
+    the user approves each one.
     """
     clean_action = (_clean_text_input(action, max_len=80) or "inbox").lower().replace("-", "_")
     parsed_limit = _parse_limit(limit, default=20, max_limit=50)
@@ -1245,12 +1315,19 @@ def review(
             payload = _set_memory_status(identifier, "active")
         elif clean_action == "forget":
             payload = _forget_memory(identifier, confirm=confirm)
+        elif clean_action == "consolidate":
+            payload = _core_build_consolidation_plan(
+                captures_payload=_capture_inbox(limit=parsed_limit, project=clean_project),
+                inbox_payload=_memory_inbox(limit=parsed_limit, project=clean_project),
+                command_target=WIKI_DIR.parent,
+                project=clean_project,
+            )
         else:
             return json.dumps({
                 "surface": "slim",
                 "tool": "review",
                 "error": f"unsupported action: {clean_action}",
-                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "explain", "reviewed", "archive", "restore", "forget"],
+                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "explain", "reviewed", "archive", "restore", "forget", "consolidate"],
             })
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "review", "updated": False, "error": str(exc)})

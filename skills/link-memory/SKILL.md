@@ -7,6 +7,8 @@ description: Use after important user-approved decisions, when durable context s
 
 Use this skill after important user-approved decisions, preference changes, project conventions, or long work sessions that may deserve durable context. In a source checkout, replace `lnk` with `python3 link.py`. Do not silently save durable memory; propose first unless the user directly asks to remember, approves a proposal, or explicitly confirms an important decision should become durable memory.
 
+If Link session hooks are installed for this agent, the memory brief is injected automatically at session start — skip step 1 and go straight to task-specific recall.
+
 1. Prime before work:
    ```bash
    lnk brief "<current task>" [link-root]
@@ -25,6 +27,12 @@ Use this skill after important user-approved decisions, preference changes, proj
    lnk remember "<user-approved memory>" [link-root] --type note --scope user
    ```
    Use `--project <slug>` for project-scoped memory, `--visibility private|project|team` for sharing intent, `--review-after YYYY-MM-DD` for stale-risk memories, and `--expires-at YYYY-MM-DD` for temporary context.
+When a brief or recall reports a memory backlog (pending captures or reviews above threshold), offer the user a short consolidation pass:
+   ```bash
+   lnk consolidate [link-root]
+   ```
+   The plan is read-only: it groups duplicates and recurring themes and prints accept/discard/review commands. Apply an action only after the user approves it.
+
 5. Review and explain before trusting uncertain memory:
    ```bash
    lnk memory-inbox [link-root]

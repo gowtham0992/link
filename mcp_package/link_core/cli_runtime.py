@@ -122,6 +122,14 @@ def render_start_text(payload: Mapping[str, object]) -> tuple[int, str]:
             lines.append(f"- Need more context: {commands['query']}")
         if isinstance(commands, Mapping) and commands.get("review"):
             lines.append(f"- Review pending memory: {commands['review']}")
+        brief = payload.get("brief") if isinstance(payload.get("brief"), Mapping) else {}
+        backlog = brief.get("backlog") if isinstance(brief.get("backlog"), Mapping) else {}
+        if backlog.get("backlog"):
+            lines.append(
+                f"- Memory backlog ({backlog.get('pending_captures', 0)} captures · "
+                f"{backlog.get('needs_review_memories', 0)} reviews): offer a consolidation pass — "
+                f"{backlog.get('command')}"
+            )
         lines.append("- Save memory only after explicit user approval.")
     return 0 if status.get("ready") else 1, "\n".join(lines)
 
@@ -267,9 +275,15 @@ def render_proof_text(payload: Mapping[str, object]) -> tuple[int, str]:
         "Cross-agent memory continuity works" if ready else "Cross-agent memory proof needs attention",
         "",
         "What happened",
-        f"1. Workspace: {'created' if created else 'reused'} local Markdown wiki.",
+        f"1. Workspace: {'created' if created else 'reused'} a throwaway demo wiki (not your real memory).",
         f"2. Memory: {memory_status}: {title}",
         f"3. Recall: {recall_status} through the same bounded recall path used by CLI, skills, and MCP.",
+        "",
+        "What this means for you",
+        "- Save something once; any of your agents can recall it later, from plain local files.",
+        "- Ready for real use? Create your durable workspace and wire an agent:",
+        f"    {display_command(['lnk', 'onboard'])}",
+        "    (this proof workspace is a demo — your memory will live at ~/link)",
         "",
         "Try it with two agents",
         f"Agent A: {prompts.get('agent_a', 'remember that this project uses Link')}",
@@ -301,9 +315,19 @@ def _first_mapping_items(value: object, limit: int) -> list[Mapping[str, object]
 
 def _connection_state(connection: Mapping[str, object]) -> str:
     write_status = connection.get("write") if isinstance(connection.get("write"), Mapping) else {}
+    state = "preview"
     if write_status.get("requested"):
-        return "updated" if write_status.get("ok") else "failed"
-    return "preview"
+        state = "updated" if write_status.get("ok") else "failed"
+    session_hooks = connection.get("session_hooks")
+    if isinstance(session_hooks, Mapping):
+        hooks_write = session_hooks.get("write") if isinstance(session_hooks.get("write"), Mapping) else {}
+        if hooks_write.get("requested"):
+            state += " · hooks " + ("updated" if hooks_write.get("ok") else "failed")
+        elif hooks_write.get("message"):
+            state += f" · hooks: {hooks_write.get('message')}"
+        else:
+            state += " · hooks preview"
+    return state
 
 
 def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
@@ -384,6 +408,8 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
                     if action.get("label") == "write config":
                         lines.append(f"  Write when ready: {action.get('command_text')}")
                         break
+                if connection.get("hooks_command"):
+                    lines.append(f"  Make memory automatic (recommended): {connection.get('hooks_command')}")
                 if restart_hint:
                     lines.append(f"  After writing: {restart_hint}")
             elif state == "updated":
@@ -399,6 +425,9 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
             lines.append("- not connected yet. Preview an agent config with:")
             for command in payload.get("agent_examples", []):
                 lines.append(f"  {command}")
+    hooks_hint = str(payload.get("hooks_hint") or "").strip()
+    if hooks_hint:
+        lines.extend(["", *hooks_hint.splitlines()])
 
     prompts = _first_mapping_items(payload.get("prompts"), 4)
     lines.extend(["", "Ask your agent"])
@@ -464,3 +493,99 @@ def render_mcp_connect_text(payload: Mapping[str, object]) -> tuple[int, str]:
     if restart_hint:
         lines.append(f"  {restart_hint}")
     return code, "\n".join(lines)
+
+
+def render_agent_hooks_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render a session-hook configuration plan for a supported local agent."""
+    write_status = payload.get("write") if isinstance(payload.get("write"), Mapping) else {}
+    requested = bool(write_status.get("requested"))
+    ok = bool(write_status.get("ok"))
+    code = 0 if not requested or ok else 1
+    lines = [
+        f"Link session hooks: {payload.get('display_name')}",
+        "",
+        f"Settings: {payload.get('settings_path')}",
+    ]
+    behavior = payload.get("behavior")
+    if isinstance(behavior, Sequence) and not isinstance(behavior, (str, bytes)):
+        lines.append("")
+        lines.extend(f"  {item}" for item in behavior)
+    runtime_note = str(payload.get("runtime_note") or "").strip()
+    if runtime_note:
+        lines.extend(["", f"  {runtime_note}"])
+    lines.append("")
+    if requested:
+        lines.append(f"Write: {'updated' if ok else 'failed'}")
+        message = write_status.get("message")
+        if message:
+            lines.append(f"  {message}")
+    else:
+        lines.append("Preview only. Rerun with --write to update the settings file.")
+    lines.extend(["", "Hooks snippet:"])
+    snippet = str(payload.get("snippet") or "")
+    lines.extend(f"  {line}" if line else "" for line in snippet.splitlines())
+    restart_hint = payload.get("restart_hint")
+    if restart_hint:
+        lines.extend(["", f"  {restart_hint}"])
+    return code, "\n".join(lines)
+
+
+def render_session_start_hook_text(payload: Mapping[str, object]) -> tuple[int, str]:
+    """Render the bounded memory-brief context block injected by session-start hooks."""
+    status = payload.get("status") if isinstance(payload.get("status"), Mapping) else {}
+    target = str(payload.get("target") or "")
+    project = str(payload.get("project") or "").strip()
+    lines = [
+        "Link memory (local, source-backed)"
+        + (f" · project {project}" if project else ""),
+    ]
+    if not status.get("ready"):
+        lines.extend([
+            "Link is not ready; skipping the memory brief.",
+            f"Check with: {display_command(['lnk', 'health', target])}",
+        ])
+        return 0, "\n".join(lines)
+
+    # Empty workspace: inject two useful lines, not a skeleton of zeros.
+    if (
+        not int(status.get("active_memory_count") or 0)
+        and not int(status.get("content_page_count") or 0)
+        and not int(payload.get("capture_count") or 0)
+    ):
+        lines[0] += " — empty workspace, nothing to recall yet."
+        lines.extend([
+            "To give day-one recall real project context, seed allowlisted repo docs: "
+            f"{display_command(['lnk', 'seed', '.', target])} (source-backed, no durable memory).",
+            "Save durable memory only after the user explicitly approves it.",
+        ])
+        return 0, "\n".join(lines)
+
+    brief_text = str(payload.get("brief_text") or "").strip()
+    if brief_text:
+        lines.extend(["", brief_text])
+
+    seed_recommended = bool(payload.get("project_seed_recommended"))
+    if seed_recommended:
+        lines.extend([
+            "",
+            "No project context or relevant memory yet. To seed source-backed project context "
+            f"from this repo's docs, suggest: {display_command(['lnk', 'seed', '.', target])}",
+        ])
+    backlog = payload.get("backlog") if isinstance(payload.get("backlog"), Mapping) else {}
+    if backlog.get("backlog"):
+        lines.extend([
+            "",
+            (
+                f"Memory backlog: {backlog.get('pending_captures', 0)} pending captures · "
+                f"{backlog.get('needs_review_memories', 0)} memories need review. "
+                "Offer the user a short consolidation pass this session; "
+                f"{backlog.get('command')} prints a read-only plan with approve/discard commands."
+            ),
+        ])
+    lines.extend([
+        "",
+        "Use this brief before asking the user to repeat durable context. "
+        f"For task-specific context: {display_command(['lnk', 'query', '<topic>', target, '--budget', 'micro'])} "
+        "or the Link MCP recall tool. Save durable memory only after explicit user approval.",
+    ])
+    return 0, "\n".join(lines)
