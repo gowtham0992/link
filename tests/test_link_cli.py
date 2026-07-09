@@ -2971,6 +2971,59 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertTrue(payload["captures"][0]["accept_command"])
         self.assertTrue(payload["captures"][0]["delete_command"])
 
+    def test_hook_session_end_ignores_assistant_prose(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-assistant-prose-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        # Only the assistant states preference-shaped sentences; the user just
+        # acknowledges. Nothing should be captured.
+        transcript.write_text(
+            "\n".join([
+                json.dumps({"type": "user", "message": {"role": "user", "content": "ok go ahead"}}),
+                json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{
+                    "type": "text",
+                    "text": "Tests pass on broken things; eyes don't. These are shell commands. "
+                            "I prefer small commits and short PR descriptions for this project always."}]}}),
+                json.dumps({"type": "user", "message": {"role": "user", "content": "makes sense, nice"}}),
+            ]),
+            encoding="utf-8",
+        )
+
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(StringIO()):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(captures, [], "assistant prose must not become a capture")
+
+    def test_hook_session_end_captures_user_stated_decision(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-user-decision-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join([
+                json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{
+                    "type": "text", "text": "Here are some options for the release branch."}]}}),
+                json.dumps({"type": "user", "message": {"role": "user", "content":
+                    "For this project we decided to always cut releases from the develop branch, "
+                    "never straight to main, and to keep every commit without co-author trailers. "
+                    "Please treat that as the standing release convention from now on so we stay "
+                    "consistent across the whole team and every future release we ship together."}}),
+            ]),
+            encoding="utf-8",
+        )
+
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(StringIO()):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(len(captures), 1, "a user-stated decision should be captured")
+
     def test_hook_session_end_skips_trivial_sessions(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
         target = tmp / "demo"

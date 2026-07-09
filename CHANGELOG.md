@@ -43,6 +43,10 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - Added `lnk hook session-end` to turn an agent transcript into review-gated memory: it extracts bounded user/assistant text (skipping tool calls and outputs), skips trivial sessions, and stores proposal-only session notes through the same duplicate/conflict-safe capture path as `lnk session-end`.
 - Added idempotent, non-destructive session-hook writing to `~/.claude/settings.json` that preserves existing user hooks and settings, replaces only Link's own hook entries on rerun, and skips re-injection on session resume.
 
+### Fixed
+
+- Automatic session-end capture now mines memory proposals from the user's own turns only, not the assistant's replies. Dogfooding showed the assistant's prose (e.g. a summary line like "you prefer small commits") was being extracted and proposed as the user's own preference. The raw capture still keeps the full transcript for review context; only the proposal candidates are restricted to what the user actually said (`extract_transcript_text(..., roles=("user",))`).
+
 ## [1.5.0] - 2026-07-03
 
 ### Added
