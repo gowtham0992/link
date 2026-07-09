@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-09
+
 - Added an animated "aha" demo to the Getting Started page: a self-contained SVG (`docs/assets/link-aha.svg`, plain text, no external runtime, animates in any browser) showing the two moments Link is built for — recall that matches by meaning rather than keywords, and memory injected into a new agent session automatically. The README shows the matching recorded GIF (`docs/assets/link-aha.gif`), rendered from real `lnk` commands via a checked-in charmbracelet vhs tape (`docs/media/link-aha.tape`) so it is reproducible, not synthetic.
 
 - Fixed first-ten-minutes friction found by walking Link cold as a brand-new user:
