@@ -219,6 +219,50 @@ precision ties because both pipelines share the same retrieval; the gated
 advantage there appears exactly when the outdated version would otherwise
 outrank the current one (the exposure metric).
 
+## Track 4: End-to-end QA under mem0's own harness
+
+Tracks 1–3 isolate retrieval and governance. This track runs the full
+question-answering pipeline — ingest, retrieve, answer, judge — under
+[mem0's open benchmark harness](https://github.com/mem0ai/memory-benchmarks)
+with a Link backend, so the numbers are directly comparable to the raw
+result files mem0 publishes in that repository. Full provenance notes,
+the Link backend adapter, and every judgment live in our benchmark
+workspace; config: top-50 memories per answer (single cutoff),
+claude-haiku-4-5 as answerer and judge, ~2.7k mean tokens per answer
+call, zero LLM calls and zero cost at ingest.
+
+**LoCoMo, full 1,540 questions:**
+
+| system | answerer | judge | accuracy |
+|---|---|---|---|
+| **Link (local files)** | haiku-4-5 | haiku-4-5 | **84.8%** |
+| mem0 v3 platform (cloud) | gpt-5 | haiku-4-5 (same judge) | 83.2% |
+| mem0 v3 platform (cloud) | gpt-5 | gpt-5 (their own) | 82.66% |
+
+The middle row is mem0's own published raw answers re-judged with the
+identical judge model that scored Link, using the harness's own judge
+prompt — so the comparison holds under one referee. The haiku judge
+proved slightly stricter than gpt-5 on their answers, and their answers
+were written by gpt-5 while Link's came from a budget model: both
+asymmetries favor mem0, and Link still leads (multi-hop: 85.1 vs 82.3).
+Their 91.6% headline configuration uses top-200 (~7k tokens/call) —
+more than twice Link's token budget.
+
+**LongMemEval, full 500 questions: 78.0%** (knowledge-update 92.3,
+single-session-user 90.0, temporal-reasoning 81.2, preference 76.7,
+single-session-assistant 66.1, multi-session 65.4, abstention 22/30).
+Not directly comparable to mem0's published 90.4%: every number in
+their files uses gpt-5 as both answerer and judge, and LongMemEval is
+heavily answerer-reasoning-bound.
+
+What *is* directly measurable without any judge: replaying Link's
+deterministic ingest maps every retrieved memory to its source session,
+so we can check whether retrieval surfaced the gold evidence. **Link
+put evidence sessions in the top-50 context for 99.4% of questions**
+(complete evidence: 92.6%); of 102 failures, 3 were retrieval misses
+and 79 had the full evidence already in context — the score is
+answerer-limited, not memory-limited.
+
 ## Honest limitations
 
 - **Pure paraphrases are much better, not solved.** The quality tier
