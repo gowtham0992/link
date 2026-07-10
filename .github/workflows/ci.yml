@@ -113,6 +113,102 @@ jobs:
           $env:PYTHONPATH = "mcp_package"
           python link.py verify-mcp $demo --python python
 
+  # A brand-new user on a machine that has never seen Link: onboard must
+  # provision the MCP runtime itself and every advertised surface must
+  # work. The local wheel is offered via PIP_FIND_LINKS so the pinned
+  # link-mcp==LINK_VERSION resolves even before that version is on PyPI.
+  macos-clean-install:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the link-mcp wheel
+        run: python -m pip wheel ./mcp_package -w dist --no-deps
+
+      - name: Assert the driving python has no link_mcp (a dirty runner would mask real breakage)
+        run: |
+          if python -c "import link_mcp" 2>/dev/null; then
+            echo "runner is not clean: link_mcp already importable" >&2
+            exit 1
+          fi
+
+      - name: Cold onboard with hooks and MCP
+        env:
+          PIP_FIND_LINKS: ${{ github.workspace }}/dist
+        run: |
+          export HOME="$RUNNER_TEMP/cleanhome"
+          mkdir -p "$HOME"
+          python link.py onboard --agent claude-code --hooks --write
+          test -f "$HOME/.claude.json"
+          grep -q '"link"' "$HOME/.claude.json"
+          grep -q "SessionStart" "$HOME/.claude/settings.json"
+          test -x "$HOME/.link-mcp-venv/bin/python"
+
+      - name: Session-start hook produces the memory brief
+        run: |
+          export HOME="$RUNNER_TEMP/cleanhome"
+          echo '{"session_id":"ci-cold","source":"startup"}' \
+            | python "$HOME/link/link.py" hook session-start "$HOME/link" | grep -q "Link memory"
+
+      - name: MCP server answers over stdio from the provisioned venv
+        run: |
+          export HOME="$RUNNER_TEMP/cleanhome"
+          python -m pip install "mcp>=1.0.0,<2"
+          python scripts/smoke_mcp_stdio.py "$HOME/link/wiki" \
+            --python "$HOME/.link-mcp-venv/bin/python" --surface slim
+
+  # The same walk on Windows, where nobody has ever cold-walked by hand:
+  # pip/source is the install path, venv layout is Scripts\python.exe.
+  windows-cold-walk:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the link-mcp wheel
+        run: python -m pip wheel ./mcp_package -w dist --no-deps
+
+      - name: Assert the driving python has no link_mcp
+        shell: pwsh
+        run: |
+          python -c "import link_mcp" 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Error "runner is not clean: link_mcp already importable"; exit 1 }
+          exit 0
+
+      - name: Cold onboard with hooks and MCP
+        shell: pwsh
+        env:
+          PIP_FIND_LINKS: ${{ github.workspace }}\dist
+        run: |
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "cleanhome"
+          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
+          python link.py onboard --agent claude-code --hooks --write
+          if (-not (Test-Path "$env:USERPROFILE\.claude.json")) { Write-Error "no MCP config written"; exit 1 }
+          if (-not (Select-String -Quiet '"link"' "$env:USERPROFILE\.claude.json")) { Write-Error "link server missing from config"; exit 1 }
+          if (-not (Select-String -Quiet "SessionStart" "$env:USERPROFILE\.claude\settings.json")) { Write-Error "hooks not written"; exit 1 }
+          if (-not (Test-Path "$env:USERPROFILE\.link-mcp-venv\Scripts\python.exe")) { Write-Error "MCP venv not provisioned"; exit 1 }
+
+      - name: Session-start hook produces the memory brief
+        shell: pwsh
+        run: |
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "cleanhome"
+          $out = '{"session_id":"ci-cold","source":"startup"}' | python "$env:USERPROFILE\link\link.py" hook session-start "$env:USERPROFILE\link"
+          if ($out -notmatch "Link memory") { Write-Error "hook produced no brief: $out"; exit 1 }
+
+      - name: MCP server answers over stdio from the provisioned venv
+        shell: pwsh
+        run: |
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "cleanhome"
+          python -m pip install "mcp>=1.0.0,<2"
+          python scripts/smoke_mcp_stdio.py "$env:USERPROFILE\link\wiki" --python "$env:USERPROFILE\.link-mcp-venv\Scripts\python.exe" --surface slim
+
   installer-syntax:
     runs-on: ubuntu-latest
     steps:
