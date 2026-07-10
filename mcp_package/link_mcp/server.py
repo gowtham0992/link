@@ -570,6 +570,7 @@ def _recall_memory_results(
     limit: int = 10,
     include_archived: bool = False,
     project: str = "",
+    context_path: str = "",
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
     records = _memory_records()
@@ -579,6 +580,7 @@ def _recall_memory_results(
         limit=limit,
         include_archived=include_archived,
         project=_resolve_project(project),
+        context_path=_clean_text_input(context_path, max_len=500) or None,
         semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, query, records),
     )
 
@@ -1154,6 +1156,7 @@ def recall(
     project: str = "",
     mode: str = "auto",
     limit: int = 6,
+    context_path: str = "",
 ) -> str:
     """Retrieve local memory/wiki context through one obvious read tool.
 
@@ -1161,6 +1164,9 @@ def recall(
     work. mode=auto returns a startup memory brief when query is empty and an
     answer-ready query packet when query is present. mode=brief returns the
     memory brief; mode=memory returns focused memory-only recall.
+    Pass context_path (the session's working directory) so memories fenced
+    with applies_when path: conditions can match; without it they are
+    honestly demoted as out_of_context.
     """
     clean_query = _clean_text_input(query, max_len=MAX_TEXT_INPUT)
     clean_mode = (_clean_text_input(mode, max_len=40) or "auto").lower().replace("-", "_")
@@ -1179,7 +1185,9 @@ def recall(
     if clean_mode == "memory":
         if not clean_query:
             return json.dumps({"surface": "slim", "tool": "recall", "error": "query required for memory mode"})
-        memories = _recall_memory_results(clean_query, limit=parsed_limit, project=clean_project)
+        memories = _recall_memory_results(
+            clean_query, limit=parsed_limit, project=clean_project, context_path=context_path
+        )
         return json.dumps({
             "surface": "slim",
             "tool": "recall",

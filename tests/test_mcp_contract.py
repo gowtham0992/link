@@ -286,6 +286,38 @@ class McpContractTests(unittest.TestCase):
         self.assertTrue(any("this project uses Link" in prompt for prompt in prompts))
         self.assertTrue(any(command.startswith("lnk health ") for command in payload["commands"]))
 
+    def test_slim_recall_context_path_matches_path_fenced_memory(self):
+        # A memory fenced with applies_when path: must match when the MCP
+        # client passes the session's working directory as context_path, and
+        # be honestly demoted as out_of_context when it cannot.
+        slim, previous_modules, previous_argv, module_name = import_mcp_server(self.target / "wiki", surface="slim")
+        try:
+            saved = json.loads(slim.remember(
+                "Always run the picochat data prep script before training",
+                memory_type="preference",
+                applies_when="path:*picochat*",
+            ))
+            self.assertTrue(saved.get("created"), saved)
+
+            with_path = json.loads(slim.recall(
+                "picochat data prep before training", mode="memory",
+                context_path="/Users/dev/projects/picochat",
+            ))
+            match = next(m for m in with_path["memories"] if "data prep" in str(m.get("title")))
+            self.assertEqual(match.get("applicability"), "matched")
+
+            without_path = json.loads(slim.recall(
+                "picochat data prep before training", mode="memory",
+            ))
+            miss = next(m for m in without_path["memories"] if "data prep" in str(m.get("title")))
+            self.assertEqual(miss.get("applicability"), "out_of_context")
+        finally:
+            if hasattr(slim, "_clear_cache"):
+                slim._clear_cache()
+            sys.modules.pop(module_name, None)
+            restore_mcp_modules(previous_modules)
+            sys.argv = previous_argv
+
     def test_slim_surface_contract(self):
         slim, previous_modules, previous_argv, module_name = import_mcp_server(self.target / "wiki", surface="slim")
         try:
