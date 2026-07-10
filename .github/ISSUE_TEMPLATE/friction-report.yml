@@ -1,0 +1,27 @@
+name: Friction report
+description: Nothing crashed, but something was confusing, surprising, or harder than it should be.
+labels: ["friction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These reports shape Link more than feature requests do — the fresh-user
+        experience is tested before every release, and real friction reports are
+        how we find what those walkthroughs miss.
+  - type: textarea
+    id: friction
+    attributes:
+      label: What was confusing or harder than expected?
+      description: Where were you in the flow, what did you expect to happen, and what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expectation
+    attributes:
+      label: What would have felt right?
+      description: Optional — how you expected it to work.
+  - type: input
+    id: platform
+    attributes:
+      label: Install path, OS, and agent
+      placeholder: "Homebrew · macOS 15 · Claude Code"

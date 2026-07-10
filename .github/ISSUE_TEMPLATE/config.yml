@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: "First 10 minutes guide"
+    url: https://gowtham0992.github.io/link/getting-started.html
+    about: "Setup, hooks, MCP, and the three questions everyone asks — check here before filing setup issues."
+  - name: "Does Link read my conversations? (FAQ)"
+    url: https://gowtham0992.github.io/link/getting-started.html#faq
+    about: "Privacy, context windows, and memory scoping, answered plainly."
