@@ -214,6 +214,17 @@ lnk connect cursor ~/link --hooks --write</code></pre>
 python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs</code></pre>
         <p>On Homebrew installs the runtime Python refuses direct <code>pip install</code>s (PEP&nbsp;668), so <code>--setup</code> provisions the extras into Link's managed venv (<code>~/.link-mcp-venv</code>) automatically — the same venv the MCP server runs from, and <code>lnk</code> uses it on the next command. In your own venv, <code>pip install "link-mcp[semantic]"</code> (fast tier) or <code>"link-mcp[semantic-quality]"</code> (quality tier) works as usual before running <code>--setup</code>.</p>
         <p>Recall quality is measured, not asserted: see <a href="https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md">benchmarks/RESULTS.md</a> for the full methodology, numbers, and honest limitations.</p>
+
+        <h2 id="faq">11. The Three Questions Everyone Asks</h2>
+
+        <h3>Does Link read my conversations?</h3>
+        <p>Link never sees a conversation. The session <em>hooks</em> do the reading: at session end the agent's own transcript is mined <strong>locally and deterministically</strong> — no LLM, no network — for statements that look like durable preferences or decisions ("from now on I only push to develop"). Those become <em>proposals</em> in a pending inbox. Nothing is memory until you approve it, and the whole pipeline runs from plain Python files inside your own workspace that you can read (<code>link_core/agent_hooks.py</code>). If you never install hooks, Link only knows what you explicitly tell it with <code>lnk remember</code>.</p>
+
+        <h3>What happens when I clear context or open a new terminal?</h3>
+        <p>That is the whole point of Link. Context windows are disposable — cleared, compacted, abandoned with every new terminal. Your memory does not live there: it lives in Markdown files under <code>~/link</code>, outside every context window. When a new session starts, the hook injects a compact brief of relevant memories back in; when an agent needs more, it asks over MCP. Clear context a hundred times — the agent still knows you never push to main, because that fact was never <em>in</em> the context to begin with. It was in a file.</p>
+
+        <h3>Which project or branch does a memory belong to?</h3>
+        <p>Every memory carries an explicit <code>scope</code> — <code>user</code> (true everywhere: "I prefer concise release notes") or <code>project</code> (tied to one repo: "this service deploys from tags"). Project memories are labeled with their project and don't leak into other repos' briefs. For finer fencing, <code>applies_when</code> conditions (<code>project:</code>, <code>path:</code>, <code>task:</code>) demote a memory to <em>out of context — verify</em> whenever you're outside its territory — so one project's conventions never masquerade as another's. Old checkouts and stale branches can't pollute recall: it's deterministic frontmatter you can open and edit, not classifier guesswork.</p>
       </article>
     </div>
   </main>

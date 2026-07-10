@@ -624,6 +624,7 @@ More detail: [Security guide](https://gowtham0992.github.io/link/security.html).
 | Need | Go here |
 |------|---------|
 | Run Link for the first time | [First 10 minutes](https://gowtham0992.github.io/link/getting-started.html) |
+| "Does Link read my conversations?" | [The three questions everyone asks](https://gowtham0992.github.io/link/getting-started.html#faq) |
 | Decide whether Link fits | [Why Link?](https://gowtham0992.github.io/link/why-link.html) |
 | Use the local viewer | [Web UI](https://gowtham0992.github.io/link/ui.html) |
 | Understand raw/wiki/memory | [Concepts](https://gowtham0992.github.io/link/concepts.html) |
