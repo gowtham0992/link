@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import (  # noqa: E402
     memory_applicability,
+    memory_review_issues,
     memory_brief,
     memory_records,
     parse_applies_when,
@@ -43,6 +44,17 @@ class ApplicabilityTests(unittest.TestCase):
             parse_applies_when("branch:main")
         with self.assertRaises(ValueError):
             parse_applies_when("task:")
+
+    def test_malformed_condition_fails_closed_and_is_flagged(self):
+        # A hand-edit typo ("proj:" for "project:") must not silently remove
+        # the fence: the memory stays out of context until repaired, and the
+        # review inbox flags the syntax error.
+        record = _memory("tabs-memory", "Use tabs.", applies_when="proj:acme")
+        self.assertEqual(memory_applicability(record, project="acme"), "out_of_context")
+        self.assertEqual(memory_applicability(record, project="other"), "out_of_context")
+        issues = memory_review_issues(record)
+        codes = {issue["code"] for issue in issues}
+        self.assertIn("invalid_applies_when", codes)
 
     def test_applicability_states(self):
         record = _memory("squash-merges", "Use squash merges.", applies_when="project:acme")

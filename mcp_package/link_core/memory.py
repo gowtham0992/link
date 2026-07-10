@@ -538,6 +538,24 @@ def memory_review_issues(
                     "suggested_action": "Update it with a new expiry date, archive it, or delete it after confirmation.",
                 })
 
+    applies_when = str(record.get("applies_when") or "").strip()
+    if applies_when:
+        try:
+            parse_applies_when(applies_when)
+        except ValueError:
+            issues.append({
+                "code": "invalid_applies_when",
+                "severity": "high",
+                "message": (
+                    f"applies_when has invalid syntax: {applies_when!r}. The memory is treated "
+                    "as out of context everywhere until the condition is fixed."
+                ),
+                "suggested_action": (
+                    "Edit the memory frontmatter to use project:<slug>, path:<glob>, or "
+                    "task:<phrase> conditions (comma-separated), or remove applies_when."
+                ),
+            })
+
     if status == "stale":
         issues.append({
             "code": "stale_status",
@@ -2391,7 +2409,11 @@ def memory_applicability(
     try:
         conditions = parse_applies_when(record.get("applies_when"))
     except ValueError:
-        return "unconditional"
+        # Fail closed: a malformed condition string is still a fence the
+        # user wrote. Treating it as unconditional would silently apply the
+        # memory everywhere — the exact mis-scoping applies_when prevents.
+        # memory_review_issues flags the syntax error for repair.
+        return "out_of_context"
     if not conditions:
         return "unconditional"
     query_tokens = stemmed_memory_tokens(significant_memory_tokens(query))
