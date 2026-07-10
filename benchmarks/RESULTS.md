@@ -143,6 +143,14 @@ Remaining known headroom is multi-hop evidence recall (0.403 with the rerank
 tier): questions whose gold evidence spans 3+ scattered turns; the honest
 answer today is agent-side iterative recall, not memory-layer reasoning.
 
+**Development-set honesty.** The retrieval improvements above (context
+records, the rerank tier, and the rejected ablations) were selected by their
+scores on this same query set — LoCoMo has no held-out split, and we did not
+create one. Treat the deltas as development-set results: directionally real
+(each change also had to hold or lift the bundled benchmark, a different
+corpus and query style), but the absolute numbers carry selection bias.
+Anyone can rerun every configuration from the scripts in this repo.
+
 **Not comparable to published LoCoMo QA scores** (mem0, Zep, etc. report
 end-to-end LLM answer quality with server-side pipelines). This track scores
 deterministic local ranking only — no answer generation, no LLM judging, no
