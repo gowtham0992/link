@@ -6,7 +6,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
-### Added (procedural memory — feature branch)
+### Added
 
 - Added `procedure` as a memory type: reusable how-to memory (recipes) with an optional `trigger` phrase describing when it applies. Procedures are plain Markdown like every other memory, review-gated, and shared across agents.
 - Trigger phrases are scored like the intent-bearing head fields in recall and included in semantic embeddings, so task-shaped queries ("how do I prepare a release") find recipes phrased differently; recalled procedures carry a bounded `steps` excerpt in recall packets so agents can follow them without another file read.
