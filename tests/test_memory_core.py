@@ -683,6 +683,30 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(payload["proposals"][1]["primary_action"]["kind"], "remember")
         self.assertEqual(payload["proposals"][1]["primary_action"]["tool"], "remember_memory")
 
+    def test_standing_rule_phrasings_propose_preferences(self):
+        payload = propose_memories_from_text(
+            "hey, before we start — from now on I only push to the develop "
+            "branch. never push to main directly, releases go through PRs. "
+            "great. now help me fix the failing test in utils.py",
+            [],
+            source="unit test",
+        )
+        memories = [p["memory"] for p in payload["proposals"]]
+
+        self.assertEqual(len(memories), 2)
+        self.assertTrue(any("develop branch" in m for m in memories))
+        self.assertTrue(any("never push to main" in m for m in memories))
+        for proposal in payload["proposals"]:
+            self.assertEqual(proposal["memory_type"], "preference")
+
+    def test_narrative_only_is_not_a_preference(self):
+        payload = propose_memories_from_text(
+            "I only found one bug in the parser.",
+            [],
+            source="unit test",
+        )
+        self.assertEqual(payload["proposals"], [])
+
     def test_project_duplicate_proposal_command_preserves_project(self):
         records = [
             {

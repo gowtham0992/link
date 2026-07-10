@@ -2896,6 +2896,8 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
                 r"\b(?:i|user|human)\s+(?:prefer|prefers|like|likes|want|wants|need|needs)\b",
                 r"\b(?:please\s+)?(?:always|never|avoid|do not|don't)\b",
                 r"\bagents?\s+should\s+(?:always|never|prefer|avoid|use)\b",
+                r"\b(?:from now on|going forward)\b",
+                r"\b(?:i|we)\s+only\s+(?:push|use|deploy|commit|merge|release|write|run|work|ship)\b",
             ),
         ),
         (
