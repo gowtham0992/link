@@ -210,10 +210,9 @@ lnk connect cursor ~/link --hooks --write</code></pre>
 
         <h2 id="semantic">10. Optional: Hybrid Semantic Recall</h2>
         <p>Lexical recall is always the default and the fallback. Two optional local tiers add paraphrase recall — "how should I structure my pull requests" finds a memory about commit style. The models load offline-only at recall time (a query can never trigger a download), embeddings are plain JSON under <code>.link-cache/</code>, and there is no vector database or service.</p>
-        <pre><code>pip install "link-mcp[semantic]"          # fast tier: tiny static model, instant load
-pip install "link-mcp[semantic-quality]"  # quality tier: contextual model, best recall
-lnk semantic ~/link --setup               # explicit one-time model fetch
+        <pre><code>lnk semantic ~/link --setup               # installs the extras if needed + fetches the models once
 python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs</code></pre>
+        <p>On Homebrew installs the runtime Python refuses direct <code>pip install</code>s (PEP&nbsp;668), so <code>--setup</code> provisions the extras into Link's managed venv (<code>~/.link-mcp-venv</code>) automatically — the same venv the MCP server runs from, and <code>lnk</code> uses it on the next command. In your own venv, <code>pip install "link-mcp[semantic]"</code> (fast tier) or <code>"link-mcp[semantic-quality]"</code> (quality tier) works as usual before running <code>--setup</code>.</p>
         <p>Recall quality is measured, not asserted: see <a href="https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md">benchmarks/RESULTS.md</a> for the full methodology, numbers, and honest limitations.</p>
       </article>
     </div>
