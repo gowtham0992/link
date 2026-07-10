@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from .files import atomic_write_json, atomic_write_text
-from .mcp_verify import display_command, normalize_command_parts, resolve_mcp_python
+from .mcp_verify import (
+    display_command,
+    ensure_link_mcp_runtime,
+    normalize_command_parts,
+    resolve_mcp_python,
+)
 
 
 @dataclass(frozen=True)
@@ -182,14 +187,41 @@ def build_mcp_connect_payload(
     default_python: str,
     config_path: str | None = None,
     write: bool = False,
+    runtime_check: Any = ensure_link_mcp_runtime,
 ) -> dict[str, object]:
-    """Build or write an MCP client configuration for a supported local agent."""
+    """Build or write an MCP client configuration for a supported local agent.
+
+    Before writing, the chosen Python is verified to actually serve link-mcp
+    at Link's version; if it cannot, Link falls back to (or provisions)
+    ~/.link-mcp-venv rather than writing a config the agent cannot start.
+    """
     config = _agent_by_name(agent)
     resolved_python = resolve_mcp_python(target, wiki_dir, python_cmd, default_python=default_python)
+    runtime = runtime_check(resolved_python, expected_version, provision=write)
+    runtime_ready = bool(runtime.get("ready"))
+    chosen_python = str(runtime.get("python") or resolved_python)
+    if runtime_ready and chosen_python != resolved_python:
+        resolved_python = chosen_python
+        root = wiki_dir.parent if wiki_dir.name == "wiki" else target
+        if write:
+            try:
+                atomic_write_text(root / ".link-mcp-python", resolved_python + "\n")
+            except OSError:
+                pass
     path = _config_path(config.default_config, config_path)
     snippet = _config_snippet(config, resolved_python, wiki_dir)
     write_status: dict[str, object] = {"requested": write, "ok": False, "message": "preview only"}
-    if write:
+    if write and not runtime_ready:
+        fix = display_command([resolved_python, "-m", "pip", "install", "--upgrade", f"link-mcp=={expected_version}"])
+        write_status = {
+            "requested": True,
+            "ok": False,
+            "message": (
+                f"not written: {resolved_python} cannot serve link-mcp {expected_version} "
+                f"and provisioning ~/.link-mcp-venv failed. Fix the runtime first: {fix}"
+            ),
+        }
+    elif write:
         try:
             _write_config(path, config, resolved_python, wiki_dir)
             write_status = {"requested": True, "ok": True, "message": f"updated {path}"}
@@ -209,6 +241,12 @@ def build_mcp_connect_payload(
         "target": str(target),
         "wiki": str(wiki_dir),
         "python": resolved_python,
+        "mcp_runtime": {
+            "ready": runtime_ready,
+            "provisioned": bool(runtime.get("provisioned")),
+            "link_mcp": runtime.get("status"),
+            "notes": runtime.get("notes", []),
+        },
         "expected_version": expected_version,
         "config_path": str(path),
         "config_format": config.config_format,

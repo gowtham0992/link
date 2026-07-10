@@ -11,6 +11,26 @@ sys.path.insert(0, str(ROOT / "mcp_package"))
 from link_core.mcp_connect import build_mcp_connect_payload, supported_agents  # noqa: E402
 
 
+def _ready_runtime(python_cmd, expected_version, *, provision=False):
+    return {
+        "ready": True,
+        "python": python_cmd,
+        "status": {"installed": True, "version": expected_version, "mcp_sdk": True, "error": None},
+        "provisioned": False,
+        "notes": [],
+    }
+
+
+def _broken_runtime(python_cmd, expected_version, *, provision=False):
+    return {
+        "ready": False,
+        "python": python_cmd,
+        "status": {"installed": False, "version": None, "mcp_sdk": False, "error": "No module named link_mcp"},
+        "provisioned": False,
+        "notes": [f"{python_cmd}: link-mcp not importable"],
+    }
+
+
 class McpConnectCoreTests(unittest.TestCase):
     def test_supported_agents_include_primary_install_targets(self):
         agents = supported_agents()
@@ -32,6 +52,7 @@ class McpConnectCoreTests(unittest.TestCase):
                 expected_version="1.3.0",
                 init_command=["link", "init", str(root)],
                 default_python="python3",
+                runtime_check=_ready_runtime,
             )
 
         self.assertEqual(payload["agent"], "codex")
@@ -57,6 +78,7 @@ class McpConnectCoreTests(unittest.TestCase):
                 default_python="python3",
                 config_path=str(config),
                 write=True,
+                runtime_check=_ready_runtime,
             )
 
             text = config.read_text(encoding="utf-8")
@@ -84,6 +106,7 @@ class McpConnectCoreTests(unittest.TestCase):
                 default_python="python3",
                 config_path=str(config),
                 write=True,
+                runtime_check=_ready_runtime,
             )
             data = json.loads(config.read_text(encoding="utf-8"))
 
@@ -109,6 +132,7 @@ class McpConnectCoreTests(unittest.TestCase):
                 default_python="python3",
                 config_path=str(config),
                 write=True,
+                runtime_check=_ready_runtime,
             )
             data = json.loads(config.read_text(encoding="utf-8"))
 
@@ -118,6 +142,67 @@ class McpConnectCoreTests(unittest.TestCase):
             data["servers"]["link"]["args"],
             ["-m", "link_mcp", "--wiki", str(wiki), "--surface", "slim"],
         )
+
+    def test_write_refused_when_mcp_runtime_is_broken(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            wiki = root / "wiki"
+            wiki.mkdir()
+            config = root / "mcp.json"
+
+            payload = build_mcp_connect_payload(
+                target=root,
+                wiki_dir=wiki,
+                agent="kiro",
+                expected_version="1.3.0",
+                init_command=["link", "init", str(root)],
+                python_cmd="/tmp/python",
+                default_python="python3",
+                config_path=str(config),
+                write=True,
+                runtime_check=_broken_runtime,
+            )
+
+        self.assertFalse(payload["write"]["ok"])
+        self.assertIn("not written", str(payload["write"]["message"]))
+        self.assertFalse(config.exists())
+        self.assertFalse(payload["mcp_runtime"]["ready"])
+
+    def test_write_repoints_to_provisioned_venv_and_persists_marker(self):
+        def venv_runtime(python_cmd, expected_version, *, provision=False):
+            return {
+                "ready": True,
+                "python": "/home/user/.link-mcp-venv/bin/python",
+                "status": {"installed": True, "version": expected_version, "mcp_sdk": True, "error": None},
+                "provisioned": True,
+                "notes": ["provisioned ~/.link-mcp-venv"],
+            }
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            wiki = root / "wiki"
+            wiki.mkdir()
+            config = root / "mcp.json"
+
+            payload = build_mcp_connect_payload(
+                target=root,
+                wiki_dir=wiki,
+                agent="kiro",
+                expected_version="1.3.0",
+                init_command=["link", "init", str(root)],
+                python_cmd="/tmp/python",
+                default_python="python3",
+                config_path=str(config),
+                write=True,
+                runtime_check=venv_runtime,
+            )
+            data = json.loads(config.read_text(encoding="utf-8"))
+            marker = (root / ".link-mcp-python").read_text(encoding="utf-8").strip()
+
+        self.assertTrue(payload["write"]["ok"])
+        self.assertEqual(data["mcpServers"]["link"]["command"], "/home/user/.link-mcp-venv/bin/python")
+        self.assertEqual(marker, "/home/user/.link-mcp-venv/bin/python")
+        self.assertTrue(payload["mcp_runtime"]["provisioned"])
 
     def test_unknown_agent_is_clear(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -133,6 +218,7 @@ class McpConnectCoreTests(unittest.TestCase):
                     expected_version="1.3.0",
                     init_command=["link", "init", str(root)],
                     default_python="python3",
+                    runtime_check=_ready_runtime,
                 )
 
 

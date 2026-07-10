@@ -413,6 +413,9 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
                 if restart_hint:
                     lines.append(f"  After writing: {restart_hint}")
             elif state == "updated":
+                runtime = connection.get("mcp_runtime") if isinstance(connection.get("mcp_runtime"), Mapping) else {}
+                if runtime.get("provisioned"):
+                    lines.append("  MCP runtime: provisioned ~/.link-mcp-venv so the agent can start Link's MCP server.")
                 if restart_hint:
                     lines.append(f"  Restart: {restart_hint}")
             elif state == "failed":
@@ -461,8 +464,21 @@ def render_mcp_connect_text(payload: Mapping[str, object]) -> tuple[int, str]:
         f"Wiki: {payload.get('wiki')}",
         f"Python: {payload.get('python')}",
         f"Config: {payload.get('config_path')}",
-        "",
     ]
+    runtime = payload.get("mcp_runtime") if isinstance(payload.get("mcp_runtime"), Mapping) else {}
+    if runtime:
+        link_mcp = runtime.get("link_mcp") if isinstance(runtime.get("link_mcp"), Mapping) else {}
+        version = link_mcp.get("version") or "missing"
+        if runtime.get("ready") and runtime.get("provisioned"):
+            lines.append(f"MCP runtime: ready — provisioned ~/.link-mcp-venv (link-mcp {version})")
+        elif runtime.get("ready"):
+            lines.append(f"MCP runtime: ready (link-mcp {version})")
+        elif not requested:
+            lines.append(
+                f"MCP runtime: needs attention (link-mcp {version}, need {payload.get('expected_version')}); "
+                "--write provisions ~/.link-mcp-venv automatically"
+            )
+    lines.append("")
     if requested:
         lines.append(f"Write: {'updated' if ok else 'failed'}")
         message = write_status.get("message")
