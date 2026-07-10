@@ -218,8 +218,7 @@ def load_reranker(allow_download: bool = False) -> Reranker | None:
         try:
             from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-            if not allow_download:
-                os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            _set_offline_guard(allow_download)
             model = TextCrossEncoder(model_name)
             _MODEL_CACHE[cache_key] = model
         except Exception:
@@ -276,6 +275,11 @@ def rerank_blend(
         item["rerank"] = "blended"
         reranked.append(item)
     return reranked
+
+
+def rerank_model_available() -> bool:
+    """True when the rerank cross-encoder loads offline (installed + cached)."""
+    return load_reranker(allow_download=False) is not None
 
 
 def model_available() -> bool:
@@ -509,7 +513,23 @@ def build_semantic_status(
     elif provider == "model2vec":
         tier = "fast (static embeddings; instant load, best for CLI and hooks)"
 
+    rerank_installed = _fastembed_installed() and not rerank_disabled()
+    rerank_ready = rerank_model_available() if rerank_installed else False
+    if rerank_disabled():
+        rerank_state = f"disabled via {RERANK_DISABLE_ENV}"
+    elif rerank_ready:
+        rerank_state = "active on explicit recall (hooks and briefs never pay the latency)"
+    elif rerank_installed:
+        rerank_state = "installed but model not fetched"
+        next_actions.append(f"lnk semantic {command_target} --setup  # also fetches the rerank model")
+    else:
+        rerank_state = "not installed"
+        next_actions.append('optional rerank tier: pip install "link-mcp[rerank]" then rerun --setup')
+
     return {
+        "rerank_ready": rerank_ready,
+        "rerank_state": rerank_state,
+        "rerank_model": rerank_model_name(),
         "enabled": ready,
         "disabled_by_env": disabled,
         "provider": provider,
@@ -540,6 +560,8 @@ def render_semantic_status_text(payload: Mapping[str, object]) -> tuple[int, str
         f"Model: {payload.get('model')}",
         f"Indexed memories: {payload.get('indexed_memories')} of {payload.get('memory_count')}",
         f"Index: {payload.get('index_path')}",
+        f"Rerank tier: {payload.get('rerank_state')}"
+        + (f" · {payload.get('rerank_model')}" if payload.get("rerank_ready") else ""),
     ]
     if payload.get("disabled_by_env"):
         lines.append(f"Disabled via {SEMANTIC_DISABLE_ENV} environment variable.")

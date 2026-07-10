@@ -15,14 +15,71 @@ DEFAULT_PROOF_DIR = "link-proof"
 CliHandler = Callable[..., int]
 
 
+COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Start here", (
+        "try", "onboard", "init", "demo", "proof", "welcome", "prompts",
+    )),
+    ("Memory — the core loop", (
+        "remember", "recall", "recipes", "query", "brief", "start",
+        "session-end", "semantic",
+    )),
+    ("Review & governance", (
+        "memory-inbox", "review-memory", "explain-memory", "consolidate",
+        "capture-inbox", "accept-capture", "delete-capture", "redact-capture",
+        "capture-session", "propose-memories", "update-memory",
+        "archive-memory", "restore-memory", "forget-memory",
+        "set-memory-visibility", "memory-log", "memory-audit",
+    )),
+    ("Agents & automation", (
+        "connect", "hook", "verify-mcp",
+    )),
+    ("Workspace & health", (
+        "status", "health", "doctor", "validate", "migrate", "backup",
+        "restore-backup", "operations", "seed", "ingest-status",
+        "import-obsidian",
+    )),
+    ("Sharing & viewing", (
+        "serve", "share", "snapshot", "graph-summary", "team-sync",
+        "compliance-export",
+    )),
+    ("Utilities", (
+        "version", "benchmark", "wins", "profile", "rebuild-index",
+        "rebuild-backlinks", "query-link",
+    )),
+)
+
+
+class _GroupedCommandHelp(argparse.RawDescriptionHelpFormatter):
+    """Hide the flat 60-command listing; the grouped epilog carries it."""
+
+    def _format_action(self, action):
+        if isinstance(action, argparse._SubParsersAction):
+            return ""
+        return super()._format_action(action)
+
+
+def _grouped_epilog() -> str:
+    lines = ["commands:"]
+    for group, names in COMMAND_GROUPS:
+        lines.append(f"\n  {group}:")
+        lines.append("    " + ", ".join(names))
+    lines.append("\nRun `link.py <command> --help` for that command's options.")
+    return "\n".join(lines)
+
+
 def build_cli_parser(
     default_demo_dir: str = DEFAULT_DEMO_DIR,
     default_proof_dir: str = DEFAULT_PROOF_DIR,
 ) -> argparse.ArgumentParser:
     """Build the Link CLI argument parser."""
-    parser = argparse.ArgumentParser(prog="link.py", description="Link command runner")
+    parser = argparse.ArgumentParser(
+        prog="link.py",
+        description="Link — local, review-gated memory for AI agents. New? Run: link.py try",
+        epilog=_grouped_epilog(),
+        formatter_class=_GroupedCommandHelp,
+    )
     parser.add_argument("--version", action="version", version=f"Link {LINK_VERSION}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
     sub.add_parser("version", help="print the Link CLI version")
 

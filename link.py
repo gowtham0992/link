@@ -2068,6 +2068,13 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
             index = _core_refresh_semantic_index(root, records, embedder=embedder)
             items = index.get("items") if isinstance(index.get("items"), dict) else {}
             action_result = f"Indexed {len(items)} memories."
+            if setup:
+                # The rerank tier shares the fastembed dependency; setup is the
+                # one sanctioned moment to fetch its model too. Never required:
+                # a missing reranker just means retrieval-order results.
+                reranker = _core_load_reranker(allow_download=True)
+                if reranker is not None:
+                    action_result += " Rerank tier ready: explicit recall now blends a local cross-encoder."
             if setup and _core_semantic_provider() == "fastembed":
                 action_result += (
                     " Quality tier active: expect a ~5s model load per short-lived CLI command; "
