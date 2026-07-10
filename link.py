@@ -259,6 +259,8 @@ from link_core.mcp_verify import (
     build_mcp_verify_status as _core_build_mcp_verify_status,
     check_link_mcp_import as _core_check_link_mcp_import,
     display_command as _core_display_command,
+    provision_link_extras as _core_provision_link_extras,
+    python_is_externally_managed as _core_python_is_externally_managed,
     render_mcp_verify_text as _core_render_mcp_verify_text,
     resolve_mcp_python as _core_resolve_mcp_python,
     set_link_command_override as _core_set_link_command_override,
@@ -2059,7 +2061,31 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                 "Recall itself never uses the network."
             )
         embedder = _core_load_semantic_embedder(allow_download=setup)
-        if embedder is None:
+        if embedder is None and setup and _core_python_is_externally_managed():
+            # PEP 668 (e.g. the Homebrew runtime python): a direct pip install
+            # here would be refused, so provision Link's managed venv and run
+            # the setup under it — same venv the MCP server uses.
+            if not json_output:
+                _print_text(
+                    f"{sys.executable} cannot host the semantic extras (externally managed). "
+                    "Provisioning ~/.link-mcp-venv with them instead..."
+                )
+            outcome = _core_provision_link_extras(sys.executable, LINK_VERSION)
+            for note in outcome.get("notes", []):
+                if not json_output:
+                    _print_text(f"  {note}")
+            if outcome.get("ready"):
+                rerun = [str(outcome["python"]), str(ROOT / "link.py"), "semantic", str(root), "--setup"]
+                if json_output:
+                    rerun.append("--json")
+                return subprocess.run(rerun, check=False).returncode
+            action_error = (
+                "Could not provision the semantic extras into ~/.link-mcp-venv. "
+                "Create it by hand: python3 -m venv ~/.link-mcp-venv && "
+                f'~/.link-mcp-venv/bin/python -m pip install "link-mcp[semantic,semantic-quality,rerank]=={LINK_VERSION}" '
+                f"then rerun: ~/.link-mcp-venv/bin/python {ROOT / 'link.py'} semantic {root} --setup"
+            )
+        elif embedder is None:
             install_hint = f'{sys.executable} -m pip install "link-mcp[semantic]"'
             action_error = (
                 f"Semantic provider unavailable for {sys.executable}. Install it first: {install_hint}"
@@ -2091,7 +2117,11 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                     "Set LINK_SEMANTIC_PROVIDER=model2vec (fast tier)."
                 )
     payload = _core_build_semantic_status(
-        root, memory_count=active_count, command_target=root, python_cmd=sys.executable
+        root,
+        memory_count=active_count,
+        command_target=root,
+        python_cmd=sys.executable,
+        externally_managed=_core_python_is_externally_managed(),
     )
     if action_result:
         payload["action_result"] = action_result

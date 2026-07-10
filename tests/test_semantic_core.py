@@ -220,6 +220,16 @@ class SemanticCoreTests(unittest.TestCase):
         self.assertFalse(payload["enabled"])
         self.assertTrue(any("--setup" in action for action in payload["next_actions"]))
 
+    def test_externally_managed_guidance_never_prints_dead_pip_commands(self):
+        with tempfile.TemporaryDirectory() as temp:
+            payload = build_semantic_status(
+                Path(temp), memory_count=3, command_target=temp, externally_managed=True,
+            )
+        joined = "\n".join(payload["next_actions"])
+        self.assertNotIn("pip install", joined)
+        self.assertIn("--setup", joined)
+        self.assertIn(".link-mcp-venv", joined)
+
     def test_memory_embedding_text_is_bounded(self):
         record = _memory("big", "Big memory", "x" * 10000)
         self.assertLess(len(memory_embedding_text(record)), 1200)

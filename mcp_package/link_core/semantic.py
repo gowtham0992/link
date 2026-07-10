@@ -477,6 +477,7 @@ def build_semantic_status(
     memory_count: int,
     command_target: str | Path = ".",
     python_cmd: str | None = None,
+    externally_managed: bool = False,
 ) -> dict[str, object]:
     """Readiness report for the optional semantic recall layer."""
     provider = semantic_provider()
@@ -495,14 +496,22 @@ def build_semantic_status(
     if disabled:
         next_actions.append(f"unset {SEMANTIC_DISABLE_ENV} to re-enable semantic recall")
     elif not installed:
-        next_actions.append('pip install "link-mcp[semantic]"  # fast tier (tiny static model)')
-        next_actions.append('pip install "link-mcp[semantic-quality]"  # quality tier (contextual model)')
-        next_actions.append(f"lnk semantic {command_target} --setup")
+        if externally_managed:
+            # PEP 668 (Homebrew/Debian pythons): direct pip installs are
+            # refused, so --setup provisions Link's managed venv instead.
+            next_actions.append(
+                f"lnk semantic {command_target} --setup"
+                "  # installs the semantic extras into ~/.link-mcp-venv and fetches the models"
+            )
+        else:
+            next_actions.append('pip install "link-mcp[semantic]"  # fast tier (tiny static model)')
+            next_actions.append('pip install "link-mcp[semantic-quality]"  # quality tier (contextual model)')
+            next_actions.append(f"lnk semantic {command_target} --setup")
     elif not ready:
         next_actions.append(f"lnk semantic {command_target} --setup")
     elif index_items < memory_count:
         next_actions.append(f"lnk semantic {command_target} --rebuild")
-    if installed and provider == "model2vec" and not _fastembed_installed():
+    if installed and provider == "model2vec" and not _fastembed_installed() and not externally_managed:
         next_actions.append(
             'optional quality upgrade: pip install "link-mcp[semantic-quality]" then rerun --setup'
         )
@@ -524,7 +533,8 @@ def build_semantic_status(
         next_actions.append(f"lnk semantic {command_target} --setup  # also fetches the rerank model")
     else:
         rerank_state = "not installed"
-        next_actions.append('optional rerank tier: pip install "link-mcp[rerank]" then rerun --setup')
+        if not externally_managed:
+            next_actions.append('optional rerank tier: pip install "link-mcp[rerank]" then rerun --setup')
 
     return {
         "rerank_ready": rerank_ready,

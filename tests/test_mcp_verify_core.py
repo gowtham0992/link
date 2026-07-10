@@ -9,10 +9,52 @@ from mcp_package.link_core.mcp_verify import (
     ensure_link_mcp_runtime,
     expand_command_prefix,
     mcp_verify_guidance,
+    provision_link_extras,
     resolve_mcp_python,
     render_mcp_verify_text,
     set_link_command_override,
 )
+
+
+class ProvisionLinkExtrasTests(unittest.TestCase):
+    def test_installs_pinned_extras_into_managed_venv(self):
+        with tempfile.TemporaryDirectory() as temp:
+            venv_dir = Path(temp) / "venv"
+            commands = []
+
+            def run(cmd, **kwargs):
+                commands.append(cmd)
+                class Done:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Done()
+
+            result = provision_link_extras(
+                "/usr/bin/python3", "1.7.0", venv_dir=venv_dir, run=run,
+            )
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(commands[0][:3], ["/usr/bin/python3", "-m", "venv"])
+        self.assertIn("link-mcp[semantic,semantic-quality,rerank]==1.7.0", commands[1])
+
+    def test_reports_pip_failure_with_the_failing_command(self):
+        with tempfile.TemporaryDirectory() as temp:
+            venv_dir = Path(temp) / "venv"
+
+            def run(cmd, **kwargs):
+                class Failed:
+                    returncode = 1
+                    stdout = ""
+                    stderr = "error: no matching distribution"
+                return Failed()
+
+            result = provision_link_extras(
+                "/usr/bin/python3", "9.9.9", venv_dir=venv_dir, run=run,
+            )
+
+        self.assertFalse(result["ready"])
+        self.assertTrue(any("no matching distribution" in note for note in result["notes"]))
 
 
 class EnsureLinkMcpRuntimeTests(unittest.TestCase):

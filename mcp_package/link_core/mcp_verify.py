@@ -5,6 +5,8 @@ import json
 import os
 import shlex
 import subprocess
+import sys
+import sysconfig
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -98,6 +100,67 @@ def check_link_mcp_import(python_cmd: str) -> dict[str, object]:
         "mcp_sdk": bool(data.get("mcp_sdk")),
         "error": data.get("error"),
     }
+
+
+def python_is_externally_managed(python_cmd: str | None = None) -> bool:
+    """PEP 668: True when the interpreter refuses direct pip installs.
+
+    Homebrew and Debian pythons ship an EXTERNALLY-MANAGED marker; any
+    guidance telling those users to `pip install` directly is dead on
+    arrival — point them at Link's managed venv instead.
+    """
+    if python_cmd is None or python_cmd == sys.executable:
+        return (Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED").exists()
+    code = (
+        "import sysconfig, pathlib; "
+        "print((pathlib.Path(sysconfig.get_path('stdlib')) / 'EXTERNALLY-MANAGED').exists())"
+    )
+    try:
+        result = subprocess.run(
+            [python_cmd, "-c", code],
+            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "True"
+
+
+LINK_EXTRAS = ("semantic", "semantic-quality", "rerank")
+
+
+def provision_link_extras(
+    python_cmd: str,
+    expected_version: str,
+    *,
+    extras: tuple[str, ...] = LINK_EXTRAS,
+    venv_dir: Path | None = None,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> dict[str, object]:
+    """Install link-mcp with the given extras into Link's managed venv.
+
+    Used when the runtime python cannot host the optional tiers itself
+    (PEP 668). Returns {"ready", "python", "notes"}.
+    """
+    notes: list[str] = []
+    venv_root = venv_dir or (Path.home() / ".link-mcp-venv")
+    venv_python = default_mcp_venv_python(venv_dir)
+    spec = f"link-mcp[{','.join(extras)}]=={expected_version}"
+    steps: list[list[str]] = []
+    if not Path(venv_python).exists():
+        steps.append([python_cmd, "-m", "venv", str(venv_root)])
+    steps.append([venv_python, "-m", "pip", "install", "--upgrade", "pip", spec])
+    for step in steps:
+        try:
+            result = run(step, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except OSError as exc:
+            notes.append(f"failed: {display_command(list(step))}: {exc}")
+            return {"ready": False, "python": venv_python, "notes": notes}
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip().splitlines()
+            notes.append(f"failed: {display_command(list(step))}: {detail[-1] if detail else 'unknown error'}")
+            return {"ready": False, "python": venv_python, "notes": notes}
+    notes.append(f"installed {spec} into {venv_root}")
+    return {"ready": True, "python": venv_python, "notes": notes}
 
 
 def default_mcp_venv_python(venv_dir: Path | None = None) -> str:
@@ -231,6 +294,8 @@ def build_mcp_verify_status(
     normalized_import_status = dict(import_status)
     normalized_import_status.setdefault("mcp_sdk", mcp_sdk_ready)
     normalized_import_status.setdefault("error", None)
+    if not import_status.get("installed"):
+        normalized_import_status["externally_managed"] = python_is_externally_managed(resolved_python)
     issues, next_actions = mcp_verify_guidance(
         target=target,
         init_command=init_command,
@@ -374,12 +439,21 @@ def render_mcp_verify_text(status: Mapping[str, object]) -> tuple[int, str]:
 
     lines.extend(["", "Next:"])
     if not installed:
-        action = _action_by_tool(status, "install_link_mcp")
-        lines.append(f"  Install: {action.get('command_text') or display_command([python_cmd, '-m', 'pip', 'install', '--upgrade', 'link-mcp'])}")
-        lines.append("  macOS/Homebrew fallback:")
-        lines.append("    python3 -m venv ~/.link-mcp-venv")
-        lines.append("    ~/.link-mcp-venv/bin/python -m pip install --upgrade pip link-mcp")
-        lines.append("    Then rerun with: python3 link.py verify-mcp . --python ~/.link-mcp-venv/bin/python")
+        if import_status.get("externally_managed"):
+            # PEP 668: a direct pip install into this python would be refused.
+            lines.append("  This Python refuses direct pip installs (PEP 668). Use Link's managed venv:")
+            lines.append("    " + display_command(["lnk", "connect", "<agent>", ".", "--write"]) + "  # provisions ~/.link-mcp-venv automatically")
+            lines.append("  Or by hand:")
+            lines.append("    python3 -m venv ~/.link-mcp-venv")
+            lines.append("    ~/.link-mcp-venv/bin/python -m pip install --upgrade pip link-mcp")
+            lines.append("    Then rerun with: " + display_command(["lnk", "verify-mcp", ".", "--python", "~/.link-mcp-venv/bin/python"]))
+        else:
+            action = _action_by_tool(status, "install_link_mcp")
+            lines.append(f"  Install: {action.get('command_text') or display_command([python_cmd, '-m', 'pip', 'install', '--upgrade', 'link-mcp'])}")
+            lines.append("  macOS/Homebrew fallback:")
+            lines.append("    python3 -m venv ~/.link-mcp-venv")
+            lines.append("    ~/.link-mcp-venv/bin/python -m pip install --upgrade pip link-mcp")
+            lines.append("    Then rerun with: python3 link.py verify-mcp . --python ~/.link-mcp-venv/bin/python")
     elif not mcp_sdk_ready:
         action = _action_by_tool(status, "reinstall_link_mcp")
         lines.append(f"  Reinstall link-mcp dependencies for Link {expected_version}:")
