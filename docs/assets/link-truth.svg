@@ -2,116 +2,34 @@
      aria-label="Link demo: a new memory conflicts with an old one; Link replaces it with lineage, recall returns only the current truth, and --as-of answers what was true back then.">
   <style>
     .win { fill:#221c12; stroke:#3b342a; }
-    text { font-family:'SF Mono','Menlo','Consolas',ui-monospace,monospace; font-size:15px; opacity:0; }
+    text { font-family:'SF Mono','Menlo','Consolas',ui-monospace,monospace; font-size:15px; }
     .cmd { font-weight:500; }
-@keyframes t_0 {
-  0%,2.722% { opacity:0; clip-path:inset(0 100% 0 0); }
-  2.778% { opacity:1; clip-path:inset(0 100% 0 0); }
-  11.111% { opacity:1; clip-path:inset(0 0 0 0); }
-  53.889% { opacity:1; clip-path:inset(0 0 0 0); }
-  56.111%,100% { opacity:0; clip-path:inset(0 0 0 0); }
-}
-@keyframes t_1 {
-  0%,11.056% { opacity:0; }
-  13.056% { opacity:1; }
-  53.889% { opacity:1; }
-  56.111%,100% { opacity:0; }
-}
-@keyframes t_2 {
-  0%,15.500% { opacity:0; }
-  17.500% { opacity:1; }
-  53.889% { opacity:1; }
-  56.111%,100% { opacity:0; }
-}
-@keyframes t_3 {
-  0%,19.389% { opacity:0; clip-path:inset(0 100% 0 0); }
-  19.444% { opacity:1; clip-path:inset(0 100% 0 0); }
-  27.778% { opacity:1; clip-path:inset(0 0 0 0); }
-  53.889% { opacity:1; clip-path:inset(0 0 0 0); }
-  56.111%,100% { opacity:0; clip-path:inset(0 0 0 0); }
-}
-@keyframes t_4 {
-  0%,28.278% { opacity:0; }
-  30.278% { opacity:1; }
-  53.889% { opacity:1; }
-  56.111%,100% { opacity:0; }
-}
-@keyframes t_5 {
-  0%,32.167% { opacity:0; }
-  34.167% { opacity:1; }
-  53.889% { opacity:1; }
-  56.111%,100% { opacity:0; }
-}
-@keyframes t_6 {
-  0%,37.722% { opacity:0; clip-path:inset(0 100% 0 0); }
-  37.778% { opacity:1; clip-path:inset(0 100% 0 0); }
-  46.111% { opacity:1; clip-path:inset(0 0 0 0); }
-  53.889% { opacity:1; clip-path:inset(0 0 0 0); }
-  56.111%,100% { opacity:0; clip-path:inset(0 0 0 0); }
-}
-@keyframes t_7 {
-  0%,47.722% { opacity:0; }
-  49.722% { opacity:1; }
-  53.889% { opacity:1; }
-  56.111%,100% { opacity:0; }
-}
-@keyframes t_8 {
-  0%,58.833% { opacity:0; clip-path:inset(0 100% 0 0); }
-  58.889% { opacity:1; clip-path:inset(0 100% 0 0); }
-  64.578% { opacity:1; clip-path:inset(0 0 0 0); }
-  96.111% { opacity:1; clip-path:inset(0 0 0 0); }
-  98.333%,100% { opacity:0; clip-path:inset(0 0 0 0); }
-}
-@keyframes t_9 {
-  0%,66.056% { opacity:0; }
-  68.056% { opacity:1; }
-  96.111% { opacity:1; }
-  98.333%,100% { opacity:0; }
-}
-@keyframes t_10 {
-  0%,69.389% { opacity:0; }
-  71.389% { opacity:1; }
-  96.111% { opacity:1; }
-  98.333%,100% { opacity:0; }
-}
-@keyframes t_11 {
-  0%,74.389% { opacity:0; clip-path:inset(0 100% 0 0); }
-  74.444% { opacity:1; clip-path:inset(0 100% 0 0); }
-  82.778% { opacity:1; clip-path:inset(0 0 0 0); }
-  96.111% { opacity:1; clip-path:inset(0 0 0 0); }
-  98.333%,100% { opacity:0; clip-path:inset(0 0 0 0); }
-}
-@keyframes t_12 {
-  0%,83.833% { opacity:0; }
-  85.833% { opacity:1; }
-  96.111% { opacity:1; }
-  98.333%,100% { opacity:0; }
-}
-@keyframes t_13 {
-  0%,87.167% { opacity:0; }
-  89.167% { opacity:1; }
-  96.111% { opacity:1; }
-  98.333%,100% { opacity:0; }
-}
   </style>
+  <defs>
+    <clipPath id="tw0"><rect x="28" y="49" height="24" width="0"><animate attributeName="width" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;464;464" keyTimes="0.00000;0.02778;0.11111;1.00000"/></rect></clipPath>
+<clipPath id="tw3"><rect x="28" y="135" height="24" width="0"><animate attributeName="width" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;547;547" keyTimes="0.00000;0.19444;0.27778;1.00000"/></rect></clipPath>
+<clipPath id="tw6"><rect x="28" y="217" height="24" width="0"><animate attributeName="width" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;556;556" keyTimes="0.00000;0.37778;0.46111;1.00000"/></rect></clipPath>
+<clipPath id="tw8"><rect x="28" y="61" height="24" width="308"><animate attributeName="width" dur="18s" repeatCount="indefinite" calcMode="linear" values="308;0;0;308;308" keyTimes="0.00000;0.00667;0.58889;0.64578;1.00000"/></rect></clipPath>
+<clipPath id="tw11"><rect x="28" y="159" height="24" width="483"><animate attributeName="width" dur="18s" repeatCount="indefinite" calcMode="linear" values="483;0;0;483;483" keyTimes="0.00000;0.00667;0.74444;0.82778;1.00000"/></rect></clipPath>
+  </defs>
   <rect class="win" x="1" y="1" width="718" height="298" rx="12"/>
   <rect x="1" y="1" width="718" height="34" rx="12" fill="#1a150d"/>
   <circle cx="24" cy="18" r="5" fill="#e06c60"/>
   <circle cx="44" cy="18" r="5" fill="#e0b34f"/>
   <circle cx="64" cy="18" r="5" fill="#7fae8f"/>
-  <text x="360" y="23" text-anchor="middle" fill="#8a8174" style="font-size:12px;opacity:1;letter-spacing:.08em;">lnk · memory that stays true</text>
-  <text x="30" y="66" class="cmd" fill="#f3ece0" style="animation:t_0 18s infinite;">$ lnk remember "we deploy from main every Friday"</text>
-  <text x="30" y="92" class="out" fill="#86c79a" style="animation:t_1 18s infinite;">✓ saved to local memory</text>
-  <text x="30" y="124" class="dim" fill="#8a8174" style="animation:t_2 18s infinite;">— weeks later —</text>
-  <text x="30" y="152" class="cmd" fill="#f3ece0" style="animation:t_3 18s infinite;">$ lnk remember "no longer Fridays - deploys ship Tuesdays"</text>
-  <text x="30" y="178" class="out" fill="#e0b34f" style="animation:t_4 18s infinite;">⚠ conflicts with an active memory</text>
-  <text x="30" y="202" class="note" fill="#e0955f" style="animation:t_5 18s infinite;">→ replace it: rerun with --supersedes deploy-…-friday</text>
-  <text x="30" y="234" class="cmd" fill="#f3ece0" style="animation:t_6 18s infinite;">$ lnk remember … --supersedes deploy-from-main-every-friday</text>
-  <text x="30" y="262" class="out" fill="#86c79a" style="animation:t_7 18s infinite;">✓ saved · old memory archived with lineage</text>
-  <text x="30" y="78" class="cmd" fill="#f3ece0" style="animation:t_8 18s infinite;">$ lnk recall "when do we deploy"</text>
-  <text x="30" y="106" class="out" fill="#86c79a" style="animation:t_9 18s infinite;">✓ no longer Fridays - deploys ship Tuesdays</text>
-  <text x="30" y="130" class="note" fill="#e0955f" style="animation:t_10 18s infinite;">→ only the current truth</text>
-  <text x="30" y="176" class="cmd" fill="#f3ece0" style="animation:t_11 18s infinite;">$ lnk recall "when do we deploy" --as-of 2026-05-01</text>
-  <text x="30" y="204" class="out" fill="#86c79a" style="animation:t_12 18s infinite;">✓ we deploy from main every Friday</text>
-  <text x="30" y="228" class="note" fill="#e0955f" style="animation:t_13 18s infinite;">→ what was true back then · history is never lost</text>
+  <text x="360" y="23" text-anchor="middle" fill="#8a8174" style="font-size:12px;letter-spacing:.08em;">lnk · memory that stays true</text>
+  <text x="30" y="66" class="cmd" fill="#f3ece0" opacity="0" clip-path="url(#tw0)">$ lnk remember "we deploy from main every Friday"<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.02778;0.02889;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="92" class="out" fill="#86c79a" opacity="0">✓ saved to local memory<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.11111;0.13056;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="124" class="dim" fill="#8a8174" opacity="0">— weeks later —<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.15556;0.17500;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="152" class="cmd" fill="#f3ece0" opacity="0" clip-path="url(#tw3)">$ lnk remember "no longer Fridays - deploys ship Tuesdays"<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.19444;0.19556;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="178" class="out" fill="#e0b34f" opacity="0">⚠ conflicts with an active memory<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.28333;0.30278;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="202" class="note" fill="#e0955f" opacity="0">→ replace it: rerun with --supersedes deploy-…-friday<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.32222;0.34167;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="234" class="cmd" fill="#f3ece0" opacity="0" clip-path="url(#tw6)">$ lnk remember … --supersedes deploy-from-main-every-friday<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.37778;0.37889;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="262" class="out" fill="#86c79a" opacity="0">✓ saved · old memory archived with lineage<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.47778;0.49722;0.53889;0.56111;1.00000"/></text>
+  <text x="30" y="78" class="cmd" fill="#f3ece0" opacity="1" clip-path="url(#tw8)">$ lnk recall "when do we deploy"<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00667;0.58889;0.59000;1.00000"/></text>
+  <text x="30" y="106" class="out" fill="#86c79a" opacity="1">✓ no longer Fridays - deploys ship Tuesdays<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00667;0.66111;0.68056;1.00000"/></text>
+  <text x="30" y="130" class="note" fill="#e0955f" opacity="1">→ only the current truth<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00667;0.69444;0.71389;1.00000"/></text>
+  <text x="30" y="176" class="cmd" fill="#f3ece0" opacity="1" clip-path="url(#tw11)">$ lnk recall "when do we deploy" --as-of 2026-05-01<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00667;0.74444;0.74556;1.00000"/></text>
+  <text x="30" y="204" class="out" fill="#86c79a" opacity="1">✓ we deploy from main every Friday<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00667;0.83889;0.85833;1.00000"/></text>
+  <text x="30" y="228" class="note" fill="#e0955f" opacity="1">→ what was true back then · history is never lost<animate attributeName="opacity" dur="18s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00667;0.87222;0.89167;1.00000"/></text>
 </svg>

@@ -32,7 +32,7 @@
 
 <p align="center">
   <a href="https://gowtham0992.github.io/link/">
-    <img src="docs/assets/link-site.png" alt="Link — local, source-backed memory for AI agents" width="840">
+    <img src="docs/assets/link-remembers.svg" alt="Link demo: a preference said once in an agent session is captured automatically, approved by you, and recalled in a brand-new terminal the next day — from a plain Markdown file" width="840">
   </a>
 </p>
 
