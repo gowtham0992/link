@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img"
+     aria-label="Link demo: a new memory conflicts with an old one; Link replaces it with lineage, recall returns only the current truth, and --as-of answers what was true back then.">
+  <style>
+    .win { fill:#221c12; stroke:#3b342a; }
+    text { font-family:'SF Mono','Menlo','Consolas',ui-monospace,monospace; font-size:15px; opacity:0; }
+    .cmd { font-weight:500; }
+@keyframes t_0 {
+  0%,2.722% { opacity:0; clip-path:inset(0 100% 0 0); }
+  2.778% { opacity:1; clip-path:inset(0 100% 0 0); }
+  11.111% { opacity:1; clip-path:inset(0 0 0 0); }
+  53.889% { opacity:1; clip-path:inset(0 0 0 0); }
+  56.111%,100% { opacity:0; clip-path:inset(0 0 0 0); }
+}
+@keyframes t_1 {
+  0%,11.056% { opacity:0; }
+  13.056% { opacity:1; }
+  53.889% { opacity:1; }
+  56.111%,100% { opacity:0; }
+}
+@keyframes t_2 {
+  0%,15.500% { opacity:0; }
+  17.500% { opacity:1; }
+  53.889% { opacity:1; }
+  56.111%,100% { opacity:0; }
+}
+@keyframes t_3 {
+  0%,19.389% { opacity:0; clip-path:inset(0 100% 0 0); }
+  19.444% { opacity:1; clip-path:inset(0 100% 0 0); }
+  26.911% { opacity:1; clip-path:inset(0 0 0 0); }
+  53.889% { opacity:1; clip-path:inset(0 0 0 0); }
+  56.111%,100% { opacity:0; clip-path:inset(0 0 0 0); }
+}
+@keyframes t_4 {
+  0%,28.278% { opacity:0; }
+  30.278% { opacity:1; }
+  53.889% { opacity:1; }
+  56.111%,100% { opacity:0; }
+}
+@keyframes t_5 {
+  0%,32.167% { opacity:0; }
+  34.167% { opacity:1; }
+  53.889% { opacity:1; }
+  56.111%,100% { opacity:0; }
+}
+@keyframes t_6 {
+  0%,37.722% { opacity:0; clip-path:inset(0 100% 0 0); }
+  37.778% { opacity:1; clip-path:inset(0 100% 0 0); }
+  46.111% { opacity:1; clip-path:inset(0 0 0 0); }
+  53.889% { opacity:1; clip-path:inset(0 0 0 0); }
+  56.111%,100% { opacity:0; clip-path:inset(0 0 0 0); }
+}
+@keyframes t_7 {
+  0%,47.722% { opacity:0; }
+  49.722% { opacity:1; }
+  53.889% { opacity:1; }
+  56.111%,100% { opacity:0; }
+}
+@keyframes t_8 {
+  0%,58.833% { opacity:0; clip-path:inset(0 100% 0 0); }
+  58.889% { opacity:1; clip-path:inset(0 100% 0 0); }
+  64.578% { opacity:1; clip-path:inset(0 0 0 0); }
+  96.111% { opacity:1; clip-path:inset(0 0 0 0); }
+  98.333%,100% { opacity:0; clip-path:inset(0 0 0 0); }
+}
+@keyframes t_9 {
+  0%,66.056% { opacity:0; }
+  68.056% { opacity:1; }
+  96.111% { opacity:1; }
+  98.333%,100% { opacity:0; }
+}
+@keyframes t_10 {
+  0%,69.389% { opacity:0; }
+  71.389% { opacity:1; }
+  96.111% { opacity:1; }
+  98.333%,100% { opacity:0; }
+}
+@keyframes t_11 {
+  0%,74.389% { opacity:0; clip-path:inset(0 100% 0 0); }
+  74.444% { opacity:1; clip-path:inset(0 100% 0 0); }
+  82.778% { opacity:1; clip-path:inset(0 0 0 0); }
+  96.111% { opacity:1; clip-path:inset(0 0 0 0); }
+  98.333%,100% { opacity:0; clip-path:inset(0 0 0 0); }
+}
+@keyframes t_12 {
+  0%,83.833% { opacity:0; }
+  85.833% { opacity:1; }
+  96.111% { opacity:1; }
+  98.333%,100% { opacity:0; }
+}
+@keyframes t_13 {
+  0%,87.167% { opacity:0; }
+  89.167% { opacity:1; }
+  96.111% { opacity:1; }
+  98.333%,100% { opacity:0; }
+}
+  </style>
+  <rect class="win" x="1" y="1" width="718" height="298" rx="12"/>
+  <rect x="1" y="1" width="718" height="34" rx="12" fill="#1a150d"/>
+  <circle cx="24" cy="18" r="5" fill="#e06c60"/>
+  <circle cx="44" cy="18" r="5" fill="#e0b34f"/>
+  <circle cx="64" cy="18" r="5" fill="#7fae8f"/>
+  <text x="360" y="23" text-anchor="middle" fill="#8a8174" style="font-size:12px;opacity:1;letter-spacing:.08em;">lnk · memory that stays true</text>
+  <text x="30" y="66" class="cmd" fill="#f3ece0" style="animation:t_0 18s infinite;">$ lnk remember "we deploy from main every Friday"</text>
+  <text x="30" y="92" class="out" fill="#86c79a" style="animation:t_1 18s infinite;">✓ saved to local memory</text>
+  <text x="30" y="124" class="dim" fill="#8a8174" style="animation:t_2 18s infinite;">— weeks later —</text>
+  <text x="30" y="152" class="cmd" fill="#f3ece0" style="animation:t_3 18s infinite;">$ lnk remember "deploys moved to Tuesdays"</text>
+  <text x="30" y="178" class="out" fill="#e0b34f" style="animation:t_4 18s infinite;">⚠ conflicts with an active memory</text>
+  <text x="30" y="202" class="note" fill="#e0955f" style="animation:t_5 18s infinite;">→ replace it: rerun with --supersedes deploy-…-friday</text>
+  <text x="30" y="234" class="cmd" fill="#f3ece0" style="animation:t_6 18s infinite;">$ lnk remember … --supersedes deploy-from-main-every-friday</text>
+  <text x="30" y="262" class="out" fill="#86c79a" style="animation:t_7 18s infinite;">✓ saved · old memory archived with lineage</text>
+  <text x="30" y="78" class="cmd" fill="#f3ece0" style="animation:t_8 18s infinite;">$ lnk recall "when do we deploy"</text>
+  <text x="30" y="106" class="out" fill="#86c79a" style="animation:t_9 18s infinite;">✓ deploys moved to Tuesdays</text>
+  <text x="30" y="130" class="note" fill="#e0955f" style="animation:t_10 18s infinite;">→ only the current truth</text>
+  <text x="30" y="176" class="cmd" fill="#f3ece0" style="animation:t_11 18s infinite;">$ lnk recall "when do we deploy" --as-of 2026-05-01</text>
+  <text x="30" y="204" class="out" fill="#86c79a" style="animation:t_12 18s infinite;">✓ we deploy from main every Friday</text>
+  <text x="30" y="228" class="note" fill="#e0955f" style="animation:t_13 18s infinite;">→ what was true back then · history is never lost</text>
+</svg>
