@@ -94,12 +94,27 @@ commitments those designs cannot bolt on:
 4. **Provably local.** CI blocks outbound network code in the runtime, and the
    optional semantic models load offline-only after one explicit setup.
 
-And the claims are measured, not asserted: a reproducible 1,176-case recall
-benchmark plus a third-party LoCoMo retrieval track, with published miss rates
-and a CI gate against regressions —
-[benchmarks/RESULTS.md](benchmarks/RESULTS.md). Named comparisons against
-Mem0/OpenMemory, Zep/Graphiti, and Letta:
+And the claims are measured, not asserted — see the benchmarks below. Named
+comparisons against Mem0/OpenMemory, Zep/Graphiti, and Letta:
 [Why Link?](https://gowtham0992.github.io/link/why-link.html)
+
+## Benchmarks
+
+Plain files with no LLM in the memory layer, measured against the systems
+that have one everywhere:
+
+| What | Link | For comparison |
+|---|---|---|
+| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's |
+| **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
+| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 23.9% |
+| **Bundled 1,176-case recall benchmark** — deterministic, runs offline in CI | hit@1 **0.749**, +rerank **0.839** | gates every change; a regression fails the build |
+
+Every number ships with its config, judge model, caveats, and the
+experiments that *lost* — including LongMemEval end-to-end (78.0%, where
+the published comparisons use GPT-5 as both answerer and judge and ours
+uses a budget model, so we don't claim a comparison). Full methodology
+and reproduction steps: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 ## Quick Start
 
@@ -391,9 +406,9 @@ tier lifts token-overlap hit@1 from 0.589 to 0.749 and pure-paraphrase
 (zero token overlap) hit@3/hit@5 by ~4×, at ~10 ms per recall with no
 service or vector database. On the third-party LoCoMo retrieval track
 (1,536 evidence-annotated questions over 5,882 conversation turns), hybrid
-recall lifts any-evidence hit@10 from 0.578 to 0.685. Full methodology,
-honest limitations, and reproduction steps:
-[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+recall lifts any-evidence hit@10 from 0.628 to 0.737 (0.794 with the
+opt-in rerank tier). Full methodology, honest limitations, and
+reproduction steps: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 <details>
 <summary>MCP-only install</summary>
