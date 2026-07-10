@@ -140,6 +140,7 @@ from link_core.memory import (
     memory_review_issues as _core_memory_review_issues,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memories,
+    recall_abstention as _core_recall_abstention,
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
@@ -1665,6 +1666,7 @@ def recall(
             "include_archived": include_archived,
             "project": project_name,
             "as_of": as_of or "",
+            "abstention": _core_recall_abstention(results),
             "memories": results,
         }, indent=2))
         return 0
