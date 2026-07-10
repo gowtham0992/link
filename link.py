@@ -265,6 +265,7 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    read_agent_link_server as _core_read_agent_link_server,
     supported_agents as _core_supported_agents,
 )
 from link_core.agent_hooks import (
@@ -2423,7 +2424,35 @@ def verify_mcp(
     json_output: bool = False,
     python_cmd: str | None = None,
     import_check: Callable[[str], dict[str, object]] = _core_check_link_mcp_import,
+    agent: str | None = None,
 ) -> int:
+    agent_note: str | None = None
+    if agent:
+        # Verify what the agent is actually configured to run, not a guess.
+        if str(target) == ".":
+            target = _default_workspace()
+        server = _core_read_agent_link_server(agent)
+        if not server.get("configured"):
+            message = (
+                f"{server.get('display_name')} has no Link MCP server configured "
+                f"({server.get('config_path')}).\n"
+                "Write one with: "
+                + _display_command(["lnk", "connect", str(server.get("agent")), str(target), "--write"])
+            )
+            if json_output:
+                print(json.dumps({"ready": False, "agent": server}, indent=2))
+            else:
+                _print_text(message)
+            return 1
+        python_cmd = str(server.get("python"))
+        configured_wiki = server.get("wiki")
+        if configured_wiki:
+            wiki_path = Path(str(configured_wiki)).expanduser()
+            target = wiki_path.parent if wiki_path.name == "wiki" else wiki_path
+        agent_note = (
+            f"Verifying the Link server {server.get('display_name')} is configured to run "
+            f"({server.get('config_path')})."
+        )
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     status = _core_build_mcp_verify_status(
@@ -2441,6 +2470,8 @@ def verify_mcp(
         return 0 if status["ready"] else 1
 
     code, text = _core_render_mcp_verify_text(status)
+    if agent_note:
+        _print_text(agent_note + "\n")
     _print_text(text)
     return code
 

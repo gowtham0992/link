@@ -176,6 +176,72 @@ def _write_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki_dir:
     _write_json_config(path, config, python_cmd, wiki_dir)
 
 
+def agent_alias_matches(name: str) -> bool:
+    """True when the string names a supported agent (canonical or alias)."""
+    normalized = name.strip().lower().replace("_", "-")
+    return any(
+        normalized == config.name or normalized in config.aliases
+        for config in AGENT_CONFIGS
+    )
+
+
+def read_agent_link_server(agent: str, config_path: str | None = None) -> dict[str, object]:
+    """Read the Link MCP server an agent is actually configured to run.
+
+    Returns {"agent", "display_name", "config_path", "configured", "python",
+    "wiki"}. `configured` is False when the config file or its link server
+    entry is missing — the caller should point at `lnk connect`.
+    """
+    config = _agent_by_name(agent)
+    path = _config_path(config.default_config, config_path)
+    result: dict[str, object] = {
+        "agent": config.name,
+        "display_name": config.display_name,
+        "config_path": str(path),
+        "configured": False,
+        "python": None,
+        "wiki": None,
+    }
+    if not path.exists():
+        return result
+    text = path.read_text(encoding="utf-8", errors="replace")
+    command: str | None = None
+    args: list[str] = []
+    if config.config_format == "codex-toml":
+        block = re.search(r"(?ms)^\[mcp_servers\.link\]\r?\n(.*?)(?=^\[|\Z)", text)
+        if not block:
+            return result
+        command_match = re.search(r'(?m)^command\s*=\s*"((?:[^"\\]|\\.)*)"', block.group(1))
+        args_match = re.search(r"(?m)^args\s*=\s*(\[.*\])", block.group(1))
+        if command_match:
+            command = json.loads(f'"{command_match.group(1)}"')
+        if args_match:
+            try:
+                args = [str(item) for item in json.loads(args_match.group(1))]
+            except json.JSONDecodeError:
+                args = []
+    else:
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return result
+        server = payload.get(config.top_key, {}).get("link") if isinstance(payload, dict) else None
+        if not isinstance(server, dict):
+            return result
+        command = str(server.get("command") or "") or None
+        raw_args = server.get("args")
+        args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
+    if not command:
+        return result
+    wiki = None
+    for index, item in enumerate(args):
+        if item == "--wiki" and index + 1 < len(args):
+            wiki = args[index + 1]
+            break
+    result.update({"configured": True, "python": command, "wiki": wiki})
+    return result
+
+
 def build_mcp_connect_payload(
     *,
     target: Path,

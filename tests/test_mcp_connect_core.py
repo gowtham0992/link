@@ -8,7 +8,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
-from link_core.mcp_connect import build_mcp_connect_payload, supported_agents  # noqa: E402
+from link_core.mcp_connect import (  # noqa: E402
+    agent_alias_matches,
+    build_mcp_connect_payload,
+    read_agent_link_server,
+    supported_agents,
+)
 
 
 def _ready_runtime(python_cmd, expected_version, *, provision=False):
@@ -203,6 +208,56 @@ class McpConnectCoreTests(unittest.TestCase):
         self.assertEqual(data["mcpServers"]["link"]["command"], "/home/user/.link-mcp-venv/bin/python")
         self.assertEqual(marker, "/home/user/.link-mcp-venv/bin/python")
         self.assertTrue(payload["mcp_runtime"]["provisioned"])
+
+    def test_agent_alias_matches_names_and_aliases_only(self):
+        self.assertTrue(agent_alias_matches("claude-code"))
+        self.assertTrue(agent_alias_matches("claude"))
+        self.assertTrue(agent_alias_matches("Codex"))
+        self.assertFalse(agent_alias_matches("./my-workspace"))
+        self.assertFalse(agent_alias_matches("link-demo"))
+
+    def test_read_agent_link_server_from_json_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp) / "claude.json"
+            config.write_text(json.dumps({
+                "mcpServers": {
+                    "link": {
+                        "command": "/venv/bin/python",
+                        "args": ["-m", "link_mcp", "--wiki", "/home/u/link/wiki", "--surface", "slim"],
+                    }
+                }
+            }), encoding="utf-8")
+
+            server = read_agent_link_server("claude-code", config_path=str(config))
+
+        self.assertTrue(server["configured"])
+        self.assertEqual(server["python"], "/venv/bin/python")
+        self.assertEqual(server["wiki"], "/home/u/link/wiki")
+
+    def test_read_agent_link_server_from_codex_toml(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp) / "config.toml"
+            config.write_text(
+                '[mcp_servers.link]\ncommand = "/venv/bin/python"\n'
+                'args = ["-m", "link_mcp", "--wiki", "/home/u/link/wiki", "--surface", "slim"]\n',
+                encoding="utf-8",
+            )
+
+            server = read_agent_link_server("codex", config_path=str(config))
+
+        self.assertTrue(server["configured"])
+        self.assertEqual(server["python"], "/venv/bin/python")
+        self.assertEqual(server["wiki"], "/home/u/link/wiki")
+
+    def test_read_agent_link_server_reports_unconfigured(self):
+        with tempfile.TemporaryDirectory() as temp:
+            missing = read_agent_link_server("cursor", config_path=str(Path(temp) / "nope.json"))
+            other_only = Path(temp) / "mcp.json"
+            other_only.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}), encoding="utf-8")
+            no_link = read_agent_link_server("cursor", config_path=str(other_only))
+
+        self.assertFalse(missing["configured"])
+        self.assertFalse(no_link["configured"])
 
     def test_unknown_agent_is_clear(self):
         with tempfile.TemporaryDirectory() as temp:

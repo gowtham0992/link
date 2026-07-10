@@ -479,8 +479,15 @@ def build_cli_parser(
     rebuild_cmd = sub.add_parser("rebuild-backlinks", help="rebuild wiki/_backlinks.json")
     rebuild_cmd.add_argument("target", nargs="?", default=".")
 
-    verify_mcp_cmd = sub.add_parser("verify-mcp", help="verify link-mcp import and print MCP config")
-    verify_mcp_cmd.add_argument("target", nargs="?", default=".")
+    verify_mcp_cmd = sub.add_parser(
+        "verify-mcp",
+        help="verify link-mcp import and print MCP config; pass an agent name to check what that agent is configured to run",
+    )
+    verify_mcp_cmd.add_argument(
+        "target", nargs="?", default=".",
+        help="workspace path, or an agent name (codex, claude-code, cursor, ...) to verify that agent's written config",
+    )
+    verify_mcp_cmd.add_argument("extra_target", nargs="?", default=None, help="workspace path when the first argument is an agent name")
     verify_mcp_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
     verify_mcp_cmd.add_argument("--python", default=None, help="Python executable to verify")
 
@@ -833,6 +840,15 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "rebuild-backlinks":
         return handlers["rebuild-backlinks"](Path(args.target))
     if command == "verify-mcp":
+        from .mcp_connect import agent_alias_matches
+
+        if agent_alias_matches(str(args.target)):
+            return handlers["verify-mcp"](
+                Path(args.extra_target or "."),
+                json_output=args.json,
+                python_cmd=args.python,
+                agent=str(args.target),
+            )
         return handlers["verify-mcp"](Path(args.target), json_output=args.json, python_cmd=args.python)
     if command == "connect":
         return handlers["connect"](
