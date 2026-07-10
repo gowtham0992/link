@@ -82,6 +82,19 @@ Full suite, Apple M4, macOS 26.5.1, Python 3.14, run 2026-07-08, Link
   no shared token to expand from) and slightly hurt token-overlap hit@1 by
   pulling in competing memories. Rejected.
 
+## Research context
+
+Two of Link's most-questioned design choices now have independent academic
+support. A controlled ablation of memory representations (arXiv:2601.00821)
+found verbatim conversation chunks beat LLM-extracted artifacts by 15.9
+points on LoCoMo and 22.0 on LongMemEval-S — "retrieval accuracy tracks how
+far the representation departs from the source" — with the winning hybrid
+being verbatim text supplemented by distilled artifacts, which is Link's
+raw-sources-plus-reviewed-memories layout. Separately, a study of
+conversational memory retrieval (arXiv:2603.15599) found ranking quality
+beats graph structure, consistent with our own rejected entity-graph
+ablation below. Neither paper is affiliated with Link.
+
 ## Track 2: LoCoMo third-party retrieval
 
 Every dialog turn of a LoCoMo conversation becomes one memory record; every

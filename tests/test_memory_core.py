@@ -148,6 +148,20 @@ class MemoryCoreTests(unittest.TestCase):
             "context must not count as the memory's own claim",
         )
 
+    def test_abstention_verdict_matches_evidence(self):
+        # The don't-know contract: empty or weak-confidence results must
+        # yield abstention.recommended=True so agents say "my memory has
+        # nothing on this" instead of dressing a weak match up as an answer.
+        from link_core.memory import recall_abstention
+
+        self.assertTrue(recall_abstention([])["recommended"])
+        weak = [{"name": "m", "confidence": "weak"}]
+        verdict = recall_abstention(weak)
+        self.assertTrue(verdict["recommended"])
+        self.assertIn("weak", verdict["reason"])
+        strong = [{"name": "m", "confidence": "strong"}]
+        self.assertFalse(recall_abstention(strong)["recommended"])
+
     def test_recall_matches_common_developer_paraphrases(self):
         records = [
             {

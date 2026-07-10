@@ -2493,6 +2493,40 @@ def is_existing_memory_echo(
     return False
 
 
+ABSTENTION_CONFIDENCES = {"", "weak"}
+
+
+def recall_abstention(results: list[dict[str, object]]) -> dict[str, object]:
+    """An explicit don't-know signal for a recall result set.
+
+    LongMemEval-style abstention: when someone asks about something the
+    memory never contained, the correct behavior is to say so — not to let
+    an agent dress a weak match up as an answer. Link already computes the
+    evidence (confidence labels, match kinds); this makes the verdict
+    first-class so every surface can pass it to the agent.
+
+    recommended=True means: no memory here is strong enough to assert from.
+    """
+    if not results:
+        return {
+            "recommended": True,
+            "reason": "no matching memories",
+            "guidance": "Say the memory does not contain this rather than guessing.",
+        }
+    top = results[0]
+    confidence = str(top.get("confidence") or "")
+    if confidence in ABSTENTION_CONFIDENCES:
+        return {
+            "recommended": True,
+            "reason": f"best match has {confidence or 'no'} confidence",
+            "guidance": (
+                "Treat matches as hints only; say the memory has nothing "
+                "reliable on this rather than asserting from a weak match."
+            ),
+        }
+    return {"recommended": False, "reason": f"best match confidence: {confidence}"}
+
+
 def memory_duplicate_candidates(
     records: Iterable[Mapping[str, object]],
     text: str,

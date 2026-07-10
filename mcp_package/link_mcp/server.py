@@ -227,6 +227,7 @@ from link_core.memory import (
     memory_review_issues as _core_memory_review_issues,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memory_results,
+    recall_abstention as _core_recall_abstention,
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
@@ -966,6 +967,9 @@ def link_instructions_resource() -> str:
         "skip step 2 and go straight to bounded task recall.\n"
         "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
         "confidence) as hints to verify, not facts to act on.\n"
+        "Recall results include an `abstention` verdict: when `abstention.recommended` is true, the memory "
+        "has nothing reliable on this — tell the user so instead of answering from a weak match. Saying "
+        "\"my memory doesn't cover that\" is correct behavior, not failure.\n"
         "When a new memory contradicts an existing one, prefer remember(..., supersedes=\"<old-name>\") "
         "with user approval: the old memory is archived with lineage instead of coexisting.\n"
         "Memories may carry an `applicability` label: `out_of_context` means the memory's declared "
@@ -1203,6 +1207,7 @@ def recall(
             "query": clean_query,
             "project": clean_project,
             "count": len(memories),
+            "abstention": _core_recall_abstention(memories),
             "memories": memories,
         }, ensure_ascii=False)
 
@@ -1682,6 +1687,7 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
         "count": len(memories),
         "include_archived": include_archived,
         "project": project_name,
+        "abstention": _core_recall_abstention(memories),
         "memories": memories,
     }, ensure_ascii=False)
 

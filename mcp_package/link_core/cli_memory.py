@@ -232,6 +232,12 @@ def render_recall_text(
         return 0, "\n".join(lines)
 
     lines.append(f"{len(results)} memor{'y' if len(results) == 1 else 'ies'}")
+    top_confidence = str(results[0].get("confidence") or "")
+    if top_confidence in {"", "weak"}:
+        lines.append(
+            "⚠ Best match is weak — treat as a hint. If asked to answer from memory, "
+            "say the memory has nothing reliable on this rather than asserting."
+        )
     for record in results:
         lines.append(f"- {record['title']} ({record['memory_type']} · {record['scope']})")
         lines.append(f"  {record['path']}")
