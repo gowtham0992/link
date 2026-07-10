@@ -1149,6 +1149,12 @@ def remember(
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
+        if "missing wiki directory" in str(exc):
+            print(
+                f"No workspace yet? Create one with {_display_command(['lnk', 'onboard'])} "
+                f"(builds {_default_workspace()}), then pathless commands find it automatically.",
+                file=sys.stderr,
+            )
         return 1
 
     return _emit_json_or_text(
@@ -2381,8 +2387,30 @@ def _display_command(parts: list[str]) -> str:
     return _core_display_command(parts)
 
 
+def _lnk_on_path_runs_this_runtime() -> bool:
+    """True when a `lnk` on PATH is a shim for this very runtime.
+
+    Homebrew installs the runtime under .../Cellar/link/<ver>/libexec and a
+    `lnk` shim in bin — users should see `lnk` in every generated command,
+    never the interpreter + Cellar path leaking into the product's own
+    suggested next steps.
+    """
+    if "/Cellar/link/" in str(ROOT):
+        return True
+    lnk = shutil.which("lnk")
+    if not lnk:
+        return False
+    try:
+        shim = Path(lnk).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return str(ROOT / "link.py") in shim
+
+
 def _configure_link_command_display() -> None:
     if os.environ.get("LINK_CLI_COMMAND"):
+        _core_set_link_command_override(None)
+    elif _lnk_on_path_runs_this_runtime():
         _core_set_link_command_override(None)
     else:
         _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
@@ -3055,6 +3083,48 @@ def try_link(
     return code
 
 
+# Commands that CONSUME an existing workspace. When one of these is run with
+# the default target (.) in a directory that has no Link wiki, fall back to
+# the default workspace (LINK_WORKSPACE or ~/link) instead of dead-ending —
+# `lnk onboard` creates ~/link and the very next thing every new user types
+# is `lnk remember "..."` with no path. Creator commands (init, demo, try,
+# proof, onboard) are excluded on purpose: they must act where they are told.
+_WORKSPACE_COMMANDS = {
+    "remember", "recall", "recipes", "query", "query-link", "brief", "start",
+    "session-end", "end", "propose-memories", "capture-session",
+    "capture-inbox", "accept-capture", "redact-capture", "delete-capture",
+    "update-memory", "set-memory-visibility", "memory-inbox", "memory-log",
+    "review-memory", "explain-memory", "memory-audit", "archive-memory",
+    "restore-memory", "forget-memory", "consolidate", "profile", "wins",
+    "semantic", "status", "health", "doctor", "validate", "operations",
+    "backup", "restore-backup", "ingest-status", "serve", "share",
+    "snapshot", "graph-summary", "benchmark", "team-sync",
+    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
+    "verify-mcp", "connect",
+}
+
+
+def _default_workspace() -> Path:
+    return Path(os.environ.get("LINK_WORKSPACE") or (Path.home() / "link")).expanduser()
+
+
+def _apply_default_workspace(args) -> None:
+    if getattr(args, "command", "") not in _WORKSPACE_COMMANDS:
+        return
+    if getattr(args, "target", None) != ".":
+        return
+    if (Path.cwd() / "wiki").exists():
+        return
+    workspace = _default_workspace()
+    if (workspace / "wiki").exists():
+        args.target = str(workspace)
+        print(
+            f"Workspace: {workspace} (no Link wiki in the current directory; "
+            "pass a path or set LINK_WORKSPACE to change)",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     # Short-lived CLI: prefer the instant-load semantic tier so interactive
     # commands never pay a multi-second model load. Explicit provider wins;
@@ -3062,6 +3132,7 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("LINK_SEMANTIC_SURFACE", "cli")
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
+    _apply_default_workspace(args)
     _configure_link_command_display()
     try:
         return _core_dispatch_cli_command(args, {

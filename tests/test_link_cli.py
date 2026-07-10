@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import os
+import types
 import subprocess
 import sys
 import tarfile
@@ -3248,3 +3250,100 @@ class AgentHookCliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DefaultWorkspaceFallbackTests(unittest.TestCase):
+    """A pathless memory command in a wikiless directory must fall back to
+    the default workspace instead of dead-ending — onboard creates ~/link
+    and the next thing every new user types is `lnk remember` with no path.
+    """
+
+    def _args(self, command: str, target: str = "."):
+        return types.SimpleNamespace(command=command, target=target)
+
+    def test_pathless_consumer_command_falls_back_to_workspace(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-ws-fallback-"))
+        workspace = tmp / "workspace"
+        (workspace / "wiki").mkdir(parents=True)
+        elsewhere = tmp / "elsewhere"
+        elsewhere.mkdir()
+        previous_cwd = Path.cwd()
+        previous_env = os.environ.get("LINK_WORKSPACE")
+        try:
+            os.chdir(elsewhere)
+            os.environ["LINK_WORKSPACE"] = str(workspace)
+            args = self._args("remember")
+            with redirect_stderr(StringIO()) as err:
+                link_cli._apply_default_workspace(args)
+            self.assertEqual(args.target, str(workspace))
+            self.assertIn("Workspace:", err.getvalue())
+        finally:
+            os.chdir(previous_cwd)
+            if previous_env is None:
+                os.environ.pop("LINK_WORKSPACE", None)
+            else:
+                os.environ["LINK_WORKSPACE"] = previous_env
+
+    def test_creator_commands_and_explicit_targets_never_redirect(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-ws-noredirect-"))
+        workspace = tmp / "workspace"
+        (workspace / "wiki").mkdir(parents=True)
+        elsewhere = tmp / "elsewhere"
+        elsewhere.mkdir()
+        previous_cwd = Path.cwd()
+        previous_env = os.environ.get("LINK_WORKSPACE")
+        try:
+            os.chdir(elsewhere)
+            os.environ["LINK_WORKSPACE"] = str(workspace)
+            for command, target in (("init", "."), ("demo", "."), ("remember", "some/path")):
+                args = self._args(command, target)
+                link_cli._apply_default_workspace(args)
+                self.assertEqual(args.target, target, command)
+        finally:
+            os.chdir(previous_cwd)
+            if previous_env is None:
+                os.environ.pop("LINK_WORKSPACE", None)
+            else:
+                os.environ["LINK_WORKSPACE"] = previous_env
+
+    def test_cwd_with_wiki_wins_over_workspace(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-ws-cwdwins-"))
+        (tmp / "wiki").mkdir(parents=True)
+        previous_cwd = Path.cwd()
+        try:
+            os.chdir(tmp)
+            args = self._args("recall")
+            link_cli._apply_default_workspace(args)
+            self.assertEqual(args.target, ".")
+        finally:
+            os.chdir(previous_cwd)
+
+
+class LnkCommandDisplayTests(unittest.TestCase):
+    def test_shim_on_path_switches_generated_commands_to_lnk(self):
+        # A `lnk` on PATH that wraps THIS runtime means the user installed a
+        # launcher (e.g. Homebrew): generated commands must say `lnk`, never
+        # interpreter + install path.
+        tmp = Path(tempfile.mkdtemp(prefix="link-shim-"))
+        shim = tmp / "lnk"
+        shim.write_text(f'#!/bin/sh\nexec python3 "{link_cli.ROOT / "link.py"}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        previous_path = os.environ.get("PATH", "")
+        try:
+            os.environ["PATH"] = f"{tmp}:{previous_path}"
+            self.assertTrue(link_cli._lnk_on_path_runs_this_runtime())
+            link_cli._configure_link_command_display()
+            rendered = link_cli._display_command(["lnk", "status"])
+            self.assertEqual(rendered, "lnk status")
+        finally:
+            os.environ["PATH"] = previous_path
+            link_cli._core_set_link_command_override(None)
+
+    def test_no_shim_keeps_source_checkout_command(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-noshim-"))
+        previous_path = os.environ.get("PATH", "")
+        try:
+            os.environ["PATH"] = str(tmp)  # no lnk anywhere
+            self.assertFalse(link_cli._lnk_on_path_runs_this_runtime())
+        finally:
+            os.environ["PATH"] = previous_path
+
