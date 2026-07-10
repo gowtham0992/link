@@ -97,6 +97,28 @@ class DoctorCoreTests(unittest.TestCase):
         self.assertIn("created wiki/log.md", fixes)
         self.assertIn("created wiki/index.md", fixes)
 
+    def test_apply_doctor_fixes_refreshes_stale_workspace_runtime(self):
+        root = Path(tempfile.mkdtemp(prefix="link-doctor-runtime-"))
+        (root / "link.py").write_text("# old runtime\n", encoding="utf-8")
+        (root / "link_core").mkdir()
+        (root / "link_core" / "version.py").write_text(
+            'LINK_VERSION = "1.0.0"\n', encoding="utf-8",
+        )
+
+        fixes = apply_doctor_fixes(root)
+
+        self.assertTrue(any("refreshed workspace runtime 1.0.0" in fix for fix in fixes))
+        refreshed = (root / "link_core" / "version.py").read_text(encoding="utf-8")
+        self.assertNotIn('"1.0.0"', refreshed)
+        self.assertGreater((root / "link.py").stat().st_size, 100)
+
+    def test_apply_doctor_fixes_leaves_current_runtime_alone(self):
+        root = Path(tempfile.mkdtemp(prefix="link-doctor-runtime-"))
+
+        fixes = apply_doctor_fixes(root)  # no runtime copy at all
+
+        self.assertFalse(any("workspace runtime" in fix for fix in fixes))
+
     def test_required_paths_lists_workspace_shape(self):
         root = Path("/tmp/link")
         paths = [path.relative_to(root).as_posix() for path in required_paths(root)]

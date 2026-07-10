@@ -17,6 +17,7 @@ from .schema import migrate_wiki
 from .schema import schema_status
 from .security import find_sensitive_filenames, find_sensitive_values
 from .validation import validate_wiki
+from .version import LINK_VERSION, workspace_runtime_is_older
 from .wiki import WIKILINK_RE, load_backlinks_index, rebuild_index
 from .wiki import build_backlinks_from_cache, build_wiki_cache, close_wiki_cache
 
@@ -407,6 +408,19 @@ def apply_doctor_fixes(target: Path) -> list[str]:
         if needs_rebuild:
             atomic_write_json(backlinks_path, expected)
             fixes.append("rebuilt wiki/_backlinks.json")
+
+    stale_runtime = workspace_runtime_is_older(target, LINK_VERSION)
+    if stale_runtime:
+        # Session hooks run the workspace's runtime copy; refreshing it is
+        # a safe repair (Link's own code, never user data). Only possible
+        # when this runtime is a full checkout — the pip package has no
+        # link.py to copy from.
+        source_root = Path(__file__).resolve().parents[2]
+        if (source_root / "link.py").exists():
+            from .demo import copy_runtime_files
+
+            copy_runtime_files(source_root, target)
+            fixes.append(f"refreshed workspace runtime {stale_runtime} → {LINK_VERSION}")
 
     return fixes
 

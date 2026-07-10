@@ -71,6 +71,41 @@ class StatusCoreTests(unittest.TestCase):
         self.assertEqual(payload["next_actions"][0]["tool"], "recall")
         self.assertEqual(payload["next_actions"][0]["arguments"], {"query": "<user task>", "budget": "micro"})
 
+    def test_link_status_warns_when_workspace_runtime_is_older(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "link.py").write_text("# runtime copy\n", encoding="utf-8")
+            (root / "link_core").mkdir()
+            (root / "link_core" / "version.py").write_text(
+                'LINK_VERSION = "1.5.0"\n', encoding="utf-8",
+            )
+            wiki = root / "wiki"
+            wiki.mkdir()
+
+            payload = link_status(wiki, version="1.7.0")
+            codes = [w.get("code") for w in payload.get("warnings", [])]
+
+            self.assertIn("stale_runtime", codes)
+            stale = next(w for w in payload["warnings"] if w["code"] == "stale_runtime")
+            self.assertIn("1.5.0", stale["message"])
+            self.assertIn("lnk init", stale["detail"])
+
+    def test_link_status_leaves_newer_workspace_runtimes_alone(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "link.py").write_text("# dev checkout copy\n", encoding="utf-8")
+            (root / "link_core").mkdir()
+            (root / "link_core" / "version.py").write_text(
+                'LINK_VERSION = "9.9.9"\n', encoding="utf-8",
+            )
+            wiki = root / "wiki"
+            wiki.mkdir()
+
+            payload = link_status(wiki, version="1.7.0")
+            codes = [w.get("code") for w in payload.get("warnings", [])]
+
+            self.assertNotIn("stale_runtime", codes)
+
     def test_link_status_reports_missing_structure(self):
         wiki = Path(tempfile.mkdtemp(prefix="link-status-core-")) / "wiki"
 

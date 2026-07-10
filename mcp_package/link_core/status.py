@@ -8,6 +8,7 @@ from .memory import memory_records
 from .operations import pending_operations
 from .schema import schema_status
 from .validation import validate_wiki
+from .version import workspace_runtime_is_older
 from .wiki import build_wiki_cache, close_wiki_cache
 
 
@@ -51,6 +52,19 @@ def link_status(
     pages: list[Mapping[str, object]] = []
     record_list: list[Mapping[str, object]] = []
     warnings: list[dict[str, str]] = []
+    if version:
+        # Session hooks run the workspace's own runtime copy; after an
+        # upgrade it stays old until refreshed, and nothing else notices.
+        stale_runtime = workspace_runtime_is_older(wiki_dir.parent, version)
+        if stale_runtime:
+            warnings.append({
+                "code": "stale_runtime",
+                "message": (
+                    f"The workspace runtime is {stale_runtime} but installed Link is {version}; "
+                    "session hooks run the workspace copy."
+                ),
+                "detail": f"Refresh it with: lnk init {wiki_dir.parent}",
+            })
     search_backend = "unavailable"
     persistent_cache: dict[str, object] = {
         "enabled": False,

@@ -340,6 +340,7 @@ from link_core.validation import (
 )
 from link_core.version import (
     LINK_VERSION,
+    workspace_runtime_is_older as _core_workspace_runtime_is_older,
 )
 from link_core.cli_style import (
     style_cli_text as _core_style_cli_text,
@@ -2540,7 +2541,9 @@ def connect_mcp(
         runtime_note = ""
         if runtime_script.exists():
             # A workspace runtime copied before session hooks existed would
-            # make every installed hook fail with an argparse error.
+            # make every installed hook fail with an argparse error, and an
+            # older runtime silently runs old capture behavior after upgrades.
+            stale_version = _core_workspace_runtime_is_older(target, LINK_VERSION)
             if not (target / "link_core" / "agent_hooks.py").exists():
                 if write:
                     _copy_runtime_files(target)
@@ -2550,6 +2553,19 @@ def connect_mcp(
                         f"The Link runtime at {target} predates session hooks; "
                         "--write will refresh it automatically (or run "
                         f"{_display_command(['lnk', 'init', str(target)])} first)."
+                    )
+            elif stale_version:
+                if write:
+                    _copy_runtime_files(target)
+                    runtime_note = (
+                        f"Refreshed the Link runtime at {target}: "
+                        f"{stale_version} → {LINK_VERSION} (hooks run the workspace copy)."
+                    )
+                else:
+                    runtime_note = (
+                        f"The Link runtime at {target} is {stale_version} but installed Link is "
+                        f"{LINK_VERSION}; --write will refresh it (or run "
+                        f"{_display_command(['lnk', 'init', str(target)])})."
                     )
         else:
             runtime_script = ROOT / "link.py"
