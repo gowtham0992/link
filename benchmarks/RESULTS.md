@@ -119,10 +119,29 @@ deterministic entity-activation layer), and HippoRAG-style one-step entity
 activation over a speaker/proper-noun graph (no measurable lift over its
 base fusion). The shipped ranking — field-weighted lexical scoring over
 claim + context, merged with standout-based semantic scores — remains the
-best configuration measured (0.737). Remaining known headroom is multi-hop
-evidence recall (0.350): questions whose gold evidence spans 3+ scattered
-turns, which none of the cheap structural tricks closed; the honest answer
-today is agent-side iterative recall, not memory-layer reasoning.
+best configuration measured (0.737). **Rerank tier (opt-in).** A local cross-encoder
+(Xenova/ms-marco-MiniLM-L-6-v2, 0.08 GB ONNX) re-orders the top 50 recall
+candidates, blended with the retrieval order via reciprocal-rank fusion.
+On the default embedder this lifts any-evidence hit@10 0.737 → 0.794,
+evidence recall@10 0.660 → 0.717, and multi-hop evidence recall
+0.350 → 0.403 — and on the bundled benchmark lifts token-overlap hit@1
+0.749 → 0.839 and pure-paraphrase hit@5 0.338 → 0.436, so the gain holds
+across both text shapes. Cost: ~0.5 s per recall at 50 candidates, so the
+tier applies only to explicit recall calls, never hooks or briefs.
+Ablation: using the reranker score alone (no blend) collapsed hit@1
+0.380 → 0.182 by promoting topically related non-evidence turns.
+
+**Embedding models are not interchangeable across text shapes.** A sweep of
+four modern small local models found the rankings invert between benchmarks:
+nomic-embed-text-v1.5-Q wins LoCoMo (hit@10 0.787 vs 0.737 for the default
+all-MiniLM-L6-v2) but loses the bundled claim-shaped suite (hit@1 0.713 vs
+0.749), with bge-small-en-v1.5 between the two on both. The default stays
+all-MiniLM-L6-v2; `LINK_SEMANTIC_MODEL=nomic-ai/nomic-embed-text-v1.5-Q` is
+the measured recommendation for conversational-archive workloads.
+
+Remaining known headroom is multi-hop evidence recall (0.403 with the rerank
+tier): questions whose gold evidence spans 3+ scattered turns; the honest
+answer today is agent-side iterative recall, not memory-layer reasoning.
 
 **Not comparable to published LoCoMo QA scores** (mem0, Zep, etc. report
 end-to-end LLM answer quality with server-side pipelines). This track scores

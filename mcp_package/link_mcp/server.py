@@ -257,6 +257,9 @@ from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
 )
 from link_core.semantic import (
+    RERANK_CANDIDATES as _CORE_RERANK_CANDIDATES,
+    load_reranker as _core_load_reranker,
+    rerank_blend as _core_rerank_blend,
     semantic_memory_scores as _core_semantic_memory_scores,
 )
 from link_core.files import (
@@ -574,15 +577,20 @@ def _recall_memory_results(
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
     records = _memory_records()
-    return _core_recall_memory_results(
+    reranker = _core_load_reranker()
+    fetch = max(limit, _CORE_RERANK_CANDIDATES) if reranker is not None else limit
+    results = _core_recall_memory_results(
         records,
         query,
-        limit=limit,
+        limit=fetch,
         include_archived=include_archived,
         project=_resolve_project(project),
         context_path=_clean_text_input(context_path, max_len=500) or None,
         semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, query, records),
     )
+    if reranker is not None:
+        results = _core_rerank_blend(query, results, limit=limit, reranker=reranker)
+    return results[:limit]
 
 
 def _propose_memories_from_text(

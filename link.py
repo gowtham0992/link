@@ -277,6 +277,9 @@ from link_core.consolidate import (
     render_consolidate_text as _core_render_consolidate_text,
 )
 from link_core.semantic import (
+    RERANK_CANDIDATES as _CORE_RERANK_CANDIDATES,
+    load_reranker as _core_load_reranker,
+    rerank_blend as _core_rerank_blend,
     build_semantic_status as _core_build_semantic_status,
     load_embedder as _core_load_semantic_embedder,
     refresh_memory_index as _core_refresh_semantic_index,
@@ -519,10 +522,15 @@ def _recall_memories(
     memory_type: str | None = None,
 ) -> list[dict[str, object]]:
     records = _memory_records(wiki_dir)
-    return _core_recall_memories(
+    # Rerank tier (optional): over-fetch candidates and let a local
+    # cross-encoder blend into the final order. Explicit recall only —
+    # hooks and briefs never take this path.
+    reranker = _core_load_reranker()
+    fetch = max(limit, _CORE_RERANK_CANDIDATES) if reranker is not None else limit
+    results = _core_recall_memories(
         records,
         query,
-        limit=limit,
+        limit=fetch,
         include_archived=include_archived,
         project=project,
         semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
@@ -530,6 +538,9 @@ def _recall_memories(
         as_of=as_of,
         memory_type=memory_type,
     )
+    if reranker is not None:
+        results = _core_rerank_blend(query, results, limit=limit, reranker=reranker)
+    return results[:limit]
 
 
 def _propose_memories_from_text(
