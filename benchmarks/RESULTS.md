@@ -111,6 +111,18 @@ category, most strongly single-hop (hit@10 0.713 → 0.816 in the prototype).
 Ablation that did not survive: splicing a hit's dialogue neighbors into the
 ranked list at recall time *hurt* (hit@10 0.685 → 0.550) — neighbors displace
 genuinely ranked turns; context must inform scoring, not bypass it.
+Three further challengers to the shipped ranking also measured worse, with
+correct primitives and the same protocol: reciprocal rank fusion of the
+lexical and semantic rankings (hit@10 0.616), Okapi BM25 replacing Link's
+field-weighted lexical scoring inside the fusion (0.627 alone, 0.691 with a
+deterministic entity-activation layer), and HippoRAG-style one-step entity
+activation over a speaker/proper-noun graph (no measurable lift over its
+base fusion). The shipped ranking — field-weighted lexical scoring over
+claim + context, merged with standout-based semantic scores — remains the
+best configuration measured (0.737). Remaining known headroom is multi-hop
+evidence recall (0.350): questions whose gold evidence spans 3+ scattered
+turns, which none of the cheap structural tricks closed; the honest answer
+today is agent-side iterative recall, not memory-layer reasoning.
 
 **Not comparable to published LoCoMo QA scores** (mem0, Zep, etc. report
 end-to-end LLM answer quality with server-side pipelines). This track scores
