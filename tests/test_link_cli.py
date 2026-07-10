@@ -1801,6 +1801,39 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Capture read warnings", text)
         self.assertIn("locked.md", text)
 
+    def test_accept_capture_carries_procedure_trigger_into_frontmatter(self):
+        # The end-to-end recipe promise: a numbered-steps session becomes a
+        # procedure proposal with a trigger, and accepting the capture writes
+        # that trigger into the memory page so trigger-boosted recall works.
+        tmp = Path(tempfile.mkdtemp(prefix="link-trigger-accept-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        capture_out = StringIO()
+        with redirect_stdout(capture_out):
+            capture_code = link_cli.capture_session(
+                target,
+                "To rotate staging keys:\n"
+                "1. Generate a new key in the vault console\n"
+                "2. Update the staging secrets file and redeploy\n"
+                "3. Revoke the old key after the deploy is green",
+                title="Key rotation session",
+                json_output=True,
+            )
+        capture = json.loads(capture_out.getvalue())
+        self.assertEqual(capture_code, 0)
+
+        accept_out = StringIO()
+        with redirect_stdout(accept_out):
+            accept_code = link_cli.accept_capture(target, capture["path"], index=1, json_output=True)
+        accepted = json.loads(accept_out.getvalue())
+        self.assertEqual(accept_code, 0)
+        self.assertTrue(accepted["result"]["created"], accepted)
+
+        memory_text = (target / accepted["result"]["path"]).read_text(encoding="utf-8")
+        self.assertIn("memory_type: procedure", memory_text)
+        self.assertIn('trigger: "To rotate staging keys"', memory_text)
+
     def test_accept_capture_writes_approved_proposal(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-memory-test-"))
         target = tmp / "demo"

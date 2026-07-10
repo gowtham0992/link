@@ -73,6 +73,41 @@ class ProcedureMemoryTests(unittest.TestCase):
         self.assertIn("Bump the version", str(recalled["steps"]))
         self.assertIn(recalled["confidence"], {"strong", "moderate"})
 
+    def test_numbered_steps_get_trigger_as_title_not_the_digit(self):
+        # "1. Run the script ..." must not become a memory titled "1";
+        # the trigger names the recipe when no explicit title is given.
+        with tempfile.TemporaryDirectory() as temp:
+            wiki = self._wiki(temp)
+            result = write_memory_page(
+                wiki,
+                "1. Bump the version. 2. Open the release PR. 3. Tag and publish.",
+                title=None,
+                memory_type="procedure",
+                scope="user",
+                tags=None,
+                source="test",
+                timestamp="2026-07-08T00:00:00Z",
+                trigger="cutting a release",
+            )
+        self.assertTrue(result.get("created"), result)
+        self.assertEqual(result.get("title"), "cutting a release")
+
+    def test_numbered_steps_without_trigger_use_first_step_text(self):
+        with tempfile.TemporaryDirectory() as temp:
+            wiki = self._wiki(temp)
+            result = write_memory_page(
+                wiki,
+                "1. Bump the version everywhere. 2. Open the release PR. 3. Tag and publish.",
+                title=None,
+                memory_type="note",
+                scope="user",
+                tags=None,
+                source="test",
+                timestamp="2026-07-08T00:00:00Z",
+            )
+        self.assertTrue(result.get("created"), result)
+        self.assertEqual(result.get("title"), "Bump the version everywhere")
+
     def test_invalid_trigger_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             wiki = self._wiki(temp)

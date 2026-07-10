@@ -19,6 +19,39 @@ from link_core.wiki import build_wiki_cache, close_wiki_cache  # noqa: E402
 
 
 class ProjectSeedCoreTests(unittest.TestCase):
+    def test_adr_save_command_is_paste_safe_and_untruncated(self):
+        # The printed "Save if approved" command must carry the full decision
+        # text, shell-quoted — a display-truncated command would silently save
+        # a cut-off memory ending in an ellipsis.
+        long_decision = (
+            "We will use SQLite with WAL mode as the job queue backend instead of Redis, "
+            "because operational simplicity beats throughput at our scale and it removes "
+            "a service dependency from every deployment environment we support."
+        )
+        payload = {
+            "project": "demo", "project_root": "/tmp/demo", "target": "/tmp/wiki",
+            "status": "ok", "included_count": 1, "skipped_large_count": 0,
+            "blocked_secret_count": 0, "read_error_count": 0,
+            "git_log_included": False, "git_log_error": "", "dry_run": True,
+            "wrote": [], "existing": [], "next_commands": [],
+            "next_prompt": "query Link for demo project context",
+            "decision_candidates": [{
+                "path": "docs/adr/0007.md",
+                "title": "ADR 0007",
+                "memory": f"ADR 0007: {long_decision}",
+            }],
+        }
+        _, text = render_seed_project_text(payload)
+        command_line = next(line for line in text.splitlines() if "Save if approved" in line)
+        self.assertIn("every deployment environment we support.", command_line)
+        self.assertNotIn("…", command_line)
+        # shlex-parseable: pasting it must hand remember exactly one text arg.
+        import shlex
+        parts = shlex.split(command_line.split("Save if approved: ", 1)[1])
+        self.assertEqual(parts[:2], ["lnk", "remember"])
+        self.assertIn("every deployment environment we support.", parts[2])
+
+
     def test_discovers_allowlisted_project_context_files(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-project-seed-test-"))
         project = tmp / "client-app"

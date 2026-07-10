@@ -154,6 +154,9 @@ def memory_title(text: str, explicit_title: str | None = None) -> str:
     if explicit_title and explicit_title.strip():
         return explicit_title.strip()
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "Memory")
+    # Numbered steps ("1. Run the script ...") would otherwise title the
+    # memory "1" — the enumeration marker is not the sentence.
+    first_line = re.sub(r"^(?:\d+[.)]\s+|step\s+\d+\s*[:.]\s*)", "", first_line, flags=re.IGNORECASE) or first_line
     first_sentence = re.split(r"(?<=[.!?])\s+", first_line, maxsplit=1)[0].strip()
     if len(first_sentence) <= 70:
         return first_sentence.rstrip(".")
@@ -1485,7 +1488,10 @@ def write_memory_page(
     if clean_expires_at:
         _parse_expires_date(clean_expires_at)
     clean_project = normalize_project(project) if scope == "project" else ""
-    memory_title_value = memory_title(clean_text, title)
+    derived_title = title
+    if not (derived_title and derived_title.strip()) and memory_type == "procedure" and clean_trigger:
+        derived_title = clean_trigger
+    memory_title_value = memory_title(clean_text, derived_title)
     summary = clean_text.splitlines()[0].strip()
     if len(summary) > 180:
         summary = summary[:177].rstrip() + "..."

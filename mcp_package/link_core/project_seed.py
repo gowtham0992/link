@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -502,8 +503,15 @@ def render_seed_project_text(payload: dict[str, object]) -> tuple[int, str]:
         lines.extend(["", f"Decision candidates found in ADRs ({len(candidates)}) — review with the user, nothing was saved:"])
         for candidate in candidates:
             lines.append(f"- {candidate.get('title')} ({candidate.get('path')})")
+            # The command must be paste-safe: the full candidate text, shell
+            # quoted. A display-truncated command would save a cut-off memory.
             memory_text = str(candidate.get("memory") or "")
-            lines.append(f"  Save if approved: lnk remember \"{memory_text[:80]}…\" --type decision --source {candidate.get('path')}")
+            save_command = shlex.join([
+                "lnk", "remember", memory_text,
+                "--type", "decision",
+                "--source", str(candidate.get("path") or ""),
+            ])
+            lines.append(f"  Save if approved: {save_command}")
     if payload.get("dry_run"):
         lines.append("Dry run: no files were written.")
     if payload.get("wrote"):

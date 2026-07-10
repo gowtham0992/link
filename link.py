@@ -1456,6 +1456,7 @@ def accept_capture(
         allow_duplicate=allow_duplicate,
         allow_conflict=allow_conflict,
         project=str(memory_args["project"]),
+        trigger=str(memory_args.get("trigger") or "") or None,
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
