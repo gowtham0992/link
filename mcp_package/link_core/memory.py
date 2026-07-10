@@ -294,7 +294,7 @@ def _extract_preference_pairs(value: str) -> list[tuple[set[str], set[str]]]:
 
 
 def slim_memory(record: Mapping[str, object]) -> dict[str, object]:
-    return {key: value for key, value in record.items() if key != "body"}
+    return {key: value for key, value in record.items() if key not in {"body", "context"}}
 
 
 def memory_claim_text(record: Mapping[str, object]) -> str:
@@ -444,6 +444,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "expires_at": meta.get("expires_at", ""),
         "review_note": meta.get("review_note", ""),
         "trigger": str(meta.get("trigger") or ""),
+        "context": str(meta.get("context") or ""),
         "applies_when": str(meta.get("applies_when") or ""),
         "supersedes": str(meta.get("supersedes") or ""),
         "superseded_by": str(meta.get("superseded_by") or ""),
@@ -2132,6 +2133,14 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     trigger = str(record.get("trigger") or "").lower()
     if trigger:
         tldr = f"{tldr} {trigger}".strip()
+    # Retrieval context: text from around the memory's origin (neighboring
+    # dialogue turns, surrounding notes). It helps recall FIND the memory but
+    # is never part of the claim — echoes, duplicates, and conflicts compare
+    # claims only (memory_claim_text), and slim output drops it. Measured on
+    # LoCoMo: indexing turns with +/-1 neighbors lifts hit@10 0.685 -> 0.749.
+    context = str(record.get("context") or "").lower()
+    if context:
+        body = f"{body} {context}".strip()
     title_tokens = memory_tokens(title)
     tldr_tokens = memory_tokens(tldr)
     body_tokens = memory_tokens(body)

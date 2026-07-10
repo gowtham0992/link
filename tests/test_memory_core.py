@@ -113,6 +113,41 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(recalled[0]["highest_review_severity"], "none")
         self.assertNotIn("body", recalled[0])
 
+    def test_retrieval_context_finds_memory_but_stays_out_of_claim_and_output(self):
+        # `context` is retrieval fuel from around a memory's origin (e.g.
+        # neighboring dialogue turns). It must make the memory findable,
+        # but never leak into recall output or count as part of the claim
+        # for echo detection.
+        record = {
+            "name": "inspiring-stories",
+            "path": "wiki/memories/inspiring-stories.md",
+            "title": "Stories felt inspiring",
+            "memory_type": "note",
+            "scope": "user",
+            "status": "active",
+            "review_status": "reviewed",
+            "tags": [],
+            "tldr": "The stories were so inspiring.",
+            "body": "The stories were so inspiring, I felt thankful for the support.",
+            "context": "Caroline: I gave a talk about my transgender journey at the school event.",
+        }
+
+        results = recall_memories([record], "transgender journey school event", limit=3)
+        self.assertTrue(results, "context tokens must make the memory findable")
+        self.assertEqual(results[0]["name"], "inspiring-stories")
+        self.assertNotIn("context", results[0], "context must not leak into recall output")
+        self.assertNotIn("body", results[0])
+
+        # Text that only restates the CONTEXT is not an echo of the claim.
+        from link_core.memory import is_existing_memory_echo
+        self.assertFalse(
+            is_existing_memory_echo(
+                [record],
+                "Caroline gave a talk about her transgender journey at the school event.",
+            ),
+            "context must not count as the memory's own claim",
+        )
+
     def test_recall_matches_common_developer_paraphrases(self):
         records = [
             {

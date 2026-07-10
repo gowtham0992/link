@@ -206,6 +206,7 @@ def memory_embedding_text(record: Mapping[str, object]) -> str:
         str(record.get("trigger") or ""),
         tags,
         str(record.get("body") or "")[:1000],
+        str(record.get("context") or "")[:600],
     ]
     return "\n".join(part for part in parts if part.strip())
 

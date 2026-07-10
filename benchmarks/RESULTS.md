@@ -93,11 +93,24 @@ third-party queries and third-party gold labels.
 
 | metric | lexical | hybrid (quality tier) |
 |---|---|---|
-| any-evidence hit@1 | 0.290 | **0.309** |
-| any-evidence hit@5 | 0.496 | **0.540** |
-| any-evidence hit@10 | 0.578 | **0.685** |
-| evidence recall@10 | 0.517 | **0.608** |
-| latency p50 / mean | 16 ms | 45 ms / 61 ms |
+| any-evidence hit@1 | 0.266 | **0.329** |
+| any-evidence hit@5 | 0.537 | **0.609** |
+| any-evidence hit@10 | 0.628 | **0.737** |
+| evidence recall@10 | 0.560 | **0.660** |
+| latency p50 / mean | 28 ms | 58 ms / 75 ms |
+
+**Context-window records.** Each turn record carries its ±1 dialogue
+neighbors in the record's `context` field — retrieval text that is not part
+of the memory's claim (echo/duplicate/conflict checks and recall output
+never see it). Failure analysis showed the dominant miss was conversational
+deixis: a gold turn like "the stories were so inspiring" is only findable by
+what it was about, and the surrounding turns give that away for free.
+Context-free turn records (the previous rows) scored hybrid hit@10 0.685 /
+recall@10 0.608; context lifts that to 0.737 / 0.660 and helps every
+category, most strongly single-hop (hit@10 0.713 → 0.816 in the prototype).
+Ablation that did not survive: splicing a hit's dialogue neighbors into the
+ranked list at recall time *hurt* (hit@10 0.685 → 0.550) — neighbors displace
+genuinely ranked turns; context must inform scoring, not bypass it.
 
 **Not comparable to published LoCoMo QA scores** (mem0, Zep, etc. report
 end-to-end LLM answer quality with server-side pipelines). This track scores
