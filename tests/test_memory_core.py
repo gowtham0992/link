@@ -699,6 +699,24 @@ class MemoryCoreTests(unittest.TestCase):
         for proposal in payload["proposals"]:
             self.assertEqual(proposal["memory_type"], "preference")
 
+    def test_conversational_preambles_are_trimmed_from_memory_text(self):
+        payload = propose_memories_from_text(
+            "hey, before we start — from now on I only push to the develop branch.",
+            [],
+            source="unit test",
+        )
+        self.assertEqual(
+            [p["memory"] for p in payload["proposals"]],
+            ["from now on I only push to the develop branch."],
+        )
+
+        payload = propose_memories_from_text("ok so I prefer tabs over spaces.", [], source="unit test")
+        self.assertEqual([p["memory"] for p in payload["proposals"]], ["User prefers tabs over spaces."])
+
+    def test_preamble_trim_keeps_full_text_when_tail_does_not_classify(self):
+        payload = propose_memories_from_text("never push to main — thanks!", [], source="unit test")
+        self.assertEqual([p["memory"] for p in payload["proposals"]], ["never push to main — thanks!"])
+
     def test_narrative_only_is_not_a_preference(self):
         payload = propose_memories_from_text(
             "I only found one bug in the parser.",

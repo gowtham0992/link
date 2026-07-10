@@ -2880,6 +2880,39 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
     return action
 
 
+_PREAMBLE_INTERJECTIONS = re.compile(
+    r"^(?:hey|hi|hello|ok|okay|oh|so|well|also|btw|alright|great|thanks|thank you|yeah|actually|anyway)"
+    r"[,!.:\s]+",
+    re.IGNORECASE,
+)
+
+
+def _preamble_trim_candidates(text: str) -> list[str]:
+    """Trim variants of a segment, most-trimmed first.
+
+    Conversational lead-ins ("hey, before we start — ...") should not become
+    part of a durable memory. A trimmed variant is only used when it still
+    classifies on its own; otherwise the full text wins.
+    """
+    stripped = text.strip()
+    plain = stripped
+    for _ in range(3):
+        trimmed = _PREAMBLE_INTERJECTIONS.sub("", plain, count=1).strip()
+        if trimmed == plain or not trimmed:
+            break
+        plain = trimmed
+    candidates: list[str] = []
+    for dash in ("—", "–"):
+        head, sep, tail = plain.partition(dash)
+        if sep and tail.strip() and len(head.strip()) <= 60:
+            candidates.append(tail.strip())
+            break
+    if plain != stripped:
+        candidates.append(plain)
+    candidates.append(stripped)
+    return candidates
+
+
 def classify_memory_segment(segment: str) -> dict[str, object] | None:
     text = segment.strip()
     lower = text.lower()
@@ -2931,16 +2964,18 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
         ),
     ]
 
-    for memory_type, scope, score, reason, patterns in checks:
-        if any(re.search(pattern, lower) for pattern in patterns):
-            memory = normalize_proposed_memory(text, memory_type)
-            return {
-                "memory": memory,
-                "memory_type": memory_type,
-                "scope": scope,
-                "confidence_score": score,
-                "reason": reason,
-            }
+    for candidate in _preamble_trim_candidates(text):
+        candidate_lower = candidate.lower()
+        for memory_type, scope, score, reason, patterns in checks:
+            if any(re.search(pattern, candidate_lower) for pattern in patterns):
+                memory = normalize_proposed_memory(candidate, memory_type)
+                return {
+                    "memory": memory,
+                    "memory_type": memory_type,
+                    "scope": scope,
+                    "confidence_score": score,
+                    "reason": reason,
+                }
     return None
 
 
