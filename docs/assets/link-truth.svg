@@ -26,7 +26,7 @@
 @keyframes t_3 {
   0%,19.389% { opacity:0; clip-path:inset(0 100% 0 0); }
   19.444% { opacity:1; clip-path:inset(0 100% 0 0); }
-  26.911% { opacity:1; clip-path:inset(0 0 0 0); }
+  27.778% { opacity:1; clip-path:inset(0 0 0 0); }
   53.889% { opacity:1; clip-path:inset(0 0 0 0); }
   56.111%,100% { opacity:0; clip-path:inset(0 0 0 0); }
 }
@@ -103,13 +103,13 @@
   <text x="30" y="66" class="cmd" fill="#f3ece0" style="animation:t_0 18s infinite;">$ lnk remember "we deploy from main every Friday"</text>
   <text x="30" y="92" class="out" fill="#86c79a" style="animation:t_1 18s infinite;">✓ saved to local memory</text>
   <text x="30" y="124" class="dim" fill="#8a8174" style="animation:t_2 18s infinite;">— weeks later —</text>
-  <text x="30" y="152" class="cmd" fill="#f3ece0" style="animation:t_3 18s infinite;">$ lnk remember "deploys moved to Tuesdays"</text>
+  <text x="30" y="152" class="cmd" fill="#f3ece0" style="animation:t_3 18s infinite;">$ lnk remember "no longer Fridays - deploys ship Tuesdays"</text>
   <text x="30" y="178" class="out" fill="#e0b34f" style="animation:t_4 18s infinite;">⚠ conflicts with an active memory</text>
   <text x="30" y="202" class="note" fill="#e0955f" style="animation:t_5 18s infinite;">→ replace it: rerun with --supersedes deploy-…-friday</text>
   <text x="30" y="234" class="cmd" fill="#f3ece0" style="animation:t_6 18s infinite;">$ lnk remember … --supersedes deploy-from-main-every-friday</text>
   <text x="30" y="262" class="out" fill="#86c79a" style="animation:t_7 18s infinite;">✓ saved · old memory archived with lineage</text>
   <text x="30" y="78" class="cmd" fill="#f3ece0" style="animation:t_8 18s infinite;">$ lnk recall "when do we deploy"</text>
-  <text x="30" y="106" class="out" fill="#86c79a" style="animation:t_9 18s infinite;">✓ deploys moved to Tuesdays</text>
+  <text x="30" y="106" class="out" fill="#86c79a" style="animation:t_9 18s infinite;">✓ no longer Fridays - deploys ship Tuesdays</text>
   <text x="30" y="130" class="note" fill="#e0955f" style="animation:t_10 18s infinite;">→ only the current truth</text>
   <text x="30" y="176" class="cmd" fill="#f3ece0" style="animation:t_11 18s infinite;">$ lnk recall "when do we deploy" --as-of 2026-05-01</text>
   <text x="30" y="204" class="out" fill="#86c79a" style="animation:t_12 18s infinite;">✓ we deploy from main every Friday</text>
