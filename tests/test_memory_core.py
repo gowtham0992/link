@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import (  # noqa: E402
+    slugify,
     add_capture_review_to_brief,
     default_project_for_target,
     extract_wikilinks,
@@ -1428,3 +1429,12 @@ class MemoryCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlugifyBoundsTests(unittest.TestCase):
+    def test_slugify_caps_length_for_filesystem_limits(self):
+        slug = slugify("word " * 200)
+        self.assertLessEqual(len(slug), 80)
+        self.assertFalse(slug.endswith("-"))
+        # short slugs unchanged
+        self.assertEqual(slugify("My Cool Title"), "my-cool-title")

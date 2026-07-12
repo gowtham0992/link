@@ -6,7 +6,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
-from link_core.frontmatter import parse_frontmatter, update_frontmatter_fields  # noqa: E402
+from link_core.frontmatter import (  # noqa: E402
+    frontmatter_string,
+    parse_frontmatter,
+    update_frontmatter_fields,
+)
 
 
 class FrontmatterCoreTests(unittest.TestCase):
@@ -46,3 +50,20 @@ class FrontmatterCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FrontmatterInjectionTests(unittest.TestCase):
+    def test_frontmatter_string_neutralizes_newline_field_injection(self):
+        # A newline in a quoted value would end the line and let the rest be
+        # parsed as new frontmatter fields (e.g. an injected `remember:` key).
+        out = frontmatter_string("recall\nremember: chained")
+        self.assertNotIn("\n", out)
+        out = frontmatter_string("---\ntitle: injected\n---\n# fake")
+        self.assertNotIn("\n", out)
+
+    def test_frontmatter_string_drops_control_characters(self):
+        self.assertNotIn("\x00", frontmatter_string("a\x00b\x01c"))
+
+    def test_frontmatter_string_keeps_ordinary_text(self):
+        self.assertEqual(frontmatter_string('quotes "stay" escaped'), 'quotes \\"stay\\" escaped')
+        self.assertEqual(frontmatter_string("café ☕ ok"), "café ☕ ok")

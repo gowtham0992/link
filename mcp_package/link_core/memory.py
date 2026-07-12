@@ -120,8 +120,13 @@ BacklinkRebuilder = Callable[[], bool]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def slugify(value: str, fallback: str = "memory") -> str:
+def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    if len(slug) > max_len:
+        # Cap for filesystem limits (255-byte filenames); cut at a word
+        # boundary so truncated slugs stay readable.
+        head = slug[:max_len]
+        slug = head.rsplit("-", 1)[0] if "-" in head else head
     return slug or fallback
 
 
