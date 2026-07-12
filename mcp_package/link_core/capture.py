@@ -76,8 +76,16 @@ def write_session_capture(
     timestamp: str | None = None,
     default_source: str = "inline",
     path_source: bool = False,
+    proposal_text: str | None = None,
+    decision_trail: list[str] | None = None,
 ) -> dict[str, object]:
-    """Persist proposal-only session notes under raw/memory-captures."""
+    """Persist proposal-only session notes under raw/memory-captures.
+
+    `proposal_text` records exactly which turns memory is mined from (the
+    user's own turns), so accept-time re-mining reads the same words the
+    hook did — never the assistant's prose. `decision_trail` records why
+    proposals were kept or dropped, so the pipeline is reviewable.
+    """
     root = root.expanduser().resolve()
     notes = text.strip()
     if not notes:
@@ -97,6 +105,23 @@ def write_session_capture(
     capture_dir.mkdir(parents=True, exist_ok=True)
     capture_path = capture_filename(captured_at, capture_name, capture_dir)
     project_line = f'project: "{frontmatter_string(project_name)}"\n' if project_name else ""
+
+    # Proposal source: the user's own turns, redacted, so accept-time mining
+    # reads exactly what the hook mined — not the assistant's prose beneath.
+    mined = (proposal_text or "").strip()
+    mined_section = ""
+    if mined and mined != notes:
+        safe_mined, _, _ = redact_secret_values(mined)
+        mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{safe_mined}\n"
+
+    trail_section = ""
+    if decision_trail:
+        safe_lines = []
+        for line in decision_trail:
+            safe, _, _ = redact_secret_values(str(line))
+            safe_lines.append(f"- {safe}")
+        trail_section = "\n## How Link Read This Session\n\n" + "\n".join(safe_lines) + "\n"
+
     atomic_write_text(
         capture_path,
         f"""---
@@ -112,7 +137,7 @@ Captured locally for Link memory review. This raw note is proposal-only until th
 ## Source Input
 
 {source_value}
-
+{trail_section}{mined_section}
 ## Notes
 
 {notes}
@@ -170,6 +195,38 @@ def capture_notes_from_markdown(text: str) -> tuple[dict[str, object], str]:
     return meta, notes
 
 
+def capture_proposal_source(text: str) -> str | None:
+    """Return the `## Proposal Source` body (user turns) when present.
+
+    Accept-time mining reads this instead of the full notes so the
+    assistant's prose is never re-attributed as the user's preference.
+    """
+    _, body = parse_frontmatter(text)
+    match = re.search(r"^## Proposal Source\s*(.*?)(?=^## |\Z)", body, flags=re.MULTILINE | re.DOTALL)
+    if not match:
+        return None
+    section = match.group(1).strip()
+    # Drop the leading explanatory sentence Link writes above the turns.
+    section = re.sub(
+        r"^Memory is mined only from these \(the user's own turns\):\s*",
+        "", section,
+    ).strip()
+    return section or None
+
+
+def capture_decision_trail(text: str) -> list[str]:
+    """Return the `## How Link Read This Session` bullet lines when present."""
+    _, body = parse_frontmatter(text)
+    match = re.search(r"^## How Link Read This Session\s*(.*?)(?=^## |\Z)", body, flags=re.MULTILINE | re.DOTALL)
+    if not match:
+        return []
+    return [
+        line.lstrip("- ").strip()
+        for line in match.group(1).strip().splitlines()
+        if line.strip().startswith("-")
+    ]
+
+
 def capture_proposal_selection(
     root: Path,
     capture: str,
@@ -200,8 +257,12 @@ def capture_proposal_selection(
 
     rel_path = capture_path.relative_to(root).as_posix()
     project_name = normalize_project(project or str(meta.get("project") or "") or default_project)
+    # Mine from the user's own turns when the capture recorded them, so accept
+    # never re-attributes the assistant's prose. Fall back to full notes for
+    # older captures written before proposal-source provenance existed.
+    mining_text = capture_proposal_source(raw_text) or notes
     proposals = propose_memories(
-        notes,
+        mining_text,
         rel_path,
         max(1, min(max(proposal_index, 10), 50)),
         project_name,
@@ -381,9 +442,11 @@ def capture_records(
             continue
         warnings = secret_value_warnings(text)
         safe_notes, _, _ = redact_secret_values(notes)
-        # What Accept will actually save: mined the same way accept-capture
-        # mines, so the preview is the proposal, not a guess.
-        mined = propose_memories_from_text(notes, [], source=rel, limit=3)
+        # What Accept will actually save: mine from the user's own turns
+        # (proposal source) the same way accept-capture does, so the preview
+        # matches the outcome and never surfaces the assistant's prose.
+        mining_text = capture_proposal_source(text) or notes
+        mined = propose_memories_from_text(mining_text, [], source=rel, limit=3)
         proposal_items = mined.get("proposals") if isinstance(mined.get("proposals"), list) else []
         proposal_previews = []
         for proposal in proposal_items[:3]:
@@ -407,6 +470,8 @@ def capture_records(
             "snippet": re.sub(r"\s+", " ", safe_notes).strip()[:180],
             "proposal_count": len(proposal_items),
             "proposals": proposal_previews,
+            "decision_trail": capture_decision_trail(text),
+            "mined_from_user_turns": capture_proposal_source(text) is not None,
             "commands": command_builder(rel),
         })
     records.sort(key=lambda item: (str(item["date_captured"]), str(item["path"])), reverse=True)

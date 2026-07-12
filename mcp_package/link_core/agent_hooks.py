@@ -349,6 +349,7 @@ def extract_transcript_text(
     max_message_chars: int = 800,
     roles: tuple[str, ...] = ("user", "assistant"),
     stats: dict[str, int] | None = None,
+    keep_head: bool = False,
 ) -> str:
     """Extract bounded conversation text from an agent transcript JSONL file.
 
@@ -359,6 +360,10 @@ def extract_transcript_text(
     user said — memory proposals should come from the user's own words, not the
     assistant's prose, which would otherwise be mis-attributed as user
     preferences.
+
+    With `keep_head`, when the turns exceed the budget Link keeps the opening
+    turns as well as the recent ones. Standing rules ("from now on…") are
+    stated early in a session; a recency-only window silently drops them.
     """
     role_set = set(roles)
     try:
@@ -396,12 +401,48 @@ def extract_transcript_text(
         lines.append(f"{role}: {text}")
     if not lines:
         return ""
-    kept: list[str] = []
-    total = 0
-    for line in reversed(lines):
+
+    def _fits(selected: list[str]) -> bool:
+        return sum(len(item) + 2 for item in selected) <= max_chars
+
+    if _fits(lines):
+        return "\n\n".join(lines)
+
+    if not keep_head:
+        kept: list[str] = []
+        total = 0
+        for line in reversed(lines):
+            cost = len(line) + 2
+            if kept and total + cost > max_chars:
+                break
+            kept.append(line)
+            total += cost
+        return "\n\n".join(reversed(kept))
+
+    # Head + tail: opening turns carry standing rules, recent turns carry the
+    # session's decisions. Spend ~a third of the budget on the head.
+    head_budget = max_chars // 3
+    head: list[str] = []
+    head_total = 0
+    consumed = 0
+    for index, line in enumerate(lines):
         cost = len(line) + 2
-        if kept and total + cost > max_chars:
+        if head and head_total + cost > head_budget:
             break
-        kept.append(line)
-        total += cost
-    return "\n\n".join(reversed(kept))
+        head.append(line)
+        head_total += cost
+        consumed = index + 1
+
+    tail: list[str] = []
+    tail_total = 0
+    for line in reversed(lines[consumed:]):
+        cost = len(line) + 2
+        if tail and head_total + tail_total + cost > max_chars:
+            break
+        tail.append(line)
+        tail_total += cost
+    tail.reverse()
+
+    if head and tail:
+        return "\n\n".join(head) + "\n\n… (middle of the session omitted) …\n\n" + "\n\n".join(tail)
+    return "\n\n".join(head or tail)

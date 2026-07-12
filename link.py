@@ -1303,6 +1303,7 @@ def session_end(
     limit: int = 3,
     project: str | None = None,
     proposal_text: str | None = None,
+    decision_trail: list[str] | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -1325,6 +1326,8 @@ def session_end(
         project=project_name,
         default_source="session-end",
         path_source=True,
+        proposal_text=proposal_text,
+        decision_trail=decision_trail,
     )
     rel_path = str(capture_record["path"])
     # The raw capture keeps the full session for review context, but memory
@@ -2266,7 +2269,10 @@ def _hook_session_end(
     target: Path, hook_event: dict[str, object], limit: int, project: str | None,
     explain: bool = False,
 ) -> int:
+    trail: list[str] = []
+
     def _trace(message: str) -> None:
+        trail.append(message)
         if explain:
             print(f"[session-end] {message}")
 
@@ -2278,8 +2284,8 @@ def _hook_session_end(
     extraction_stats: dict[str, int] = {}
     notes = _core_extract_transcript_text(transcript_path, stats=extraction_stats)
     _trace(
-        f"transcript: kept {extraction_stats.get('kept_messages', 0)} messages, "
-        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own output (echo guard, layer 1)."
+        f"Read the session: kept {extraction_stats.get('kept_messages', 0)} messages, "
+        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own injected output (echo guard, layer 1)."
     )
     if len(notes.strip()) < 200:
         _trace("skipped: under 200 characters of conversation — nothing memory-worthy in a trivial session.")
@@ -2288,7 +2294,12 @@ def _hook_session_end(
     # prose is help, not the user's preferences; mining it would attribute the
     # assistant's words to the user (found in dogfooding). The raw capture below
     # still keeps the full transcript for review context.
-    user_notes = _core_extract_transcript_text(transcript_path, roles=("user",))
+    # Mine from a head+tail window so an opening standing rule ("from now on…")
+    # survives even in a long session, where a recency-only window would drop it.
+    user_notes = _core_extract_transcript_text(
+        transcript_path, roles=("user",), max_chars=9000, keep_head=True
+    )
+    _trace("Mined memory only from your own turns — the assistant's prose is never proposed as your preference.")
     # Skip duplicate firings for the same conversation content (e.g. /clear
     # immediately followed by exit, or repeated end events).
     state_path = _session_end_hook_state_path(target)
@@ -2340,7 +2351,7 @@ def _hook_session_end(
     if not fresh:
         _trace("no fresh proposals left; no capture stored.")
         return 0
-    _trace(f"storing a proposal-only capture with {len(fresh)} fresh proposal(s) for review.")
+    _trace(f"Stored a proposal-only capture with {len(fresh)} fresh proposal(s) for your review.")
     code = session_end(
         target,
         notes,
@@ -2348,6 +2359,7 @@ def _hook_session_end(
         limit=proposal_limit,
         project=project_name,
         proposal_text=user_notes,
+        decision_trail=trail,
     )
     if code == 0:
         try:

@@ -6,10 +6,12 @@ from unittest.mock import patch
 from mcp_package.link_core.capture import (
     capture_accept_memory_args,
     capture_accept_payload,
+    capture_decision_trail,
     capture_filename,
     capture_inbox,
     capture_notes_from_markdown,
     capture_proposal_selection,
+    capture_proposal_source,
     capture_records,
     capture_review_summary,
     capture_title,
@@ -566,3 +568,48 @@ class CaptureInboxProposalPreviewTests(unittest.TestCase):
         first = item["proposals"][0]
         self.assertIn("release script", first["memory"])
         self.assertEqual(first["memory_type"], "preference")
+
+
+class CaptureProvenanceTests(unittest.TestCase):
+    def test_capture_records_proposal_source_and_trail(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            record = write_session_capture(
+                root,
+                text="User: hi\n\nAssistant: here is a long helpful explanation.",
+                source="session-end",
+                proposal_text="User: from now on I only push to develop.",
+                decision_trail=["Read the session: kept 4 messages.", "Stored 1 proposal."],
+            )
+            text = (root / record["path"]).read_text(encoding="utf-8")
+
+        source = capture_proposal_source(text)
+        self.assertIn("only push to develop", source)
+        self.assertNotIn("helpful explanation", source)
+        self.assertEqual(len(capture_decision_trail(text)), 2)
+
+    def test_accept_mines_user_turns_not_assistant_prose(self):
+        from mcp_package.link_core.memory import propose_memories_from_text
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            record = write_session_capture(
+                root,
+                text=(
+                    "User: help me name branches.\n\n"
+                    "Assistant: I always recommend feat/short-topic naming for clarity."
+                ),
+                source="session-end",
+                proposal_text="User: from now on I only push to develop.",
+            )
+
+            def builder(notes, source, limit, project):
+                return propose_memories_from_text(notes, [], source=source, limit=limit)
+
+            selection = capture_proposal_selection(
+                root, record["path"], index=1, propose_memories=builder,
+            )
+            memory = str(selection["proposal"]["memory"])
+
+        self.assertIn("only push to develop", memory)
+        self.assertNotIn("feat/short-topic", memory)
