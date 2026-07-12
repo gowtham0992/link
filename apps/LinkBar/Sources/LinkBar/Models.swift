@@ -51,6 +51,14 @@ struct CaptureItem: Decodable, Identifiable {
     let project: String?
     let proposals: [ProposalPreview]?
     let snippet: String?
+    let decisionTrail: [String]?
+    let minedFromUserTurns: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case path, title, project, proposals, snippet
+        case decisionTrail = "decision_trail"
+        case minedFromUserTurns = "mined_from_user_turns"
+    }
 
     var id: String { path }
     var displayTitle: String {

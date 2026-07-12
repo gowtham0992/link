@@ -283,6 +283,23 @@ struct PopoverView: View {
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(2)
                             }
+                            if let trail = capture.decisionTrail, !trail.isEmpty {
+                                DisclosureGroup {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        ForEach(Array(trail.enumerated()), id: \.offset) { _, step in
+                                            Text("• \(step)")
+                                                .font(.caption2)
+                                                .foregroundStyle(.tertiary)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                    .padding(.top, 2)
+                                } label: {
+                                    Text("How Link read this session")
+                                        .font(.caption2)
+                                        .foregroundStyle(LinkBrand.rust)
+                                }
+                            }
                         }
                         .contentShape(Rectangle())
                         .contextMenu {
