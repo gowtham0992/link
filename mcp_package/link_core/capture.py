@@ -54,16 +54,38 @@ def capture_title(
 
 
 def capture_filename(timestamp: str, title: str, raw_dir: Path) -> Path:
-    """Return a unique capture path under raw_dir for the given timestamp/title."""
+    """Atomically reserve a unique capture path under raw_dir.
+
+    Concurrent session-end hooks (several agents/terminals closing at once)
+    share the same second-timestamp and default title, so a check-then-write
+    counter loop races: two hooks pick the same name and one clobbers the
+    other. Claim each name with O_CREAT|O_EXCL so only one hook can own it;
+    the caller overwrites the reserved placeholder with the real content.
+    """
+    import errno
+    import os
+
     safe_stamp = str(timestamp).replace("-", "").replace(":", "")
     title_slug = slugify(title.replace("Memory capture:", ""), fallback="session-notes")
     base = f"{safe_stamp}-{title_slug}"
-    candidate = raw_dir / f"{base}.md"
-    counter = 2
-    while candidate.exists():
-        candidate = raw_dir / f"{base}-{counter}.md"
-        counter += 1
-    return candidate
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    counter = 1
+    while True:
+        name = f"{base}.md" if counter == 1 else f"{base}-{counter}.md"
+        candidate = raw_dir / name
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            os.close(fd)
+            return candidate
+        except FileExistsError:
+            counter += 1
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                counter += 1
+                continue
+            raise
+        if counter > 10000:  # pathological; give up rather than spin
+            return raw_dir / f"{base}-{os.getpid()}.md"
 
 
 def write_session_capture(
