@@ -13,6 +13,18 @@ struct PopoverView: View {
     }
 
     var body: some View {
+        Group {
+            if showSettings {
+                SettingsPane(done: { showSettings = false })
+                    .environmentObject(store)
+            } else {
+                mainContent
+            }
+        }
+        .frame(width: 380)
+    }
+
+    private var mainContent: some View {
         VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
             header
             if let warning = store.runtimeWarning {
@@ -36,12 +48,7 @@ struct PopoverView: View {
             footer
         }
         .padding(LinkBrand.pad)
-        .frame(width: 380)
         .animation(.easeOut(duration: 0.18), value: store.pendingCount)
-        .sheet(isPresented: $showSettings) {
-            SettingsSheet()
-                .environmentObject(store)
-        }
     }
 
     // MARK: header
@@ -391,9 +398,9 @@ struct PopoverView: View {
     }
 }
 
-struct SettingsSheet: View {
+struct SettingsPane: View {
     @EnvironmentObject var store: LinkStore
-    @Environment(\.dismiss) private var dismiss
+    let done: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -442,12 +449,11 @@ struct SettingsSheet: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done") { done() }
                     .keyboardShortcut(.defaultAction)
                     .tint(LinkBrand.rust)
             }
         }
         .padding(16)
-        .frame(width: 340)
     }
 }
