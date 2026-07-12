@@ -249,6 +249,36 @@ def render_capture_card(capture: dict[str, object]) -> str:
             + html.escape(", ".join(warnings))
             + "</p>"
         )
+
+    # What Accept will save, and how Link decided — the pipeline made reviewable.
+    proposals = capture.get("proposals") if isinstance(capture.get("proposals"), list) else []
+    proposals_html = ""
+    if proposals:
+        rows = "".join(
+            f'<li><strong>{html.escape(str(p.get("memory") or ""))}</strong>'
+            f' <span class="memory-meta">{html.escape(str(p.get("memory_type") or ""))}'
+            f'{" · " + html.escape(str(p.get("confidence"))) if p.get("confidence") else ""}</span></li>'
+            for p in proposals if isinstance(p, dict)
+        )
+        attribution = (
+            "mined from your own turns"
+            if capture.get("mined_from_user_turns")
+            else "mined from the full session"
+        )
+        proposals_html = (
+            f'<p class="summary"><strong>Will save</strong> ({attribution}):</p>'
+            f'<ul class="capture-proposals">{rows}</ul>'
+        )
+
+    trail = capture.get("decision_trail") if isinstance(capture.get("decision_trail"), list) else []
+    trail_html = ""
+    if trail:
+        steps = "".join(f"<li>{html.escape(str(step))}</li>" for step in trail)
+        trail_html = (
+            '<details class="capture-trail"><summary>How Link read this session</summary>'
+            f'<ol>{steps}</ol></details>'
+        )
+
     commands = capture.get("commands") or {}
     actions = "".join(
         f'<div><strong>{html.escape(label)}</strong>'
@@ -267,6 +297,8 @@ def render_capture_card(capture: dict[str, object]) -> str:
         f'<div class="memory-meta">{html.escape(meta)}</div>'
         f'<p class="summary"><code>{path}</code></p>'
         f'{warning_html}'
+        f'{proposals_html}'
+        f'{trail_html}'
         f'<div class="memory-actions">{actions}</div>'
         '</article>'
     )

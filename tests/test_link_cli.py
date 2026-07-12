@@ -3171,7 +3171,7 @@ class AgentHookCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         text = out.getvalue()
-        self.assertIn("dropped 1 carrying Link's own output", text)
+        self.assertIn("dropped 1 carrying Link's own injected output", text)
         self.assertIn("trivial session", text)
 
     def test_conflict_output_offers_supersede_command(self):

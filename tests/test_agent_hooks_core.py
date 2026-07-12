@@ -242,6 +242,21 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertIn("message 49", text)
         self.assertNotIn("message 0:", text)
 
+    def test_keep_head_preserves_opening_turns_in_a_long_session(self):
+        with tempfile.TemporaryDirectory() as temp:
+            transcript = Path(temp) / "transcript.jsonl"
+            lines = [_transcript_line("user", "OPENING RULE: only deploy through the release script.")]
+            lines += [_transcript_line("user", f"filler step {i}: " + ("x" * 400)) for i in range(50)]
+            transcript.write_text("\n".join(lines), encoding="utf-8")
+
+            # Recency-only drops the opening; keep_head preserves it.
+            recency = extract_transcript_text(transcript, max_chars=2000)
+            headed = extract_transcript_text(transcript, max_chars=2000, keep_head=True)
+
+        self.assertNotIn("OPENING RULE", recency)
+        self.assertIn("OPENING RULE", headed)
+        self.assertIn("filler step 49", headed)
+
     def test_extract_transcript_drops_link_injected_content(self):
         with tempfile.TemporaryDirectory() as temp:
             transcript = Path(temp) / "transcript.jsonl"
