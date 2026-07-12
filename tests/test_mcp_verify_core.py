@@ -5,6 +5,7 @@ from pathlib import Path
 
 from mcp_package.link_core.mcp_verify import (
     build_mcp_verify_status,
+    default_mcp_venv_python,
     display_command,
     ensure_link_mcp_runtime,
     expand_command_prefix,
@@ -71,8 +72,11 @@ class EnsureLinkMcpRuntimeTests(unittest.TestCase):
     def test_existing_venv_is_used_when_configured_python_is_stale(self):
         with tempfile.TemporaryDirectory() as temp:
             venv_dir = Path(temp) / "venv"
-            (venv_dir / "bin").mkdir(parents=True)
-            venv_python = venv_dir / "bin" / "python"
+            # The venv interpreter lives under bin/ on POSIX, Scripts/ on
+            # Windows — use the same resolver the runtime does so the test
+            # creates the file where ensure_link_mcp_runtime will look.
+            venv_python = Path(default_mcp_venv_python(venv_dir))
+            venv_python.parent.mkdir(parents=True)
             venv_python.write_text("")
 
             def check(python_cmd):

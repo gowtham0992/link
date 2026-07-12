@@ -469,8 +469,9 @@ def capture_records(
         # matches the outcome and never surfaces the assistant's prose.
         mining_text = capture_proposal_source(text) or notes
         mined = propose_memories_from_text(mining_text, [], source=rel, limit=3)
-        proposal_items = mined.get("proposals") if isinstance(mined.get("proposals"), list) else []
-        proposal_previews = []
+        proposals_obj = mined.get("proposals")
+        proposal_items: list[object] = proposals_obj if isinstance(proposals_obj, list) else []
+        proposal_previews: list[dict[str, object]] = []
         for proposal in proposal_items[:3]:
             if not isinstance(proposal, dict):
                 continue
@@ -528,10 +529,14 @@ def capture_inbox(
 def render_capture_inbox_text(payload: dict[str, object]) -> str:
     """Render human-readable raw capture inbox output."""
     project_name = str(payload.get("project") or "")
-    captures = payload.get("captures") if isinstance(payload.get("captures"), list) else []
-    warning_count = int(payload.get("warning_count") or 0)
-    read_warning_count = int(payload.get("read_warning_count") or 0)
-    read_warnings = payload.get("read_warnings") if isinstance(payload.get("read_warnings"), list) else []
+    captures_obj = payload.get("captures")
+    captures: list[object] = captures_obj if isinstance(captures_obj, list) else []
+    warning_count_obj = payload.get("warning_count")
+    warning_count = warning_count_obj if isinstance(warning_count_obj, int) else 0
+    read_warning_count_obj = payload.get("read_warning_count")
+    read_warning_count = read_warning_count_obj if isinstance(read_warning_count_obj, int) else 0
+    read_warnings_obj = payload.get("read_warnings")
+    read_warnings: list[object] = read_warnings_obj if isinstance(read_warnings_obj, list) else []
 
     lines = ["Raw capture inbox"]
     if project_name:
@@ -551,8 +556,10 @@ def render_capture_inbox_text(payload: dict[str, object]) -> str:
     for index, capture in enumerate(captures, start=1):
         if not isinstance(capture, dict):
             continue
-        commands = capture.get("commands") if isinstance(capture.get("commands"), dict) else {}
-        secret_warnings = capture.get("secret_warnings") if isinstance(capture.get("secret_warnings"), list) else []
+        commands_obj = capture.get("commands")
+        commands: dict[object, object] = commands_obj if isinstance(commands_obj, dict) else {}
+        secret_warnings_obj = capture.get("secret_warnings")
+        secret_warnings: list[object] = secret_warnings_obj if isinstance(secret_warnings_obj, list) else []
         lines.extend(["", f"{index}. {capture.get('title')}"])
         lines.append(f"   Path: {capture.get('path')}")
         if capture.get("project"):
@@ -598,7 +605,8 @@ def render_accept_capture_text(payload: dict[str, object], *, target: object = "
 def render_redact_capture_text(payload: dict[str, object]) -> str:
     """Render redact-capture CLI output."""
     if payload.get("redacted"):
-        labels = payload.get("labels") if isinstance(payload.get("labels"), list) else []
+        labels_obj = payload.get("labels")
+        labels: list[object] = labels_obj if isinstance(labels_obj, list) else []
         return "\n".join([
             "Capture redacted",
             f"Path: {payload.get('path')}",
