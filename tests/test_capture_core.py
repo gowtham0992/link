@@ -613,3 +613,25 @@ class CaptureProvenanceTests(unittest.TestCase):
 
         self.assertIn("only push to develop", memory)
         self.assertNotIn("feat/short-topic", memory)
+
+
+class CaptureFilenameConcurrencyTests(unittest.TestCase):
+    def test_capture_filename_never_collides_under_concurrency(self):
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as temp:
+            raw = Path(temp)
+            # Same timestamp AND title — the collision case real hooks hit
+            # when several sessions end in the same second.
+            def claim(_):
+                return capture_filename("2026-07-12T18:00:00Z", "Agent session notes", raw)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+                paths = list(ex.map(claim, range(32)))
+
+            # Every reservation is a distinct, actually-created file (checked
+            # inside the tempdir, before it is cleaned up).
+            self.assertEqual(len(paths), 32)
+            self.assertEqual(len({p.name for p in paths}), 32)
+            for p in paths:
+                self.assertTrue(p.exists())

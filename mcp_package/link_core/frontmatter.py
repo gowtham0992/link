@@ -45,7 +45,16 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
 
 
 def frontmatter_string(value: object) -> str:
-    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+    """Escape a value for a double-quoted single-line frontmatter field.
+
+    Newlines and control characters must never reach the file raw: a title
+    containing "\\ntitle: injected" would otherwise write extra frontmatter
+    lines that the parser then honors (field injection). Collapse whitespace
+    runs to single spaces and drop remaining non-printable characters.
+    """
+    text = " ".join(str(value).split())
+    text = "".join(ch for ch in text if ch.isprintable())
+    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def csv_values(raw: str | None) -> list[str]:

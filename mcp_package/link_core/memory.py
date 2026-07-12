@@ -120,8 +120,13 @@ BacklinkRebuilder = Callable[[], bool]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def slugify(value: str, fallback: str = "memory") -> str:
+def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    if len(slug) > max_len:
+        # Cap for filesystem limits (255-byte filenames); cut at a word
+        # boundary so truncated slugs stay readable.
+        head = slug[:max_len]
+        slug = head.rsplit("-", 1)[0] if "-" in head else head
     return slug or fallback
 
 
@@ -2441,6 +2446,17 @@ def parse_applies_when(value: object) -> list[tuple[str, str]]:
             raise ValueError(
                 "applies_when conditions must look like project:<slug>, path:<glob>, or task:<phrase>"
             )
+        if kind == "project":
+            # Store the slug recall actually compares against, so the
+            # condition matches what it displays — and reject a value that
+            # slugifies to nothing (e.g. "project:!!!"), which would be a
+            # silently-dead scope.
+            normalized = normalize_project(argument)
+            if not normalized:
+                raise ValueError(
+                    f"applies_when project condition has no usable slug: {argument!r}"
+                )
+            argument = normalized
         conditions.append((kind, argument))
     return conditions
 

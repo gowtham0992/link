@@ -45,6 +45,15 @@ class ApplicabilityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_applies_when("task:")
 
+    def test_project_condition_is_normalized_to_a_matchable_slug(self):
+        # Stored condition matches the slug space recall compares against, so
+        # a project scope displays what it will actually match.
+        self.assertEqual(parse_applies_when("project:My Cool Project"), [("project", "my-cool-project")])
+        self.assertEqual(parse_applies_when("project:::::garbage[[["), [("project", "garbage")])
+        # A value that slugifies to nothing is a silently-dead scope — reject it.
+        with self.assertRaises(ValueError):
+            parse_applies_when("project:!!!")
+
     def test_malformed_condition_fails_closed_and_is_flagged(self):
         # A hand-edit typo ("proj:" for "project:") must not silently remove
         # the fence: the memory stays out of context until repaired, and the
