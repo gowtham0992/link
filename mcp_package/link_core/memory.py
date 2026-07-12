@@ -2441,6 +2441,17 @@ def parse_applies_when(value: object) -> list[tuple[str, str]]:
             raise ValueError(
                 "applies_when conditions must look like project:<slug>, path:<glob>, or task:<phrase>"
             )
+        if kind == "project":
+            # Store the slug recall actually compares against, so the
+            # condition matches what it displays — and reject a value that
+            # slugifies to nothing (e.g. "project:!!!"), which would be a
+            # silently-dead scope.
+            normalized = normalize_project(argument)
+            if not normalized:
+                raise ValueError(
+                    f"applies_when project condition has no usable slug: {argument!r}"
+                )
+            argument = normalized
         conditions.append((kind, argument))
     return conditions
 
