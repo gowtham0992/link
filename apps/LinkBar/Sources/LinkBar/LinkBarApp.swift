@@ -39,6 +39,11 @@ struct LinkBarApp: App {
     @MainActor
     static func snapshotIfRequested(store: LinkStore) {
         guard let path = ProcessInfo.processInfo.environment["LINKBAR_SNAPSHOT"] else { return }
+        if let appearance = ProcessInfo.processInfo.environment["LINKBAR_APPEARANCE"] {
+            NSApplication.shared.appearance = NSAppearance(
+                named: appearance == "light" ? .aqua : .darkAqua
+            )
+        }
         store.start()
         Task { @MainActor in
             // Real AppKit backing so SF Symbols and text fields render.
