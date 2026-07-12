@@ -26,6 +26,11 @@ struct LinkBarApp: App {
                 if store.pendingCount > 0 {
                     Text("\(store.pendingCount)")
                         .font(.system(size: 11, weight: .semibold))
+                } else if store.runtimeWarning != nil {
+                    // Attention without a count: the workspace runtime is
+                    // stale and one click fixes it.
+                    Text("!")
+                        .font(.system(size: 11, weight: .bold))
                 }
             }
             .onAppear { Self.snapshotIfRequested(store: store) }

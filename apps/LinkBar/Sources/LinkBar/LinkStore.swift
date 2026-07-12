@@ -22,6 +22,7 @@ final class LinkStore: ObservableObject {
     @Published var flashTone: FlashTone = .success
     @Published var busy = false
     @Published var linkVersion: String = ""
+    @Published var stats: StatusPayload?
     @Published var runtimeWarning: String?
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
@@ -29,12 +30,33 @@ final class LinkStore: ObservableObject {
         (inbox?.reviewCount ?? 0) + (captures?.count ?? 0)
     }
 
+    /// Memory writes per day for the last `days` days (today last) —
+    /// derived from the log, no extra CLI call.
+    func activityPulse(days: Int = 14) -> [Int] {
+        var buckets = [Int](repeating: 0, count: days)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        for entry in activity {
+            guard let date = entry.date else { continue }
+            let delta = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: today).day ?? .max
+            if delta >= 0 && delta < days {
+                buckets[days - 1 - delta] += 1
+            }
+        }
+        return buckets
+    }
+
     private var timer: Timer?
     private var watchers: [DirectoryWatcher] = []
     private var refreshDebounce: DispatchWorkItem?
     private var flashGeneration = 0
+    private var started = false
 
     func start() {
+        // The popover calls this on every open; guard so timers and
+        // watchers are created exactly once per app lifetime.
+        if started { refresh(); return }
+        started = true
         refresh()
         // Fallback heartbeat only — the directory watchers do the real work.
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
@@ -45,19 +67,30 @@ final class LinkStore: ObservableObject {
 
     /// Watch the paths that change when memory changes: captures land in
     /// raw/memory-captures, memories in wiki/memories, log in wiki.
-    private func startWatching() {
+    private var watchPaths: [String] {
         let root = LinkCLI.workspace
-        let paths = [
+        return [
             root,
             (root as NSString).appendingPathComponent("raw/memory-captures"),
             (root as NSString).appendingPathComponent("wiki/memories"),
             (root as NSString).appendingPathComponent("wiki"),
         ]
-        watchers = paths.compactMap { path in
+    }
+
+    private func startWatching() {
+        watchers = watchPaths.compactMap { path in
             DirectoryWatcher(path: path) { [weak self] in
                 Task { @MainActor in self?.scheduleRefresh() }
             }
         }
+    }
+
+    /// A fresh workspace may not have raw/memory-captures yet, so its
+    /// watcher fails at launch; once the first capture creates the
+    /// directory, pick it up instead of staying blind until restart.
+    private func healWatchersIfNeeded() {
+        guard watchers.count < watchPaths.count else { return }
+        startWatching()
     }
 
     /// Coalesce watcher bursts (a single accept touches several files).
@@ -76,7 +109,7 @@ final class LinkStore: ObservableObject {
             let workspace = LinkCLI.workspace
             let inbox = try? LinkCLI.runJSON(MemoryInbox.self, ["memory-inbox", workspace, "--json"])
             let captures = try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"])
-            let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "4"])
+            let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
             await MainActor.run {
                 if inbox == nil && captures == nil {
@@ -86,14 +119,16 @@ final class LinkStore: ObservableObject {
                 }
                 self.inbox = inbox ?? self.inbox
                 self.captures = captures ?? self.captures
-                self.activity = log?.entries ?? self.activity
+                self.activity = log.map { Array($0.entries.reversed()) } ?? self.activity
                 if let status {
+                    self.stats = status
                     self.linkVersion = status.version ?? self.linkVersion
                     self.runtimeWarning = status.warnings?
                         .first { $0.code == "stale_runtime" }?
                         .message
                 }
                 self.busy = false
+                self.healWatchersIfNeeded()
             }
         }
     }
@@ -132,9 +167,9 @@ final class LinkStore: ObservableObject {
         act(["archive-memory", item.name, LinkCLI.workspace])
     }
 
-    /// Accept a session capture's first proposal into reviewed memory flow.
-    func acceptCapture(_ capture: CaptureItem) {
-        act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "1"])
+    /// Accept a session capture proposal into the reviewed memory flow.
+    func acceptCapture(_ capture: CaptureItem, index: Int = 1) {
+        act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "\(index)"])
     }
 
     func deleteCapture(_ capture: CaptureItem) {
@@ -234,6 +269,19 @@ final class LinkStore: ObservableObject {
         }
     }
 
+    /// Put text on the clipboard — for pasting a memory into a prompt.
+    func copyText(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        showFlash("Copied.", tone: .success)
+    }
+
+    func clearSearch() {
+        recallResults = []
+        searchedQuery = nil
+        abstention = nil
+    }
+
     func openWorkspace() {
         NSWorkspace.shared.open(URL(fileURLWithPath: LinkCLI.workspace))
     }
@@ -279,12 +327,15 @@ final class LinkStore: ObservableObject {
     }
 
     private static func viewerResponds() async -> Bool {
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:3000/")!)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:3000/memory")!)
         request.timeoutInterval = 0.5
-        request.httpMethod = "HEAD"
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            return (response as? HTTPURLResponse) != nil
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return false }
+            // Some other dev server may own :3000 — only treat it as ours
+            // when the page is recognizably the Link viewer.
+            let body = String(data: data.prefix(4096), encoding: .utf8) ?? ""
+            return body.contains("Link")
         } catch {
             return false
         }

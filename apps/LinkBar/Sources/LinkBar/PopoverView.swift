@@ -123,6 +123,18 @@ struct PopoverView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5))
                     .onSubmit { store.recall(query) }
+                if !query.isEmpty || store.searchedQuery != nil {
+                    Button {
+                        query = ""
+                        store.clearSearch()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Clear the search")
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -180,11 +192,12 @@ struct PopoverView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .contextMenu {
+                        Button("Copy text") { store.copyText(memory.tldr ?? memory.title) }
                         Button("Reveal in Finder") { store.revealMemory(named: memory.name) }
                     }
                     .onTapGesture(count: 2) { store.revealMemory(named: memory.name) }
                 }
-                .help("Double-click or right-click to open the memory file")
+                .help("Double-click to open · right-click to copy")
             }
         }
     }
@@ -306,11 +319,25 @@ struct PopoverView: View {
                             Button("Reveal in Finder") { store.revealCapture(capture) }
                         }
                         Spacer(minLength: 6)
-                        Button("Accept") { store.acceptCapture(capture) }
-                            .buttonStyle(.borderedProminent)
-                            .tint(LinkBrand.rust)
+                        if let proposals = capture.proposals, proposals.count > 1 {
+                            Menu("Accept") {
+                                ForEach(Array(proposals.enumerated()), id: \.offset) { position, proposal in
+                                    Button(proposal.title ?? proposal.memory?.prefix(60).description ?? "Proposal \(position + 1)") {
+                                        store.acceptCapture(capture, index: position + 1)
+                                    }
+                                }
+                            }
+                            .menuStyle(.borderedButton)
                             .controlSize(.small)
-                            .help("Accept the first proposal into reviewed memory")
+                            .frame(width: 76)
+                            .help("This session proposed \(proposals.count) memories — pick one to accept")
+                        } else {
+                            Button("Accept") { store.acceptCapture(capture) }
+                                .buttonStyle(.borderedProminent)
+                                .tint(LinkBrand.rust)
+                                .controlSize(.small)
+                                .help("Accept the proposal into reviewed memory")
+                        }
                         Button {
                             store.deleteCapture(capture)
                         } label: { Image(systemName: "trash") }
@@ -349,20 +376,44 @@ struct PopoverView: View {
         }
     }
 
-    /// Everything reviewed, nothing captured, nothing searched: say so nicely.
+    /// Everything reviewed, nothing captured, nothing searched — show the
+    /// workspace at a glance instead of an empty room: counts, the last
+    /// fortnight's pulse, and the most recent thing Link did.
     private var idleState: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "checkmark.seal")
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(LinkBrand.rust.opacity(0.8))
-            Text("All reviewed.")
-                .font(.system(size: 12.5, weight: .medium))
-            Text("Your agents remember you — say something worth keeping.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+            SectionHeader(title: "Your memory")
+            HStack(spacing: 0) {
+                StatChip(
+                    value: "\(store.stats?.activeMemoryCount ?? 0)",
+                    label: "active",
+                    tint: LinkBrand.rust
+                )
+                StatChip(value: "\(store.stats?.memoryCount ?? 0)", label: "memories")
+                StatChip(value: "\(store.stats?.contentPageCount ?? 0)", label: "wiki pages")
+                StatChip(value: "\(store.stats?.needsReviewCount ?? 0)", label: "to review")
+            }
+            .padding(.vertical, 6)
+            HStack(alignment: .center, spacing: 10) {
+                Sparkline(values: store.activityPulse())
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Last 14 days")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    if let last = store.activity.first {
+                        Text("Latest: \(last.operation)\(last.date.map { " · \($0.relativeLabel)" } ?? "")")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: 15, weight: .light))
+                    .foregroundStyle(LinkBrand.rust.opacity(0.75))
+                    .help("Everything is reviewed")
+            }
+            .padding(.horizontal, 8)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
     }
 
     private var footer: some View {
@@ -393,7 +444,7 @@ struct PopoverView: View {
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer()
-                Text("LinkBar 0.5" + (store.linkVersion.isEmpty ? "" : " · Link \(store.linkVersion)"))
+                Text("LinkBar \(LinkBrand.version)" + (store.linkVersion.isEmpty ? "" : " · Link \(store.linkVersion)"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
                 Button("Quit") { NSApplication.shared.terminate(nil) }
@@ -461,7 +512,7 @@ struct SettingsPane: View {
 
             HStack {
                 if !store.linkVersion.isEmpty {
-                    Text("LinkBar 0.5 · Link \(store.linkVersion)")
+                    Text("LinkBar \(LinkBrand.version) · Link \(store.linkVersion)")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }

@@ -66,18 +66,37 @@ struct CaptureItem: Decodable, Identifiable {
     }
 
     /// Capture filenames start with a UTC stamp (20260712T165329Z-…);
-    /// showing it disambiguates same-titled sessions.
+    /// shown as local relative time ("2h ago") so same-titled sessions
+    /// disambiguate without the reader doing timezone math.
     var capturedAt: String? {
         let name = (path as NSString).lastPathComponent
         guard name.count >= 16, name.prefix(8).allSatisfy(\.isNumber) else { return nil }
-        let month = Int(name.dropFirst(4).prefix(2)) ?? 0
-        let day = name.dropFirst(6).prefix(2)
-        let hour = name.dropFirst(9).prefix(2)
-        let minute = name.dropFirst(11).prefix(2)
-        let months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        guard (1...12).contains(month) else { return nil }
-        return "\(day) \(months[month]) \(hour):\(minute) UTC"
+        var comps = DateComponents()
+        comps.year = Int(name.prefix(4)); comps.month = Int(name.dropFirst(4).prefix(2))
+        comps.day = Int(name.dropFirst(6).prefix(2)); comps.hour = Int(name.dropFirst(9).prefix(2))
+        comps.minute = Int(name.dropFirst(11).prefix(2)); comps.second = Int(name.dropFirst(13).prefix(2))
+        comps.timeZone = TimeZone(identifier: "UTC")
+        guard let date = Calendar(identifier: .gregorian).date(from: comps) else { return nil }
+        return date.relativeLabel
+    }
+}
+
+extension Date {
+    /// Parse Link's UTC stamps ("2026-07-12T18:00:00Z").
+    static func fromLinkStamp(_ stamp: String) -> Date? {
+        ISO8601DateFormatter().date(from: stamp)
+    }
+
+    /// "2h ago" under a day, "Jul 12" beyond — compact enough for a row.
+    var relativeLabel: String {
+        let interval = Date().timeIntervalSince(self)
+        if interval < 90 { return "now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86_400 { return "\(Int(interval / 3600))h ago" }
+        if interval < 7 * 86_400 { return "\(Int(interval / 86_400))d ago" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: self)
     }
 }
 
@@ -90,7 +109,11 @@ struct LogEntry: Decodable, Identifiable {
     let operation: String
     let description: String?
 
-    var id: String { timestamp + operation }
+    // timestamp+operation alone collides when one command writes twice
+    // in a second (ForEach then drops rows) — include the description.
+    var id: String { timestamp + operation + (description ?? "") }
+
+    var date: Date? { Date.fromLinkStamp(timestamp) }
 }
 
 struct RecallPayload: Decodable {
@@ -126,6 +149,18 @@ struct StatusPayload: Decodable {
 
     let version: String?
     let warnings: [Warning]?
+    let memoryCount: Int?
+    let activeMemoryCount: Int?
+    let needsReviewCount: Int?
+    let contentPageCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case version, warnings
+        case memoryCount = "memory_count"
+        case activeMemoryCount = "active_memory_count"
+        case needsReviewCount = "needs_review_count"
+        case contentPageCount = "content_page_count"
+    }
 }
 
 struct RememberResult: Decodable {
