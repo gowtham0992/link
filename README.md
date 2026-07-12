@@ -121,19 +121,18 @@ Full methodology and reproduction steps:
 
 ## Quick Start
 
-Start with the memory proof. It creates a clean local workspace, writes one
-reviewed memory, and proves that the same memory can be recalled through CLI,
-official skills, and MCP. No web server is required for the proof.
+Two commands: see it work, then make it yours.
 
 ```bash
 brew install gowtham0992/link/link
-lnk proof
+lnk proof                              # see the promise (~1 second, no setup)
+lnk onboard --agent claude-code --write   # wire your agent for real memory
 ```
 
-The installed command is `lnk` because `link` is already a POSIX/macOS system
-utility. From a source checkout, use `python3 link.py ...` instead.
-
-You should see:
+`lnk proof` creates a throwaway workspace, writes one reviewed memory, and
+recalls it through the same path the CLI, skills, and MCP use — the core
+promise (one local memory, reusable by different agents, no cloud profile) in
+one second:
 
 ```text
 Cross-agent memory continuity works
@@ -142,37 +141,19 @@ Recall: found through the same bounded recall path used by CLI, skills, and MCP.
 Result: proof passed
 ```
 
-That is the core promise: one local memory, reusable by different agents,
-without a hidden cloud profile.
+`lnk onboard --agent claude-code --write` then creates `~/link`, provisions the
+MCP runtime, and wires the agent — including the session hooks that capture
+memory automatically as you work (swap `claude-code` for `codex`, `cursor`,
+`kiro`, `copilot`, `antigravity`, or others). Drop `--write` to preview the
+config without touching anything, or drop `--agent` to just create the
+workspace.
 
-Then run the richer demo when you want the UI, graph, source pages, and query
-packets:
+The installed command is `lnk` because `link` is already a POSIX/macOS system
+utility. From a source checkout, use `python3 link.py ...` instead.
 
-```bash
-lnk try
-lnk serve link-demo
-```
-
-`lnk try` creates the demo, checks readiness, runs compact query/brief examples,
-and prints the first agent prompts. Windows, source checkout, MCP-only, and
-skill-first setup live in the
+Want the UI, graph, and source pages first? `lnk try && lnk serve link-demo`.
+Windows, source checkout, MCP-only, and skill-first paths are in the
 [First 10 Minutes guide](https://gowtham0992.github.io/link/getting-started.html).
-
-When you are ready to use Link for real memory, run one guided command:
-
-```bash
-lnk onboard
-lnk onboard --first-memory "I prefer concise release notes"
-lnk onboard --seed-project .
-lnk onboard --agent codex
-lnk onboard --agent codex --write
-```
-
-`lnk onboard` creates or repairs `~/link`, checks health, prints the exact agent
-prompts to try, and previews MCP wiring for Codex, Claude Code, Cursor, Kiro,
-VS Code, Copilot, Antigravity, and other supported clients. It only writes an
-agent config when you pass `--write`. Add `--seed-project .` from inside a repo
-when you want onboarding to create the first source-backed project context page.
 
 Or seed your current repo as a separate step so the first real recall is not empty:
 

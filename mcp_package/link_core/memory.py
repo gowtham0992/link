@@ -3085,6 +3085,46 @@ def extract_procedure_candidates(text: str, max_candidates: int = 3) -> list[dic
     return candidates
 
 
+# A sentence can classify as a preference yet carry no durable substance —
+# "I want to set some conventions" is *about* making rules, not itself a
+# rule. These rank such meta-preambles below concrete directives so the
+# proposal a one-click Accept lands on is the useful one, not the throat-
+# clearing that happened to come first in the transcript.
+_META_PREAMBLE_RE = re.compile(
+    r"(?i)\b(?:want|wanted|like|need|going|trying|hoping|planning)\s+to\s+"
+    r"(?:set|establish|define|create|make|figure|think|discuss|talk|"
+    r"standardi[sz]e|nail|sort|work)\b"
+    r"|\b(?:some|a few|certain|our|the)\s+"
+    r"(?:conventions?|guidelines?|standards?|rules?|practices?|norms?|processes?)\b"
+    r"|\bhow\s+we\s+(?:work|operate|do things)\b"
+)
+# Deliberately excludes bare temporal phrases ("from now on", "going
+# forward") — they attach just as easily to a vague preamble ("I want to
+# set conventions going forward") as to a real rule, so they can't earn the
+# concrete bonus on their own. A genuine directive has an action verb or an
+# absolute qualifier.
+_CONCRETE_DIRECTIVE_RE = re.compile(
+    r"(?i)\b(?:only|always|never|by default|whenever)\b"
+    r"|\b(?:i|we)\s+(?:prefer|use|deploy|merge|commit|run|ship|release|test|"
+    r"avoid|write|require|keep|review|pin|target)\b"
+)
+
+
+def memory_durability_rank(memory: str) -> int:
+    """Higher = more durably useful as a standalone memory.
+
+    Used only to order proposals within a capture (not to accept/reject):
+    concrete directives outrank vague meta-statements about wanting rules.
+    """
+    text = str(memory or "").strip()
+    rank = 0
+    if _CONCRETE_DIRECTIVE_RE.search(text):
+        rank += 2
+    if _META_PREAMBLE_RE.search(text) and not _CONCRETE_DIRECTIVE_RE.search(text):
+        rank -= 2
+    return rank
+
+
 def propose_memories_from_text(
     text: str,
     records: Iterable[Mapping[str, object]],
@@ -3133,8 +3173,6 @@ def propose_memories_from_text(
         }
         proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
         proposals.append(proposal)
-        if len(proposals) >= limit:
-            break
     segments = memory_proposal_segments(text)
     for index, segment in enumerate(segments):
         classified = classify_memory_segment(segment)
@@ -3199,8 +3237,11 @@ def propose_memories_from_text(
         }
         proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
         proposals.append(proposal)
-        if len(proposals) >= limit:
-            break
+    # Rank the most durably useful proposal first so a one-click Accept (and
+    # accept-capture --index 1) lands on the substance, not a meta-preamble
+    # that happened to come first. Stable: equal ranks keep transcript order.
+    proposals.sort(key=lambda p: memory_durability_rank(str(p.get("memory", ""))), reverse=True)
+    proposals = proposals[:limit]
     return {
         "proposed": True,
         "source": source,
