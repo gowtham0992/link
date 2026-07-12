@@ -3185,7 +3185,7 @@ def propose_memories_from_text(
         segment_context = " ".join(
             segments[j] for j in (index - 1, index + 1) if 0 <= j < len(segments)
         ).strip()
-        score = int(classified["confidence_score"])
+        score = int(str(classified["confidence_score"]))
         if score < MEMORY_PROPOSAL_MIN_SCORE:
             skipped += 1
             continue

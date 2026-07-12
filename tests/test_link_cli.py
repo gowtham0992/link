@@ -3319,6 +3319,11 @@ class DefaultWorkspaceFallbackTests(unittest.TestCase):
 
 
 class LnkCommandDisplayTests(unittest.TestCase):
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX shim scenario: a #!/bin/sh `lnk` on PATH is a Homebrew "
+        "(macOS/Linux) launcher; Windows uses .exe/.bat and has no such shim.",
+    )
     def test_shim_on_path_switches_generated_commands_to_lnk(self):
         # A `lnk` on PATH that wraps THIS runtime means the user installed a
         # launcher (e.g. Homebrew): generated commands must say `lnk`, never

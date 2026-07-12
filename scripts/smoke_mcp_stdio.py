@@ -155,8 +155,11 @@ async def _run_full_smoke(session: Any) -> None:
         ),
         "search_wiki",
     )
-    if search.get("count", 0) < 1 or search["results"][0]["name"] != "agent-memory":
-        raise RuntimeError("search_wiki did not return the expected demo result")
+    result_names = [r.get("name") for r in search.get("results", []) if isinstance(r, dict)]
+    if search.get("count", 0) < 1 or "agent-memory" not in result_names:
+        raise RuntimeError(
+            f"search_wiki did not surface the demo page; got {result_names}"
+        )
 
     packet = _json_text(
         await session.call_tool(
@@ -370,8 +373,21 @@ def main() -> int:
         import anyio
 
         anyio.run(_run_smoke, wiki_dir, args.python, args.surface)
-    except Exception as exc:
-        print(f"MCP smoke failed: {exc}", file=sys.stderr)
+    except BaseException as exc:  # noqa: BLE001 - surface the real cause
+        # The MCP session wraps handler failures in anyio TaskGroups, so a
+        # plain str(exc) is just "unhandled errors in a TaskGroup". Unwrap
+        # nested ExceptionGroups to the leaf so CI shows what actually broke.
+        def _leaves(err: BaseException) -> list[str]:
+            subs = getattr(err, "exceptions", None)
+            if not subs:
+                return [f"{type(err).__name__}: {err}"]
+            out: list[str] = []
+            for sub in subs:
+                out.extend(_leaves(sub))
+            return out
+
+        for leaf in _leaves(exc):
+            print(f"MCP smoke failed: {leaf}", file=sys.stderr)
         return 1
 
     print(f"MCP stdio smoke passed for {wiki_dir} ({args.surface} surface)")

@@ -199,7 +199,11 @@ jobs:
         shell: pwsh
         run: |
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "cleanhome"
-          $out = '{"session_id":"ci-cold","source":"startup"}' | python "$env:USERPROFILE\link\link.py" hook session-start "$env:USERPROFILE\link"
+          # Join multi-line stdout into one string: PowerShell captures command
+          # output as a string array, and `-notmatch` on an array returns the
+          # non-matching lines (truthy) rather than a boolean, so a brief that
+          # DOES contain "Link memory" still trips the guard.
+          $out = ('{"session_id":"ci-cold","source":"startup"}' | python "$env:USERPROFILE\link\link.py" hook session-start "$env:USERPROFILE\link") -join "`n"
           if ($out -notmatch "Link memory") { Write-Error "hook produced no brief: $out"; exit 1 }
 
       - name: MCP server answers over stdio from the provisioned venv
