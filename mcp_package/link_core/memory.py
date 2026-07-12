@@ -1458,6 +1458,7 @@ def write_memory_page(
     trigger: str | None = None,
     applies_when: str | None = None,
     supersedes: str | None = None,
+    context: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
@@ -1471,6 +1472,13 @@ def write_memory_page(
     clean_trigger = " ".join(str(trigger or "").split())
     if clean_trigger and len(clean_trigger) > 200:
         raise ValueError("trigger must be 200 characters or fewer")
+    # Retrieval context: surrounding text from the memory's origin. It helps
+    # recall find the memory but is never part of the claim, so it needs no
+    # review-visible section — frontmatter only, bounded like LoCoMo's
+    # measured +/-1-neighbor window.
+    clean_context = " ".join(str(context or "").split())
+    if len(clean_context) > 600:
+        clean_context = clean_context[:600].rsplit(" ", 1)[0].strip()
     clean_applies_when = " ".join(str(applies_when or "").split())
     if clean_applies_when:
         if len(clean_applies_when) > 200:
@@ -1589,6 +1597,7 @@ def write_memory_page(
         f'applies_when: "{frontmatter_string(clean_applies_when)}"\n' if clean_applies_when else ""
     )
     supersedes_line = f'supersedes: "{frontmatter_string(superseded_name)}"\n' if superseded_name else ""
+    context_line = f'context: "{frontmatter_string(clean_context)}"\n' if clean_context else ""
 
 
     if memory_type == "procedure":
@@ -1613,7 +1622,7 @@ visibility: {clean_visibility}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
-{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}{supersedes_line}reviewed_at: ""
+{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}{supersedes_line}{context_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -2867,6 +2876,12 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
     if project:
         command_parts.extend(["--project", project])
         args["project"] = project
+    # Retrieval context rides the structured paths (MCP tool arguments,
+    # accept-capture) but stays out of the paste-ready shell command —
+    # a 600-char quoted blob would make the command unusable.
+    proposal_context = str(proposal.get("context") or "").strip()
+    if proposal_context:
+        args["context"] = proposal_context
     action = _memory_action(
         kind="remember",
         label="Remember",
@@ -3075,11 +3090,18 @@ def propose_memories_from_text(
         proposals.append(proposal)
         if len(proposals) >= limit:
             break
-    for segment in memory_proposal_segments(text):
+    segments = memory_proposal_segments(text)
+    for index, segment in enumerate(segments):
         classified = classify_memory_segment(segment)
         if not classified:
             skipped += 1
             continue
+        # Retrieval context: the neighboring sentences around the claim's
+        # origin (the LoCoMo-measured +/-1 window). Helps recall find the
+        # memory later; never part of the claim itself.
+        segment_context = " ".join(
+            segments[j] for j in (index - 1, index + 1) if 0 <= j < len(segments)
+        ).strip()
         score = int(classified["confidence_score"])
         if score < MEMORY_PROPOSAL_MIN_SCORE:
             skipped += 1
@@ -3121,6 +3143,7 @@ def propose_memories_from_text(
             "memory_type": memory_type,
             "scope": scope,
             "project": project_name if scope == "project" else "",
+            "context": segment_context[:600],
             "confidence": confidence_label(score),
             "confidence_score": score,
             "reason": classified["reason"],

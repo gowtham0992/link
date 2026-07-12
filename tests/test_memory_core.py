@@ -683,6 +683,23 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(payload["proposals"][1]["primary_action"]["kind"], "remember")
         self.assertEqual(payload["proposals"][1]["primary_action"]["tool"], "remember_memory")
 
+    def test_proposals_carry_neighboring_sentences_as_context(self):
+        payload = propose_memories_from_text(
+            "we spent an hour debugging the deploy pipeline. "
+            "from now on I only deploy to staging through the release script. "
+            "also check whether the bucket migration ticket is still open.",
+            [],
+            source="unit test",
+        )
+        proposal = payload["proposals"][0]
+
+        self.assertIn("release script", proposal["memory"])
+        self.assertIn("debugging the deploy pipeline", proposal["context"])
+        self.assertIn("bucket migration ticket", proposal["context"])
+        self.assertNotIn("release script", proposal["context"])
+        self.assertEqual(proposal["primary_action"]["arguments"]["context"], proposal["context"])
+        self.assertNotIn("--context", proposal["primary_action"]["command"])
+
     def test_standing_rule_phrasings_propose_preferences(self):
         payload = propose_memories_from_text(
             "hey, before we start — from now on I only push to the develop "
@@ -1173,6 +1190,35 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(logged[-1][1], "forget-memory")
         self.assertNotIn("User prefers focused commits", "\n".join(logged[-1][3]))
         self.assertEqual(pending_operations(wiki), [])
+
+    def test_write_memory_page_stores_bounded_context_in_frontmatter(self):
+        root = Path(tempfile.mkdtemp(prefix="link-memory-ctx-"))
+        wiki = root / "wiki"
+        wiki.mkdir(parents=True)
+
+        created = write_memory_page(
+            wiki,
+            "User only deploys to staging through the release script.",
+            title="Deploy through release script",
+            memory_type="preference",
+            scope="user",
+            tags=None,
+            source="unit test",
+            timestamp="2026-07-12T06:00:00Z",
+            context="we debugged the pipeline for an hour " * 30,  # > 600 chars
+            records=[],
+            log_writer=lambda *a: None,
+            rebuild_backlinks=lambda: True,
+        )
+        page = (wiki / "memories" / f"{created['name']}.md").read_text(encoding="utf-8")
+        context_line = next(line for line in page.splitlines() if line.startswith("context:"))
+
+        self.assertTrue(created["created"])
+        self.assertIn("we debugged the pipeline", context_line)
+        self.assertLessEqual(len(context_line), 620)
+        # context never appears in the visible page body — it is not a claim
+        body = page.split("---", 2)[2]
+        self.assertNotIn("we debugged the pipeline", body)
 
     def test_write_memory_page_creates_index_log_and_blocks_duplicates(self):
         root = Path(tempfile.mkdtemp(prefix="link-memory-write-"))

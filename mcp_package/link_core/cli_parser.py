@@ -259,6 +259,7 @@ def build_cli_parser(
     remember_cmd.add_argument("--trigger", default=None, help="short phrase describing when this memory applies (recommended for --type procedure)")
     remember_cmd.add_argument("--applies-when", default=None, dest="applies_when", help='scoping conditions, e.g. "project:link, task:cutting a release, path:*repo*" (OR semantics)')
     remember_cmd.add_argument("--supersedes", default=None, help="name of the active memory this one replaces; the old memory is archived with lineage")
+    remember_cmd.add_argument("--context", default=None, help="surrounding text from the memory's origin; helps recall find it, never part of the claim (600 chars max)")
     remember_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
     remember_cmd.add_argument("--allow-conflict", action="store_true", help="create a memory even if it may conflict with an active memory")
     remember_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
@@ -660,6 +661,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             trigger=args.trigger,
             applies_when=args.applies_when,
             supersedes=args.supersedes,
+            context=args.context,
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
             json_output=args.json,

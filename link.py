@@ -711,6 +711,7 @@ def _write_memory_page(
     trigger: str | None = None,
     applies_when: str | None = None,
     supersedes: str | None = None,
+    context: str | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -724,6 +725,7 @@ def _write_memory_page(
         trigger=trigger,
         applies_when=applies_when,
         supersedes=supersedes,
+        context=context,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -1128,6 +1130,7 @@ def remember(
     trigger: str | None = None,
     applies_when: str | None = None,
     supersedes: str | None = None,
+    context: str | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -1151,6 +1154,7 @@ def remember(
             trigger=trigger,
             applies_when=applies_when,
             supersedes=supersedes,
+            context=context,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
@@ -1479,6 +1483,7 @@ def accept_capture(
         allow_conflict=allow_conflict,
         project=str(memory_args["project"]),
         trigger=str(memory_args.get("trigger") or "") or None,
+        context=str(memory_args.get("context") or "") or None,
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):

@@ -251,6 +251,7 @@ def capture_accept_memory_args(
         "source": str(selection.get("capture") or ""),
         "project": project_name if chosen_scope == "project" else "",
         "trigger": str(proposal.get("trigger") or "") or None,
+        "context": str(proposal.get("context") or "") or None,
     }
 
 

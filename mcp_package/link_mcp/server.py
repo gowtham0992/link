@@ -743,6 +743,7 @@ def _accept_capture(
         allow_conflict=allow_conflict,
         project=str(memory_args["project"]),
         trigger=str(memory_args.get("trigger") or ""),
+        context=str(memory_args.get("context") or ""),
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
@@ -914,7 +915,7 @@ def _write_mcp_memory_page(
     scope: str = "user", tags: str = "", source: str = "mcp",
     allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
     visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
-    applies_when: str = "", supersedes: str = "",
+    applies_when: str = "", supersedes: str = "", context: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -930,6 +931,7 @@ def _write_mcp_memory_page(
         trigger=_clean_text_input(trigger, max_len=200) or None,
         applies_when=_clean_text_input(applies_when, max_len=200) or None,
         supersedes=_clean_text_input(supersedes, max_len=200) or None,
+        context=_clean_text_input(context, max_len=600) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         **options,
     )
@@ -1235,6 +1237,7 @@ def remember(
     trigger: str = "",
     applies_when: str = "",
     supersedes: str = "",
+    context: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
 ) -> str:
@@ -1245,6 +1248,7 @@ def remember(
     reviewing, or archiving existing memory instead of forcing a new page.
     Use memory_type="procedure" with a short `trigger` phrase for reusable
     how-to memory (steps for a recurring task) the user has approved.
+    context: optional surrounding text from the memory's origin (neighboring conversation turns); it helps recall find the memory later but is never part of the claim.
     Field rule: trigger helps recall FIND a recipe; applies_when FENCES a
     memory to a context; scope/project/visibility say whose memory it is;
     supersedes REPLACES an old claim with lineage. When unsure, omit them.
@@ -1266,6 +1270,7 @@ def remember(
             trigger=trigger,
             applies_when=applies_when,
             supersedes=supersedes,
+            context=context,
         )
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})
@@ -1978,6 +1983,7 @@ def remember_memory(
     review_after: str = "",
     expires_at: str = "",
     trigger: str = "",
+    context: str = "",
 ) -> str:
     """Save a local agent memory as a Markdown page.
 
@@ -1991,6 +1997,7 @@ def remember_memory(
     project: optional project key for project-scoped memories.
     tags: optional comma-separated tags.
     review_after: optional YYYY-MM-DD date when this memory should be checked again.
+    context: optional surrounding origin text (max 600 chars); aids recall, never part of the claim.
     expires_at: optional YYYY-MM-DD date when this memory should leave default recall.
     trigger: optional short phrase describing when this memory applies (recommended for procedure).
     """
@@ -2009,6 +2016,7 @@ def remember_memory(
             review_after=review_after,
             expires_at=expires_at,
             trigger=trigger,
+            context=context,
         )
     except ValueError as exc:
         return json.dumps({"created": False, "error": str(exc)})
