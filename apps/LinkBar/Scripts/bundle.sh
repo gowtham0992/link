@@ -28,3 +28,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 codesign --force --sign - "$APP" 2>/dev/null || true
 echo "bundled: $APP"
+
+# --install: replace /Applications/LinkBar.app with this build and relaunch.
+if [ "$1" = "--install" ]; then
+  pkill -x LinkBar 2>/dev/null || true
+  sleep 1
+  rm -rf /Applications/LinkBar.app
+  cp -R "$APP" /Applications/LinkBar.app
+  open /Applications/LinkBar.app
+  echo "installed: /Applications/LinkBar.app (running)"
+fi
