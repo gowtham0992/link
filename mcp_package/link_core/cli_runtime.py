@@ -357,8 +357,15 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
     ]
     fixes = payload.get("fixes")
     if isinstance(fixes, Sequence) and not isinstance(fixes, (str, bytes)) and fixes:
-        lines.append("- safe repairs:")
-        lines.extend(f"  - {item}" for item in fixes)
+        # A fresh workspace reports every scaffolded directory/file — a dozen
+        # lines a first-timer doesn't need. Collapse the bulk case to one
+        # line; keep a short list of targeted repairs on an existing
+        # workspace, where each line is actually meaningful.
+        if len(fixes) > 4:
+            lines.append(f"- scaffolded a fresh workspace ({len(fixes)} items)")
+        else:
+            lines.append("- safe repairs:")
+            lines.extend(f"  - {item}" for item in fixes)
 
     lines.extend(["", "First memory"])
     if memory:

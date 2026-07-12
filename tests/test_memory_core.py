@@ -25,6 +25,7 @@ from link_core.memory import (  # noqa: E402
     memory_profile,
     memory_review_issues,
     memory_records,
+    memory_durability_rank,
     propose_memories_from_text,
     recall_memories,
     recall_state,
@@ -1438,3 +1439,29 @@ class SlugifyBoundsTests(unittest.TestCase):
         self.assertFalse(slug.endswith("-"))
         # short slugs unchanged
         self.assertEqual(slugify("My Cool Title"), "my-cool-title")
+
+
+class ProposalDurabilityRankingTests(unittest.TestCase):
+    def test_concrete_rule_outranks_meta_preamble(self):
+        self.assertGreater(
+            memory_durability_rank("From now on I only deploy on Fridays"),
+            memory_durability_rank("I want to set some conventions for how we work going forward"),
+        )
+
+    def test_one_click_accept_lands_on_substance_not_preamble(self):
+        text = (
+            "I want to set some conventions for how we work on the payments service going forward. "
+            "From now on I only deploy the payments service on Fridays, never mid-week. "
+            "I prefer squash merges for that repo."
+        )
+        proposals = propose_memories_from_text(text, [])["proposals"]
+        # The default accept (--index 1 / one-click) must not be the preamble.
+        self.assertNotIn("set some conventions", proposals[0]["memory"])
+        # The vague preamble ranks last, not first.
+        self.assertIn("set some conventions", proposals[-1]["memory"])
+
+    def test_ranking_is_stable_for_equal_substance(self):
+        # Two concrete rules keep transcript order (both rank equally).
+        text = "I only merge with squash commits. I always run the linter before pushing."
+        proposals = propose_memories_from_text(text, [])["proposals"]
+        self.assertIn("squash", proposals[0]["memory"])
