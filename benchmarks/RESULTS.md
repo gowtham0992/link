@@ -250,7 +250,7 @@ more than twice Link's token budget.
 
 The result also holds under a second, independent judge — Tencent
 Hunyuan 3 (295B open weights, unrelated to either lab): **Link 85.5%
-vs mem0 platform 83.5%** on the same answers (n=1,538 per side; two
+vs mem0 platform 83.6%** on the same answers (n=1,538 per side; two
 questions per side hit persistent gateway errors and are excluded
 identically). Two unrelated judges, same verdict, slightly wider
 margin under the neutral one.
