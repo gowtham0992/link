@@ -262,6 +262,19 @@ Not directly comparable to mem0's published 90.4%: every number in
 their files uses gpt-5 as both answerer and judge, and LongMemEval is
 heavily answerer-reasoning-bound.
 
+We also ran the whole comparison under the neutral Hunyuan 3 judge, in
+both directions: mem0's own gpt-5 answers score **91.0%** (so their
+published number was not judge-inflated — it holds up under an
+unrelated referee, and we say so), Link's haiku answers score **80.6%**,
+and swapping Link's answerer from haiku to Hunyuan 3 itself also lands
+at **80.6%** (per-category shifts: single-session-user 95.7,
+knowledge-update 94.9, temporal 82.7). The ~10-point gap between
+answer sets written by gpt-5 and by budget/open models is the
+answerer effect the evidence analysis above predicts — on this
+benchmark the answering model, not the memory layer, dominates the
+score, which is why we publish the retrieval decomposition (evidence
+in context for 99.4% of questions) as the memory-layer signal.
+
 What *is* directly measurable without any judge: replaying Link's
 deterministic ingest maps every retrieved memory to its source session,
 so we can check whether retrieval surfaced the gold evidence. **Link
