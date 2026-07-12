@@ -535,3 +535,34 @@ class CaptureCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CaptureInboxProposalPreviewTests(unittest.TestCase):
+    def test_inbox_items_carry_proposal_previews(self):
+        import tempfile
+        from pathlib import Path
+        from mcp_package.link_core.capture import capture_inbox
+
+        root = Path(tempfile.mkdtemp(prefix="link-capture-preview-"))
+        captures_dir = root / "raw" / "memory-captures"
+        captures_dir.mkdir(parents=True)
+        (captures_dir / "20260712T120000Z-agent-session-notes.md").write_text(
+            "---\n"
+            'title: "Agent session notes"\n'
+            'date_captured: "2026-07-12T12:00:00Z"\n'
+            "---\n\n"
+            "## Notes\n\n"
+            "User: from now on I only deploy to staging through the release script.\n"
+            "User: also we decided to keep the memory layer deterministic.\n",
+            encoding="utf-8",
+        )
+
+        payload = capture_inbox(root)
+        records = payload["captures"]
+
+        self.assertEqual(len(records), 1)
+        item = records[0]
+        self.assertGreaterEqual(item["proposal_count"], 1)
+        first = item["proposals"][0]
+        self.assertIn("release script", first["memory"])
+        self.assertEqual(first["memory_type"], "preference")

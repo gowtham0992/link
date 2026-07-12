@@ -72,6 +72,86 @@ def append_log(
     )
 
 
+def redact_log_references(
+    wiki_dir: Path,
+    needles: list[str],
+    timestamp: str,
+    reason: str,
+) -> dict[str, object]:
+    """Replace needle text in past log entries and re-anchor the hash chain.
+
+    Forgetting a memory must also forget the log lines that quote its title.
+    The log is tamper-evident, so this is never silent: every touched entry
+    is re-hashed into a fresh chain and a final entry declares the redaction
+    and the re-anchor. Needles shorter than 6 characters are ignored to
+    avoid mangling unrelated text.
+    """
+    log_path = wiki_dir / "log.md"
+    safe_needles = [n for n in needles if isinstance(n, str) and len(n.strip()) >= 6]
+    if not log_path.exists() or not safe_needles:
+        return {"redacted_entries": 0, "rechained": False}
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    touched = 0
+    for needle in safe_needles:
+        if needle in text:
+            touched += text.count(needle)
+            text = text.replace(needle, "[forgotten memory]")
+    if not touched:
+        return {"redacted_entries": 0, "rechained": False}
+
+    # Rebuild the hash chain over the redacted entries.
+    lines = text.splitlines()
+    out: list[str] = []
+    previous_hash = "0" * 64
+    heading: str | None = None
+    details: list[str] = []
+
+    def flush() -> None:
+        nonlocal previous_hash, heading, details
+        if heading is None:
+            return
+        entry_hash = _hash_log_entry(previous_hash, heading, details)
+        out.append(heading)
+        out.append("")
+        out.extend(details)
+        out.append(f"- log_previous_hash: {previous_hash}")
+        out.append(f"- log_entry_hash: {entry_hash}")
+        out.extend(["", "---", ""])
+        previous_hash = entry_hash
+        heading = None
+        details = []
+
+    preamble_done = False
+    for line in lines:
+        if line.startswith("## ["):
+            flush()
+            preamble_done = True
+            heading = line
+            continue
+        if not preamble_done:
+            out.append(line)
+            continue
+        if LOG_HASH_RE.match(line) or LOG_PREVIOUS_HASH_RE.match(line):
+            continue
+        if line.strip() == "---" or (heading is not None and not line.strip() and not details):
+            continue
+        if heading is not None and line.startswith("- "):
+            details.append(line)
+    flush()
+    log_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+    append_log(
+        wiki_dir,
+        timestamp,
+        "redact-log",
+        reason,
+        [
+            f"Replaced {touched} reference(s) with [forgotten memory].",
+            "Hash chain re-anchored by this entry.",
+        ],
+    )
+    return {"redacted_entries": touched, "rechained": True}
+
+
 def _log_entry_blocks(log_path: Path) -> list[dict[str, Any]]:
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()

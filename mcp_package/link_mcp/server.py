@@ -913,7 +913,8 @@ def _update_memory_page(
 def _write_mcp_memory_page(
     text: str, title: str = "", memory_type: str = "note",
     scope: str = "user", tags: str = "", source: str = "mcp",
-    allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
+    allow_duplicate: bool = False, allow_conflict: bool = False, allow_secret: bool = False,
+    project: str = "",
     visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
     applies_when: str = "", supersedes: str = "", context: str = "",
 ) -> dict[str, object]:
@@ -933,6 +934,7 @@ def _write_mcp_memory_page(
         supersedes=_clean_text_input(supersedes, max_len=200) or None,
         context=_clean_text_input(context, max_len=600) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
+        allow_secret=allow_secret,
         **options,
     )
     if result.get("created"):
@@ -1240,6 +1242,7 @@ def remember(
     context: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
 ) -> str:
     """Save explicit user-approved memory.
 
@@ -1263,6 +1266,7 @@ def remember(
             source=source,
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
+            allow_secret=allow_secret,
             project=project,
             visibility=visibility,
             review_after=review_after,
@@ -1978,6 +1982,7 @@ def remember_memory(
     source: str = "mcp",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
     project: str = "",
     visibility: str = "",
     review_after: str = "",
@@ -1998,6 +2003,7 @@ def remember_memory(
     tags: optional comma-separated tags.
     review_after: optional YYYY-MM-DD date when this memory should be checked again.
     context: optional surrounding origin text (max 600 chars); aids recall, never part of the claim.
+    allow_secret: memory that looks like a credential is refused by default; set true only when the user insists it is not a secret.
     expires_at: optional YYYY-MM-DD date when this memory should leave default recall.
     trigger: optional short phrase describing when this memory applies (recommended for procedure).
     """
@@ -2011,6 +2017,7 @@ def remember_memory(
             source=source,
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
+            allow_secret=allow_secret,
             project=project,
             visibility=visibility,
             review_after=review_after,

@@ -34,6 +34,38 @@ def clean_text_input(value: object, max_len: int = 500) -> str:
     return str(value).strip()[:max_len]
 
 
+_PASSWORD_KEYWORD_RE = re.compile(r"(?i)\b(password|passwd|passcode|pass code|otp|2fa code|pin)\b")
+
+
+def looks_like_password_note(text: str) -> str | None:
+    """Heuristic for human credentials that token patterns cannot catch.
+
+    Memory pages are plain files injected into every connected agent's
+    context; a password saved as memory leaks by design. Conservative on
+    purpose: a lone credential-shaped token, or a credential keyword next
+    to one.
+    """
+    value = str(text or "").strip()
+    if not value:
+        return None
+    token = value if " " not in value else ""
+    if token and 6 <= len(token) <= 40:
+        has_letter = any(c.isalpha() for c in token)
+        has_digit = any(c.isdigit() for c in token)
+        has_symbol = any(not c.isalnum() for c in token)
+        mixed_case = token != token.lower() and token != token.upper()
+        if has_letter and has_digit and (has_symbol or mixed_case):
+            return "password-like value"
+    if _PASSWORD_KEYWORD_RE.search(value):
+        for word in re.findall(r"\S+", value):
+            if 6 <= len(word) <= 40 and any(c.isdigit() for c in word) and any(c.isalpha() for c in word):
+                if any(not c.isalnum() for c in word) or word != word.lower():
+                    return "password mentioned alongside a credential-shaped value"
+            if word.isdigit() and 4 <= len(word) <= 12:
+                return "password/PIN mentioned alongside a numeric code"
+    return None
+
+
 def secret_value_warnings(text: str) -> list[str]:
     """Return labels for secret-looking values found in text."""
     warnings: list[str] = []

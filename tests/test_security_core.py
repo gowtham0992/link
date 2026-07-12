@@ -4,6 +4,7 @@ from pathlib import Path
 
 from mcp_package.link_core.security import (
     clean_text_input,
+    looks_like_password_note,
     find_sensitive_filenames,
     find_sensitive_values,
     iter_scannable_files,
@@ -125,3 +126,22 @@ class SecurityCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PasswordHeuristicTests(unittest.TestCase):
+    def test_lone_credential_shaped_token_is_flagged(self):
+        self.assertIsNotNone(looks_like_password_note("Zk9#mango42"))
+        self.assertIsNotNone(looks_like_password_note("hunter2X!"))
+
+    def test_password_keyword_with_credential_is_flagged(self):
+        self.assertIsNotNone(looks_like_password_note("the wifi password is Hunter2024!"))
+        self.assertIsNotNone(looks_like_password_note("my otp is 482911"))
+
+    def test_normal_memories_pass(self):
+        for text in (
+            "I prefer concise release notes",
+            "feat/short-topic branch names",
+            "the password policy requires rotation every 90 days",
+            "deploy only through the release script",
+        ):
+            self.assertIsNone(looks_like_password_note(text), text)

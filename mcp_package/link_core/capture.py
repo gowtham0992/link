@@ -9,7 +9,7 @@ from .files import atomic_write_text
 from .frontmatter import frontmatter_string, parse_frontmatter
 from .log import utc_timestamp
 from .mcp_verify import display_command
-from .memory import normalize_project, slugify
+from .memory import normalize_project, propose_memories_from_text, slugify
 from .security import redact_secret_values, secret_value_warnings
 
 
@@ -381,6 +381,21 @@ def capture_records(
             continue
         warnings = secret_value_warnings(text)
         safe_notes, _, _ = redact_secret_values(notes)
+        # What Accept will actually save: mined the same way accept-capture
+        # mines, so the preview is the proposal, not a guess.
+        mined = propose_memories_from_text(notes, [], source=rel, limit=3)
+        proposal_items = mined.get("proposals") if isinstance(mined.get("proposals"), list) else []
+        proposal_previews = []
+        for proposal in proposal_items[:3]:
+            if not isinstance(proposal, dict):
+                continue
+            preview_text, _, _ = redact_secret_values(str(proposal.get("memory") or ""))
+            proposal_previews.append({
+                "title": str(proposal.get("title") or ""),
+                "memory": preview_text[:240],
+                "memory_type": str(proposal.get("memory_type") or ""),
+                "confidence": str(proposal.get("confidence") or ""),
+            })
         records.append({
             "path": rel,
             "title": str(meta.get("title") or path.stem),
@@ -390,6 +405,8 @@ def capture_records(
             "secret_warnings": warnings,
             "warning_count": len(warnings),
             "snippet": re.sub(r"\s+", " ", safe_notes).strip()[:180],
+            "proposal_count": len(proposal_items),
+            "proposals": proposal_previews,
             "commands": command_builder(rel),
         })
     records.sort(key=lambda item: (str(item["date_captured"]), str(item["path"])), reverse=True)

@@ -261,6 +261,7 @@ def build_cli_parser(
     remember_cmd.add_argument("--supersedes", default=None, help="name of the active memory this one replaces; the old memory is archived with lineage")
     remember_cmd.add_argument("--context", default=None, help="surrounding text from the memory's origin; helps recall find it, never part of the claim (600 chars max)")
     remember_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
+    remember_cmd.add_argument("--allow-secret", action="store_true", help="save even if the text looks like a credential (memory is plain files read by every agent)")
     remember_cmd.add_argument("--allow-conflict", action="store_true", help="create a memory even if it may conflict with an active memory")
     remember_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
@@ -664,6 +665,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             context=args.context,
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
+            allow_secret=args.allow_secret,
             json_output=args.json,
         )
     if command == "propose-memories":

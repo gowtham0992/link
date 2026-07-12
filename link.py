@@ -704,7 +704,8 @@ def _write_memory_page(
     memory_type: str = "note", scope: str = "user",
     tags: str | None = None, source: str = "manual",
     timestamp: str | None = None, allow_duplicate: bool = False,
-    allow_conflict: bool = False, project: str | None = None,
+    allow_conflict: bool = False, allow_secret: bool = False,
+    project: str | None = None,
     visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
@@ -727,6 +728,7 @@ def _write_memory_page(
         supersedes=supersedes,
         context=context,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
+        allow_secret=allow_secret,
         **options,
     )
 
@@ -1123,6 +1125,7 @@ def remember(
     source: str = "manual",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
     project: str | None = None,
     visibility: str | None = None,
     review_after: str | None = None,
@@ -1147,6 +1150,7 @@ def remember(
             source=source,
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
+            allow_secret=allow_secret,
             project=project or _default_project(target),
             visibility=visibility,
             review_after=review_after,

@@ -1191,6 +1191,62 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertNotIn("User prefers focused commits", "\n".join(logged[-1][3]))
         self.assertEqual(pending_operations(wiki), [])
 
+    def test_write_memory_page_refuses_secret_looking_text(self):
+        root = Path(tempfile.mkdtemp(prefix="link-memory-secret-"))
+        wiki = root / "wiki"
+        wiki.mkdir(parents=True)
+
+        refused = write_memory_page(
+            wiki, "Zk9#mango42", title=None, memory_type="note", scope="user",
+            tags=None, source="unit test", timestamp="2026-07-12T06:00:00Z",
+            records=[], log_writer=lambda *a: None, rebuild_backlinks=lambda: True,
+        )
+        allowed = write_memory_page(
+            wiki, "Zk9#mango42", title=None, memory_type="note", scope="user",
+            tags=None, source="unit test", timestamp="2026-07-12T06:00:00Z",
+            allow_secret=True,
+            records=[], log_writer=lambda *a: None, rebuild_backlinks=lambda: True,
+        )
+
+        self.assertFalse(refused["created"])
+        self.assertTrue(refused["secret"])
+        self.assertIn("password manager", str(refused["message"]))
+        self.assertTrue(allowed["created"])
+
+    def test_forget_memory_redacts_log_references(self):
+        from link_core.log import append_log, verify_log_integrity
+
+        root = Path(tempfile.mkdtemp(prefix="link-memory-forget-"))
+        wiki = root / "wiki"
+        (wiki / "memories").mkdir(parents=True)
+        (wiki / "index.md").write_text("# Index\n", encoding="utf-8")
+
+        def log_writer(timestamp, operation, description, lines):
+            append_log(wiki, timestamp, operation, description, lines)
+
+        created = write_memory_page(
+            wiki, "TempSecret@42 for the beta box", title=None, memory_type="note",
+            scope="user", tags=None, source="unit test",
+            timestamp="2026-07-12T06:00:00Z", allow_secret=True,
+            records=[], log_writer=log_writer, rebuild_backlinks=lambda: True,
+        )
+        self.assertTrue(created["created"])
+        self.assertIn("TempSecret@42", (wiki / "log.md").read_text(encoding="utf-8"))
+
+        result = forget_memory_page(
+            wiki, str(created["name"]), confirm=True, records=None,
+            log_writer=log_writer, timestamp="2026-07-12T07:00:00Z",
+            rebuild_backlinks=lambda: True,
+        )
+        log_text = (wiki / "log.md").read_text(encoding="utf-8")
+
+        self.assertTrue(result["forgotten"])
+        self.assertGreater(result["log_redaction"]["redacted_entries"], 0)
+        self.assertNotIn("TempSecret@42", log_text)
+        self.assertIn("redact-log", log_text)
+        integrity = verify_log_integrity(wiki)
+        self.assertTrue(integrity["passed"], integrity)
+
     def test_write_memory_page_stores_bounded_context_in_frontmatter(self):
         root = Path(tempfile.mkdtemp(prefix="link-memory-ctx-"))
         wiki = root / "wiki"

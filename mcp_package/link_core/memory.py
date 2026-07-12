@@ -11,6 +11,7 @@ from pathlib import Path
 from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
 from .semantic import semantic_confidence_cap, semantic_match_points
+from .security import looks_like_password_note, secret_value_warnings
 from .frontmatter import (
     csv_values,
     frontmatter_int,
@@ -21,6 +22,7 @@ from .frontmatter import (
     yaml_list,
 )
 from .mcp_verify import display_command
+from .log import redact_log_references
 from .operations import operation_journal
 from .wiki import (
     WIKILINK_RE,
@@ -1272,11 +1274,18 @@ def forget_memory_page(
                     "Deleted memory page only; memory body was not logged.",
                 ],
             )
+    redaction = redact_log_references(
+        wiki_dir,
+        [str(record.get("title") or ""), str(record.get("name") or "")],
+        timestamp,
+        "Forgot a memory; its title is removed from past log entries.",
+    )
     payload.update({
         "forgotten": True,
         "confirmation_required": False,
         "index_updated": index_updated,
         "backlinks_rebuilt": bool(backlinks_rebuilt),
+        "log_redaction": redaction,
     })
     return payload
 
@@ -1462,6 +1471,7 @@ def write_memory_page(
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
     log_writer: MemoryLogWriter | None = None,
     rebuild_backlinks: BacklinkRebuilder | None = None,
 ) -> dict[str, object]:
@@ -1489,6 +1499,25 @@ def write_memory_page(
     clean_text = text.strip()
     if not clean_text:
         raise ValueError("memory text required")
+    if not allow_secret:
+        # Memory pages are plain files injected into every connected agent's
+        # session; a credential saved here leaks by design. Refuse loudly.
+        secret_labels = secret_value_warnings(f"{clean_text}\n{title or ''}")
+        password_hint = looks_like_password_note(clean_text)
+        if password_hint:
+            secret_labels.append(password_hint)
+        if secret_labels:
+            return {
+                "created": False,
+                "secret": True,
+                "secret_warnings": secret_labels,
+                "message": (
+                    "This looks like a secret (" + ", ".join(secret_labels) + "). "
+                    "Memory is plain Markdown read by every connected agent — keep "
+                    "credentials in a password manager. If this is truly not a "
+                    "secret, rerun with --allow-secret."
+                ),
+            }
     clean_source = source.strip() if source is not None else ""
     clean_review_after = str(review_after or "").strip()
     if clean_review_after:

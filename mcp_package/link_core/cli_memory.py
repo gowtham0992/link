@@ -51,6 +51,13 @@ def format_counts(counts: Mapping[str, int]) -> str:
 
 def render_remember_text(result: Mapping[str, object], *, target: object = ".") -> tuple[int, str]:
     if not result.get("created"):
+        if result.get("secret"):
+            return 1, "\n".join([
+                "Not saved — this looks like a secret",
+                f"Detected: {', '.join(str(w) for w in result.get('secret_warnings', []))}",
+                "",
+                str(result.get("message") or ""),
+            ])
         if result.get("conflict"):
             lines = [
                 "Possible conflicting memory found",
