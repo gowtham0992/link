@@ -105,16 +105,19 @@ that have one everywhere:
 
 | What | Link | For comparison |
 |---|---|---|
-| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's |
+| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.5%** |
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
 | **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 23.9% |
 | **Bundled 1,176-case recall benchmark** — deterministic, runs offline in CI | hit@1 **0.749**, +rerank **0.839** | gates every change; a regression fails the build |
 
 Every number ships with its config, judge model, caveats, and the
-experiments that *lost* — including LongMemEval end-to-end (78.0%, where
-the published comparisons use GPT-5 as both answerer and judge and ours
-uses a budget model, so we don't claim a comparison). Full methodology
-and reproduction steps: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+experiments that *lost* — including LongMemEval end-to-end, where we
+re-judged both sides under the neutral Hunyuan 3 referee: mem0's GPT-5
+answers score 91.0%, Link's budget-model answers 80.6%. Their published
+number holds up, and the gap tracks the answering model, not the memory
+layer — that's what the 99.4% evidence-retrieval row above isolates.
+Full methodology and reproduction steps:
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 ## Quick Start
 
