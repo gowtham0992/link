@@ -277,6 +277,11 @@ jobs:
 
       - name: MCP stdio smoke test
         run: |
-          python link.py demo /tmp/link-mcp-smoke --force
-          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki --surface full
-          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki
+          # A fresh demo per surface: the full smoke exercises mutating tools
+          # (rebuild_index, migrate_wiki, backup_wiki), so the slim run must
+          # not inherit that mutated wiki — it needs a pristine one to assert
+          # clean recall.
+          python link.py demo /tmp/link-mcp-smoke-full --force
+          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke-full/wiki --surface full
+          python link.py demo /tmp/link-mcp-smoke-slim --force
+          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke-slim/wiki
