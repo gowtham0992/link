@@ -284,4 +284,7 @@ jobs:
           python link.py demo /tmp/link-mcp-smoke-full --force
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke-full/wiki --surface full
           python link.py demo /tmp/link-mcp-smoke-slim --force
+          # Show the slim demo's page count so an empty-demo failure is
+          # obvious in the log, distinct from a recall/search failure.
+          python link.py status /tmp/link-mcp-smoke-slim | grep -Ei "pages|memories" || true
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke-slim/wiki

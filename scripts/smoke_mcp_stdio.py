@@ -291,9 +291,16 @@ async def _run_slim_smoke(session: Any) -> None:
     wiki = packet.get("wiki") if isinstance(packet.get("wiki"), dict) else {}
     page_names = [p.get("name") for p in (wiki.get("pages") or []) if isinstance(p, dict)]
     if not packet.get("found") or "agent-memory" not in page_names:
+        # Report the server's own page/search counts so we can tell an
+        # empty-wiki problem (0 content pages) from a search problem
+        # (pages present, recall returns none).
         raise RuntimeError(
             "slim recall did not surface the demo page; "
-            f"found={packet.get('found')} primary={wiki.get('primary')} pages={page_names[:5]}"
+            f"found={packet.get('found')} primary={wiki.get('primary')} pages={page_names[:5]} "
+            f"| status.content_pages={status.get('content_page_count')} "
+            f"status.pages={status.get('page_count')} "
+            f"wiki.search_count={wiki.get('search_count')} "
+            f"strategy={packet.get('strategy')}"
         )
 
     brief = _json_text(
