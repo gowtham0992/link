@@ -63,6 +63,26 @@ enum LinkCLI {
         return data
     }
 
+    /// Run an arbitrary executable + args (not the `lnk` launcher) — used for
+    /// the exact remediation commands `verify-mcp` emits (e.g. a venv pip
+    /// upgrade). Blocking; call off the main actor.
+    @discardableResult
+    static func runRaw(_ command: [String]) throws -> Data {
+        guard let executable = command.first else {
+            throw CLIError(message: "empty command")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = Array(command.dropFirst())
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+        try process.run()
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return data
+    }
+
     /// Fire-and-forget for long-lived processes (the local viewer).
     static func launchDetached(_ args: [String]) {
         guard let lnk = lnkPath() else { return }

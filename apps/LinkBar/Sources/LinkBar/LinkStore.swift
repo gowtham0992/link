@@ -173,7 +173,7 @@ final class LinkStore: ObservableObject {
     /// Read Claude Code's settings.json directly to see whether Link's
     /// session hooks are wired (the flagship agent; other agents live in
     /// their own configs and are added as the dashboard grows).
-    private static func claudeHooksAreWired() -> Bool {
+    nonisolated private static func claudeHooksAreWired() -> Bool {
         let path = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/settings.json")
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return false }
         return text.contains("SessionStart") && text.contains("hook session-start")
@@ -384,51 +384,77 @@ final class LinkStore: ObservableObject {
 
     /// Install the semantic tier into the managed venv and fetch the model
     /// (the only network step Link takes, with the user's click as consent).
+    ///
+    /// `--setup` only actually provisions on Link 1.7+; older CLIs just print
+    /// the manual pip steps. So we verify the *outcome* (re-read semantic
+    /// --json) rather than trusting the exit code, and flash the truth.
     func setupSemantic() {
-        runFix(["semantic", LinkCLI.workspace, "--setup"],
-               running: "Installing semantic recall…",
-               done: "Semantic recall ready.")
+        busy = true
+        showFlash("Setting up semantic recall…", tone: .info)
+        Task.detached(priority: .userInitiated) {
+            _ = try? LinkCLI.run(["semantic", LinkCLI.workspace, "--setup"])
+            let after = try? LinkCLI.runJSON(SemanticStatus.self, ["semantic", LinkCLI.workspace, "--json"])
+            await MainActor.run {
+                self.busy = false
+                self.semantic = after ?? self.semantic
+                if after?.enabled == true {
+                    self.showFlash("Semantic recall ready — \(after?.tier ?? "on").", tone: .success)
+                } else {
+                    self.showFlash("Needs a one-time install — run: lnk semantic \(LinkCLI.workspace) --setup", tone: .info)
+                }
+                self.refreshHealth()
+            }
+        }
     }
 
-    /// Bring link-mcp in the workspace venv to Link's version.
+    /// Bring link-mcp in the workspace venv to Link's version by running the
+    /// exact upgrade command verify-mcp emits, then confirm it actually took.
     func upgradeMCP() {
-        // A workspace runtime refresh re-provisions the pinned venv; simplest
-        // one-click path that matches how connect/onboard heal MCP drift.
-        repairRuntime()
+        guard let command = mcp?.nextActions?.first?.command, !command.isEmpty else {
+            repairRuntime()  // fallback: refresh the workspace runtime copy
+            return
+        }
+        busy = true
+        showFlash("Updating link-mcp…", tone: .info)
+        Task.detached(priority: .userInitiated) {
+            _ = try? LinkCLI.runRaw(command)
+            let after = try? LinkCLI.runJSON(MCPVerify.self, ["verify-mcp", LinkCLI.workspace, "--json"])
+            await MainActor.run {
+                self.busy = false
+                self.mcp = after ?? self.mcp
+                if after?.ready == true {
+                    self.showFlash("MCP updated to Link \(after?.expectedVersion ?? "").", tone: .success)
+                } else {
+                    self.showFlash("Couldn't auto-update — run: \(command.joined(separator: " "))", tone: .info)
+                }
+                self.refreshHealth()
+            }
+        }
     }
 
     /// Wire Claude Code's session hooks (capture on session end, brief on
-    /// session start) — the automatic loop, one click.
+    /// session start) — the automatic loop, one click — then confirm they
+    /// actually landed in the settings file.
     func wireClaudeHooks() {
-        runFix(["connect", "claude-code", LinkCLI.workspace, "--hooks", "--write"],
-               running: "Wiring Claude Code hooks…",
-               done: "Hooks wired — new sessions capture automatically.")
+        busy = true
+        showFlash("Wiring Claude Code hooks…", tone: .info)
+        Task.detached(priority: .userInitiated) {
+            _ = try? LinkCLI.run(["connect", "claude-code", LinkCLI.workspace, "--hooks", "--write"])
+            let wired = Self.claudeHooksAreWired()
+            await MainActor.run {
+                self.busy = false
+                self.claudeHooksWired = wired
+                self.showFlash(wired
+                    ? "Hooks wired — new sessions capture automatically."
+                    : "Couldn't wire hooks — check Claude Code settings.",
+                    tone: wired ? .success : .info)
+                self.refreshHealth()
+            }
+        }
     }
 
     func openInstallDocs() {
         NSWorkspace.shared.open(URL(string: "https://github.com/gowtham0992/link#quick-start")!)
-    }
-
-    /// Run a remediation command, flash progress, and refresh health after.
-    private func runFix(_ args: [String], running: String, done: String) {
-        busy = true
-        showFlash(running, tone: .info)
-        Task.detached(priority: .userInitiated) {
-            do {
-                _ = try LinkCLI.run(args)
-                await MainActor.run {
-                    self.showFlash(done, tone: .success)
-                    self.busy = false
-                    self.refresh()
-                    self.refreshHealth()
-                }
-            } catch {
-                await MainActor.run {
-                    self.lastError = String(describing: error)
-                    self.busy = false
-                }
-            }
-        }
     }
 
     func revealMemory(named name: String) {
