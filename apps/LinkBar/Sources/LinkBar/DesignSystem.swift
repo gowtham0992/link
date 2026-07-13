@@ -118,3 +118,57 @@ struct StatChip: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+/// A colored health dot for a Link surface (green / amber / red / neutral).
+struct HealthDot: View {
+    let level: SurfaceHealth.Level
+    var body: some View {
+        let c = level.color
+        Circle()
+            .fill(Color(red: c.r, green: c.g, blue: c.b))
+            .frame(width: 8, height: 8)
+            .overlay(
+                Circle().stroke(Color(red: c.r, green: c.g, blue: c.b).opacity(0.35), lineWidth: 3)
+                    .opacity(level == .error || level == .warn ? 1 : 0)
+            )
+    }
+}
+
+/// One row in the Status dashboard: dot · icon · name/detail · optional Fix.
+struct StatusRow: View {
+    let surface: SurfaceHealth
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HealthDot(level: surface.level)
+            Image(systemName: surface.icon)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(surface.name)
+                    .font(.system(size: 12.5, weight: .medium))
+                Text(surface.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 6)
+            if let fix = surface.fix {
+                Button(fix.label) { fix.action() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(LinkBrand.rust)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(hovering ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear))
+        )
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: hovering)
+    }
+}

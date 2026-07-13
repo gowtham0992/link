@@ -26,6 +26,13 @@ final class LinkStore: ObservableObject {
     @Published var runtimeWarning: String?
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
+    // Status dashboard: the health of every Link surface.
+    @Published var mcp: MCPVerify?
+    @Published var semantic: SemanticStatus?
+    @Published var claudeHooksWired: Bool?
+    @Published var viewerRunning = false
+    private var lastHealthAt = Date.distantPast
+
     var pendingCount: Int {
         (inbox?.reviewCount ?? 0) + (captures?.count ?? 0)
     }
@@ -130,7 +137,136 @@ final class LinkStore: ObservableObject {
                 self.busy = false
                 self.healWatchersIfNeeded()
             }
+            // Health surfaces are heavier (each spawns a Python probe), so
+            // refresh them at most every 15s and after the fast data is on
+            // screen — the dots fill in a moment later without blocking.
+            await self.refreshHealthIfDue()
         }
+    }
+
+    /// Force a health refresh now (used by the manual refresh button and
+    /// when the Status tab opens).
+    func refreshHealth() {
+        Task.detached(priority: .utility) { await self.fetchHealth() }
+    }
+
+    private func refreshHealthIfDue() async {
+        let due = await MainActor.run { Date().timeIntervalSince(self.lastHealthAt) > 15 }
+        if due { await fetchHealth() }
+    }
+
+    private func fetchHealth() async {
+        let workspace = LinkCLI.workspace
+        let mcp = try? LinkCLI.runJSON(MCPVerify.self, ["verify-mcp", workspace, "--json"])
+        let semantic = try? LinkCLI.runJSON(SemanticStatus.self, ["semantic", workspace, "--json"])
+        let hooks = Self.claudeHooksAreWired()
+        let viewer = await Self.viewerResponds()
+        await MainActor.run {
+            self.mcp = mcp ?? self.mcp
+            self.semantic = semantic ?? self.semantic
+            self.claudeHooksWired = hooks
+            self.viewerRunning = viewer
+            self.lastHealthAt = Date()
+        }
+    }
+
+    /// Read Claude Code's settings.json directly to see whether Link's
+    /// session hooks are wired (the flagship agent; other agents live in
+    /// their own configs and are added as the dashboard grows).
+    private static func claudeHooksAreWired() -> Bool {
+        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/settings.json")
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return false }
+        return text.contains("SessionStart") && text.contains("hook session-start")
+    }
+
+    /// The live dashboard rows, most-critical surfaces first.
+    func surfaces() -> [SurfaceHealth] {
+        var rows: [SurfaceHealth] = []
+
+        // CLI
+        if linkVersion.isEmpty && lastError != nil {
+            rows.append(.init(icon: "terminal", name: "CLI", level: .error,
+                              detail: "lnk not found on PATH",
+                              fix: .init(label: "Install") { [weak self] in self?.openInstallDocs() }))
+        } else {
+            rows.append(.init(icon: "terminal", name: "CLI", level: .ok,
+                              detail: linkVersion.isEmpty ? "installed" : "lnk \(linkVersion)"))
+        }
+
+        // Workspace
+        if let runtimeWarning {
+            rows.append(.init(icon: "shippingbox", name: "Workspace", level: .warn,
+                              detail: "runtime is stale — recall may use old logic",
+                              fix: .init(label: "Refresh") { [weak self] in self?.repairRuntime() }))
+        } else if let s = stats {
+            let review = s.needsReviewCount ?? 0
+            let level: SurfaceHealth.Level = review > 0 ? .info : .ok
+            let counts = "\(s.activeMemoryCount ?? 0) active · \(s.contentPageCount ?? 0) pages"
+            rows.append(.init(icon: "shippingbox", name: "Workspace", level: level,
+                              detail: review > 0 ? "\(counts) · \(review) to review" : counts))
+        } else {
+            rows.append(.init(icon: "shippingbox", name: "Workspace", level: .info, detail: "checking…"))
+        }
+
+        // MCP
+        if let m = mcp {
+            if m.ready {
+                rows.append(.init(icon: "point.3.connected.trianglepath.dotted", name: "MCP", level: .ok,
+                                  detail: "ready · link-mcp \(m.linkMcp?.version ?? "?")"))
+            } else if m.linkMcp?.installed != true {
+                rows.append(.init(icon: "point.3.connected.trianglepath.dotted", name: "MCP", level: .error,
+                                  detail: "server not provisioned",
+                                  fix: .init(label: "Repair") { [weak self] in self?.repairRuntime() }))
+            } else {
+                let want = m.expectedVersion ?? "?"
+                rows.append(.init(icon: "point.3.connected.trianglepath.dotted", name: "MCP", level: .warn,
+                                  detail: "version \(m.linkMcp?.version ?? "?") ≠ Link \(want)",
+                                  fix: .init(label: "Fix") { [weak self] in self?.upgradeMCP() }))
+            }
+        } else {
+            rows.append(.init(icon: "point.3.connected.trianglepath.dotted", name: "MCP", level: .info, detail: "checking…"))
+        }
+
+        // Hooks (Claude Code)
+        switch claudeHooksWired {
+        case .some(true):
+            rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .ok,
+                              detail: "Claude Code: session capture wired"))
+        case .some(false):
+            rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .warn,
+                              detail: "Claude Code: not wired — no automatic capture",
+                              fix: .init(label: "Wire") { [weak self] in self?.wireClaudeHooks() }))
+        case .none:
+            rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .info, detail: "checking…"))
+        }
+
+        // Recall power (semantic tier)
+        if let sem = semantic {
+            if sem.enabled, let tier = sem.tier {
+                let rerank = (sem.rerankReady == true) ? " + rerank" : ""
+                rows.append(.init(icon: "sparkle.magnifyingglass", name: "Recall", level: .ok,
+                                  detail: "\(tier.capitalized) semantic\(rerank)"))
+            } else {
+                rows.append(.init(icon: "sparkle.magnifyingglass", name: "Recall", level: .info,
+                                  detail: "Lexical only — no semantic matching yet",
+                                  fix: .init(label: "Enable") { [weak self] in self?.setupSemantic() }))
+            }
+        } else {
+            rows.append(.init(icon: "sparkle.magnifyingglass", name: "Recall", level: .info, detail: "checking…"))
+        }
+
+        // Viewer
+        rows.append(.init(icon: "gauge.with.needle", name: "Viewer",
+                          level: viewerRunning ? .ok : .info,
+                          detail: viewerRunning ? "running · 127.0.0.1:3000" : "not running",
+                          fix: viewerRunning ? nil : .init(label: "Open") { [weak self] in self?.openDashboard() }))
+
+        return rows
+    }
+
+    /// Any surface that a user would want to act on (amber menu-bar dot).
+    var anyUnhealthy: Bool {
+        surfaces().contains { $0.level == .warn || $0.level == .error }
     }
 
     func recall(_ query: String) {
@@ -234,6 +370,57 @@ final class LinkStore: ObservableObject {
                     self.showFlash("Workspace runtime refreshed.", tone: .success)
                     self.runtimeWarning = nil
                     self.refresh()
+                }
+            } catch {
+                await MainActor.run {
+                    self.lastError = String(describing: error)
+                    self.busy = false
+                }
+            }
+        }
+    }
+
+    // MARK: Status-dashboard remediations
+
+    /// Install the semantic tier into the managed venv and fetch the model
+    /// (the only network step Link takes, with the user's click as consent).
+    func setupSemantic() {
+        runFix(["semantic", LinkCLI.workspace, "--setup"],
+               running: "Installing semantic recall…",
+               done: "Semantic recall ready.")
+    }
+
+    /// Bring link-mcp in the workspace venv to Link's version.
+    func upgradeMCP() {
+        // A workspace runtime refresh re-provisions the pinned venv; simplest
+        // one-click path that matches how connect/onboard heal MCP drift.
+        repairRuntime()
+    }
+
+    /// Wire Claude Code's session hooks (capture on session end, brief on
+    /// session start) — the automatic loop, one click.
+    func wireClaudeHooks() {
+        runFix(["connect", "claude-code", LinkCLI.workspace, "--hooks", "--write"],
+               running: "Wiring Claude Code hooks…",
+               done: "Hooks wired — new sessions capture automatically.")
+    }
+
+    func openInstallDocs() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/gowtham0992/link#quick-start")!)
+    }
+
+    /// Run a remediation command, flash progress, and refresh health after.
+    private func runFix(_ args: [String], running: String, done: String) {
+        busy = true
+        showFlash(running, tone: .info)
+        Task.detached(priority: .userInitiated) {
+            do {
+                _ = try LinkCLI.run(args)
+                await MainActor.run {
+                    self.showFlash(done, tone: .success)
+                    self.busy = false
+                    self.refresh()
+                    self.refreshHealth()
                 }
             } catch {
                 await MainActor.run {

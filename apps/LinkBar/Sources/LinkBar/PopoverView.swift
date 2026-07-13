@@ -1,9 +1,13 @@
 import SwiftUI
 
 struct PopoverView: View {
+    enum Tab { case inbox, status, settings }
+
     @EnvironmentObject var store: LinkStore
     @State private var query = ""
-    @State private var showSettings = false
+    // Snapshot aid: LINKBAR_TAB=status opens straight to the Status tab.
+    @State private var tab: Tab =
+        ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "status" ? .status : .inbox
 
     private var isFullyIdle: Bool {
         (store.inbox?.items.isEmpty ?? true)
@@ -13,20 +17,76 @@ struct PopoverView: View {
     }
 
     var body: some View {
-        Group {
-            if showSettings {
-                SettingsPane(done: { showSettings = false })
-                    .environmentObject(store)
-            } else {
-                mainContent
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, LinkBrand.pad)
+                .padding(.top, LinkBrand.pad)
+            tabBar
+                .padding(.horizontal, LinkBrand.pad)
+                .padding(.top, 10)
+            Divider().opacity(0.35).padding(.top, 8)
+
+            Group {
+                switch tab {
+                case .inbox: inboxTab
+                case .status: statusTab
+                case .settings:
+                    SettingsPane(done: { tab = .inbox })
+                        .environmentObject(store)
+                }
             }
+            .animation(.easeOut(duration: 0.18), value: store.pendingCount)
+
+            footer
+                .padding(.horizontal, LinkBrand.pad)
+                .padding(.bottom, LinkBrand.pad)
         }
         .frame(width: 380)
     }
 
-    private var mainContent: some View {
+    // MARK: tab bar
+
+    private var tabBar: some View {
+        HStack(spacing: 4) {
+            tabButton("Inbox", .inbox, badge: store.pendingCount)
+            tabButton("Status", .status, alert: store.anyUnhealthy)
+            tabButton("Settings", .settings)
+            Spacer()
+        }
+    }
+
+    private func tabButton(_ label: String, _ value: Tab, badge: Int = 0, alert: Bool = false) -> some View {
+        let active = tab == value
+        return Button {
+            tab = value
+            if value == .status { store.refreshHealth() }
+        } label: {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(LinkBrand.rust, in: Capsule())
+                } else if alert {
+                    Circle().fill(Color(red: 0.90, green: 0.62, blue: 0.20)).frame(width: 6, height: 6)
+                }
+            }
+            .foregroundStyle(active ? AnyShapeStyle(LinkBrand.rust) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(active ? AnyShapeStyle(LinkBrand.rust.opacity(0.12)) : AnyShapeStyle(.clear),
+                        in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: inbox tab (the original memory view)
+
+    private var inboxTab: some View {
         VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
-            header
             if let warning = store.runtimeWarning {
                 runtimeBanner(warning)
             }
@@ -45,10 +105,27 @@ struct PopoverView: View {
             if !store.activity.isEmpty && !isFullyIdle {
                 activitySection
             }
-            footer
         }
         .padding(LinkBrand.pad)
-        .animation(.easeOut(duration: 0.18), value: store.pendingCount)
+    }
+
+    // MARK: status tab (health of every Link surface)
+
+    private var statusTab: some View {
+        VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+            HStack {
+                SectionHeader(title: "Link status")
+                Spacer()
+                Text(store.anyUnhealthy ? "Needs attention" : "All systems go")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(store.anyUnhealthy
+                        ? Color(red: 0.90, green: 0.62, blue: 0.20) : .green)
+            }
+            ForEach(store.surfaces()) { surface in
+                StatusRow(surface: surface)
+            }
+        }
+        .padding(LinkBrand.pad)
     }
 
     // MARK: header
@@ -71,11 +148,9 @@ struct PopoverView: View {
             }
             toolbarButton("arrow.clockwise", help: "Refresh (⌘R)") {
                 store.refresh()
+                store.refreshHealth()
             }
             .keyboardShortcut("r", modifiers: .command)
-            toolbarButton("gearshape", help: "Settings") {
-                showSettings = true
-            }
         }
     }
 

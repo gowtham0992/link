@@ -168,3 +168,94 @@ struct RememberResult: Decodable {
     let secret: Bool?
     let message: String?
 }
+
+// MARK: - Status dashboard payloads
+
+/// `lnk verify-mcp --json`: is the MCP server reachable and version-matched?
+struct MCPVerify: Decodable {
+    struct Component: Decodable {
+        let installed: Bool?
+        let version: String?
+        let mcpSdk: Bool?
+        let error: String?
+        enum CodingKeys: String, CodingKey {
+            case installed, version, error
+            case mcpSdk = "mcp_sdk"
+        }
+    }
+    struct Action: Decodable {
+        let label: String?
+        let commandText: String?
+        let command: [String]?
+        enum CodingKeys: String, CodingKey {
+            case label, command
+            case commandText = "command_text"
+        }
+    }
+
+    let ready: Bool
+    let python: String?
+    let expectedVersion: String?
+    let versionMatches: Bool?
+    let linkMcp: Component?
+    let nextActions: [Action]?
+
+    enum CodingKeys: String, CodingKey {
+        case ready, python
+        case expectedVersion = "expected_version"
+        case versionMatches = "version_matches"
+        case linkMcp = "link_mcp"
+        case nextActions = "next_actions"
+    }
+}
+
+/// `lnk semantic --json`: which recall power is active (lexical/fast/quality + rerank).
+struct SemanticStatus: Decodable {
+    let enabled: Bool
+    let tier: String?
+    let provider: String?
+    let mode: String?
+    let model: String?
+    let rerankReady: Bool?
+    let rerankState: String?
+    let modelAvailableOffline: Bool?
+    let indexedMemories: Int?
+    let memoryCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, tier, provider, mode, model
+        case rerankReady = "rerank_ready"
+        case rerankState = "rerank_state"
+        case modelAvailableOffline = "model_available_offline"
+        case indexedMemories = "indexed_memories"
+        case memoryCount = "memory_count"
+    }
+}
+
+/// One row in the Status dashboard: a Link surface and its live health.
+struct SurfaceHealth: Identifiable {
+    enum Level {
+        case ok, warn, error, info
+        var color: (r: Double, g: Double, b: Double) {
+            switch self {
+            case .ok:    return (0.30, 0.72, 0.42)   // green
+            case .warn:  return (0.90, 0.62, 0.20)   // amber
+            case .error: return (0.86, 0.30, 0.24)   // red
+            case .info:  return (0.55, 0.55, 0.55)   // neutral
+            }
+        }
+    }
+    /// A one-click remediation for an unhealthy surface.
+    struct Fix {
+        let label: String
+        let action: () -> Void
+    }
+
+    let icon: String
+    let name: String
+    let level: Level
+    let detail: String
+    var fix: Fix? = nil
+
+    var id: String { name }
+}
