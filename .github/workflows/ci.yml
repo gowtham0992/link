@@ -158,7 +158,12 @@ jobs:
         run: |
           export HOME="$RUNNER_TEMP/cleanhome"
           python -m pip install "mcp>=1.0.0,<2"
-          python scripts/smoke_mcp_stdio.py "$HOME/link/wiki" \
+          # The smoke asserts demo content is recallable, so point it at a
+          # populated demo wiki — the onboarded workspace ($HOME/link) is
+          # intentionally empty. Still drives the provisioned venv python,
+          # which is what this step verifies. (Mirrors the Windows fix.)
+          python link.py demo "$RUNNER_TEMP/mcp-demo" --force
+          python scripts/smoke_mcp_stdio.py "$RUNNER_TEMP/mcp-demo/wiki" \
             --python "$HOME/.link-mcp-venv/bin/python" --surface slim
 
   # The same walk on Windows, where nobody has ever cold-walked by hand:
@@ -277,16 +282,9 @@ jobs:
 
       - name: MCP stdio smoke test
         run: |
-          # A fresh demo per surface: the full smoke exercises mutating tools
-          # (rebuild_index, migrate_wiki, backup_wiki), so the slim run must
-          # not inherit that mutated wiki — it needs a pristine one to assert
-          # clean recall.
           python link.py demo /tmp/link-mcp-smoke --force
-          python link.py status /tmp/link-mcp-smoke | grep -Ei "pages|memories" || true
-          # Run the slim smoke FIRST, against the pristine demo. The full
-          # smoke exercises mutating tools (rebuild_index, migrate_wiki,
-          # backup_wiki), so it must run last. (A second `demo` call proved
-          # unreliable on the macOS runner — it produced an empty wiki even
-          # though the first call is fully populated; tracked separately.)
+          # Slim (read-only) first on the pristine demo; the full smoke
+          # exercises mutating tools (rebuild_index, migrate_wiki,
+          # backup_wiki), so it runs last.
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki --surface full
