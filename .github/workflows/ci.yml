@@ -158,7 +158,12 @@ jobs:
         run: |
           export HOME="$RUNNER_TEMP/cleanhome"
           python -m pip install "mcp>=1.0.0,<2"
-          python scripts/smoke_mcp_stdio.py "$HOME/link/wiki" \
+          # The smoke asserts demo content is recallable, so point it at a
+          # populated demo wiki — the onboarded workspace ($HOME/link) is
+          # intentionally empty. Still drives the provisioned venv python,
+          # which is what this step verifies. (Mirrors the Windows fix.)
+          python link.py demo "$RUNNER_TEMP/mcp-demo" --force
+          python scripts/smoke_mcp_stdio.py "$RUNNER_TEMP/mcp-demo/wiki" \
             --python "$HOME/.link-mcp-venv/bin/python" --surface slim
 
   # The same walk on Windows, where nobody has ever cold-walked by hand:
@@ -277,21 +282,9 @@ jobs:
 
       - name: MCP stdio smoke test
         run: |
-          # A fresh demo per surface: the full smoke exercises mutating tools
-          # (rebuild_index, migrate_wiki, backup_wiki), so the slim run must
-          # not inherit that mutated wiki — it needs a pristine one to assert
-          # clean recall.
-          echo "=== demo creation output ==="
           python link.py demo /tmp/link-mcp-smoke --force
-          echo "=== wiki .md files written ==="
-          find /tmp/link-mcp-smoke/wiki -name '*.md' | sort
-          echo "=== demo status ==="
-          python link.py status /tmp/link-mcp-smoke
-          # Hard-fail with a clear message if the demo is empty (the macOS
-          # runner has produced a bare scaffold here; unreproducible locally).
-          test "$(find /tmp/link-mcp-smoke/wiki -name '*.md' | wc -l)" -ge 10 \
-            || { echo "DEMO IS EMPTY — expected >=10 wiki pages"; exit 1; }
-          echo "=== slim smoke ==="
+          # Slim (read-only) first on the pristine demo; the full smoke
+          # exercises mutating tools (rebuild_index, migrate_wiki,
+          # backup_wiki), so it runs last.
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki
-          echo "=== full smoke ==="
           python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki --surface full
