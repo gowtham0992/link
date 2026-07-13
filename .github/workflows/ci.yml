@@ -281,7 +281,12 @@ jobs:
           # (rebuild_index, migrate_wiki, backup_wiki), so the slim run must
           # not inherit that mutated wiki — it needs a pristine one to assert
           # clean recall.
-          python link.py demo /tmp/link-mcp-smoke-full --force
-          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke-full/wiki --surface full
-          python link.py demo /tmp/link-mcp-smoke-slim --force
-          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke-slim/wiki
+          python link.py demo /tmp/link-mcp-smoke --force
+          python link.py status /tmp/link-mcp-smoke | grep -Ei "pages|memories" || true
+          # Run the slim smoke FIRST, against the pristine demo. The full
+          # smoke exercises mutating tools (rebuild_index, migrate_wiki,
+          # backup_wiki), so it must run last. (A second `demo` call proved
+          # unreliable on the macOS runner — it produced an empty wiki even
+          # though the first call is fully populated; tracked separately.)
+          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki
+          python scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki --surface full
