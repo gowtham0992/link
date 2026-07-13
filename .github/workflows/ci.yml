@@ -211,7 +211,12 @@ jobs:
         run: |
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "cleanhome"
           python -m pip install "mcp>=1.0.0,<2"
-          python scripts/smoke_mcp_stdio.py "$env:USERPROFILE\link\wiki" --python "$env:USERPROFILE\.link-mcp-venv\Scripts\python.exe" --surface slim
+          # The smoke asserts demo content is recallable, so point it at a
+          # populated demo wiki (the onboarded workspace is intentionally
+          # empty). Still drives the provisioned venv python — that's what
+          # this step verifies.
+          python link.py demo "$env:RUNNER_TEMP\mcp-demo" --force
+          python scripts/smoke_mcp_stdio.py "$env:RUNNER_TEMP\mcp-demo\wiki" --python "$env:USERPROFILE\.link-mcp-venv\Scripts\python.exe" --surface slim
 
   installer-syntax:
     runs-on: ubuntu-latest

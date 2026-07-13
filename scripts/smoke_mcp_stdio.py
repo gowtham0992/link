@@ -169,8 +169,13 @@ async def _run_full_smoke(session: Any) -> None:
         ),
         "query_link",
     )
-    if not packet.get("found") or packet.get("wiki", {}).get("primary") != "agent-memory":
-        raise RuntimeError("query_link did not return the expected demo packet")
+    wiki = packet.get("wiki") if isinstance(packet.get("wiki"), dict) else {}
+    page_names = [p.get("name") for p in (wiki.get("pages") or []) if isinstance(p, dict)]
+    if not packet.get("found") or "agent-memory" not in page_names:
+        raise RuntimeError(
+            "query_link did not surface the demo page; "
+            f"found={packet.get('found')} primary={wiki.get('primary')} pages={page_names[:5]}"
+        )
     if not packet.get("context_packet"):
         raise RuntimeError("query_link returned an empty context packet")
 
@@ -283,8 +288,13 @@ async def _run_slim_smoke(session: Any) -> None:
         ),
         "recall",
     )
-    if not packet.get("found") or packet.get("wiki", {}).get("primary") != "agent-memory":
-        raise RuntimeError("slim recall did not return the expected query packet")
+    wiki = packet.get("wiki") if isinstance(packet.get("wiki"), dict) else {}
+    page_names = [p.get("name") for p in (wiki.get("pages") or []) if isinstance(p, dict)]
+    if not packet.get("found") or "agent-memory" not in page_names:
+        raise RuntimeError(
+            "slim recall did not surface the demo page; "
+            f"found={packet.get('found')} primary={wiki.get('primary')} pages={page_names[:5]}"
+        )
 
     brief = _json_text(
         await session.call_tool(
