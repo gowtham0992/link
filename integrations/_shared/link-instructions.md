@@ -33,4 +33,12 @@ If Link session hooks are installed for this agent, the session-start memory bri
 
 When the user says **"remember"**, **"recall"**, **"ingest"**, **"query"**, **"lint"**, or **"research"**, read `~/link/LINK.md` for instructions and follow the protocol. Use terminal commands to access `~/link/` since it's outside the workspace.
 
+One rule for memory fields: `trigger` helps recall find a recipe (task phrase); `applies_when` fences a memory to a context; `scope`/`project`/`visibility` say whose memory it is; `supersedes` replaces an old claim with lineage; `review_after`/`expires_at` age it. When unsure, save with none — fields can be added later through review.
+
+When a new memory contradicts an existing one, do not force both to coexist: with the user's approval, save the new memory with `supersedes: <old-name>` (CLI `--supersedes`). The old memory is archived with lineage in both directions, `explain-memory` shows the full chain, and `lnk recall --as-of YYYY-MM-DD` can reconstruct what was true on a past date.
+
+Recalled memories may carry an `applicability` label: `matched` means the memory's declared conditions fit this context; `out_of_context` means they do not — do not apply that memory here without asking the user. When saving a memory that only applies in specific situations, set scoping conditions (for example `applies_when: "project:acme, task:deploying"`).
+
+After completing a notable multi-step task (a release, a tricky deploy, a recovery), offer to save it as a reusable recipe: propose a `procedure` memory with a short `trigger` phrase describing when it applies, and save it only after the user approves. When starting a recurring task, recall first — approved procedures return with their steps.
+
 Otherwise, keep working normally after the cheap first recall; do not save durable memory unless the user asks or approves it.

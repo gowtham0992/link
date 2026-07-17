@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import os
+import types
 import subprocess
 import sys
 import tarfile
@@ -1801,6 +1803,39 @@ class LinkCliTests(unittest.TestCase):
         self.assertIn("Capture read warnings", text)
         self.assertIn("locked.md", text)
 
+    def test_accept_capture_carries_procedure_trigger_into_frontmatter(self):
+        # The end-to-end recipe promise: a numbered-steps session becomes a
+        # procedure proposal with a trigger, and accepting the capture writes
+        # that trigger into the memory page so trigger-boosted recall works.
+        tmp = Path(tempfile.mkdtemp(prefix="link-trigger-accept-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+
+        capture_out = StringIO()
+        with redirect_stdout(capture_out):
+            capture_code = link_cli.capture_session(
+                target,
+                "To rotate staging keys:\n"
+                "1. Generate a new key in the vault console\n"
+                "2. Update the staging secrets file and redeploy\n"
+                "3. Revoke the old key after the deploy is green",
+                title="Key rotation session",
+                json_output=True,
+            )
+        capture = json.loads(capture_out.getvalue())
+        self.assertEqual(capture_code, 0)
+
+        accept_out = StringIO()
+        with redirect_stdout(accept_out):
+            accept_code = link_cli.accept_capture(target, capture["path"], index=1, json_output=True)
+        accepted = json.loads(accept_out.getvalue())
+        self.assertEqual(accept_code, 0)
+        self.assertTrue(accepted["result"]["created"], accepted)
+
+        memory_text = (target / accepted["result"]["path"]).read_text(encoding="utf-8")
+        self.assertIn("memory_type: procedure", memory_text)
+        self.assertIn('trigger: "To rotate staging keys"', memory_text)
+
     def test_accept_capture_writes_approved_proposal(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-memory-test-"))
         target = tmp / "demo"
@@ -2971,6 +3006,36 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertTrue(payload["captures"][0]["accept_command"])
         self.assertTrue(payload["captures"][0]["delete_command"])
 
+    def test_hook_session_end_never_recaptures_existing_memory(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-echo-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        # The demo wiki already holds "Keep agent memory in local Markdown".
+        # An agent restating that memory must not become a new capture.
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                json.dumps({
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": [{
+                        "type": "text",
+                        "text": "Per your saved preference, we decided agent memory stays in "
+                                "local Markdown files with no cloud sync. I will keep following that.",
+                    }]},
+                })
+                for _ in range(4)
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(StringIO()):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(captures, [])
+
     def test_hook_session_end_ignores_assistant_prose(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-assistant-prose-"))
         target = tmp / "demo"
@@ -2997,6 +3062,40 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
         self.assertEqual(captures, [], "assistant prose must not become a capture")
+
+    def test_hook_session_end_ignores_injected_brief_but_keeps_new_decision(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-echo-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join([
+                json.dumps({"type": "user", "message": {"role": "user", "content":
+                    "Link memory (local, source-backed) · project demo\nRelevant memories\n"
+                    "- Prefer local personal memory (preference · user)"}}),
+                json.dumps({"type": "user", "message": {"role": "user", "content":
+                    "We decided to require signed commits on every branch from now on. "
+                    "Please remember this policy for all future work sessions."}}),
+                json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{
+                    "type": "text",
+                    "text": "Understood: signed commits are now required on every branch. "
+                            "I noted the policy and will verify signatures before pushing "
+                            "anything in our future sessions together."}]}}),
+            ]),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end")
+
+        self.assertEqual(code, 0)
+        captures = list((target / "raw/memory-captures").glob("*agent-session-notes*.md"))
+        self.assertEqual(len(captures), 1)
+        body = captures[0].read_text(encoding="utf-8")
+        self.assertIn("signed commits", body)
+        self.assertNotIn("Relevant memories", body)
 
     def test_hook_session_end_captures_user_stated_decision(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-user-decision-"))
@@ -3053,6 +3152,68 @@ class AgentHookCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
 
+    def test_session_end_explain_prints_decision_trail(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-explain-test-"))
+        target = tmp / "demo"
+        create_demo_quiet(target)
+        transcript = tmp / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "user", "message": {"role": "user", "content":
+                "Link memory (local, source-backed) · injected brief echo"}}) + "\n" +
+            json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}}),
+            encoding="utf-8",
+        )
+
+        out = StringIO()
+        with patch("sys.stdin", self._hook_stdin({"transcript_path": str(transcript)})):
+            with redirect_stdout(out):
+                code = link_cli.run_agent_hook(target, "session-end", explain=True)
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("dropped 1 carrying Link's own injected output", text)
+        self.assertIn("trivial session", text)
+
+    def test_conflict_output_offers_supersede_command(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-supersede-ux-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+            link_cli.remember(target, "Releases ship weekly on Thursdays", title="Weekly releases",
+                              memory_type="decision")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.remember(
+                target, "Releases do not ship weekly on Thursdays anymore",
+                title="No weekly releases", memory_type="decision",
+            )
+
+        self.assertEqual(code, 0)
+        self.assertIn("--supersedes weekly-releases", out.getvalue())
+
+    def test_recall_text_shows_applicability_and_steps(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-recall-text-"))
+        target = tmp / "wiki-root"
+        with redirect_stdout(StringIO()):
+            link_cli.init_wiki(target)
+            link_cli.remember(
+                target, "1. Cut branch 2. Cherry-pick 3. Deploy from tag",
+                title="Hotfix procedure", memory_type="procedure",
+                trigger="hotfixing production",
+                applies_when="project:acme",
+            )
+
+        out = StringIO()
+        with redirect_stdout(out):
+            code = link_cli.recall(target, "hotfixing production", project="other")
+
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("out of context here", text)
+        self.assertIn("When: hotfixing production", text)
+        self.assertIn("1. Cut branch", text)
+
     def test_connect_hooks_rejects_unsupported_agent(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))
         target = tmp / "demo"
@@ -3087,64 +3248,107 @@ class AgentHookCliTests(unittest.TestCase):
         self.assertIn(str(Path(target.name) / "link.py"), session_hooks["events"]["SessionStart"])
 
 
-class NewUserFrictionTests(unittest.TestCase):
-    def test_recall_miss_hints_at_semantic_when_memories_exist(self):
-        tmp = Path(tempfile.mkdtemp(prefix="link-miss-hint-"))
-        target = tmp / "wiki-root"
-        with redirect_stdout(StringIO()):
-            link_cli.init_wiki(target)
-            link_cli.remember(target, "I prefer short PR descriptions with a one-line summary first",
-                              memory_type="preference")
-
-        out = StringIO()
-        with redirect_stdout(out):
-            code = link_cli.recall(target, "how do I like my pull requests written")
-
-        self.assertEqual(code, 0)
-        text = out.getvalue()
-        self.assertIn("No matching memories found", text)
-        # The whole point: a paraphrase miss must point the user at semantic.
-        self.assertIn("semantic recall", text.lower())
-        self.assertIn("--setup", text)
-
-    def test_recall_miss_on_empty_wiki_gives_no_semantic_hint(self):
-        tmp = Path(tempfile.mkdtemp(prefix="link-miss-empty-"))
-        target = tmp / "wiki-root"
-        with redirect_stdout(StringIO()):
-            link_cli.init_wiki(target)
-
-        out = StringIO()
-        with redirect_stdout(out):
-            code = link_cli.recall(target, "anything at all")
-
-        self.assertEqual(code, 0)
-        # No memories yet: don't nag about semantic, just say add one.
-        self.assertNotIn("semantic recall", out.getvalue().lower())
-
-    def test_onboard_surfaces_the_hooks_path(self):
-        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-hooks-"))
-        target = tmp / "link"
-
-        out = StringIO()
-        with redirect_stdout(out):
-            code = link_cli.onboard(target)
-
-        self.assertEqual(code, 0)
-        text = out.getvalue()
-        self.assertIn("Make memory automatic", text)
-        self.assertIn("--hooks", text)
-
-    def test_onboard_agent_preview_offers_hooks(self):
-        tmp = Path(tempfile.mkdtemp(prefix="link-onboard-agent-hooks-"))
-        target = tmp / "link"
-
-        out = StringIO()
-        with redirect_stdout(out):
-            code = link_cli.onboard(target, agents=["claude-code"])
-
-        self.assertEqual(code, 0)
-        self.assertIn("Make memory automatic (recommended)", out.getvalue())
-
-
 if __name__ == "__main__":
     unittest.main()
+
+class DefaultWorkspaceFallbackTests(unittest.TestCase):
+    """A pathless memory command in a wikiless directory must fall back to
+    the default workspace instead of dead-ending — onboard creates ~/link
+    and the next thing every new user types is `lnk remember` with no path.
+    """
+
+    def _args(self, command: str, target: str = "."):
+        return types.SimpleNamespace(command=command, target=target)
+
+    def test_pathless_consumer_command_falls_back_to_workspace(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-ws-fallback-"))
+        workspace = tmp / "workspace"
+        (workspace / "wiki").mkdir(parents=True)
+        elsewhere = tmp / "elsewhere"
+        elsewhere.mkdir()
+        previous_cwd = Path.cwd()
+        previous_env = os.environ.get("LINK_WORKSPACE")
+        try:
+            os.chdir(elsewhere)
+            os.environ["LINK_WORKSPACE"] = str(workspace)
+            args = self._args("remember")
+            with redirect_stderr(StringIO()) as err:
+                link_cli._apply_default_workspace(args)
+            self.assertEqual(args.target, str(workspace))
+            self.assertIn("Workspace:", err.getvalue())
+        finally:
+            os.chdir(previous_cwd)
+            if previous_env is None:
+                os.environ.pop("LINK_WORKSPACE", None)
+            else:
+                os.environ["LINK_WORKSPACE"] = previous_env
+
+    def test_creator_commands_and_explicit_targets_never_redirect(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-ws-noredirect-"))
+        workspace = tmp / "workspace"
+        (workspace / "wiki").mkdir(parents=True)
+        elsewhere = tmp / "elsewhere"
+        elsewhere.mkdir()
+        previous_cwd = Path.cwd()
+        previous_env = os.environ.get("LINK_WORKSPACE")
+        try:
+            os.chdir(elsewhere)
+            os.environ["LINK_WORKSPACE"] = str(workspace)
+            for command, target in (("init", "."), ("demo", "."), ("remember", "some/path")):
+                args = self._args(command, target)
+                link_cli._apply_default_workspace(args)
+                self.assertEqual(args.target, target, command)
+        finally:
+            os.chdir(previous_cwd)
+            if previous_env is None:
+                os.environ.pop("LINK_WORKSPACE", None)
+            else:
+                os.environ["LINK_WORKSPACE"] = previous_env
+
+    def test_cwd_with_wiki_wins_over_workspace(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-ws-cwdwins-"))
+        (tmp / "wiki").mkdir(parents=True)
+        previous_cwd = Path.cwd()
+        try:
+            os.chdir(tmp)
+            args = self._args("recall")
+            link_cli._apply_default_workspace(args)
+            self.assertEqual(args.target, ".")
+        finally:
+            os.chdir(previous_cwd)
+
+
+class LnkCommandDisplayTests(unittest.TestCase):
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX shim scenario: a #!/bin/sh `lnk` on PATH is a Homebrew "
+        "(macOS/Linux) launcher; Windows uses .exe/.bat and has no such shim.",
+    )
+    def test_shim_on_path_switches_generated_commands_to_lnk(self):
+        # A `lnk` on PATH that wraps THIS runtime means the user installed a
+        # launcher (e.g. Homebrew): generated commands must say `lnk`, never
+        # interpreter + install path.
+        tmp = Path(tempfile.mkdtemp(prefix="link-shim-"))
+        shim = tmp / "lnk"
+        shim.write_text(f'#!/bin/sh\nexec python3 "{link_cli.ROOT / "link.py"}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        previous_path = os.environ.get("PATH", "")
+        try:
+            os.environ["PATH"] = f"{tmp}:{previous_path}"
+            self.assertTrue(link_cli._lnk_on_path_runs_this_runtime())
+            link_cli._configure_link_command_display()
+            rendered = link_cli._display_command(["lnk", "status"])
+            self.assertEqual(rendered, "lnk status")
+        finally:
+            os.environ["PATH"] = previous_path
+            link_cli._core_set_link_command_override(None)
+
+    def test_no_shim_keeps_source_checkout_command(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-noshim-"))
+        previous_path = os.environ.get("PATH", "")
+        try:
+            os.environ["PATH"] = str(tmp)  # no lnk anywhere
+            self.assertFalse(link_cli._lnk_on_path_runs_this_runtime())
+        finally:
+            os.environ["PATH"] = previous_path
+

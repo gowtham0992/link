@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "link-mcp"
-version = "1.6.0"
+version = "1.7.0"
 description = "MCP server for Link local agent memory — remember, recall, search, context, and graph traversal"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-dependencies = ["mcp>=1.0.0"]
+dependencies = ["mcp>=1.0.0,<2"]
 keywords = ["mcp", "memory", "knowledge-base", "wiki", "llm", "ai"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -25,8 +25,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-semantic = ["model2vec>=0.3"]
-semantic-quality = ["fastembed>=0.5"]
+semantic = ["model2vec>=0.3,<1"]
+semantic-quality = ["fastembed>=0.5,<1"]
+rerank = ["fastembed>=0.5,<1"]
 
 [project.urls]
 Homepage = "https://github.com/gowtham0992/link"

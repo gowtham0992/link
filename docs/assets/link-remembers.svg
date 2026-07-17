@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img"
+     aria-label="Link demo: a preference said once in an agent session is captured automatically, approved by the user, and recalled in a brand-new terminal the next day — from a plain Markdown file.">
+  <style>
+    .win { fill:#221c12; stroke:#3b342a; }
+    text { font-family:'SF Mono','Menlo','Consolas',ui-monospace,monospace; font-size:15px; }
+    .cmd { font-weight:500; }
+  </style>
+  <defs>
+    <clipPath id="tw2"><rect x="28" y="109" height="24" width="0"><animate attributeName="width" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;575;575" keyTimes="0.00000;0.09231;0.15000;1.00000"/></rect></clipPath>
+<clipPath id="tw6"><rect x="28" y="61" height="24" width="0"><animate attributeName="width" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;382;382" keyTimes="0.00000;0.43846;0.48769;1.00000"/></rect></clipPath>
+<clipPath id="tw11"><rect x="28" y="109" height="24" width="271"><animate attributeName="width" dur="26s" repeatCount="indefinite" calcMode="linear" values="271;0;0;271;271" keyTimes="0.00000;0.00462;0.70769;0.74215;1.00000"/></rect></clipPath>
+  </defs>
+  <rect class="win" x="1" y="1" width="718" height="298" rx="12"/>
+  <rect x="1" y="1" width="718" height="34" rx="12" fill="#1a150d"/>
+  <circle cx="24" cy="18" r="5" fill="#e06c60"/>
+  <circle cx="44" cy="18" r="5" fill="#e0b34f"/>
+  <circle cx="64" cy="18" r="5" fill="#7fae8f"/>
+  <text x="360" y="23" text-anchor="middle" fill="#8a8174" style="font-size:12px;letter-spacing:.08em;">lnk · link remembers</text>
+  <text x="30" y="66" class="dim" fill="#8a8174" opacity="0">— tuesday · a claude code session —<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.01538;0.02885;0.40769;0.42308;1.00000"/></text>
+  <text x="30" y="94" class="note" fill="#e0955f" opacity="0">◆ Link session-start · memory brief injected (empty, day one)<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.04615;0.05962;0.40769;0.42308;1.00000"/></text>
+  <text x="30" y="126" class="cmd" fill="#f3ece0" opacity="0" clip-path="url(#tw2)">> from now on I only push to develop — never straight to main<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.09231;0.09308;0.40769;0.42308;1.00000"/></text>
+  <text x="30" y="152" class="dim" fill="#8a8174" opacity="0">understood — develop only.<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.18462;0.19808;0.40769;0.42308;1.00000"/></text>
+  <text x="30" y="184" class="note" fill="#e0955f" opacity="0">◆ Link session-end · captured 1 proposal for your review<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.23077;0.24423;0.40769;0.42308;1.00000"/></text>
+  <text x="30" y="210" class="out" fill="#e0b34f" opacity="0">pending: "only push to develop, never straight to main"<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.27692;0.29038;0.40769;0.42308;1.00000"/></text>
+  <text x="30" y="78" class="cmd" fill="#f3ece0" opacity="0" clip-path="url(#tw6)">$ lnk review-memory only-push-to-develop<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.43846;0.43923;0.60000;0.61538;1.00000"/></text>
+  <text x="30" y="106" class="out" fill="#86c79a" opacity="0">✓ reviewed — durable memory now, because you approved it<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.50769;0.52115;0.60000;0.61538;1.00000"/></text>
+  <text x="30" y="130" class="note" fill="#e0955f" opacity="0">→ agents propose · you decide<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.00000;0.53846;0.55192;0.60000;0.61538;1.00000"/></text>
+  <text x="30" y="66" class="dim" fill="#8a8174" opacity="1">— wednesday · brand-new terminal · zero context —<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00462;0.63077;0.64423;1.00000"/></text>
+  <text x="30" y="94" class="note" fill="#e0955f" opacity="1">◆ Link session-start · 1 memory injected<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00462;0.66923;0.68269;1.00000"/></text>
+  <text x="30" y="126" class="cmd" fill="#f3ece0" opacity="1" clip-path="url(#tw11)">> which branch do I push to?<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00462;0.70769;0.70846;1.00000"/></text>
+  <text x="30" y="154" class="out" fill="#86c79a" opacity="1">✓ develop only — never straight to main<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00462;0.76923;0.78269;1.00000"/></text>
+  <text x="30" y="180" class="note" fill="#e0955f" opacity="1">→ from wiki/memories/only-push-to-develop.md<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00462;0.80769;0.82115;1.00000"/></text>
+  <text x="30" y="216" class="dim" fill="#8a8174" opacity="1">plain Markdown · reviewed by you · shared by every agent<animate attributeName="opacity" dur="26s" repeatCount="indefinite" calcMode="linear" values="1;0;0;1;1" keyTimes="0.00000;0.00462;0.86154;0.87500;1.00000"/></text>
+</svg>

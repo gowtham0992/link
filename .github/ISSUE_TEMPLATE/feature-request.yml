@@ -1,0 +1,29 @@
+name: Feature request
+description: Something Link should be able to do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Link's direction is deliberately narrow: local, source-backed personal
+        memory with review-gated writes and no LLM in the memory layer.
+        Requests that fit that shape land fastest.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: The situation you keep hitting, before any proposed solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Optional — what you imagine the feature looking like.
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Fit
+      options:
+        - label: This works with plain local files and no cloud service.
+        - label: This keeps the user in control of what becomes durable memory.

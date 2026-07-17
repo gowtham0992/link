@@ -141,6 +141,8 @@ def _compact_memory(memory: Mapping[str, object]) -> dict[str, object]:
         "status": memory.get("status", ""),
         "review_status": memory.get("review_status", ""),
         "summary": memory.get("tldr") or memory.get("snippet") or "",
+        "trigger": memory.get("trigger", ""),
+        "steps": memory.get("steps", ""),
         "score": memory.get("score", 0),
         "rank_score": memory.get("rank_score", 0),
         "confidence": memory.get("confidence", ""),

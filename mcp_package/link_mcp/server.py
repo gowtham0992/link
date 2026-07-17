@@ -226,7 +226,8 @@ from link_core.memory import (
     normalize_project as _core_normalize_project,
     memory_review_issues as _core_memory_review_issues,
     propose_memories_from_text as _core_propose_memories_from_text,
-    recall_memories as _core_recall_memories,
+    recall_memories as _core_recall_memory_results,
+    recall_abstention as _core_recall_abstention,
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
@@ -257,6 +258,9 @@ from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
 )
 from link_core.semantic import (
+    RERANK_CANDIDATES as _CORE_RERANK_CANDIDATES,
+    load_reranker as _core_load_reranker,
+    rerank_blend as _core_rerank_blend,
     semantic_memory_scores as _core_semantic_memory_scores,
 )
 from link_core.files import (
@@ -565,22 +569,29 @@ def _memory_audit(limit: int = 10, project: str = "") -> dict[str, object]:
     )
 
 
-def _recall_memories(
+def _recall_memory_results(
     query: str,
     limit: int = 10,
     include_archived: bool = False,
     project: str = "",
+    context_path: str = "",
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
     records = _memory_records()
-    return _core_recall_memories(
+    reranker = _core_load_reranker()
+    fetch = max(limit, _CORE_RERANK_CANDIDATES) if reranker is not None else limit
+    results = _core_recall_memory_results(
         records,
         query,
-        limit=limit,
+        limit=fetch,
         include_archived=include_archived,
         project=_resolve_project(project),
+        context_path=_clean_text_input(context_path, max_len=500) or None,
         semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, query, records),
     )
+    if reranker is not None:
+        results = _core_rerank_blend(query, results, limit=limit, reranker=reranker)
+    return results[:limit]
 
 
 def _propose_memories_from_text(
@@ -731,6 +742,8 @@ def _accept_capture(
         allow_duplicate=allow_duplicate,
         allow_conflict=allow_conflict,
         project=str(memory_args["project"]),
+        trigger=str(memory_args.get("trigger") or ""),
+        context=str(memory_args.get("context") or ""),
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
@@ -900,8 +913,10 @@ def _update_memory_page(
 def _write_mcp_memory_page(
     text: str, title: str = "", memory_type: str = "note",
     scope: str = "user", tags: str = "", source: str = "mcp",
-    allow_duplicate: bool = False, allow_conflict: bool = False, project: str = "",
-    visibility: str = "", review_after: str = "", expires_at: str = "",
+    allow_duplicate: bool = False, allow_conflict: bool = False, allow_secret: bool = False,
+    project: str = "",
+    visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
+    applies_when: str = "", supersedes: str = "", context: str = "",
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -914,7 +929,12 @@ def _write_mcp_memory_page(
         visibility=_clean_text_input(visibility, max_len=40) or None,
         review_after=_clean_text_input(review_after, max_len=40) or None,
         expires_at=_clean_text_input(expires_at, max_len=40) or None,
+        trigger=_clean_text_input(trigger, max_len=200) or None,
+        applies_when=_clean_text_input(applies_when, max_len=200) or None,
+        supersedes=_clean_text_input(supersedes, max_len=200) or None,
+        context=_clean_text_input(context, max_len=600) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
+        allow_secret=allow_secret,
         **options,
     )
     if result.get("created"):
@@ -950,7 +970,18 @@ def link_instructions_resource() -> str:
         "If Link session hooks are installed for this agent, the startup brief is injected automatically — "
         "skip step 2 and go straight to bounded task recall.\n"
         "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
-        "confidence) as hints to verify, not facts to act on.\n\n"
+        "confidence) as hints to verify, not facts to act on.\n"
+        "Recall results include an `abstention` verdict: when `abstention.recommended` is true, the memory "
+        "has nothing reliable on this — tell the user so instead of answering from a weak match. Saying "
+        "\"my memory doesn't cover that\" is correct behavior, not failure.\n"
+        "When a new memory contradicts an existing one, prefer remember(..., supersedes=\"<old-name>\") "
+        "with user approval: the old memory is archived with lineage instead of coexisting.\n"
+        "Memories may carry an `applicability` label: `out_of_context` means the memory's declared "
+        "conditions do not fit here — do not apply it without asking. Scope situational memories with "
+        "`applies_when` (project:/path:/task: conditions).\n"
+        "After a notable multi-step task, offer to save a reusable recipe: propose a `procedure` memory "
+        "with a short `trigger` phrase, and save only after approval. Approved procedures return from "
+        "recall with their steps.\n\n"
         "Never silently save durable memory. Prefer reviewed memories and source-backed wiki pages, and cite "
         "provenance when explaining why Link knows something.\n"
     )
@@ -1141,6 +1172,7 @@ def recall(
     project: str = "",
     mode: str = "auto",
     limit: int = 6,
+    context_path: str = "",
 ) -> str:
     """Retrieve local memory/wiki context through one obvious read tool.
 
@@ -1148,6 +1180,9 @@ def recall(
     work. mode=auto returns a startup memory brief when query is empty and an
     answer-ready query packet when query is present. mode=brief returns the
     memory brief; mode=memory returns focused memory-only recall.
+    Pass context_path (the session's working directory) so memories fenced
+    with applies_when path: conditions can match; without it they are
+    honestly demoted as out_of_context.
     """
     clean_query = _clean_text_input(query, max_len=MAX_TEXT_INPUT)
     clean_mode = (_clean_text_input(mode, max_len=40) or "auto").lower().replace("-", "_")
@@ -1166,7 +1201,9 @@ def recall(
     if clean_mode == "memory":
         if not clean_query:
             return json.dumps({"surface": "slim", "tool": "recall", "error": "query required for memory mode"})
-        memories = _recall_memories(clean_query, limit=parsed_limit, project=clean_project)
+        memories = _recall_memory_results(
+            clean_query, limit=parsed_limit, project=clean_project, context_path=context_path
+        )
         return json.dumps({
             "surface": "slim",
             "tool": "recall",
@@ -1174,6 +1211,7 @@ def recall(
             "query": clean_query,
             "project": clean_project,
             "count": len(memories),
+            "abstention": _core_recall_abstention(memories),
             "memories": memories,
         }, ensure_ascii=False)
 
@@ -1198,14 +1236,25 @@ def remember(
     visibility: str = "",
     review_after: str = "",
     expires_at: str = "",
+    trigger: str = "",
+    applies_when: str = "",
+    supersedes: str = "",
+    context: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
 ) -> str:
     """Save explicit user-approved memory.
 
     Use only when the user asks Link to remember something or approves a memory
     proposal. Duplicate and conflict candidates should be resolved by updating,
     reviewing, or archiving existing memory instead of forcing a new page.
+    Use memory_type="procedure" with a short `trigger` phrase for reusable
+    how-to memory (steps for a recurring task) the user has approved.
+    context: optional surrounding text from the memory's origin (neighboring conversation turns); it helps recall find the memory later but is never part of the claim.
+    Field rule: trigger helps recall FIND a recipe; applies_when FENCES a
+    memory to a context; scope/project/visibility say whose memory it is;
+    supersedes REPLACES an old claim with lineage. When unsure, omit them.
     """
     try:
         result = _write_mcp_memory_page(
@@ -1217,10 +1266,15 @@ def remember(
             source=source,
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
+            allow_secret=allow_secret,
             project=project,
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
+            trigger=trigger,
+            applies_when=applies_when,
+            supersedes=supersedes,
+            context=context,
         )
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})
@@ -1636,12 +1690,13 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
     if not query:
         return json.dumps({"error": "query required", "query": "", "count": 0, "memories": []})
     project_name = _resolve_project(project)
-    memories = _recall_memories(query, limit=limit, include_archived=include_archived, project=project_name)
+    memories = _recall_memory_results(query, limit=limit, include_archived=include_archived, project=project_name)
     return json.dumps({
         "query": query,
         "count": len(memories),
         "include_archived": include_archived,
         "project": project_name,
+        "abstention": _core_recall_abstention(memories),
         "memories": memories,
     }, ensure_ascii=False)
 
@@ -1927,10 +1982,13 @@ def remember_memory(
     source: str = "mcp",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
     project: str = "",
     visibility: str = "",
     review_after: str = "",
     expires_at: str = "",
+    trigger: str = "",
+    context: str = "",
 ) -> str:
     """Save a local agent memory as a Markdown page.
 
@@ -1938,13 +1996,16 @@ def remember_memory(
     is written under wiki/memories/, indexed, logged, and kept local. Strong
     duplicates are refused unless allow_duplicate is true.
     Potential conflicts are refused unless allow_conflict is true.
-    memory_type: preference, decision, project, fact, or note.
+    memory_type: preference, decision, project, fact, note, or procedure.
     scope: user, project, or global.
     visibility: private, project, or team. Defaults to private for user/global and project for project-scoped memories.
     project: optional project key for project-scoped memories.
     tags: optional comma-separated tags.
     review_after: optional YYYY-MM-DD date when this memory should be checked again.
+    context: optional surrounding origin text (max 600 chars); aids recall, never part of the claim.
+    allow_secret: memory that looks like a credential is refused by default; set true only when the user insists it is not a secret.
     expires_at: optional YYYY-MM-DD date when this memory should leave default recall.
+    trigger: optional short phrase describing when this memory applies (recommended for procedure).
     """
     try:
         result = _write_mcp_memory_page(
@@ -1956,10 +2017,13 @@ def remember_memory(
             source=source,
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
+            allow_secret=allow_secret,
             project=project,
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
+            trigger=trigger,
+            context=context,
         )
     except ValueError as exc:
         return json.dumps({"created": False, "error": str(exc)})

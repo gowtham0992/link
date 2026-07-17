@@ -59,6 +59,10 @@ _MODEL_CACHE: dict[str, object] = {}
 # - "model2vec" (fast): tiny static embeddings. ~100 ms load, ideal for
 #   short-lived CLI calls and session-start hooks.
 SEMANTIC_PROVIDER_ENV = "LINK_SEMANTIC_PROVIDER"
+# Set by entry points: short-lived CLI commands prefer the instant-load fast
+# tier; the long-lived MCP server prefers the quality tier. An explicit
+# LINK_SEMANTIC_PROVIDER always wins.
+SEMANTIC_SURFACE_ENV = "LINK_SEMANTIC_SURFACE"
 DEFAULT_FASTEMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
@@ -89,6 +93,11 @@ def semantic_provider() -> str | None:
         return "fastembed" if _fastembed_installed() else None
     if override == "model2vec":
         return "model2vec" if _model2vec_installed() else None
+    surface = os.environ.get(SEMANTIC_SURFACE_ENV, "").strip().lower()
+    if surface == "cli" and _model2vec_installed():
+        # Interactive commands stay instant; the MCP server still gets the
+        # quality tier. LINK_SEMANTIC_PROVIDER overrides this split.
+        return "model2vec"
     if _fastembed_installed():
         return "fastembed"
     if _model2vec_installed():
@@ -167,6 +176,112 @@ def load_embedder(allow_download: bool = False) -> Embedder | None:
     return _embed
 
 
+# ── Rerank tier (optional, local) ──────────────────────────────────────
+# A tiny local ONNX cross-encoder re-orders the top recall candidates by
+# reading each (query, memory) pair directly. Measured (see
+# benchmarks/RESULTS.md): LoCoMo hit@10 0.737 -> 0.794 and bundled
+# token-overlap hit@1 0.749 -> 0.839 on the default embedder. The reranker
+# score is BLENDED with the retrieval order (reciprocal-rank fusion), never
+# substituted: pure reranking collapsed hit@1 0.38 -> 0.18 in ablation.
+# Same guarantees as the embedding tiers: loads offline-only (only explicit
+# setup may download), disabled by default, applies only to explicit recall
+# calls — session hooks and briefs never pay the latency.
+RERANK_DISABLE_ENV = "LINK_RERANK"
+RERANK_MODEL_ENV = "LINK_RERANK_MODEL"
+DEFAULT_RERANK_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
+RERANK_CANDIDATES = 50
+RERANK_RRF_K = 60
+
+Reranker = Callable[[str, list[str]], list[float]]
+
+
+def rerank_disabled() -> bool:
+    return os.environ.get(RERANK_DISABLE_ENV, "").strip().lower() in {"off", "0", "false", "no"}
+
+
+def rerank_model_name() -> str:
+    return os.environ.get(RERANK_MODEL_ENV, "").strip() or DEFAULT_RERANK_MODEL
+
+
+def load_reranker(allow_download: bool = False) -> Reranker | None:
+    """Return a cross-encoder scoring callable, or None when unavailable.
+
+    Never raises and never touches the network unless allow_download=True
+    (the explicit one-time setup path).
+    """
+    if rerank_disabled() or not _fastembed_installed():
+        return None
+    model_name = rerank_model_name()
+    cache_key = f"rerank:{model_name}"
+    model = _MODEL_CACHE.get(cache_key)
+    if model is None:
+        try:
+            from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+            _set_offline_guard(allow_download)
+            model = TextCrossEncoder(model_name)
+            _MODEL_CACHE[cache_key] = model
+        except Exception:
+            return None
+
+    def _score(query: str, documents: list[str]) -> list[float]:
+        return [float(value) for value in model.rerank(query, documents)]
+
+    return _score
+
+
+def rerank_blend(
+    query: str,
+    results: list[dict[str, object]],
+    *,
+    limit: int,
+    reranker: Reranker | None = None,
+) -> list[dict[str, object]]:
+    """Re-order recall results by blending retrieval order with a local
+    cross-encoder's judgment of each (query, memory) pair.
+
+    Takes the over-fetched candidate list (RERANK_CANDIDATES) in retrieval
+    order and returns the top `limit` after reciprocal-rank fusion of the
+    two orders. Degrades to the input order when no reranker is available.
+    """
+    active = reranker or load_reranker(allow_download=False)
+    if active is None or len(results) <= 1:
+        return results[:limit]
+    documents = [
+        " ".join([
+            str(item.get("title") or ""),
+            str(item.get("tldr") or ""),
+            str(item.get("snippet") or ""),
+            str(item.get("steps") or ""),
+        ])[:1000]
+        for item in results
+    ]
+    try:
+        scores = active(query, documents)
+    except Exception:
+        return results[:limit]
+    if len(scores) != len(results):
+        return results[:limit]
+    rerank_order = sorted(range(len(results)), key=lambda i: -scores[i])
+    fused: dict[int, float] = {}
+    for rank, index in enumerate(rerank_order):
+        fused[index] = fused.get(index, 0.0) + 1.0 / (RERANK_RRF_K + rank + 1)
+    for rank in range(len(results)):
+        fused[rank] = fused.get(rank, 0.0) + 1.0 / (RERANK_RRF_K + rank + 1)
+    ordered = sorted(fused, key=lambda index: -fused[index])
+    reranked = []
+    for index in ordered[:limit]:
+        item = dict(results[index])
+        item["rerank"] = "blended"
+        reranked.append(item)
+    return reranked
+
+
+def rerank_model_available() -> bool:
+    """True when the rerank cross-encoder loads offline (installed + cached)."""
+    return load_reranker(allow_download=False) is not None
+
+
 def model_available() -> bool:
     """True when the model is loadable fully offline."""
     return load_embedder(allow_download=False) is not None
@@ -194,8 +309,10 @@ def memory_embedding_text(record: Mapping[str, object]) -> str:
     parts = [
         str(record.get("title") or ""),
         str(record.get("tldr") or ""),
+        str(record.get("trigger") or ""),
         tags,
         str(record.get("body") or "")[:1000],
+        str(record.get("context") or "")[:600],
     ]
     return "\n".join(part for part in parts if part.strip())
 
@@ -360,6 +477,7 @@ def build_semantic_status(
     memory_count: int,
     command_target: str | Path = ".",
     python_cmd: str | None = None,
+    externally_managed: bool = False,
 ) -> dict[str, object]:
     """Readiness report for the optional semantic recall layer."""
     provider = semantic_provider()
@@ -378,14 +496,22 @@ def build_semantic_status(
     if disabled:
         next_actions.append(f"unset {SEMANTIC_DISABLE_ENV} to re-enable semantic recall")
     elif not installed:
-        next_actions.append('pip install "link-mcp[semantic]"  # fast tier (tiny static model)')
-        next_actions.append('pip install "link-mcp[semantic-quality]"  # quality tier (contextual model)')
-        next_actions.append(f"lnk semantic {command_target} --setup")
+        if externally_managed:
+            # PEP 668 (Homebrew/Debian pythons): direct pip installs are
+            # refused, so --setup provisions Link's managed venv instead.
+            next_actions.append(
+                f"lnk semantic {command_target} --setup"
+                "  # installs the semantic extras into ~/.link-mcp-venv and fetches the models"
+            )
+        else:
+            next_actions.append('pip install "link-mcp[semantic]"  # fast tier (tiny static model)')
+            next_actions.append('pip install "link-mcp[semantic-quality]"  # quality tier (contextual model)')
+            next_actions.append(f"lnk semantic {command_target} --setup")
     elif not ready:
         next_actions.append(f"lnk semantic {command_target} --setup")
     elif index_items < memory_count:
         next_actions.append(f"lnk semantic {command_target} --rebuild")
-    if installed and provider == "model2vec" and not _fastembed_installed():
+    if installed and provider == "model2vec" and not _fastembed_installed() and not externally_managed:
         next_actions.append(
             'optional quality upgrade: pip install "link-mcp[semantic-quality]" then rerun --setup'
         )
@@ -396,7 +522,24 @@ def build_semantic_status(
     elif provider == "model2vec":
         tier = "fast (static embeddings; instant load, best for CLI and hooks)"
 
+    rerank_installed = _fastembed_installed() and not rerank_disabled()
+    rerank_ready = rerank_model_available() if rerank_installed else False
+    if rerank_disabled():
+        rerank_state = f"disabled via {RERANK_DISABLE_ENV}"
+    elif rerank_ready:
+        rerank_state = "active on explicit recall (hooks and briefs never pay the latency)"
+    elif rerank_installed:
+        rerank_state = "installed but model not fetched"
+        next_actions.append(f"lnk semantic {command_target} --setup  # also fetches the rerank model")
+    else:
+        rerank_state = "not installed"
+        if not externally_managed:
+            next_actions.append('optional rerank tier: pip install "link-mcp[rerank]" then rerun --setup')
+
     return {
+        "rerank_ready": rerank_ready,
+        "rerank_state": rerank_state,
+        "rerank_model": rerank_model_name(),
         "enabled": ready,
         "disabled_by_env": disabled,
         "provider": provider,
@@ -427,6 +570,8 @@ def render_semantic_status_text(payload: Mapping[str, object]) -> tuple[int, str
         f"Model: {payload.get('model')}",
         f"Indexed memories: {payload.get('indexed_memories')} of {payload.get('memory_count')}",
         f"Index: {payload.get('index_path')}",
+        f"Rerank tier: {payload.get('rerank_state')}"
+        + (f" · {payload.get('rerank_model')}" if payload.get("rerank_ready") else ""),
     ]
     if payload.get("disabled_by_env"):
         lines.append(f"Disabled via {SEMANTIC_DISABLE_ENV} environment variable.")

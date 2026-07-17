@@ -9,7 +9,7 @@ from .files import atomic_write_text
 from .frontmatter import frontmatter_string, parse_frontmatter
 from .log import utc_timestamp
 from .mcp_verify import display_command
-from .memory import normalize_project, slugify
+from .memory import normalize_project, propose_memories_from_text, slugify
 from .security import redact_secret_values, secret_value_warnings
 
 
@@ -54,16 +54,38 @@ def capture_title(
 
 
 def capture_filename(timestamp: str, title: str, raw_dir: Path) -> Path:
-    """Return a unique capture path under raw_dir for the given timestamp/title."""
+    """Atomically reserve a unique capture path under raw_dir.
+
+    Concurrent session-end hooks (several agents/terminals closing at once)
+    share the same second-timestamp and default title, so a check-then-write
+    counter loop races: two hooks pick the same name and one clobbers the
+    other. Claim each name with O_CREAT|O_EXCL so only one hook can own it;
+    the caller overwrites the reserved placeholder with the real content.
+    """
+    import errno
+    import os
+
     safe_stamp = str(timestamp).replace("-", "").replace(":", "")
     title_slug = slugify(title.replace("Memory capture:", ""), fallback="session-notes")
     base = f"{safe_stamp}-{title_slug}"
-    candidate = raw_dir / f"{base}.md"
-    counter = 2
-    while candidate.exists():
-        candidate = raw_dir / f"{base}-{counter}.md"
-        counter += 1
-    return candidate
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    counter = 1
+    while True:
+        name = f"{base}.md" if counter == 1 else f"{base}-{counter}.md"
+        candidate = raw_dir / name
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            os.close(fd)
+            return candidate
+        except FileExistsError:
+            counter += 1
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                counter += 1
+                continue
+            raise
+        if counter > 10000:  # pathological; give up rather than spin
+            return raw_dir / f"{base}-{os.getpid()}.md"
 
 
 def write_session_capture(
@@ -76,8 +98,16 @@ def write_session_capture(
     timestamp: str | None = None,
     default_source: str = "inline",
     path_source: bool = False,
+    proposal_text: str | None = None,
+    decision_trail: list[str] | None = None,
 ) -> dict[str, object]:
-    """Persist proposal-only session notes under raw/memory-captures."""
+    """Persist proposal-only session notes under raw/memory-captures.
+
+    `proposal_text` records exactly which turns memory is mined from (the
+    user's own turns), so accept-time re-mining reads the same words the
+    hook did — never the assistant's prose. `decision_trail` records why
+    proposals were kept or dropped, so the pipeline is reviewable.
+    """
     root = root.expanduser().resolve()
     notes = text.strip()
     if not notes:
@@ -97,6 +127,23 @@ def write_session_capture(
     capture_dir.mkdir(parents=True, exist_ok=True)
     capture_path = capture_filename(captured_at, capture_name, capture_dir)
     project_line = f'project: "{frontmatter_string(project_name)}"\n' if project_name else ""
+
+    # Proposal source: the user's own turns, redacted, so accept-time mining
+    # reads exactly what the hook mined — not the assistant's prose beneath.
+    mined = (proposal_text or "").strip()
+    mined_section = ""
+    if mined and mined != notes:
+        safe_mined, _, _ = redact_secret_values(mined)
+        mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{safe_mined}\n"
+
+    trail_section = ""
+    if decision_trail:
+        safe_lines = []
+        for line in decision_trail:
+            safe, _, _ = redact_secret_values(str(line))
+            safe_lines.append(f"- {safe}")
+        trail_section = "\n## How Link Read This Session\n\n" + "\n".join(safe_lines) + "\n"
+
     atomic_write_text(
         capture_path,
         f"""---
@@ -112,7 +159,7 @@ Captured locally for Link memory review. This raw note is proposal-only until th
 ## Source Input
 
 {source_value}
-
+{trail_section}{mined_section}
 ## Notes
 
 {notes}
@@ -170,6 +217,38 @@ def capture_notes_from_markdown(text: str) -> tuple[dict[str, object], str]:
     return meta, notes
 
 
+def capture_proposal_source(text: str) -> str | None:
+    """Return the `## Proposal Source` body (user turns) when present.
+
+    Accept-time mining reads this instead of the full notes so the
+    assistant's prose is never re-attributed as the user's preference.
+    """
+    _, body = parse_frontmatter(text)
+    match = re.search(r"^## Proposal Source\s*(.*?)(?=^## |\Z)", body, flags=re.MULTILINE | re.DOTALL)
+    if not match:
+        return None
+    section = match.group(1).strip()
+    # Drop the leading explanatory sentence Link writes above the turns.
+    section = re.sub(
+        r"^Memory is mined only from these \(the user's own turns\):\s*",
+        "", section,
+    ).strip()
+    return section or None
+
+
+def capture_decision_trail(text: str) -> list[str]:
+    """Return the `## How Link Read This Session` bullet lines when present."""
+    _, body = parse_frontmatter(text)
+    match = re.search(r"^## How Link Read This Session\s*(.*?)(?=^## |\Z)", body, flags=re.MULTILINE | re.DOTALL)
+    if not match:
+        return []
+    return [
+        line.lstrip("- ").strip()
+        for line in match.group(1).strip().splitlines()
+        if line.strip().startswith("-")
+    ]
+
+
 def capture_proposal_selection(
     root: Path,
     capture: str,
@@ -200,8 +279,12 @@ def capture_proposal_selection(
 
     rel_path = capture_path.relative_to(root).as_posix()
     project_name = normalize_project(project or str(meta.get("project") or "") or default_project)
+    # Mine from the user's own turns when the capture recorded them, so accept
+    # never re-attributes the assistant's prose. Fall back to full notes for
+    # older captures written before proposal-source provenance existed.
+    mining_text = capture_proposal_source(raw_text) or notes
     proposals = propose_memories(
-        notes,
+        mining_text,
         rel_path,
         max(1, min(max(proposal_index, 10), 50)),
         project_name,
@@ -250,6 +333,8 @@ def capture_accept_memory_args(
         "tags": tags,
         "source": str(selection.get("capture") or ""),
         "project": project_name if chosen_scope == "project" else "",
+        "trigger": str(proposal.get("trigger") or "") or None,
+        "context": str(proposal.get("context") or "") or None,
     }
 
 
@@ -379,6 +464,24 @@ def capture_records(
             continue
         warnings = secret_value_warnings(text)
         safe_notes, _, _ = redact_secret_values(notes)
+        # What Accept will actually save: mine from the user's own turns
+        # (proposal source) the same way accept-capture does, so the preview
+        # matches the outcome and never surfaces the assistant's prose.
+        mining_text = capture_proposal_source(text) or notes
+        mined = propose_memories_from_text(mining_text, [], source=rel, limit=3)
+        proposals_obj = mined.get("proposals")
+        proposal_items: list[object] = proposals_obj if isinstance(proposals_obj, list) else []
+        proposal_previews: list[dict[str, object]] = []
+        for proposal in proposal_items[:3]:
+            if not isinstance(proposal, dict):
+                continue
+            preview_text, _, _ = redact_secret_values(str(proposal.get("memory") or ""))
+            proposal_previews.append({
+                "title": str(proposal.get("title") or ""),
+                "memory": preview_text[:240],
+                "memory_type": str(proposal.get("memory_type") or ""),
+                "confidence": str(proposal.get("confidence") or ""),
+            })
         records.append({
             "path": rel,
             "title": str(meta.get("title") or path.stem),
@@ -388,6 +491,10 @@ def capture_records(
             "secret_warnings": warnings,
             "warning_count": len(warnings),
             "snippet": re.sub(r"\s+", " ", safe_notes).strip()[:180],
+            "proposal_count": len(proposal_items),
+            "proposals": proposal_previews,
+            "decision_trail": capture_decision_trail(text),
+            "mined_from_user_turns": capture_proposal_source(text) is not None,
             "commands": command_builder(rel),
         })
     records.sort(key=lambda item: (str(item["date_captured"]), str(item["path"])), reverse=True)
@@ -422,10 +529,14 @@ def capture_inbox(
 def render_capture_inbox_text(payload: dict[str, object]) -> str:
     """Render human-readable raw capture inbox output."""
     project_name = str(payload.get("project") or "")
-    captures = payload.get("captures") if isinstance(payload.get("captures"), list) else []
-    warning_count = int(payload.get("warning_count") or 0)
-    read_warning_count = int(payload.get("read_warning_count") or 0)
-    read_warnings = payload.get("read_warnings") if isinstance(payload.get("read_warnings"), list) else []
+    captures_obj = payload.get("captures")
+    captures: list[object] = captures_obj if isinstance(captures_obj, list) else []
+    warning_count_obj = payload.get("warning_count")
+    warning_count = warning_count_obj if isinstance(warning_count_obj, int) else 0
+    read_warning_count_obj = payload.get("read_warning_count")
+    read_warning_count = read_warning_count_obj if isinstance(read_warning_count_obj, int) else 0
+    read_warnings_obj = payload.get("read_warnings")
+    read_warnings: list[object] = read_warnings_obj if isinstance(read_warnings_obj, list) else []
 
     lines = ["Raw capture inbox"]
     if project_name:
@@ -445,8 +556,10 @@ def render_capture_inbox_text(payload: dict[str, object]) -> str:
     for index, capture in enumerate(captures, start=1):
         if not isinstance(capture, dict):
             continue
-        commands = capture.get("commands") if isinstance(capture.get("commands"), dict) else {}
-        secret_warnings = capture.get("secret_warnings") if isinstance(capture.get("secret_warnings"), list) else []
+        commands_obj = capture.get("commands")
+        commands: dict[object, object] = commands_obj if isinstance(commands_obj, dict) else {}
+        secret_warnings_obj = capture.get("secret_warnings")
+        secret_warnings: list[object] = secret_warnings_obj if isinstance(secret_warnings_obj, list) else []
         lines.extend(["", f"{index}. {capture.get('title')}"])
         lines.append(f"   Path: {capture.get('path')}")
         if capture.get("project"):
@@ -492,7 +605,8 @@ def render_accept_capture_text(payload: dict[str, object], *, target: object = "
 def render_redact_capture_text(payload: dict[str, object]) -> str:
     """Render redact-capture CLI output."""
     if payload.get("redacted"):
-        labels = payload.get("labels") if isinstance(payload.get("labels"), list) else []
+        labels_obj = payload.get("labels")
+        labels: list[object] = labels_obj if isinstance(labels_obj, list) else []
         return "\n".join([
             "Capture redacted",
             f"Path: {payload.get('path')}",

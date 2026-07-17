@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import (  # noqa: E402
+    slugify,
     add_capture_review_to_brief,
     default_project_for_target,
     extract_wikilinks,
@@ -24,6 +25,7 @@ from link_core.memory import (  # noqa: E402
     memory_profile,
     memory_review_issues,
     memory_records,
+    memory_durability_rank,
     propose_memories_from_text,
     recall_memories,
     recall_state,
@@ -112,6 +114,55 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(recalled[0]["review_issue_count"], 0)
         self.assertEqual(recalled[0]["highest_review_severity"], "none")
         self.assertNotIn("body", recalled[0])
+
+    def test_retrieval_context_finds_memory_but_stays_out_of_claim_and_output(self):
+        # `context` is retrieval fuel from around a memory's origin (e.g.
+        # neighboring dialogue turns). It must make the memory findable,
+        # but never leak into recall output or count as part of the claim
+        # for echo detection.
+        record = {
+            "name": "inspiring-stories",
+            "path": "wiki/memories/inspiring-stories.md",
+            "title": "Stories felt inspiring",
+            "memory_type": "note",
+            "scope": "user",
+            "status": "active",
+            "review_status": "reviewed",
+            "tags": [],
+            "tldr": "The stories were so inspiring.",
+            "body": "The stories were so inspiring, I felt thankful for the support.",
+            "context": "Caroline: I gave a talk about my transgender journey at the school event.",
+        }
+
+        results = recall_memories([record], "transgender journey school event", limit=3)
+        self.assertTrue(results, "context tokens must make the memory findable")
+        self.assertEqual(results[0]["name"], "inspiring-stories")
+        self.assertNotIn("context", results[0], "context must not leak into recall output")
+        self.assertNotIn("body", results[0])
+
+        # Text that only restates the CONTEXT is not an echo of the claim.
+        from link_core.memory import is_existing_memory_echo
+        self.assertFalse(
+            is_existing_memory_echo(
+                [record],
+                "Caroline gave a talk about her transgender journey at the school event.",
+            ),
+            "context must not count as the memory's own claim",
+        )
+
+    def test_abstention_verdict_matches_evidence(self):
+        # The don't-know contract: empty or weak-confidence results must
+        # yield abstention.recommended=True so agents say "my memory has
+        # nothing on this" instead of dressing a weak match up as an answer.
+        from link_core.memory import recall_abstention
+
+        self.assertTrue(recall_abstention([])["recommended"])
+        weak = [{"name": "m", "confidence": "weak"}]
+        verdict = recall_abstention(weak)
+        self.assertTrue(verdict["recommended"])
+        self.assertIn("weak", verdict["reason"])
+        strong = [{"name": "m", "confidence": "strong"}]
+        self.assertFalse(recall_abstention(strong)["recommended"])
 
     def test_recall_matches_common_developer_paraphrases(self):
         records = [
@@ -634,6 +685,65 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(payload["proposals"][1]["primary_action"]["kind"], "remember")
         self.assertEqual(payload["proposals"][1]["primary_action"]["tool"], "remember_memory")
 
+    def test_proposals_carry_neighboring_sentences_as_context(self):
+        payload = propose_memories_from_text(
+            "we spent an hour debugging the deploy pipeline. "
+            "from now on I only deploy to staging through the release script. "
+            "also check whether the bucket migration ticket is still open.",
+            [],
+            source="unit test",
+        )
+        proposal = payload["proposals"][0]
+
+        self.assertIn("release script", proposal["memory"])
+        self.assertIn("debugging the deploy pipeline", proposal["context"])
+        self.assertIn("bucket migration ticket", proposal["context"])
+        self.assertNotIn("release script", proposal["context"])
+        self.assertEqual(proposal["primary_action"]["arguments"]["context"], proposal["context"])
+        self.assertNotIn("--context", proposal["primary_action"]["command"])
+
+    def test_standing_rule_phrasings_propose_preferences(self):
+        payload = propose_memories_from_text(
+            "hey, before we start — from now on I only push to the develop "
+            "branch. never push to main directly, releases go through PRs. "
+            "great. now help me fix the failing test in utils.py",
+            [],
+            source="unit test",
+        )
+        memories = [p["memory"] for p in payload["proposals"]]
+
+        self.assertEqual(len(memories), 2)
+        self.assertTrue(any("develop branch" in m for m in memories))
+        self.assertTrue(any("never push to main" in m for m in memories))
+        for proposal in payload["proposals"]:
+            self.assertEqual(proposal["memory_type"], "preference")
+
+    def test_conversational_preambles_are_trimmed_from_memory_text(self):
+        payload = propose_memories_from_text(
+            "hey, before we start — from now on I only push to the develop branch.",
+            [],
+            source="unit test",
+        )
+        self.assertEqual(
+            [p["memory"] for p in payload["proposals"]],
+            ["from now on I only push to the develop branch."],
+        )
+
+        payload = propose_memories_from_text("ok so I prefer tabs over spaces.", [], source="unit test")
+        self.assertEqual([p["memory"] for p in payload["proposals"]], ["User prefers tabs over spaces."])
+
+    def test_preamble_trim_keeps_full_text_when_tail_does_not_classify(self):
+        payload = propose_memories_from_text("never push to main — thanks!", [], source="unit test")
+        self.assertEqual([p["memory"] for p in payload["proposals"]], ["never push to main — thanks!"])
+
+    def test_narrative_only_is_not_a_preference(self):
+        payload = propose_memories_from_text(
+            "I only found one bug in the parser.",
+            [],
+            source="unit test",
+        )
+        self.assertEqual(payload["proposals"], [])
+
     def test_project_duplicate_proposal_command_preserves_project(self):
         records = [
             {
@@ -1083,6 +1193,91 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertNotIn("User prefers focused commits", "\n".join(logged[-1][3]))
         self.assertEqual(pending_operations(wiki), [])
 
+    def test_write_memory_page_refuses_secret_looking_text(self):
+        root = Path(tempfile.mkdtemp(prefix="link-memory-secret-"))
+        wiki = root / "wiki"
+        wiki.mkdir(parents=True)
+
+        refused = write_memory_page(
+            wiki, "Zk9#mango42", title=None, memory_type="note", scope="user",
+            tags=None, source="unit test", timestamp="2026-07-12T06:00:00Z",
+            records=[], log_writer=lambda *a: None, rebuild_backlinks=lambda: True,
+        )
+        allowed = write_memory_page(
+            wiki, "Zk9#mango42", title=None, memory_type="note", scope="user",
+            tags=None, source="unit test", timestamp="2026-07-12T06:00:00Z",
+            allow_secret=True,
+            records=[], log_writer=lambda *a: None, rebuild_backlinks=lambda: True,
+        )
+
+        self.assertFalse(refused["created"])
+        self.assertTrue(refused["secret"])
+        self.assertIn("password manager", str(refused["message"]))
+        self.assertTrue(allowed["created"])
+
+    def test_forget_memory_redacts_log_references(self):
+        from link_core.log import append_log, verify_log_integrity
+
+        root = Path(tempfile.mkdtemp(prefix="link-memory-forget-"))
+        wiki = root / "wiki"
+        (wiki / "memories").mkdir(parents=True)
+        (wiki / "index.md").write_text("# Index\n", encoding="utf-8")
+
+        def log_writer(timestamp, operation, description, lines):
+            append_log(wiki, timestamp, operation, description, lines)
+
+        created = write_memory_page(
+            wiki, "TempSecret@42 for the beta box", title=None, memory_type="note",
+            scope="user", tags=None, source="unit test",
+            timestamp="2026-07-12T06:00:00Z", allow_secret=True,
+            records=[], log_writer=log_writer, rebuild_backlinks=lambda: True,
+        )
+        self.assertTrue(created["created"])
+        self.assertIn("TempSecret@42", (wiki / "log.md").read_text(encoding="utf-8"))
+
+        result = forget_memory_page(
+            wiki, str(created["name"]), confirm=True, records=None,
+            log_writer=log_writer, timestamp="2026-07-12T07:00:00Z",
+            rebuild_backlinks=lambda: True,
+        )
+        log_text = (wiki / "log.md").read_text(encoding="utf-8")
+
+        self.assertTrue(result["forgotten"])
+        self.assertGreater(result["log_redaction"]["redacted_entries"], 0)
+        self.assertNotIn("TempSecret@42", log_text)
+        self.assertIn("redact-log", log_text)
+        integrity = verify_log_integrity(wiki)
+        self.assertTrue(integrity["passed"], integrity)
+
+    def test_write_memory_page_stores_bounded_context_in_frontmatter(self):
+        root = Path(tempfile.mkdtemp(prefix="link-memory-ctx-"))
+        wiki = root / "wiki"
+        wiki.mkdir(parents=True)
+
+        created = write_memory_page(
+            wiki,
+            "User only deploys to staging through the release script.",
+            title="Deploy through release script",
+            memory_type="preference",
+            scope="user",
+            tags=None,
+            source="unit test",
+            timestamp="2026-07-12T06:00:00Z",
+            context="we debugged the pipeline for an hour " * 30,  # > 600 chars
+            records=[],
+            log_writer=lambda *a: None,
+            rebuild_backlinks=lambda: True,
+        )
+        page = (wiki / "memories" / f"{created['name']}.md").read_text(encoding="utf-8")
+        context_line = next(line for line in page.splitlines() if line.startswith("context:"))
+
+        self.assertTrue(created["created"])
+        self.assertIn("we debugged the pipeline", context_line)
+        self.assertLessEqual(len(context_line), 620)
+        # context never appears in the visible page body — it is not a claim
+        body = page.split("---", 2)[2]
+        self.assertNotIn("we debugged the pipeline", body)
+
     def test_write_memory_page_creates_index_log_and_blocks_duplicates(self):
         root = Path(tempfile.mkdtemp(prefix="link-memory-write-"))
         wiki = root / "wiki"
@@ -1235,3 +1430,38 @@ class MemoryCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlugifyBoundsTests(unittest.TestCase):
+    def test_slugify_caps_length_for_filesystem_limits(self):
+        slug = slugify("word " * 200)
+        self.assertLessEqual(len(slug), 80)
+        self.assertFalse(slug.endswith("-"))
+        # short slugs unchanged
+        self.assertEqual(slugify("My Cool Title"), "my-cool-title")
+
+
+class ProposalDurabilityRankingTests(unittest.TestCase):
+    def test_concrete_rule_outranks_meta_preamble(self):
+        self.assertGreater(
+            memory_durability_rank("From now on I only deploy on Fridays"),
+            memory_durability_rank("I want to set some conventions for how we work going forward"),
+        )
+
+    def test_one_click_accept_lands_on_substance_not_preamble(self):
+        text = (
+            "I want to set some conventions for how we work on the payments service going forward. "
+            "From now on I only deploy the payments service on Fridays, never mid-week. "
+            "I prefer squash merges for that repo."
+        )
+        proposals = propose_memories_from_text(text, [])["proposals"]
+        # The default accept (--index 1 / one-click) must not be the preamble.
+        self.assertNotIn("set some conventions", proposals[0]["memory"])
+        # The vague preamble ranks last, not first.
+        self.assertIn("set some conventions", proposals[-1]["memory"])
+
+    def test_ranking_is_stable_for_equal_substance(self):
+        # Two concrete rules keep transcript order (both rank equally).
+        text = "I only merge with squash commits. I always run the linter before pushing."
+        proposals = propose_memories_from_text(text, [])["proposals"]
+        self.assertIn("squash", proposals[0]["memory"])

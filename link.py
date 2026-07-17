@@ -122,6 +122,9 @@ if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
 from link_core.memory import (
+    list_recipes as _core_list_recipes,
+    render_recipes_text as _core_render_recipes_text,
+    is_existing_memory_echo as _core_is_existing_memory_echo,
     add_capture_review_to_brief as _core_add_capture_review_to_brief,
     count_values as _core_count_values,
     default_project_for_target as _core_default_project_for_target,
@@ -137,6 +140,7 @@ from link_core.memory import (
     memory_review_issues as _core_memory_review_issues,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memories,
+    recall_abstention as _core_recall_abstention,
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
@@ -255,12 +259,15 @@ from link_core.mcp_verify import (
     build_mcp_verify_status as _core_build_mcp_verify_status,
     check_link_mcp_import as _core_check_link_mcp_import,
     display_command as _core_display_command,
+    provision_link_extras as _core_provision_link_extras,
+    python_is_externally_managed as _core_python_is_externally_managed,
     render_mcp_verify_text as _core_render_mcp_verify_text,
     resolve_mcp_python as _core_resolve_mcp_python,
     set_link_command_override as _core_set_link_command_override,
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    read_agent_link_server as _core_read_agent_link_server,
     supported_agents as _core_supported_agents,
 )
 from link_core.agent_hooks import (
@@ -274,6 +281,9 @@ from link_core.consolidate import (
     render_consolidate_text as _core_render_consolidate_text,
 )
 from link_core.semantic import (
+    RERANK_CANDIDATES as _CORE_RERANK_CANDIDATES,
+    load_reranker as _core_load_reranker,
+    rerank_blend as _core_rerank_blend,
     build_semantic_status as _core_build_semantic_status,
     load_embedder as _core_load_semantic_embedder,
     refresh_memory_index as _core_refresh_semantic_index,
@@ -330,6 +340,7 @@ from link_core.validation import (
 )
 from link_core.version import (
     LINK_VERSION,
+    workspace_runtime_is_older as _core_workspace_runtime_is_older,
 )
 from link_core.cli_style import (
     style_cli_text as _core_style_cli_text,
@@ -473,7 +484,10 @@ def _memory_profile(wiki_dir: Path, limit: int = 10, project: str | None = None)
     )
 
 
-def _memory_brief(wiki_dir: Path, query: str = "", limit: int = 6, project: str | None = None) -> dict[str, object]:
+def _memory_brief(
+    wiki_dir: Path, query: str = "", limit: int = 6, project: str | None = None,
+    context_path: str | None = None,
+) -> dict[str, object]:
     records = _memory_records(wiki_dir)
     return _core_memory_brief(
         records,
@@ -483,6 +497,7 @@ def _memory_brief(wiki_dir: Path, query: str = "", limit: int = 6, project: str 
         project=project,
         command_target=wiki_dir.parent,
         semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
+        context_path=context_path,
     )
 
 
@@ -508,16 +523,29 @@ def _recall_memories(
     limit: int = 10,
     include_archived: bool = False,
     project: str | None = None,
+    as_of: str | None = None,
+    memory_type: str | None = None,
 ) -> list[dict[str, object]]:
     records = _memory_records(wiki_dir)
-    return _core_recall_memories(
+    # Rerank tier (optional): over-fetch candidates and let a local
+    # cross-encoder blend into the final order. Explicit recall only —
+    # hooks and briefs never take this path.
+    reranker = _core_load_reranker()
+    fetch = max(limit, _CORE_RERANK_CANDIDATES) if reranker is not None else limit
+    results = _core_recall_memories(
         records,
         query,
-        limit=limit,
+        limit=fetch,
         include_archived=include_archived,
         project=project,
         semantic_scores=_core_semantic_memory_scores(wiki_dir.parent, query, records),
+        context_path=str(Path.cwd()),
+        as_of=as_of,
+        memory_type=memory_type,
     )
+    if reranker is not None:
+        results = _core_rerank_blend(query, results, limit=limit, reranker=reranker)
+    return results[:limit]
 
 
 def _propose_memories_from_text(
@@ -676,10 +704,15 @@ def _write_memory_page(
     memory_type: str = "note", scope: str = "user",
     tags: str | None = None, source: str = "manual",
     timestamp: str | None = None, allow_duplicate: bool = False,
-    allow_conflict: bool = False, project: str | None = None,
+    allow_conflict: bool = False, allow_secret: bool = False,
+    project: str | None = None,
     visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
+    trigger: str | None = None,
+    applies_when: str | None = None,
+    supersedes: str | None = None,
+    context: str | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -690,7 +723,12 @@ def _write_memory_page(
         visibility=visibility,
         review_after=review_after,
         expires_at=expires_at,
+        trigger=trigger,
+        applies_when=applies_when,
+        supersedes=supersedes,
+        context=context,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
+        allow_secret=allow_secret,
         **options,
     )
 
@@ -1087,10 +1125,15 @@ def remember(
     source: str = "manual",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
     project: str | None = None,
     visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
+    trigger: str | None = None,
+    applies_when: str | None = None,
+    supersedes: str | None = None,
+    context: str | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -1107,13 +1150,24 @@ def remember(
             source=source,
             allow_duplicate=allow_duplicate,
             allow_conflict=allow_conflict,
+            allow_secret=allow_secret,
             project=project or _default_project(target),
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
+            trigger=trigger,
+            applies_when=applies_when,
+            supersedes=supersedes,
+            context=context,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
+        if "missing wiki directory" in str(exc):
+            print(
+                f"No workspace yet? Create one with {_display_command(['lnk', 'onboard'])} "
+                f"(builds {_default_workspace()}), then pathless commands find it automatically.",
+                file=sys.stderr,
+            )
         return 1
 
     return _emit_json_or_text(
@@ -1249,6 +1303,7 @@ def session_end(
     limit: int = 3,
     project: str | None = None,
     proposal_text: str | None = None,
+    decision_trail: list[str] | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -1271,6 +1326,8 @@ def session_end(
         project=project_name,
         default_source="session-end",
         path_source=True,
+        proposal_text=proposal_text,
+        decision_trail=decision_trail,
     )
     rel_path = str(capture_record["path"])
     # The raw capture keeps the full session for review context, but memory
@@ -1432,6 +1489,8 @@ def accept_capture(
         allow_duplicate=allow_duplicate,
         allow_conflict=allow_conflict,
         project=str(memory_args["project"]),
+        trigger=str(memory_args.get("trigger") or "") or None,
+        context=str(memory_args.get("context") or "") or None,
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
@@ -1594,19 +1653,27 @@ def recall(
     json_output: bool = False,
     include_archived: bool = False,
     project: str | None = None,
+    as_of: str | None = None,
+    memory_type: str | None = None,
 ) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
-    results = _recall_memories(
-        wiki_dir,
-        query,
-        limit=limit,
-        include_archived=include_archived,
-        project=project_name,
-    )
+    try:
+        results = _recall_memories(
+            wiki_dir,
+            query,
+            limit=limit,
+            include_archived=include_archived,
+            project=project_name,
+            as_of=as_of,
+            memory_type=memory_type,
+        )
+    except ValueError as exc:
+        print(f"Could not recall: {exc}", file=sys.stderr)
+        return 1
 
     if json_output:
         print(json.dumps({
@@ -1614,28 +1681,11 @@ def recall(
             "count": len(results),
             "include_archived": include_archived,
             "project": project_name,
+            "as_of": as_of or "",
+            "abstention": _core_recall_abstention(results),
             "memories": results,
         }, indent=2))
         return 0
-
-    miss_hint = ""
-    if not results:
-        records = _memory_records(wiki_dir)
-        if records:
-            if _core_semantic_provider() is None:
-                miss_hint = (
-                    "These memories exist but your words did not match any. Paraphrase matching "
-                    "(semantic recall) is off by default. Turn it on to find memories phrased "
-                    "differently:\n"
-                    "  pip install \"link-mcp[semantic]\"\n"
-                    f"  {_display_command(['link', 'semantic', str(target), '--setup'])}"
-                )
-            elif _core_load_semantic_embedder() is None:
-                miss_hint = (
-                    "These memories exist but your words did not match any. Finish enabling "
-                    "paraphrase matching (semantic recall):\n"
-                    f"  {_display_command(['link', 'semantic', str(target), '--setup'])}"
-                )
 
     code, text = _core_render_recall_text(
         query=query,
@@ -1643,7 +1693,6 @@ def recall(
         include_archived=include_archived,
         project=project_name,
         target=target,
-        miss_hint=miss_hint,
     )
     _print_text(text)
     return code
@@ -2025,7 +2074,31 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                 "Recall itself never uses the network."
             )
         embedder = _core_load_semantic_embedder(allow_download=setup)
-        if embedder is None:
+        if embedder is None and setup and _core_python_is_externally_managed():
+            # PEP 668 (e.g. the Homebrew runtime python): a direct pip install
+            # here would be refused, so provision Link's managed venv and run
+            # the setup under it — same venv the MCP server uses.
+            if not json_output:
+                _print_text(
+                    f"{sys.executable} cannot host the semantic extras (externally managed). "
+                    "Provisioning ~/.link-mcp-venv with them instead..."
+                )
+            outcome = _core_provision_link_extras(sys.executable, LINK_VERSION)
+            for note in outcome.get("notes", []):
+                if not json_output:
+                    _print_text(f"  {note}")
+            if outcome.get("ready"):
+                rerun = [str(outcome["python"]), str(ROOT / "link.py"), "semantic", str(root), "--setup"]
+                if json_output:
+                    rerun.append("--json")
+                return subprocess.run(rerun, check=False).returncode
+            action_error = (
+                "Could not provision the semantic extras into ~/.link-mcp-venv. "
+                "Create it by hand: python3 -m venv ~/.link-mcp-venv && "
+                f'~/.link-mcp-venv/bin/python -m pip install "link-mcp[semantic,semantic-quality,rerank]=={LINK_VERSION}" '
+                f"then rerun: ~/.link-mcp-venv/bin/python {ROOT / 'link.py'} semantic {root} --setup"
+            )
+        elif embedder is None:
             install_hint = f'{sys.executable} -m pip install "link-mcp[semantic]"'
             action_error = (
                 f"Semantic provider unavailable for {sys.executable}. Install it first: {install_hint}"
@@ -2043,6 +2116,13 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
             index = _core_refresh_semantic_index(root, records, embedder=embedder)
             items = index.get("items") if isinstance(index.get("items"), dict) else {}
             action_result = f"Indexed {len(items)} memories."
+            if setup:
+                # The rerank tier shares the fastembed dependency; setup is the
+                # one sanctioned moment to fetch its model too. Never required:
+                # a missing reranker just means retrieval-order results.
+                reranker = _core_load_reranker(allow_download=True)
+                if reranker is not None:
+                    action_result += " Rerank tier ready: explicit recall now blends a local cross-encoder."
             if setup and _core_semantic_provider() == "fastembed":
                 action_result += (
                     " Quality tier active: expect a ~5s model load per short-lived CLI command; "
@@ -2050,7 +2130,11 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                     "Set LINK_SEMANTIC_PROVIDER=model2vec (fast tier)."
                 )
     payload = _core_build_semantic_status(
-        root, memory_count=active_count, command_target=root, python_cmd=sys.executable
+        root,
+        memory_count=active_count,
+        command_target=root,
+        python_cmd=sys.executable,
+        externally_managed=_core_python_is_externally_managed(),
     )
     if action_result:
         payload["action_result"] = action_result
@@ -2065,6 +2149,22 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
     if action_error:
         print(action_error, file=sys.stderr)
         code = 1
+    _print_text(text)
+    return code
+
+
+def recipes(target: Path, project: str | None = None, limit: int = 50, json_output: bool = False) -> int:
+    """List saved procedure memories with their triggers."""
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    project_name = project or _default_project(target)
+    items = _core_list_recipes(_memory_records(wiki_dir), project=project_name, limit=limit)
+    if json_output:
+        print(json.dumps({"count": len(items), "project": project_name, "recipes": items}, indent=2))
+        return 0
+    code, text = _core_render_recipes_text(items, target=target)
     _print_text(text)
     return code
 
@@ -2128,7 +2228,10 @@ def _hook_session_start(
     if not project_name:
         project_name = _default_project(target)
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=False)
-    brief_payload = _memory_brief(wiki_dir, query="", limit=limit, project=project_name)
+    brief_payload = _memory_brief(
+        wiki_dir, query="", limit=limit, project=project_name,
+        context_path=_hook_project_dir(hook_event) or None,
+    )
     brief_payload = _core_add_capture_review_to_brief(
         brief_payload,
         _capture_review_summary(target, project=project_name),
@@ -2162,25 +2265,48 @@ def _session_notes_fingerprint(notes: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, project: str | None) -> int:
+def _hook_session_end(
+    target: Path, hook_event: dict[str, object], limit: int, project: str | None,
+    explain: bool = False,
+) -> int:
+    trail: list[str] = []
+
+    def _trace(message: str) -> None:
+        trail.append(message)
+        if explain:
+            print(f"[session-end] {message}")
+
     transcript_value = str(hook_event.get("transcript_path") or "").strip()
     if not transcript_value:
+        _trace("no transcript_path in the hook event; nothing to capture.")
         return 0
     transcript_path = Path(transcript_value).expanduser()
-    notes = _core_extract_transcript_text(transcript_path)
+    extraction_stats: dict[str, int] = {}
+    notes = _core_extract_transcript_text(transcript_path, stats=extraction_stats)
+    _trace(
+        f"Read the session: kept {extraction_stats.get('kept_messages', 0)} messages, "
+        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own injected output (echo guard, layer 1)."
+    )
     if len(notes.strip()) < 200:
+        _trace("skipped: under 200 characters of conversation — nothing memory-worthy in a trivial session.")
         return 0
     # Memory proposals come from the user's own turns only. The assistant's
     # prose is help, not the user's preferences; mining it would attribute the
     # assistant's words to the user (found in dogfooding). The raw capture below
     # still keeps the full transcript for review context.
-    user_notes = _core_extract_transcript_text(transcript_path, roles=("user",))
+    # Mine from a head+tail window so an opening standing rule ("from now on…")
+    # survives even in a long session, where a recency-only window would drop it.
+    user_notes = _core_extract_transcript_text(
+        transcript_path, roles=("user",), max_chars=9000, keep_head=True
+    )
+    _trace("Mined memory only from your own turns — the assistant's prose is never proposed as your preference.")
     # Skip duplicate firings for the same conversation content (e.g. /clear
     # immediately followed by exit, or repeated end events).
     state_path = _session_end_hook_state_path(target)
     fingerprint = _session_notes_fingerprint(notes)
     try:
         if state_path.exists() and state_path.read_text(encoding="utf-8").strip() == fingerprint:
+            _trace("skipped: identical conversation content was already captured (duplicate end event).")
             return 0
     except OSError:
         pass
@@ -2202,8 +2328,30 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
         project=project_name,
         command_target=root,
     )
-    if not int(preview.get("count") or 0):
+    proposals = preview.get("proposals") if isinstance(preview.get("proposals"), list) else []
+    _trace(f"extraction found {len(proposals)} memory proposal(s).")
+    # Echo guard, second layer: a proposal that merely restates an existing
+    # active memory — a strong duplicate, or a framing-diluted restatement
+    # caught by containment — is Link hearing itself through the agent.
+    # Automatic capture keeps only fresh or conflicting proposals; deliberate
+    # refinements still flow through manual `lnk session-end`.
+    records = _memory_records(wiki_dir)
+    fresh = []
+    for proposal in proposals:
+        if not isinstance(proposal, dict):
+            continue
+        title = str(proposal.get("title") or "")[:60]
+        if proposal.get("duplicate_candidates"):
+            _trace(f"dropped '{title}': strong duplicate of an existing memory.")
+            continue
+        if _core_is_existing_memory_echo(records, str(proposal.get("memory") or "")):
+            _trace(f"dropped '{title}': restates an existing memory (echo guard, layer 2).")
+            continue
+        fresh.append(proposal)
+    if not fresh:
+        _trace("no fresh proposals left; no capture stored.")
         return 0
+    _trace(f"Stored a proposal-only capture with {len(fresh)} fresh proposal(s) for your review.")
     code = session_end(
         target,
         notes,
@@ -2211,6 +2359,7 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
         limit=proposal_limit,
         project=project_name,
         proposal_text=user_notes,
+        decision_trail=trail,
     )
     if code == 0:
         try:
@@ -2222,7 +2371,8 @@ def _hook_session_end(target: Path, hook_event: dict[str, object], limit: int, p
 
 
 def run_agent_hook(
-    target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text"
+    target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text",
+    explain: bool = False,
 ) -> int:
     """Run an installed agent session hook; never fail the agent session."""
     target = target.expanduser().resolve()
@@ -2231,7 +2381,7 @@ def run_agent_hook(
         if event == "session-start":
             return _hook_session_start(target, hook_event, limit, project, emit)
         if event == "session-end":
-            return _hook_session_end(target, hook_event, limit, project)
+            return _hook_session_end(target, hook_event, limit, project, explain=explain)
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
@@ -2292,14 +2442,33 @@ def _display_command(parts: list[str]) -> str:
     return _core_display_command(parts)
 
 
+def _lnk_on_path_runs_this_runtime() -> bool:
+    """True when a `lnk` on PATH is a shim for this very runtime.
+
+    Homebrew installs the runtime under .../Cellar/link/<ver>/libexec and a
+    `lnk` shim in bin — users should see `lnk` in every generated command,
+    never the interpreter + Cellar path leaking into the product's own
+    suggested next steps.
+    """
+    if "/Cellar/link/" in str(ROOT):
+        return True
+    lnk = shutil.which("lnk")
+    if not lnk:
+        return False
+    try:
+        shim = Path(lnk).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return str(ROOT / "link.py") in shim
+
+
 def _configure_link_command_display() -> None:
     if os.environ.get("LINK_CLI_COMMAND"):
         _core_set_link_command_override(None)
+    elif _lnk_on_path_runs_this_runtime():
+        _core_set_link_command_override(None)
     else:
-        # Source-checkout runs: show a friendly `python3 link.py` in generated
-        # commands, not the raw interpreter path (e.g. python@3.14). The
-        # absolute link.py path stays for paste-safety from any directory.
-        _core_set_link_command_override(["python3", str(ROOT / "link.py")])
+        _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
 
 
 def verify_mcp(
@@ -2307,7 +2476,35 @@ def verify_mcp(
     json_output: bool = False,
     python_cmd: str | None = None,
     import_check: Callable[[str], dict[str, object]] = _core_check_link_mcp_import,
+    agent: str | None = None,
 ) -> int:
+    agent_note: str | None = None
+    if agent:
+        # Verify what the agent is actually configured to run, not a guess.
+        if str(target) == ".":
+            target = _default_workspace()
+        server = _core_read_agent_link_server(agent)
+        if not server.get("configured"):
+            message = (
+                f"{server.get('display_name')} has no Link MCP server configured "
+                f"({server.get('config_path')}).\n"
+                "Write one with: "
+                + _display_command(["lnk", "connect", str(server.get("agent")), str(target), "--write"])
+            )
+            if json_output:
+                print(json.dumps({"ready": False, "agent": server}, indent=2))
+            else:
+                _print_text(message)
+            return 1
+        python_cmd = str(server.get("python"))
+        configured_wiki = server.get("wiki")
+        if configured_wiki:
+            wiki_path = Path(str(configured_wiki)).expanduser()
+            target = wiki_path.parent if wiki_path.name == "wiki" else wiki_path
+        agent_note = (
+            f"Verifying the Link server {server.get('display_name')} is configured to run "
+            f"({server.get('config_path')})."
+        )
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
     status = _core_build_mcp_verify_status(
@@ -2325,6 +2522,8 @@ def verify_mcp(
         return 0 if status["ready"] else 1
 
     code, text = _core_render_mcp_verify_text(status)
+    if agent_note:
+        _print_text(agent_note + "\n")
     _print_text(text)
     return code
 
@@ -2337,6 +2536,7 @@ def connect_mcp(
     config_path: str | None = None,
     python_cmd: str | None = None,
     hooks: bool = False,
+    hooks_settings: str | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -2362,7 +2562,9 @@ def connect_mcp(
         runtime_note = ""
         if runtime_script.exists():
             # A workspace runtime copied before session hooks existed would
-            # make every installed hook fail with an argparse error.
+            # make every installed hook fail with an argparse error, and an
+            # older runtime silently runs old capture behavior after upgrades.
+            stale_version = _core_workspace_runtime_is_older(target, LINK_VERSION)
             if not (target / "link_core" / "agent_hooks.py").exists():
                 if write:
                     _copy_runtime_files(target)
@@ -2373,6 +2575,19 @@ def connect_mcp(
                         "--write will refresh it automatically (or run "
                         f"{_display_command(['lnk', 'init', str(target)])} first)."
                     )
+            elif stale_version:
+                if write:
+                    _copy_runtime_files(target)
+                    runtime_note = (
+                        f"Refreshed the Link runtime at {target}: "
+                        f"{stale_version} → {LINK_VERSION} (hooks run the workspace copy)."
+                    )
+                else:
+                    runtime_note = (
+                        f"The Link runtime at {target} is {stale_version} but installed Link is "
+                        f"{LINK_VERSION}; --write will refresh it (or run "
+                        f"{_display_command(['lnk', 'init', str(target)])})."
+                    )
         else:
             runtime_script = ROOT / "link.py"
         hooks_payload = _core_build_agent_hooks_payload(
@@ -2380,6 +2595,7 @@ def connect_mcp(
             agent=agent,
             runtime_script=runtime_script,
             python_cmd=sys.executable,
+            settings_path=hooks_settings,
             write=write,
         )
         if runtime_note:
@@ -2551,19 +2767,6 @@ def onboard(
                 "next_actions": [],
             })
 
-    # Surface the automatic-memory (hooks) path: without this, users who follow
-    # the guided onboarding never discover the flagship 1.6 feature.
-    for connection in connections:
-        agent_name = str(connection.get("agent") or "")
-        if agent_name and _core_supports_agent_hooks(agent_name) and "session_hooks" not in connection:
-            connection["hooks_command"] = _display_command(
-                ["link", "onboard", str(target), "--agent", agent_name, "--hooks", "--write"]
-            )
-    hooks_agents = [
-        agent for agent in _onboard_agent_names(agents, all_agents)
-        if _core_supports_agent_hooks(agent)
-    ]
-
     status_payload = _core_link_status(wiki_dir, version=LINK_VERSION, include_validation=True)
     starter_payload = _core_starter_prompt_payload(target, project=project)
     prompts = starter_payload.get("prompts", [])
@@ -2600,12 +2803,6 @@ def onboard(
             _display_command(["link", "onboard", str(target), "--agent", agent])
             for agent in ("codex", "claude-code", "cursor")
         ],
-        "hooks_hint": (
-            "Make memory automatic — add --hooks (Claude Code, Codex, Cursor): the memory brief "
-            "is injected at session start and proposals are captured at session end, so no agent "
-            "has to remember to call Link. Example:\n"
-            f"  {_display_command(['link', 'onboard', str(target), '--agent', 'claude-code', '--hooks', '--write'])}"
-        ) if (hooks_agents or not connections) and not hooks else "",
         "url": f"http://127.0.0.1:{port}",
     }
 
@@ -2986,9 +3183,56 @@ def try_link(
     return code
 
 
+# Commands that CONSUME an existing workspace. When one of these is run with
+# the default target (.) in a directory that has no Link wiki, fall back to
+# the default workspace (LINK_WORKSPACE or ~/link) instead of dead-ending —
+# `lnk onboard` creates ~/link and the very next thing every new user types
+# is `lnk remember "..."` with no path. Creator commands (init, demo, try,
+# proof, onboard) are excluded on purpose: they must act where they are told.
+_WORKSPACE_COMMANDS = {
+    "remember", "recall", "recipes", "query", "query-link", "brief", "start",
+    "session-end", "end", "propose-memories", "capture-session",
+    "capture-inbox", "accept-capture", "redact-capture", "delete-capture",
+    "update-memory", "set-memory-visibility", "memory-inbox", "memory-log",
+    "review-memory", "explain-memory", "memory-audit", "archive-memory",
+    "restore-memory", "forget-memory", "consolidate", "profile", "wins",
+    "semantic", "status", "health", "doctor", "validate", "operations",
+    "backup", "restore-backup", "ingest-status", "serve", "share",
+    "snapshot", "graph-summary", "benchmark", "team-sync",
+    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
+    "verify-mcp", "connect",
+}
+
+
+def _default_workspace() -> Path:
+    return Path(os.environ.get("LINK_WORKSPACE") or (Path.home() / "link")).expanduser()
+
+
+def _apply_default_workspace(args) -> None:
+    if getattr(args, "command", "") not in _WORKSPACE_COMMANDS:
+        return
+    if getattr(args, "target", None) != ".":
+        return
+    if (Path.cwd() / "wiki").exists():
+        return
+    workspace = _default_workspace()
+    if (workspace / "wiki").exists():
+        args.target = str(workspace)
+        print(
+            f"Workspace: {workspace} (no Link wiki in the current directory; "
+            "pass a path or set LINK_WORKSPACE to change)",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Short-lived CLI: prefer the instant-load semantic tier so interactive
+    # commands never pay a multi-second model load. Explicit provider wins;
+    # the MCP server (its own entry point) still prefers the quality tier.
+    os.environ.setdefault("LINK_SEMANTIC_SURFACE", "cli")
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
+    _apply_default_workspace(args)
     _configure_link_command_display()
     try:
         return _core_dispatch_cli_command(args, {
@@ -3033,6 +3277,7 @@ def main(argv: list[str] | None = None) -> int:
             "start": start,
             "hook": run_agent_hook,
             "consolidate": consolidate,
+            "recipes": recipes,
             "semantic": semantic,
             "profile": profile,
             "wins": memory_wins,

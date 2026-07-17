@@ -5,13 +5,132 @@ from pathlib import Path
 
 from mcp_package.link_core.mcp_verify import (
     build_mcp_verify_status,
+    default_mcp_venv_python,
     display_command,
+    ensure_link_mcp_runtime,
     expand_command_prefix,
     mcp_verify_guidance,
+    provision_link_extras,
     resolve_mcp_python,
     render_mcp_verify_text,
     set_link_command_override,
 )
+
+
+class ProvisionLinkExtrasTests(unittest.TestCase):
+    def test_installs_pinned_extras_into_managed_venv(self):
+        with tempfile.TemporaryDirectory() as temp:
+            venv_dir = Path(temp) / "venv"
+            commands = []
+
+            def run(cmd, **kwargs):
+                commands.append(cmd)
+                class Done:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Done()
+
+            result = provision_link_extras(
+                "/usr/bin/python3", "1.7.0", venv_dir=venv_dir, run=run,
+            )
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(commands[0][:3], ["/usr/bin/python3", "-m", "venv"])
+        self.assertIn("link-mcp[semantic,semantic-quality,rerank]==1.7.0", commands[1])
+
+    def test_reports_pip_failure_with_the_failing_command(self):
+        with tempfile.TemporaryDirectory() as temp:
+            venv_dir = Path(temp) / "venv"
+
+            def run(cmd, **kwargs):
+                class Failed:
+                    returncode = 1
+                    stdout = ""
+                    stderr = "error: no matching distribution"
+                return Failed()
+
+            result = provision_link_extras(
+                "/usr/bin/python3", "9.9.9", venv_dir=venv_dir, run=run,
+            )
+
+        self.assertFalse(result["ready"])
+        self.assertTrue(any("no matching distribution" in note for note in result["notes"]))
+
+
+class EnsureLinkMcpRuntimeTests(unittest.TestCase):
+    def test_configured_python_that_matches_wins(self):
+        def check(python_cmd):
+            return {"installed": True, "version": "1.7.0", "mcp_sdk": True, "error": None}
+
+        result = ensure_link_mcp_runtime("/usr/bin/python3", "1.7.0", import_check=check)
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["python"], "/usr/bin/python3")
+        self.assertFalse(result["provisioned"])
+
+    def test_existing_venv_is_used_when_configured_python_is_stale(self):
+        with tempfile.TemporaryDirectory() as temp:
+            venv_dir = Path(temp) / "venv"
+            # The venv interpreter lives under bin/ on POSIX, Scripts/ on
+            # Windows — use the same resolver the runtime does so the test
+            # creates the file where ensure_link_mcp_runtime will look.
+            venv_python = Path(default_mcp_venv_python(venv_dir))
+            venv_python.parent.mkdir(parents=True)
+            venv_python.write_text("")
+
+            def check(python_cmd):
+                if python_cmd == str(venv_python):
+                    return {"installed": True, "version": "1.7.0", "mcp_sdk": True, "error": None}
+                return {"installed": True, "version": "1.0.5", "mcp_sdk": True, "error": None}
+
+            result = ensure_link_mcp_runtime(
+                "/usr/bin/python3", "1.7.0", import_check=check, venv_dir=venv_dir,
+            )
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["python"], str(venv_python))
+        self.assertFalse(result["provisioned"])
+
+    def test_provisioning_creates_venv_and_reports_pip_failures(self):
+        with tempfile.TemporaryDirectory() as temp:
+            venv_dir = Path(temp) / "venv"
+            commands = []
+
+            def check(python_cmd):
+                if commands:  # after provisioning steps ran
+                    return {"installed": True, "version": "1.7.0", "mcp_sdk": True, "error": None}
+                return {"installed": False, "version": None, "mcp_sdk": False, "error": "no module"}
+
+            def run(cmd, **kwargs):
+                commands.append(cmd)
+                class Done:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Done()
+
+            result = ensure_link_mcp_runtime(
+                "/usr/bin/python3", "1.7.0",
+                provision=True, import_check=check, venv_dir=venv_dir, run=run,
+            )
+
+        self.assertTrue(result["ready"])
+        self.assertTrue(result["provisioned"])
+        self.assertEqual(commands[0][:3], ["/usr/bin/python3", "-m", "venv"])
+        self.assertIn("link-mcp==1.7.0", commands[1])
+
+    def test_no_provisioning_without_the_flag(self):
+        def check(python_cmd):
+            return {"installed": False, "version": None, "mcp_sdk": False, "error": "no module"}
+
+        def run(cmd, **kwargs):
+            raise AssertionError("must not run provisioning commands without provision=True")
+
+        result = ensure_link_mcp_runtime("/usr/bin/python3", "1.7.0", import_check=check, run=run)
+
+        self.assertFalse(result["ready"])
+        self.assertFalse(result["provisioned"])
 
 
 class McpVerifyCoreTests(unittest.TestCase):

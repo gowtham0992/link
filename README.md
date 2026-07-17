@@ -32,7 +32,7 @@
 
 <p align="center">
   <a href="https://gowtham0992.github.io/link/">
-    <img src="docs/assets/link-site.png" alt="Link — local, source-backed memory for AI agents" width="840">
+    <img src="docs/assets/link-remembers.svg" alt="Link demo: a preference said once in an agent session is captured automatically, approved by you, and recalled in a brand-new terminal the next day — from a plain Markdown file" width="840">
   </a>
 </p>
 
@@ -94,28 +94,45 @@ commitments those designs cannot bolt on:
 4. **Provably local.** CI blocks outbound network code in the runtime, and the
    optional semantic models load offline-only after one explicit setup.
 
-And the claims are measured, not asserted: a reproducible 1,176-case recall
-benchmark plus a third-party LoCoMo retrieval track, with published miss rates
-and a CI gate against regressions —
-[benchmarks/RESULTS.md](benchmarks/RESULTS.md). Named comparisons against
-Mem0/OpenMemory, Zep/Graphiti, and Letta:
+And the claims are measured, not asserted — see the benchmarks below. Named
+comparisons against Mem0/OpenMemory, Zep/Graphiti, and Letta:
 [Why Link?](https://gowtham0992.github.io/link/why-link.html)
+
+## Benchmarks
+
+Plain files with no LLM in the memory layer, measured against the systems
+that have one everywhere:
+
+| What | Link | For comparison |
+|---|---|---|
+| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
+| **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
+| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 23.9% |
+| **Bundled 1,176-case recall benchmark** — deterministic, runs offline in CI | hit@1 **0.749**, +rerank **0.839** | gates every change; a regression fails the build |
+
+Every number ships with its config, judge model, caveats, and the
+experiments that *lost* — including LongMemEval end-to-end, where we
+re-judged both sides under the neutral Hunyuan 3 referee: mem0's GPT-5
+answers score 91.0%, Link's budget-model answers 80.6%. Their published
+number holds up, and the gap tracks the answering model, not the memory
+layer — that's what the 99.4% evidence-retrieval row above isolates.
+Full methodology and reproduction steps:
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 ## Quick Start
 
-Start with the memory proof. It creates a clean local workspace, writes one
-reviewed memory, and proves that the same memory can be recalled through CLI,
-official skills, and MCP. No web server is required for the proof.
+Two commands: see it work, then make it yours.
 
 ```bash
 brew install gowtham0992/link/link
-lnk proof
+lnk proof                              # see the promise (~1 second, no setup)
+lnk onboard --agent claude-code --write   # wire your agent for real memory
 ```
 
-The installed command is `lnk` because `link` is already a POSIX/macOS system
-utility. From a source checkout, use `python3 link.py ...` instead.
-
-You should see:
+`lnk proof` creates a throwaway workspace, writes one reviewed memory, and
+recalls it through the same path the CLI, skills, and MCP use — the core
+promise (one local memory, reusable by different agents, no cloud profile) in
+one second:
 
 ```text
 Cross-agent memory continuity works
@@ -124,37 +141,19 @@ Recall: found through the same bounded recall path used by CLI, skills, and MCP.
 Result: proof passed
 ```
 
-That is the core promise: one local memory, reusable by different agents,
-without a hidden cloud profile.
+`lnk onboard --agent claude-code --write` then creates `~/link`, provisions the
+MCP runtime, and wires the agent — including the session hooks that capture
+memory automatically as you work (swap `claude-code` for `codex`, `cursor`,
+`kiro`, `copilot`, `antigravity`, or others). Drop `--write` to preview the
+config without touching anything, or drop `--agent` to just create the
+workspace.
 
-Then run the richer demo when you want the UI, graph, source pages, and query
-packets:
+The installed command is `lnk` because `link` is already a POSIX/macOS system
+utility. From a source checkout, use `python3 link.py ...` instead.
 
-```bash
-lnk try
-lnk serve link-demo
-```
-
-`lnk try` creates the demo, checks readiness, runs compact query/brief examples,
-and prints the first agent prompts. Windows, source checkout, MCP-only, and
-skill-first setup live in the
+Want the UI, graph, and source pages first? `lnk try && lnk serve link-demo`.
+Windows, source checkout, MCP-only, and skill-first paths are in the
 [First 10 Minutes guide](https://gowtham0992.github.io/link/getting-started.html).
-
-When you are ready to use Link for real memory, run one guided command:
-
-```bash
-lnk onboard
-lnk onboard --first-memory "I prefer concise release notes"
-lnk onboard --seed-project .
-lnk onboard --agent codex
-lnk onboard --agent codex --write
-```
-
-`lnk onboard` creates or repairs `~/link`, checks health, prints the exact agent
-prompts to try, and previews MCP wiring for Codex, Claude Code, Cursor, Kiro,
-VS Code, Copilot, Antigravity, and other supported clients. It only writes an
-agent config when you pass `--write`. Add `--seed-project .` from inside a repo
-when you want onboarding to create the first source-backed project context page.
 
 Or seed your current repo as a separate step so the first real recall is not empty:
 
@@ -391,9 +390,9 @@ tier lifts token-overlap hit@1 from 0.589 to 0.749 and pure-paraphrase
 (zero token overlap) hit@3/hit@5 by ~4×, at ~10 ms per recall with no
 service or vector database. On the third-party LoCoMo retrieval track
 (1,536 evidence-annotated questions over 5,882 conversation turns), hybrid
-recall lifts any-evidence hit@10 from 0.578 to 0.685. Full methodology,
-honest limitations, and reproduction steps:
-[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+recall lifts any-evidence hit@10 from 0.628 to 0.737 (0.794 with the
+opt-in rerank tier). Full methodology, honest limitations, and
+reproduction steps: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 <details>
 <summary>MCP-only install</summary>
@@ -609,6 +608,7 @@ More detail: [Security guide](https://gowtham0992.github.io/link/security.html).
 | Need | Go here |
 |------|---------|
 | Run Link for the first time | [First 10 minutes](https://gowtham0992.github.io/link/getting-started.html) |
+| "Does Link read my conversations?" | [The three questions everyone asks](https://gowtham0992.github.io/link/getting-started.html#faq) |
 | Decide whether Link fits | [Why Link?](https://gowtham0992.github.io/link/why-link.html) |
 | Use the local viewer | [Web UI](https://gowtham0992.github.io/link/ui.html) |
 | Understand raw/wiki/memory | [Concepts](https://gowtham0992.github.io/link/concepts.html) |

@@ -242,6 +242,42 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertIn("message 49", text)
         self.assertNotIn("message 0:", text)
 
+    def test_keep_head_preserves_opening_turns_in_a_long_session(self):
+        with tempfile.TemporaryDirectory() as temp:
+            transcript = Path(temp) / "transcript.jsonl"
+            lines = [_transcript_line("user", "OPENING RULE: only deploy through the release script.")]
+            lines += [_transcript_line("user", f"filler step {i}: " + ("x" * 400)) for i in range(50)]
+            transcript.write_text("\n".join(lines), encoding="utf-8")
+
+            # Recency-only drops the opening; keep_head preserves it.
+            recency = extract_transcript_text(transcript, max_chars=2000)
+            headed = extract_transcript_text(transcript, max_chars=2000, keep_head=True)
+
+        self.assertNotIn("OPENING RULE", recency)
+        self.assertIn("OPENING RULE", headed)
+        self.assertIn("filler step 49", headed)
+
+    def test_extract_transcript_drops_link_injected_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            transcript = Path(temp) / "transcript.jsonl"
+            transcript.write_text(
+                "\n".join([
+                    # The session-start hook's injected brief, echoed in context
+                    _transcript_line("user", "Link memory (local, source-backed) · project demo\n"
+                                             "Relevant memories\n- Prefer small commits (preference · user)"),
+                    _transcript_line("assistant", "Link consolidation plan (read-only)\nPending captures: 3"),
+                    _transcript_line("user", "We decided to adopt trunk-based development."),
+                ]),
+                encoding="utf-8",
+            )
+
+            text = extract_transcript_text(transcript)
+
+        self.assertIn("trunk-based development", text)
+        self.assertNotIn("Relevant memories", text)
+        self.assertNotIn("Pending captures", text)
+        self.assertNotIn("Prefer small commits", text)
+
     def test_extract_transcript_can_keep_user_turns_only(self):
         # Memory proposals must come from the user's words, not the assistant's
         # prose (which dogfooding showed gets mis-attributed as user preferences).

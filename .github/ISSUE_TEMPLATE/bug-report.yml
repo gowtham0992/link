@@ -1,0 +1,41 @@
+name: Bug report
+description: Something in Link behaved wrong or broke.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, what did you get instead?
+      placeholder: |
+        I ran `lnk ...` and expected ... but got ...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: lnk doctor output
+      description: |
+        Paste the output of `lnk doctor <your-workspace>` and `lnk --version`.
+        It contains no memory content — only workspace structure and health.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: install-path
+    attributes:
+      label: How did you install Link?
+      options:
+        - Homebrew (brew install gowtham0992/link/link)
+        - pip (link-mcp)
+        - Source checkout
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and agent
+      placeholder: "macOS 15 · Claude Code (or Codex, Cursor, ...)"
+    validations:
+      required: true

@@ -1,15 +1,17 @@
 """Shared memory logic for Link CLI, HTTP, and MCP runtimes."""
 from __future__ import annotations
 
+import fnmatch
 import re
 import urllib.parse
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
 from .semantic import semantic_confidence_cap, semantic_match_points
+from .security import looks_like_password_note, secret_value_warnings
 from .frontmatter import (
     csv_values,
     frontmatter_int,
@@ -20,6 +22,7 @@ from .frontmatter import (
     yaml_list,
 )
 from .mcp_verify import display_command
+from .log import redact_log_references
 from .operations import operation_journal
 from .wiki import (
     WIKILINK_RE,
@@ -28,7 +31,7 @@ from .wiki import (
 )
 
 
-MEMORY_TYPES = ("preference", "decision", "project", "fact", "note")
+MEMORY_TYPES = ("preference", "decision", "project", "fact", "note", "procedure")
 MEMORY_SCOPES = ("user", "project", "global")
 MEMORY_VISIBILITIES = ("private", "project", "team")
 MEMORY_REVIEW_STATUSES = ("pending", "reviewed", "needs_update")
@@ -117,8 +120,13 @@ BacklinkRebuilder = Callable[[], bool]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def slugify(value: str, fallback: str = "memory") -> str:
+def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    if len(slug) > max_len:
+        # Cap for filesystem limits (255-byte filenames); cut at a word
+        # boundary so truncated slugs stay readable.
+        head = slug[:max_len]
+        slug = head.rsplit("-", 1)[0] if "-" in head else head
     return slug or fallback
 
 
@@ -153,6 +161,9 @@ def memory_title(text: str, explicit_title: str | None = None) -> str:
     if explicit_title and explicit_title.strip():
         return explicit_title.strip()
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "Memory")
+    # Numbered steps ("1. Run the script ...") would otherwise title the
+    # memory "1" — the enumeration marker is not the sentence.
+    first_line = re.sub(r"^(?:\d+[.)]\s+|step\s+\d+\s*[:.]\s*)", "", first_line, flags=re.IGNORECASE) or first_line
     first_sentence = re.split(r"(?<=[.!?])\s+", first_line, maxsplit=1)[0].strip()
     if len(first_sentence) <= 70:
         return first_sentence.rstrip(".")
@@ -219,6 +230,9 @@ def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
     title = str(record.get("title", "")).lower()
     tldr = str(record.get("tldr", "")).lower()
     tags = " ".join(str(tag).lower() for tag in record.get("tags", []))
+    trigger = str(record.get("trigger") or "").lower()
+    if trigger:
+        tldr = f"{tldr} {trigger}".strip()
     body = str(record.get("body", "")).lower()
     if q and (q in title or q in tldr):
         return "strong"
@@ -287,7 +301,37 @@ def _extract_preference_pairs(value: str) -> list[tuple[set[str], set[str]]]:
 
 
 def slim_memory(record: Mapping[str, object]) -> dict[str, object]:
-    return {key: value for key, value in record.items() if key != "body"}
+    return {key: value for key, value in record.items() if key not in {"body", "context"}}
+
+
+def memory_claim_text(record: Mapping[str, object]) -> str:
+    """The memory's core claim: head fields plus the `## Memory` section.
+
+    Similarity checks (duplicates, conflicts, echoes) must compare claims,
+    not whole pages: the page template's boilerplate sections dilute token
+    overlap and let real duplicates and contradictions slip through.
+    """
+    return " ".join([
+        str(record.get("title") or ""),
+        str(record.get("tldr") or ""),
+        str(record.get("snippet") or ""),
+        procedure_steps_excerpt(str(record.get("body") or ""), max_chars=1200),
+    ])
+
+
+def procedure_steps_excerpt(body: str, max_chars: int = 800) -> str:
+    """Bounded steps text for a procedure memory (its Memory section)."""
+    text = str(body or "")
+    marker = "## Memory"
+    start = text.find(marker)
+    if start >= 0:
+        start += len(marker)
+        end = text.find("\n## ", start)
+        text = text[start:end] if end > start else text[start:]
+    text = text.strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + " …"
+    return text
 
 
 def is_active_memory(record: Mapping[str, object]) -> bool:
@@ -313,6 +357,27 @@ def _parse_expires_date(value: object) -> date | None:
 
 def _today(today: str | None = None) -> date:
     return _parse_review_date(today) if today else date.today()
+
+
+def memory_active_at(record: Mapping[str, object], as_of: str) -> bool:
+    """Whether this memory was active on a given YYYY-MM-DD date.
+
+    Reconstructs history from existing lifecycle fields: capture date,
+    archive date (supersession archives the predecessor), and expiry.
+    Archived records without an archive date cannot be placed in time and
+    are treated as inactive.
+    """
+    day = _parse_date_field(as_of, "as_of")
+    captured = _memory_date(record.get("date_captured"))
+    if captured is not None and captured.date() > day:
+        return False
+    if str(record.get("status") or "active").lower() == "archived":
+        archived = _memory_date(record.get("archived_at"))
+        if archived is None or archived.date() <= day:
+            return False
+    if memory_expired(record, today=as_of):
+        return False
+    return True
 
 
 def memory_expired(record: Mapping[str, object], today: str | None = None) -> bool:
@@ -385,6 +450,11 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "review_after": meta.get("review_after", ""),
         "expires_at": meta.get("expires_at", ""),
         "review_note": meta.get("review_note", ""),
+        "trigger": str(meta.get("trigger") or ""),
+        "context": str(meta.get("context") or ""),
+        "applies_when": str(meta.get("applies_when") or ""),
+        "supersedes": str(meta.get("supersedes") or ""),
+        "superseded_by": str(meta.get("superseded_by") or ""),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -478,6 +548,24 @@ def memory_review_issues(
                     "message": f"Memory expired at {expires_at} and is excluded from default recall.",
                     "suggested_action": "Update it with a new expiry date, archive it, or delete it after confirmation.",
                 })
+
+    applies_when = str(record.get("applies_when") or "").strip()
+    if applies_when:
+        try:
+            parse_applies_when(applies_when)
+        except ValueError:
+            issues.append({
+                "code": "invalid_applies_when",
+                "severity": "high",
+                "message": (
+                    f"applies_when has invalid syntax: {applies_when!r}. The memory is treated "
+                    "as out of context everywhere until the condition is fixed."
+                ),
+                "suggested_action": (
+                    "Edit the memory frontmatter to use project:<slug>, path:<glob>, or "
+                    "task:<phrase> conditions (comma-separated), or remove applies_when."
+                ),
+            })
 
     if status == "stale":
         issues.append({
@@ -820,9 +908,48 @@ def memory_explanation(
         "inbound": sorted(backlinks.get("backlinks", {}).get(name, [])),
         "wikilinks": extract_wikilinks(body),
     }
+    lineage: list[dict[str, str]] = []
+    by_name = {str(item.get("name") or ""): item for item in record_list}
+    seen_chain: set[str] = set()
+    cursor = record
+    while cursor is not None and str(cursor.get("supersedes") or "") and len(lineage) < 10:
+        previous_name = str(cursor.get("supersedes"))
+        if previous_name in seen_chain:
+            break
+        seen_chain.add(previous_name)
+        previous = by_name.get(previous_name)
+        lineage.insert(0, {
+            "name": previous_name,
+            "title": str(previous.get("title")) if previous else "",
+            "status": str(previous.get("status")) if previous else "missing",
+            "relation": "superseded",
+        })
+        cursor = previous
+    lineage.append({
+        "name": name,
+        "title": str(record.get("title") or ""),
+        "status": str(record.get("status") or "active"),
+        "relation": "current" if not str(record.get("superseded_by") or "") else "superseded",
+    })
+    cursor = record
+    while cursor is not None and str(cursor.get("superseded_by") or "") and len(lineage) < 12:
+        next_name = str(cursor.get("superseded_by"))
+        if next_name in seen_chain:
+            break
+        seen_chain.add(next_name)
+        successor = by_name.get(next_name)
+        lineage.append({
+            "name": next_name,
+            "title": str(successor.get("title")) if successor else "",
+            "status": str(successor.get("status")) if successor else "missing",
+            "relation": "successor",
+        })
+        cursor = successor
+
     return {
         "found": True,
         "memory": slim_memory(record),
+        "lineage": lineage if len(lineage) > 1 else [],
         "recall": recall_state(record, issues),
         "review": {
             "status": record.get("review_status", "pending"),
@@ -1152,11 +1279,18 @@ def forget_memory_page(
                     "Deleted memory page only; memory body was not logged.",
                 ],
             )
+    redaction = redact_log_references(
+        wiki_dir,
+        [str(record.get("title") or ""), str(record.get("name") or "")],
+        timestamp,
+        "Forgot a memory; its title is removed from past log entries.",
+    )
     payload.update({
         "forgotten": True,
         "confirmation_required": False,
         "index_updated": index_updated,
         "backlinks_rebuilt": bool(backlinks_rebuilt),
+        "log_redaction": redaction,
     })
     return payload
 
@@ -1335,9 +1469,14 @@ def write_memory_page(
     visibility: str | None = None,
     review_after: str | None = None,
     expires_at: str | None = None,
+    trigger: str | None = None,
+    applies_when: str | None = None,
+    supersedes: str | None = None,
+    context: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    allow_secret: bool = False,
     log_writer: MemoryLogWriter | None = None,
     rebuild_backlinks: BacklinkRebuilder | None = None,
 ) -> dict[str, object]:
@@ -1345,11 +1484,45 @@ def write_memory_page(
         raise ValueError(f"memory_type must be one of: {', '.join(MEMORY_TYPES)}")
     if scope not in MEMORY_SCOPES:
         raise ValueError(f"scope must be one of: {', '.join(MEMORY_SCOPES)}")
+    clean_trigger = " ".join(str(trigger or "").split())
+    if clean_trigger and len(clean_trigger) > 200:
+        raise ValueError("trigger must be 200 characters or fewer")
+    # Retrieval context: surrounding text from the memory's origin. It helps
+    # recall find the memory but is never part of the claim, so it needs no
+    # review-visible section — frontmatter only, bounded like LoCoMo's
+    # measured +/-1-neighbor window.
+    clean_context = " ".join(str(context or "").split())
+    if len(clean_context) > 600:
+        clean_context = clean_context[:600].rsplit(" ", 1)[0].strip()
+    clean_applies_when = " ".join(str(applies_when or "").split())
+    if clean_applies_when:
+        if len(clean_applies_when) > 200:
+            raise ValueError("applies_when must be 200 characters or fewer")
+        parse_applies_when(clean_applies_when)
     clean_visibility = normalize_memory_visibility(scope, visibility)
 
     clean_text = text.strip()
     if not clean_text:
         raise ValueError("memory text required")
+    if not allow_secret:
+        # Memory pages are plain files injected into every connected agent's
+        # session; a credential saved here leaks by design. Refuse loudly.
+        secret_labels = secret_value_warnings(f"{clean_text}\n{title or ''}")
+        password_hint = looks_like_password_note(clean_text)
+        if password_hint:
+            secret_labels.append(password_hint)
+        if secret_labels:
+            return {
+                "created": False,
+                "secret": True,
+                "secret_warnings": secret_labels,
+                "message": (
+                    "This looks like a secret (" + ", ".join(secret_labels) + "). "
+                    "Memory is plain Markdown read by every connected agent — keep "
+                    "credentials in a password manager. If this is truly not a "
+                    "secret, rerun with --allow-secret."
+                ),
+            }
     clean_source = source.strip() if source is not None else ""
     clean_review_after = str(review_after or "").strip()
     if clean_review_after:
@@ -1358,11 +1531,56 @@ def write_memory_page(
     if clean_expires_at:
         _parse_expires_date(clean_expires_at)
     clean_project = normalize_project(project) if scope == "project" else ""
-    memory_title_value = memory_title(clean_text, title)
+    derived_title = title
+    if not (derived_title and derived_title.strip()) and memory_type == "procedure" and clean_trigger:
+        derived_title = clean_trigger
+    memory_title_value = memory_title(clean_text, derived_title)
     summary = clean_text.splitlines()[0].strip()
     if len(summary) > 180:
         summary = summary[:177].rstrip() + "..."
     record_list = [dict(record) for record in records] if records is not None else memory_records(wiki_dir)
+    superseded_path: Path | None = None
+    superseded_record: dict[str, object] | None = None
+    if supersedes:
+        superseded_path, superseded_record, supersede_error = resolve_memory_page(
+            wiki_dir, supersedes, records=record_list
+        )
+        if supersede_error:
+            raise ValueError(f"supersedes: {supersede_error}")
+        assert superseded_path is not None and superseded_record is not None
+        if not is_active_memory(superseded_record):
+            raise ValueError("supersedes target must be an active memory")
+    superseded_name = str(superseded_record.get("name")) if superseded_record else ""
+    conflict_candidates = memory_conflict_candidates(
+        record_list,
+        clean_text,
+        title,
+        memory_type,
+        scope,
+        project=clean_project,
+    )
+    if superseded_name:
+        conflict_candidates = [
+            candidate for candidate in conflict_candidates
+            if str(candidate.get("name")) != superseded_name
+        ]
+    if conflict_candidates and not allow_conflict:
+        return {
+            "created": False,
+            "conflict": True,
+            "message": (
+                "This memory may conflict with an active memory. If it replaces an outdated "
+                "memory, rerun with supersedes=<name> to archive the old one with lineage; "
+                "review or update the existing memory, or pass allow_conflict if both should coexist."
+            ),
+            "title": memory_title_value,
+            "memory_type": memory_type,
+            "scope": scope,
+            "visibility": clean_visibility,
+            "project": clean_project,
+            "conflict_candidates": conflict_candidates,
+        }
+
     duplicate_candidates = memory_duplicate_candidates(
         record_list,
         clean_text,
@@ -1371,6 +1589,19 @@ def write_memory_page(
         scope,
         project=clean_project,
     )
+    if superseded_name:
+        duplicate_candidates = [
+            candidate for candidate in duplicate_candidates
+            if str(candidate.get("name")) != superseded_name
+        ]
+    # A claim cannot be both the same and opposing: records already identified
+    # as conflicts are handled by the conflict path (with supersede guidance)
+    # and must not also block the write as duplicates.
+    conflict_names = {str(candidate.get("name")) for candidate in conflict_candidates}
+    duplicate_candidates = [
+        candidate for candidate in duplicate_candidates
+        if str(candidate.get("name")) not in conflict_names
+    ]
     if duplicate_candidates and not allow_duplicate:
         return {
             "created": False,
@@ -1383,27 +1614,6 @@ def write_memory_page(
             "project": clean_project,
             "candidates": duplicate_candidates,
         }
-    conflict_candidates = memory_conflict_candidates(
-        record_list,
-        clean_text,
-        title,
-        memory_type,
-        scope,
-        project=clean_project,
-    )
-    if conflict_candidates and not allow_conflict:
-        return {
-            "created": False,
-            "conflict": True,
-            "message": "This memory may conflict with an active memory. Review or update the existing memory, archive stale memory, or pass allow_conflict if both should coexist.",
-            "title": memory_title_value,
-            "memory_type": memory_type,
-            "scope": scope,
-            "visibility": clean_visibility,
-            "project": clean_project,
-            "conflict_candidates": conflict_candidates,
-        }
-
     memories_dir = wiki_dir / "memories"
     memories_dir.mkdir(parents=True, exist_ok=True)
     page_path = unique_page_path(memories_dir, slugify(memory_title_value))
@@ -1416,6 +1626,25 @@ def write_memory_page(
     project_line = f'project: "{frontmatter_string(clean_project)}"\n' if clean_project else ""
     review_after_line = f'review_after: "{frontmatter_string(clean_review_after)}"\n' if clean_review_after else ""
     expires_at_line = f'expires_at: "{frontmatter_string(clean_expires_at)}"\n' if clean_expires_at else ""
+    trigger_line = f'trigger: "{frontmatter_string(clean_trigger)}"\n' if clean_trigger else ""
+    applies_when_line = (
+        f'applies_when: "{frontmatter_string(clean_applies_when)}"\n' if clean_applies_when else ""
+    )
+    supersedes_line = f'supersedes: "{frontmatter_string(superseded_name)}"\n' if superseded_name else ""
+    context_line = f'context: "{frontmatter_string(clean_context)}"\n' if clean_context else ""
+
+
+    if memory_type == "procedure":
+        use_when = (
+            f"- {clean_trigger}" if clean_trigger
+            else "- An agent starts a task this procedure covers."
+        )
+        use_when += "\n- Follow the steps in order; confirm with the user before deviating."
+    else:
+        use_when = (
+            f"- An agent needs relevant {scope} context for future work.\n"
+            f"- A future answer depends on this {memory_type}."
+        )
 
     page = f"""---
 type: memory
@@ -1427,7 +1656,7 @@ visibility: {clean_visibility}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
-{review_after_line}{expires_at_line}reviewed_at: ""
+{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}{supersedes_line}{context_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1441,37 +1670,58 @@ tags: {yaml_list(tag_values)}
 
 ## Use This When
 
-- An agent needs relevant {scope} context for future work.
-- A future answer depends on this {memory_type}.
+{use_when}
 
 ## Source
 
 {clean_source}
 """
+    journal_paths = [f"wiki/memories/{page_path.name}", "wiki/index.md", "wiki/_backlinks.json", "wiki/log.md"]
+    if superseded_path is not None:
+        journal_paths.insert(1, f"wiki/memories/{superseded_path.name}")
     with operation_journal(
         wiki_dir,
         "remember",
         memory_title_value,
         timestamp=timestamp,
-        paths=[f"wiki/memories/{page_path.name}", "wiki/index.md", "wiki/_backlinks.json", "wiki/log.md"],
+        paths=journal_paths,
     ):
         atomic_write_text(page_path, page)
+        if superseded_path is not None and superseded_record is not None:
+            # Supersession is one atomic story: the successor records what it
+            # replaces, and the predecessor is archived with forward lineage
+            # instead of silently coexisting or being deleted.
+            old_text = superseded_path.read_text(encoding="utf-8", errors="replace")
+            atomic_write_text(superseded_path, update_frontmatter_fields(
+                old_text,
+                {
+                    "status": "archived",
+                    "archived_at": f'"{timestamp}"',
+                    "archive_reason": f'"{frontmatter_string(f"superseded by {page_name}")}"',
+                    "superseded_by": f'"{frontmatter_string(page_name)}"',
+                },
+                remove={"restored_at"},
+            ))
         update_memory_index(wiki_dir / "index.md", page_name, memory_title_value, summary, memory_type, scope)
         if log_writer:
+            log_lines = [
+                f"Created: memories/{page_path.name}",
+                f"Type: {memory_type}",
+                f"Scope: {scope}",
+                f"Visibility: {clean_visibility}",
+            ]
+            if superseded_name:
+                log_lines.append(f"Supersedes: {superseded_name} (archived)")
             log_writer(
                 timestamp,
                 "remember",
                 memory_title_value,
-                [
-                    f"Created: memories/{page_path.name}",
-                    f"Type: {memory_type}",
-                    f"Scope: {scope}",
-                    f"Visibility: {clean_visibility}",
-                ],
+                log_lines,
             )
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
     return {
         "created": True,
+        "supersedes": superseded_name,
         "name": page_name,
         "path": f"wiki/memories/{page_path.name}",
         "title": memory_title_value,
@@ -1820,6 +2070,7 @@ def memory_brief(
     project: str | None = None,
     command_target: str | Path = ".",
     semantic_scores: Mapping[str, float] | None = None,
+    context_path: str | None = None,
 ) -> dict[str, object]:
     """Return the compact memory payload an agent should read before work."""
     limit = max(1, min(limit, 20))
@@ -1840,7 +2091,8 @@ def memory_brief(
 
     if q:
         relevant = recall_memories(
-            record_list, q, limit=limit, project=project_name, semantic_scores=semantic_scores
+            record_list, q, limit=limit, project=project_name,
+            semantic_scores=semantic_scores, context_path=context_path,
         )
         selection = "query"
     else:
@@ -1855,6 +2107,12 @@ def memory_brief(
                     continue
                 if str(record.get("memory_type") or "") != memory_type:
                     continue
+                if memory_applicability(
+                    record, query="", project=project_name, context_path=context_path
+                ) == "out_of_context":
+                    # Conditional memories stay out of startup briefs unless
+                    # their context matches; they surface via task recall.
+                    continue
                 relevant.append(slim_memory(record))
                 seen.add(name)
                 if len(relevant) >= limit:
@@ -1865,6 +2123,10 @@ def memory_brief(
             for record in recent_memories(record_list):
                 name = str(record.get("name") or "")
                 if name in seen or not is_active_memory(record):
+                    continue
+                if memory_applicability(
+                    record, query="", project=project_name, context_path=context_path
+                ) == "out_of_context":
                     continue
                 relevant.append(slim_memory(record))
                 seen.add(name)
@@ -1909,6 +2171,19 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     tldr = str(record.get("tldr", "")).lower()
     body = str(record.get("body", "")).lower()
     tags = " ".join(str(tag).lower() for tag in record.get("tags", []))
+    # A procedure's trigger phrase describes when it applies; score it like
+    # the intent-bearing head fields so task-shaped queries find recipes.
+    trigger = str(record.get("trigger") or "").lower()
+    if trigger:
+        tldr = f"{tldr} {trigger}".strip()
+    # Retrieval context: text from around the memory's origin (neighboring
+    # dialogue turns, surrounding notes). It helps recall FIND the memory but
+    # is never part of the claim — echoes, duplicates, and conflicts compare
+    # claims only (memory_claim_text), and slim output drops it. Measured on
+    # LoCoMo: indexing turns with +/-1 neighbors lifts hit@10 0.685 -> 0.749.
+    context = str(record.get("context") or "").lower()
+    if context:
+        body = f"{body} {context}".strip()
     title_tokens = memory_tokens(title)
     tldr_tokens = memory_tokens(tldr)
     body_tokens = memory_tokens(body)
@@ -1916,7 +2191,7 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     score = 0
     if q and q in title:
         score += 20
-    if q and q in tldr:
+    if q and (q in tldr or (trigger and q in trigger)):
         score += 12
     if q and q in tags:
         score += 8
@@ -2003,7 +2278,7 @@ def memory_temporal_boost(record: Mapping[str, object]) -> int:
         elif age_days > 730:
             boost -= 2
     memory_type = str(record.get("memory_type") or "").lower()
-    if memory_type in {"preference", "decision", "project"}:
+    if memory_type in {"preference", "decision", "project", "procedure"}:
         boost += 1
     return boost
 
@@ -2019,6 +2294,48 @@ def memory_rank_score(record: Mapping[str, object], match_score: int, project: s
     return max(1, rank_score)
 
 
+def list_recipes(
+    records: Iterable[Mapping[str, object]],
+    project: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    """Active procedure memories, newest first, with their triggers."""
+    project_name = normalize_project(project)
+    recipes = [
+        slim_memory(record) | {"steps": procedure_steps_excerpt(str(record.get("body") or ""))}
+        for record in records
+        if str(record.get("memory_type") or "") == "procedure"
+        and is_active_memory(record)
+        and memory_visible_for_project(record, project_name)
+    ]
+    recipes.sort(key=lambda item: str(item.get("updated_at") or item.get("date_captured") or ""), reverse=True)
+    return recipes[: max(1, min(limit, 50))]
+
+
+def render_recipes_text(recipes: Sequence[Mapping[str, object]], target: object = ".") -> tuple[int, str]:
+    lines = ["Link recipes (procedural memory)"]
+    if not recipes:
+        lines.extend([
+            "",
+            "No recipes yet. Save one after a multi-step task:",
+            f"  {display_command(['lnk', 'remember', '<steps>', str(target), '--type', 'procedure', '--trigger', '<when to use>'])}",
+        ])
+        return 0, "\n".join(lines)
+    lines.append(f"{len(recipes)} recipe{'s' if len(recipes) != 1 else ''}")
+    for recipe in recipes:
+        lines.append("")
+        lines.append(f"- {recipe.get('title')}")
+        trigger = str(recipe.get("trigger") or "").strip()
+        if trigger:
+            lines.append(f"  When: {trigger}")
+        lines.append(f"  {recipe.get('path')}")
+        steps = str(recipe.get("steps") or "").strip()
+        if steps:
+            preview = steps.splitlines()[0][:100]
+            lines.append(f"  First step: {preview}")
+    return 0, "\n".join(lines)
+
+
 def recall_memories(
     records: Iterable[Mapping[str, object]],
     query: str,
@@ -2026,17 +2343,29 @@ def recall_memories(
     include_archived: bool = False,
     project: str | None = None,
     semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
+    context_path: str | None = None,
+    as_of: str | None = None,
+    memory_type: str | None = None,
 ) -> list[dict[str, object]]:
     q = query.strip()
     if not q:
         return []
+    if as_of:
+        _parse_date_field(as_of, "as_of")
     project_name = normalize_project(project)
     scored: list[tuple[int, int, str, dict[str, object]]] = []
     severity_rank = {"high": 0, "medium": 1, "low": 2}
     for record in records:
         if not memory_visible_for_project(record, project_name):
             continue
-        if not include_archived and not is_active_memory(record):
+        if memory_type and str(record.get("memory_type") or "") != memory_type:
+            continue
+        if as_of:
+            # Temporal recall: reconstruct what was active on that date from
+            # lifecycle fields (capture, supersession/archive, expiry).
+            if not memory_active_at(record, as_of):
+                continue
+        elif not include_archived and not is_active_memory(record):
             continue
         lexical_score = score_memory(record, q)
         semantic_match = None
@@ -2046,10 +2375,21 @@ def recall_memories(
         if score >= MEMORY_RECALL_MIN_SCORE:
             lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
             rank_score = memory_rank_score(record, score, project=project_name)
+            applicability = memory_applicability(
+                record, query=q, project=project_name, context_path=context_path
+            )
+            if applicability == "matched":
+                rank_score += 4
+            elif applicability == "out_of_context":
+                # Conditional memory outside its context: still findable,
+                # but demoted and labeled so agents do not apply it blindly.
+                rank_score = max(1, rank_score - 10)
             issues = memory_review_issues(record)
             slim = slim_memory(record)
             slim["score"] = score
             slim["rank_score"] = rank_score
+            if applicability != "unconditional":
+                slim["applicability"] = applicability
             slim["match"] = (
                 "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
             )
@@ -2060,6 +2400,10 @@ def recall_memories(
             slim["confidence"] = (
                 memory_recall_confidence(record, q) if lexical_hit else semantic_confidence_cap(semantic_match)
             )
+            if str(record.get("memory_type") or "") == "procedure":
+                # The steps are the value of a recipe; carry a bounded excerpt
+                # so agents can follow it without another file read.
+                slim["steps"] = procedure_steps_excerpt(str(record.get("body") or ""))
             slim["recall"] = recall_state(record, issues)
             slim["review_issue_count"] = len(issues)
             slim["highest_review_severity"] = (
@@ -2075,6 +2419,166 @@ def recall_memories(
     scored.sort(key=lambda item: item[2], reverse=True)
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return [record for _, _, _, record in scored[:limit]]
+
+
+APPLICABILITY_CONDITION_KINDS = ("project", "path", "task")
+
+
+def parse_applies_when(value: object) -> list[tuple[str, str]]:
+    """Parse an applies_when string into (kind, argument) conditions.
+
+    Format: comma-separated `kind:argument` conditions with OR semantics,
+    e.g. "project:link, task:cutting a release, path:*picochat*".
+    Raises ValueError for unknown kinds or empty arguments.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return []
+    conditions: list[tuple[str, str]] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        kind, _, argument = part.partition(":")
+        kind = kind.strip().lower()
+        argument = argument.strip()
+        if kind not in APPLICABILITY_CONDITION_KINDS or not argument:
+            raise ValueError(
+                "applies_when conditions must look like project:<slug>, path:<glob>, or task:<phrase>"
+            )
+        if kind == "project":
+            # Store the slug recall actually compares against, so the
+            # condition matches what it displays — and reject a value that
+            # slugifies to nothing (e.g. "project:!!!"), which would be a
+            # silently-dead scope.
+            normalized = normalize_project(argument)
+            if not normalized:
+                raise ValueError(
+                    f"applies_when project condition has no usable slug: {argument!r}"
+                )
+            argument = normalized
+        conditions.append((kind, argument))
+    return conditions
+
+
+def memory_applicability(
+    record: Mapping[str, object],
+    *,
+    query: str = "",
+    project: str | None = None,
+    context_path: str | None = None,
+) -> str:
+    """Deterministically judge whether a memory applies in this context.
+
+    Returns "unconditional" (no applies_when), "matched" (any condition
+    matches: OR semantics), or "out_of_context". Conditions the current
+    context cannot evaluate (a path: condition with no known path) simply
+    do not match; they never raise.
+    """
+    try:
+        conditions = parse_applies_when(record.get("applies_when"))
+    except ValueError:
+        # Fail closed: a malformed condition string is still a fence the
+        # user wrote. Treating it as unconditional would silently apply the
+        # memory everywhere — the exact mis-scoping applies_when prevents.
+        # memory_review_issues flags the syntax error for repair.
+        return "out_of_context"
+    if not conditions:
+        return "unconditional"
+    query_tokens = stemmed_memory_tokens(significant_memory_tokens(query))
+    for kind, argument in conditions:
+        if kind == "project" and normalize_project(argument) and (
+            normalize_project(argument) == normalize_project(project or "")
+        ):
+            return "matched"
+        if kind == "path" and context_path:
+            if fnmatch.fnmatch(str(context_path).lower(), argument.lower()):
+                return "matched"
+        if kind == "task" and query_tokens:
+            condition_tokens = stemmed_memory_tokens(significant_memory_tokens(argument))
+            if condition_tokens and condition_tokens <= query_tokens:
+                return "matched"
+    return "out_of_context"
+
+
+ECHO_CONTAINMENT = 0.7
+
+
+def is_existing_memory_echo(
+    records: Iterable[Mapping[str, object]],
+    text: str,
+    threshold: float = ECHO_CONTAINMENT,
+) -> bool:
+    """True when `text` mostly restates an existing active memory.
+
+    Duplicate detection uses symmetric overlap, which framing words dilute
+    ("Per your saved preference, we decided ..."). Echo detection asks the
+    asymmetric question instead: are most of an existing memory's significant
+    tokens contained in the candidate text? That is the shape of an agent
+    repeating stored memory back into the transcript.
+    """
+    candidate_tokens = stemmed_memory_tokens(significant_memory_tokens(text))
+    if not candidate_tokens:
+        return False
+    for record in records:
+        if not is_active_memory(record):
+            continue
+        # Compare against the memory's core claim (title + TLDR, and the
+        # `## Memory` section), not the whole page: template sections would
+        # dilute containment and let restatements through.
+        views = [
+            " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")]),
+            procedure_steps_excerpt(str(record.get("body") or ""), max_chars=600),
+        ]
+        for view in views:
+            view_tokens = stemmed_memory_tokens(significant_memory_tokens(view))
+            if len(view_tokens) < 4:
+                continue
+            containment = len(view_tokens & candidate_tokens) / len(view_tokens)
+            if containment >= threshold:
+                return True
+            # Mirrored test: a partial restatement contains little of the
+            # full claim, but nearly all of ITS OWN tokens live inside the
+            # claim — it adds nothing new, so it is still an echo.
+            if len(candidate_tokens) >= 4:
+                reverse = len(view_tokens & candidate_tokens) / len(candidate_tokens)
+                if reverse >= 0.8:
+                    return True
+    return False
+
+
+ABSTENTION_CONFIDENCES = {"", "weak"}
+
+
+def recall_abstention(results: list[dict[str, object]]) -> dict[str, object]:
+    """An explicit don't-know signal for a recall result set.
+
+    LongMemEval-style abstention: when someone asks about something the
+    memory never contained, the correct behavior is to say so — not to let
+    an agent dress a weak match up as an answer. Link already computes the
+    evidence (confidence labels, match kinds); this makes the verdict
+    first-class so every surface can pass it to the agent.
+
+    recommended=True means: no memory here is strong enough to assert from.
+    """
+    if not results:
+        return {
+            "recommended": True,
+            "reason": "no matching memories",
+            "guidance": "Say the memory does not contain this rather than guessing.",
+        }
+    top = results[0]
+    confidence = str(top.get("confidence") or "")
+    if confidence in ABSTENTION_CONFIDENCES:
+        return {
+            "recommended": True,
+            "reason": f"best match has {confidence or 'no'} confidence",
+            "guidance": (
+                "Treat matches as hints only; say the memory has nothing "
+                "reliable on this rather than asserting from a weak match."
+            ),
+        }
+    return {"recommended": False, "reason": f"best match confidence: {confidence}"}
 
 
 def memory_duplicate_candidates(
@@ -2102,12 +2606,7 @@ def memory_duplicate_candidates(
         reasons: list[str] = []
         score = 0
         record_title = compact_memory_text(str(record.get("title") or ""))
-        record_text = compact_memory_text(
-            " ".join(
-                str(record.get(field) or "")
-                for field in ("title", "tldr", "snippet", "body")
-            )
-        )
+        record_text = compact_memory_text(memory_claim_text(record))
         record_tokens = memory_tokens(record_text)
 
         if str(record.get("name") or "") == new_slug:
@@ -2181,10 +2680,7 @@ def memory_conflict_candidates(
         if scope != record_scope and "global" not in {scope, record_scope}:
             continue
 
-        record_text = " ".join(
-            str(record.get(field) or "")
-            for field in ("title", "tldr", "snippet", "body")
-        )
+        record_text = memory_claim_text(record)
         record_all_tokens = memory_tokens(record_text)
         record_tokens = significant_memory_tokens(record_text)
         overlap = sorted(new_tokens & record_tokens)
@@ -2196,6 +2692,33 @@ def memory_conflict_candidates(
         if new_negated != has_negation(record_text) and len(overlap) >= 1 and overlap_ratio >= 0.45:
             score = max(score, 92)
             reasons.append("opposite_negation")
+
+        # Revision shape: the new text carries a negation or revision cue
+        # ("... does not X anymore; we now Y") and covers most of the
+        # record's head claim (title + TLDR). Symmetric ratio misses this —
+        # revisions legitimately add replacement content — and negation-XOR
+        # misses it when the original claim also contains a negation.
+        revision_cue = new_negated or bool(
+            re.search(r"\b(?:anymore|no longer|instead of|replace[sd]?|settled on)\b", new_text, re.IGNORECASE)
+        )
+        if revision_cue:
+            # Compare subjects, not phrasing: memory boilerplate tokens
+            # ("decision", "project", "prefers", ...) appear in most claims
+            # and would connect unrelated memories.
+            cue_tokens = {
+                "decision", "decid", "project", "team", "user", "prefer",
+                "use", "agent", "memory", "through", "now", "anymore",
+            }
+            head_tokens = stemmed_memory_tokens(significant_memory_tokens(
+                " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")])
+            )) - cue_tokens
+            new_stemmed = stemmed_memory_tokens(new_tokens) - cue_tokens
+            head_overlap = head_tokens & new_stemmed
+            if len(head_tokens) >= 3 and len(head_overlap) >= 2 and (
+                len(head_overlap) / len(head_tokens) >= 0.5
+            ):
+                score = max(score, 90)
+                reasons.append("revises_existing_claim")
 
         record_groups = _extract_option_groups(record_text)
         for group, new_options in new_groups.items():
@@ -2398,6 +2921,12 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
     if project:
         command_parts.extend(["--project", project])
         args["project"] = project
+    # Retrieval context rides the structured paths (MCP tool arguments,
+    # accept-capture) but stays out of the paste-ready shell command —
+    # a 600-char quoted blob would make the command unusable.
+    proposal_context = str(proposal.get("context") or "").strip()
+    if proposal_context:
+        args["context"] = proposal_context
     action = _memory_action(
         kind="remember",
         label="Remember",
@@ -2409,6 +2938,39 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
     )
     action["prompt"] = f"Approve by asking: remember that {memory}"
     return action
+
+
+_PREAMBLE_INTERJECTIONS = re.compile(
+    r"^(?:hey|hi|hello|ok|okay|oh|so|well|also|btw|alright|great|thanks|thank you|yeah|actually|anyway)"
+    r"[,!.:\s]+",
+    re.IGNORECASE,
+)
+
+
+def _preamble_trim_candidates(text: str) -> list[str]:
+    """Trim variants of a segment, most-trimmed first.
+
+    Conversational lead-ins ("hey, before we start — ...") should not become
+    part of a durable memory. A trimmed variant is only used when it still
+    classifies on its own; otherwise the full text wins.
+    """
+    stripped = text.strip()
+    plain = stripped
+    for _ in range(3):
+        trimmed = _PREAMBLE_INTERJECTIONS.sub("", plain, count=1).strip()
+        if trimmed == plain or not trimmed:
+            break
+        plain = trimmed
+    candidates: list[str] = []
+    for dash in ("—", "–"):
+        head, sep, tail = plain.partition(dash)
+        if sep and tail.strip() and len(head.strip()) <= 60:
+            candidates.append(tail.strip())
+            break
+    if plain != stripped:
+        candidates.append(plain)
+    candidates.append(stripped)
+    return candidates
 
 
 def classify_memory_segment(segment: str) -> dict[str, object] | None:
@@ -2427,6 +2989,8 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
                 r"\b(?:i|user|human)\s+(?:prefer|prefers|like|likes|want|wants|need|needs)\b",
                 r"\b(?:please\s+)?(?:always|never|avoid|do not|don't)\b",
                 r"\bagents?\s+should\s+(?:always|never|prefer|avoid|use)\b",
+                r"\b(?:from now on|going forward)\b",
+                r"\b(?:i|we)\s+only\s+(?:push|use|deploy|commit|merge|release|write|run|work|ship)\b",
             ),
         ),
         (
@@ -2460,16 +3024,18 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
         ),
     ]
 
-    for memory_type, scope, score, reason, patterns in checks:
-        if any(re.search(pattern, lower) for pattern in patterns):
-            memory = normalize_proposed_memory(text, memory_type)
-            return {
-                "memory": memory,
-                "memory_type": memory_type,
-                "scope": scope,
-                "confidence_score": score,
-                "reason": reason,
-            }
+    for candidate in _preamble_trim_candidates(text):
+        candidate_lower = candidate.lower()
+        for memory_type, scope, score, reason, patterns in checks:
+            if any(re.search(pattern, candidate_lower) for pattern in patterns):
+                memory = normalize_proposed_memory(candidate, memory_type)
+                return {
+                    "memory": memory,
+                    "memory_type": memory_type,
+                    "scope": scope,
+                    "confidence_score": score,
+                    "reason": reason,
+                }
     return None
 
 
@@ -2479,6 +3045,84 @@ def confidence_label(score: int) -> str:
     if score >= 70:
         return "medium"
     return "low"
+
+
+PROCEDURE_STEP_RE = re.compile(r"^\s*(?:\d+[.)]\s+|step\s+\d+\b)", re.IGNORECASE)
+
+
+def extract_procedure_candidates(text: str, max_candidates: int = 3) -> list[dict[str, str]]:
+    """Find numbered step sequences that look like reusable procedures.
+
+    A candidate is three or more consecutive numbered step lines. The nearest
+    preceding non-step line becomes the trigger ("To cut a release:") so the
+    recipe is recalled by task shape, not just by its words.
+    """
+    lines = str(text or "").splitlines()
+    candidates: list[dict[str, str]] = []
+    index = 0
+    while index < len(lines) and len(candidates) < max_candidates:
+        if not PROCEDURE_STEP_RE.match(lines[index]):
+            index += 1
+            continue
+        start = index
+        while index < len(lines) and (PROCEDURE_STEP_RE.match(lines[index]) or not lines[index].strip()):
+            index += 1
+        steps = [line.strip() for line in lines[start:index] if PROCEDURE_STEP_RE.match(line)]
+        if len(steps) < 3:
+            continue
+        trigger = ""
+        for back in range(start - 1, -1, -1):
+            previous = lines[back].strip()
+            if previous:
+                if 3 <= len(previous) <= 160 and not PROCEDURE_STEP_RE.match(previous):
+                    trigger = previous.rstrip(":").strip()
+                    trigger = re.sub(r"^(?:user|assistant)\s*:\s*", "", trigger, flags=re.IGNORECASE)
+                break
+        body = ("\n".join([trigger + ":"] if trigger else []) + "\n" + "\n".join(steps)).strip()
+        if len(body) > 1500:
+            body = body[:1500].rstrip() + " …"
+        candidates.append({"memory": body, "trigger": trigger[:200]})
+    return candidates
+
+
+# A sentence can classify as a preference yet carry no durable substance —
+# "I want to set some conventions" is *about* making rules, not itself a
+# rule. These rank such meta-preambles below concrete directives so the
+# proposal a one-click Accept lands on is the useful one, not the throat-
+# clearing that happened to come first in the transcript.
+_META_PREAMBLE_RE = re.compile(
+    r"(?i)\b(?:want|wanted|like|need|going|trying|hoping|planning)\s+to\s+"
+    r"(?:set|establish|define|create|make|figure|think|discuss|talk|"
+    r"standardi[sz]e|nail|sort|work)\b"
+    r"|\b(?:some|a few|certain|our|the)\s+"
+    r"(?:conventions?|guidelines?|standards?|rules?|practices?|norms?|processes?)\b"
+    r"|\bhow\s+we\s+(?:work|operate|do things)\b"
+)
+# Deliberately excludes bare temporal phrases ("from now on", "going
+# forward") — they attach just as easily to a vague preamble ("I want to
+# set conventions going forward") as to a real rule, so they can't earn the
+# concrete bonus on their own. A genuine directive has an action verb or an
+# absolute qualifier.
+_CONCRETE_DIRECTIVE_RE = re.compile(
+    r"(?i)\b(?:only|always|never|by default|whenever)\b"
+    r"|\b(?:i|we)\s+(?:prefer|use|deploy|merge|commit|run|ship|release|test|"
+    r"avoid|write|require|keep|review|pin|target)\b"
+)
+
+
+def memory_durability_rank(memory: str) -> int:
+    """Higher = more durably useful as a standalone memory.
+
+    Used only to order proposals within a capture (not to accept/reject):
+    concrete directives outrank vague meta-statements about wanting rules.
+    """
+    text = str(memory or "").strip()
+    rank = 0
+    if _CONCRETE_DIRECTIVE_RE.search(text):
+        rank += 2
+    if _META_PREAMBLE_RE.search(text) and not _CONCRETE_DIRECTIVE_RE.search(text):
+        rank -= 2
+    return rank
 
 
 def propose_memories_from_text(
@@ -2495,12 +3139,53 @@ def propose_memories_from_text(
     proposals: list[dict[str, object]] = []
     seen: set[str] = set()
     skipped = 0
-    for segment in memory_proposal_segments(text):
+    for candidate in extract_procedure_candidates(text):
+        memory = candidate["memory"]
+        dedupe_key = compact_memory_text(memory)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        memory_type = "procedure"
+        scope = "project" if project_name else "user"
+        title = proposal_title(candidate["trigger"] or memory, memory_type)
+        duplicate_candidates = memory_duplicate_candidates(
+            record_list, memory, title, memory_type, scope, project=project_name,
+        )
+        conflict_candidates = memory_conflict_candidates(
+            record_list, memory, title, memory_type, scope, project=project_name,
+        )
+        proposal = {
+            "title": title,
+            "memory": memory,
+            "memory_type": memory_type,
+            "scope": scope,
+            "project": project_name if scope == "project" else "",
+            "trigger": candidate["trigger"],
+            "confidence": confidence_label(80),
+            "confidence_score": 80,
+            "reason": "Matched a numbered step sequence that looks like a reusable procedure.",
+            "source": source,
+            "duplicate_candidates": duplicate_candidates,
+            "conflict_candidates": conflict_candidates,
+            "suggested_action": "update-memory" if duplicate_candidates else (
+                "review-conflict" if conflict_candidates else "remember"
+            ),
+        }
+        proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
+        proposals.append(proposal)
+    segments = memory_proposal_segments(text)
+    for index, segment in enumerate(segments):
         classified = classify_memory_segment(segment)
         if not classified:
             skipped += 1
             continue
-        score = int(classified["confidence_score"])
+        # Retrieval context: the neighboring sentences around the claim's
+        # origin (the LoCoMo-measured +/-1 window). Helps recall find the
+        # memory later; never part of the claim itself.
+        segment_context = " ".join(
+            segments[j] for j in (index - 1, index + 1) if 0 <= j < len(segments)
+        ).strip()
+        score = int(str(classified["confidence_score"]))
         if score < MEMORY_PROPOSAL_MIN_SCORE:
             skipped += 1
             continue
@@ -2529,10 +3214,10 @@ def propose_memories_from_text(
             scope,
             project=project_name,
         )
-        if duplicate_candidates:
-            suggested_action = "update-memory"
-        elif conflict_candidates:
+        if conflict_candidates:
             suggested_action = "review-conflict"
+        elif duplicate_candidates:
+            suggested_action = "update-memory"
         else:
             suggested_action = "remember"
         proposal = {
@@ -2541,6 +3226,7 @@ def propose_memories_from_text(
             "memory_type": memory_type,
             "scope": scope,
             "project": project_name if scope == "project" else "",
+            "context": segment_context[:600],
             "confidence": confidence_label(score),
             "confidence_score": score,
             "reason": classified["reason"],
@@ -2551,8 +3237,11 @@ def propose_memories_from_text(
         }
         proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
         proposals.append(proposal)
-        if len(proposals) >= limit:
-            break
+    # Rank the most durably useful proposal first so a one-click Accept (and
+    # accept-capture --index 1) lands on the substance, not a meta-preamble
+    # that happened to come first. Stable: equal ranks keep transcript order.
+    proposals.sort(key=lambda p: memory_durability_rank(str(p.get("memory", ""))), reverse=True)
+    proposals = proposals[:limit]
     return {
         "proposed": True,
         "source": source,

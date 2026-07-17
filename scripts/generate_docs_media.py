@@ -28,6 +28,8 @@ REQUIRED_ASSETS = {
     "link-mcp.png",
     "link-memory-flow.svg",
     "link-aha.svg",
+    "link-truth.svg",
+    "link-truth.gif",
     "link-aha.gif",
     "link-ui-tour.gif",
     "link-cli-tour.gif",

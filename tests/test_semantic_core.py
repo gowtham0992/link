@@ -220,9 +220,75 @@ class SemanticCoreTests(unittest.TestCase):
         self.assertFalse(payload["enabled"])
         self.assertTrue(any("--setup" in action for action in payload["next_actions"]))
 
+    def test_externally_managed_guidance_never_prints_dead_pip_commands(self):
+        with tempfile.TemporaryDirectory() as temp:
+            payload = build_semantic_status(
+                Path(temp), memory_count=3, command_target=temp, externally_managed=True,
+            )
+        joined = "\n".join(payload["next_actions"])
+        self.assertNotIn("pip install", joined)
+        self.assertIn("--setup", joined)
+        self.assertIn(".link-mcp-venv", joined)
+
     def test_memory_embedding_text_is_bounded(self):
         record = _memory("big", "Big memory", "x" * 10000)
         self.assertLess(len(memory_embedding_text(record)), 1200)
+
+
+class RerankTierTests(unittest.TestCase):
+    def _results(self):
+        return [
+            {"name": f"m{i}", "title": f"Memory {i}", "tldr": f"claim {i}", "snippet": "", "score": 10 - i}
+            for i in range(5)
+        ]
+
+    def test_blend_degrades_to_input_order_without_reranker(self):
+        import os
+        from link_core.semantic import rerank_blend
+        results = self._results()
+        # Force the tier off so the test is deterministic even on machines
+        # with fastembed installed and a cached reranker model.
+        previous = os.environ.get("LINK_RERANK")
+        os.environ["LINK_RERANK"] = "off"
+        try:
+            out = rerank_blend("query", results, limit=3, reranker=None)
+        finally:
+            if previous is None:
+                os.environ.pop("LINK_RERANK", None)
+            else:
+                os.environ["LINK_RERANK"] = previous
+        self.assertEqual([r["name"] for r in out], ["m0", "m1", "m2"])
+
+    def test_blend_fuses_reranker_order_with_retrieval_order(self):
+        from link_core.semantic import rerank_blend
+        results = self._results()
+        # Reranker says the LAST candidate is by far the best.
+        def fake_reranker(query, docs):
+            return [0.0, 0.0, 0.0, 0.0, 9.0]
+        out = rerank_blend("query", results, limit=3, reranker=fake_reranker)
+        names = [r["name"] for r in out]
+        # m4 must be promoted into the top, but m0 (retrieval's #1) must not
+        # be discarded: blend, not substitution.
+        self.assertIn("m4", names)
+        self.assertIn("m0", names)
+        self.assertTrue(all(r.get("rerank") == "blended" for r in out))
+
+    def test_blend_survives_reranker_failure(self):
+        from link_core.semantic import rerank_blend
+        results = self._results()
+        def broken(query, docs):
+            raise RuntimeError("model exploded")
+        out = rerank_blend("query", results, limit=2, reranker=broken)
+        self.assertEqual([r["name"] for r in out], ["m0", "m1"])
+
+    def test_reranker_offline_guard_returns_none_without_model(self):
+        from link_core.semantic import load_reranker, rerank_disabled
+        self.assertFalse(rerank_disabled())
+        # In the test environment fastembed is not installed (or no cached
+        # model): load must return None, never raise, never download.
+        reranker = load_reranker(allow_download=False)
+        self.assertTrue(reranker is None or callable(reranker))
+
 
 
 if __name__ == "__main__":

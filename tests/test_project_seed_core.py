@@ -19,6 +19,39 @@ from link_core.wiki import build_wiki_cache, close_wiki_cache  # noqa: E402
 
 
 class ProjectSeedCoreTests(unittest.TestCase):
+    def test_adr_save_command_is_paste_safe_and_untruncated(self):
+        # The printed "Save if approved" command must carry the full decision
+        # text, shell-quoted — a display-truncated command would silently save
+        # a cut-off memory ending in an ellipsis.
+        long_decision = (
+            "We will use SQLite with WAL mode as the job queue backend instead of Redis, "
+            "because operational simplicity beats throughput at our scale and it removes "
+            "a service dependency from every deployment environment we support."
+        )
+        payload = {
+            "project": "demo", "project_root": "/tmp/demo", "target": "/tmp/wiki",
+            "status": "ok", "included_count": 1, "skipped_large_count": 0,
+            "blocked_secret_count": 0, "read_error_count": 0,
+            "git_log_included": False, "git_log_error": "", "dry_run": True,
+            "wrote": [], "existing": [], "next_commands": [],
+            "next_prompt": "query Link for demo project context",
+            "decision_candidates": [{
+                "path": "docs/adr/0007.md",
+                "title": "ADR 0007",
+                "memory": f"ADR 0007: {long_decision}",
+            }],
+        }
+        _, text = render_seed_project_text(payload)
+        command_line = next(line for line in text.splitlines() if "Save if approved" in line)
+        self.assertIn("every deployment environment we support.", command_line)
+        self.assertNotIn("…", command_line)
+        # shlex-parseable: pasting it must hand remember exactly one text arg.
+        import shlex
+        parts = shlex.split(command_line.split("Save if approved: ", 1)[1])
+        self.assertEqual(parts[:2], ["lnk", "remember"])
+        self.assertIn("every deployment environment we support.", parts[2])
+
+
     def test_discovers_allowlisted_project_context_files(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-project-seed-test-"))
         project = tmp / "client-app"
@@ -129,6 +162,33 @@ class ProjectSeedCoreTests(unittest.TestCase):
         self.assertFalse((target / "raw").exists())
         self.assertFalse((target / "wiki").exists())
 
+
+
+
+class AdrDecisionMiningTests(unittest.TestCase):
+    def test_seed_mines_adr_decision_sections_as_proposals(self):
+        import tempfile
+        project = Path(tempfile.mkdtemp(prefix="link-adr-")).resolve() / "app"
+        (project / "docs" / "adr").mkdir(parents=True)
+        (project / "README.md").write_text("# App\n", encoding="utf-8")
+        (project / "docs/adr/0001-use-postgres.md").write_text(
+            "# 1. Use PostgreSQL for persistence\n\n## Status\nAccepted\n\n"
+            "## Decision\nWe will use PostgreSQL 16 on RDS; schema changes go through migrations only.\n",
+            encoding="utf-8",
+        )
+        (project / "docs/adr/0002-notes.md").write_text("# 2. Notes\nNo decision section.\n", encoding="utf-8")
+
+        result = seed_project_context(
+            Path(tempfile.mkdtemp(prefix="link-adr-root-")).resolve(), project, dry_run=True
+        )
+
+        candidates = result["decision_candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["path"], "docs/adr/0001-use-postgres.md")
+        self.assertIn("PostgreSQL 16", candidates[0]["memory"])
+        self.assertIn("Use PostgreSQL for persistence", candidates[0]["memory"])
+        # Proposal-only: dry run wrote nothing, and mining never writes memories.
+        self.assertFalse(result["wrote"])
 
 if __name__ == "__main__":
     unittest.main()

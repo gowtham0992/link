@@ -80,6 +80,10 @@ lnk health
 lnk ingest-status
 lnk remember "User prefers feature branches for Link work." --type preference --scope project --project link --visibility project --review-after 2026-08-01
 lnk remember "Temporary launch branch is release/one-off." --type project --project link --expires-at 2026-09-01
+lnk remember "1. Bump version 2. Run tests 3. Tag and publish" --type procedure --trigger "cutting a release"
+lnk remember "Deploy acme only via blue-green" --applies-when "project:acme, task:deploying"
+lnk remember "Releases ship daily from main" --supersedes weekly-releases
+lnk recall "how often do releases ship" --as-of 2026-03-01
 lnk share "Prefer local memory"
 lnk snapshot ~/link --output link-snapshot
 lnk brief "working on Link release" --project link
@@ -87,9 +91,11 @@ lnk query "what should I know before changing the MCP tools?" --budget small --p
 lnk validate</code></pre>
 
         <h2 id="memory">Memory Commands</h2>
+        <p><strong>One rule for the memory knobs.</strong> <em>Finding it</em> → <code>--trigger</code> (a phrase that helps task-shaped recall find a recipe). <em>Fencing it</em> → <code>--applies-when</code> (conditions that demote or hide a memory outside its context). <em>Owning it</em> → <code>--scope</code>/<code>--project</code>/<code>--visibility</code> (whose memory it is and who may see it). <em>Replacing it</em> → <code>--supersedes</code> (archive the old claim with lineage; accepts the memory name or its title). <em>Aging it</em> → <code>--review-after</code>/<code>--expires-at</code>. When in doubt, save with none of them — every knob can be added later through review.</p>
         <div class="grid">
           <article class="panel"><h3><code>lnk remember</code></h3><p>Save a local agent memory. Strong duplicates and likely conflicts are refused unless explicitly allowed.</p></article>
-          <article class="panel"><h3><code>lnk recall</code></h3><p>Search local memories with recall readiness and project-aware filtering.</p></article>
+          <article class="panel"><h3><code>lnk recall</code></h3><p>Search local memories with recall readiness, project-aware filtering, type filters, and <code>--as-of</code> temporal recall.</p></article>
+          <article class="panel"><h3><code>lnk recipes</code></h3><p>List saved procedure memories with their triggers and first steps.</p></article>
           <article class="panel"><h3><code>lnk explain-memory</code></h3><p>Show provenance, lifecycle, graph links, review issues, and recall readiness.</p></article>
           <article class="panel"><h3><code>lnk update-memory</code></h3><p>Merge new text into an existing memory and reset review state.</p></article>
           <article class="panel"><h3><code>lnk archive-memory</code></h3><p>Reversibly hide a stale or wrong memory from default recall.</p></article>
@@ -132,8 +138,9 @@ lnk connect kiro ~/link --write
 lnk connect claude-code ~/link --hooks --write
 lnk verify-mcp ~/link</code></pre>
         <p>Add <code>--hooks</code> (Claude Code, Codex, Cursor) to also install session hooks: every new session then starts with a bounded Link memory brief injected automatically, and session end stores proposal-only notes with memory candidates for later review — no durable memory is written without approval. Codex has no session-end event, so it gets the session-start brief only. Sessions without memory-worthy content are skipped and duplicate end events are deduplicated, so the capture inbox does not fill with noise. The hooks run <code>lnk hook session-start</code> and <code>lnk hook session-end</code>, which you can also invoke directly to inspect what they inject or capture. Codex and Cursor hook support is new and follows those vendors' documented hook schemas — if a hook misbehaves there, please open an issue. If the workspace runtime predates session hooks, <code>--write</code> refreshes it automatically.</p>
+        <p>Use <code>lnk recipes</code> to list saved procedure memories with their triggers, and <code>lnk recall "&lt;task&gt;" --type procedure</code> to recall only recipes. Consolidation plans also surface recurring themes across session captures — the review-gated way an agent learns your patterns: detection is automatic and deterministic, but turning a pattern into one durable memory is always proposed to you first. A scheduled idle-time agent session can run the plan as a "dream pass" and bring proposals to your next session.</p>
         <p>Use <code>lnk consolidate</code> when the capture or review backlog builds up. It is read-only: it counts pending captures and memories needing review, groups duplicate captures, and prints paste-safe accept/discard/review commands to run with the user. When the backlog crosses a threshold, the injected session-start brief nudges the agent to offer a consolidation pass, and MCP agents can request the same plan through <code>review(action="consolidate")</code>.</p>
-        <p>Use <code>lnk semantic</code> to inspect or enable optional hybrid recall. Lexical recall is always the default and the fallback; installing <code>pip install "link-mcp[semantic]"</code> and running <code>lnk semantic --setup</code> once (or <code>python3 -m link_mcp --semantic-setup</code> for MCP-only installs) adds a small local static-embedding model so paraphrased queries also find memories phrased differently. Recall itself never touches the network — the model loads offline-only, embeddings live in plain JSON under <code>.link-cache/</code>, and semantic-only matches are labeled with capped confidence so agents verify before trusting them. Measured results and methodology live in <code>benchmarks/RESULTS.md</code>.</p>
+        <p>Use <code>lnk semantic</code> to inspect or enable optional hybrid recall. Lexical recall is always the default and the fallback; running <code>lnk semantic --setup</code> once (or <code>python3 -m link_mcp --semantic-setup</code> for MCP-only installs) adds a small local embedding model so paraphrased queries also find memories phrased differently — on Homebrew installs, where the runtime Python refuses direct pip installs, setup provisions the extras into <code>~/.link-mcp-venv</code> automatically. Recall itself never touches the network — the model loads offline-only, embeddings live in plain JSON under <code>.link-cache/</code>, and semantic-only matches are labeled with capped confidence so agents verify before trusting them. Measured results and methodology live in <code>benchmarks/RESULTS.md</code>.</p>
         <p>From a source checkout, use the synthetic large-wiki smoke when you want local scale evidence without touching your real wiki. The script prints the exact <code>lnk serve</code> command and graph URL for the generated fixture.</p>
         <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
 
@@ -159,7 +166,7 @@ lnk share &lt;page-or-memory&gt; [dir] [--port 3000]
 lnk snapshot [dir] [--output link-snapshot] [--include-memories] [--include-private-memories] [--force]
 lnk ingest-status
 lnk import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
-lnk remember "text" [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD]
+lnk remember "text" [--type note|preference|decision|project|fact|procedure] [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD] [--trigger "..."] [--applies-when "..."] [--supersedes name-or-title]
 lnk propose-memories &lt;file-or-text&gt; [--project slug]
 lnk session-end &lt;file-or-text-or-&gt; [dir] [--project slug] [--limit 3]
 lnk capture-session &lt;file-or-text&gt; [--project slug]
@@ -175,7 +182,8 @@ lnk brief "task" [--project slug]
 lnk memory-audit [--project slug]
 lnk consolidate [dir] [--project slug] [--limit N]
 lnk semantic [dir] [--setup] [--rebuild]
-lnk recall "query" [--project slug]
+lnk recall "query" [--project slug] [--type TYPE] [--as-of YYYY-MM-DD] [--include-archived]
+lnk recipes [dir] [--project slug]
 lnk profile [--project slug]
 lnk wins [--project slug]
 lnk memory-inbox [--project slug]

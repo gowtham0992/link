@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,7 +55,13 @@ PROJECT_GLOBS = (
     ".cursor/rules/*.mdc",
     ".github/instructions/*.instructions.md",
     ".kiro/steering/*.md",
+    "docs/adr/*.md",
+    "docs/adrs/*.md",
+    "docs/decisions/*.md",
+    "adr/*.md",
 )
+
+ADR_PATH_HINTS = ("adr", "adrs", "decisions")
 
 
 def _slugify(value: str, fallback: str = "project") -> str:
@@ -156,6 +163,42 @@ def _read_project_files(
             continue
         included.append({"path": rel, "size_bytes": len(data), "text": text})
     return included, skipped_large, blocked_secret, read_errors
+
+
+def _adr_decision_candidates(included: list[dict[str, object]], limit: int = 5) -> list[dict[str, str]]:
+    """Mine ADR/decision files for decision-shaped memory candidates.
+
+    Deterministic and proposal-only: takes each ADR's title plus the text of
+    its Decision section and suggests one reviewable `decision` memory. Link
+    never writes these — the user approves each with the printed command.
+    """
+    candidates: list[dict[str, str]] = []
+    for item in included:
+        rel = str(item.get("path") or "")
+        parts = {part.lower() for part in Path(rel).parts}
+        if not (parts & set(ADR_PATH_HINTS)):
+            continue
+        text = str(item.get("text") or "")
+        title = ""
+        for line in text.splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        match = re.search(
+            r"^#{1,3}\s*Decision\b[^\n]*\n+(.*?)(?=\n#{1,3}\s|\Z)",
+            text,
+            re.IGNORECASE | re.DOTALL | re.MULTILINE,
+        )
+        decision_text = " ".join(match.group(1).split()) if match else ""
+        if not decision_text or len(decision_text) < 20:
+            continue
+        if len(decision_text) > 400:
+            decision_text = decision_text[:400].rstrip() + " …"
+        memory = f"{title}: {decision_text}" if title else decision_text
+        candidates.append({"path": rel, "title": title or rel, "memory": memory})
+        if len(candidates) >= limit:
+            break
+    return candidates
 
 
 def _git_history(project_root: Path, limit: int) -> dict[str, object]:
@@ -360,6 +403,7 @@ def seed_project_context(
         max_file_bytes=max_file_bytes,
     )
     git_history = _git_history(project, git_log_limit) if include_git_log else {"included": False, "lines": [], "error": ""}
+    decision_candidates = _adr_decision_candidates(included)
 
     status = "ok"
     if blocked_secret or read_errors:
@@ -423,6 +467,7 @@ def seed_project_context(
         "blocked_secret_count": len(blocked_secret),
         "read_error_count": len(read_errors),
         "git_log_included": bool(git_history.get("included")),
+        "decision_candidates": decision_candidates,
         "git_log_error": git_history.get("error", ""),
         "existing": existing,
         "wrote": wrote,
@@ -453,6 +498,20 @@ def render_seed_project_text(payload: dict[str, object]) -> tuple[int, str]:
         lines.append("Recent git history: included")
     elif payload.get("git_log_error"):
         lines.append(f"Recent git history: skipped ({payload['git_log_error']})")
+    candidates = payload.get("decision_candidates") if isinstance(payload.get("decision_candidates"), list) else []
+    if candidates:
+        lines.extend(["", f"Decision candidates found in ADRs ({len(candidates)}) — review with the user, nothing was saved:"])
+        for candidate in candidates:
+            lines.append(f"- {candidate.get('title')} ({candidate.get('path')})")
+            # The command must be paste-safe: the full candidate text, shell
+            # quoted. A display-truncated command would save a cut-off memory.
+            memory_text = str(candidate.get("memory") or "")
+            save_command = shlex.join([
+                "lnk", "remember", memory_text,
+                "--type", "decision",
+                "--source", str(candidate.get("path") or ""),
+            ])
+            lines.append(f"  Save if approved: {save_command}")
     if payload.get("dry_run"):
         lines.append("Dry run: no files were written.")
     if payload.get("wrote"):

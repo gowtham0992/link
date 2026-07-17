@@ -6,10 +6,12 @@ from unittest.mock import patch
 from mcp_package.link_core.capture import (
     capture_accept_memory_args,
     capture_accept_payload,
+    capture_decision_trail,
     capture_filename,
     capture_inbox,
     capture_notes_from_markdown,
     capture_proposal_selection,
+    capture_proposal_source,
     capture_records,
     capture_review_summary,
     capture_title,
@@ -535,3 +537,101 @@ class CaptureCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CaptureInboxProposalPreviewTests(unittest.TestCase):
+    def test_inbox_items_carry_proposal_previews(self):
+        import tempfile
+        from pathlib import Path
+        from mcp_package.link_core.capture import capture_inbox
+
+        root = Path(tempfile.mkdtemp(prefix="link-capture-preview-"))
+        captures_dir = root / "raw" / "memory-captures"
+        captures_dir.mkdir(parents=True)
+        (captures_dir / "20260712T120000Z-agent-session-notes.md").write_text(
+            "---\n"
+            'title: "Agent session notes"\n'
+            'date_captured: "2026-07-12T12:00:00Z"\n'
+            "---\n\n"
+            "## Notes\n\n"
+            "User: from now on I only deploy to staging through the release script.\n"
+            "User: also we decided to keep the memory layer deterministic.\n",
+            encoding="utf-8",
+        )
+
+        payload = capture_inbox(root)
+        records = payload["captures"]
+
+        self.assertEqual(len(records), 1)
+        item = records[0]
+        self.assertGreaterEqual(item["proposal_count"], 1)
+        first = item["proposals"][0]
+        self.assertIn("release script", first["memory"])
+        self.assertEqual(first["memory_type"], "preference")
+
+
+class CaptureProvenanceTests(unittest.TestCase):
+    def test_capture_records_proposal_source_and_trail(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            record = write_session_capture(
+                root,
+                text="User: hi\n\nAssistant: here is a long helpful explanation.",
+                source="session-end",
+                proposal_text="User: from now on I only push to develop.",
+                decision_trail=["Read the session: kept 4 messages.", "Stored 1 proposal."],
+            )
+            text = (root / record["path"]).read_text(encoding="utf-8")
+
+        source = capture_proposal_source(text)
+        self.assertIn("only push to develop", source)
+        self.assertNotIn("helpful explanation", source)
+        self.assertEqual(len(capture_decision_trail(text)), 2)
+
+    def test_accept_mines_user_turns_not_assistant_prose(self):
+        from mcp_package.link_core.memory import propose_memories_from_text
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            record = write_session_capture(
+                root,
+                text=(
+                    "User: help me name branches.\n\n"
+                    "Assistant: I always recommend feat/short-topic naming for clarity."
+                ),
+                source="session-end",
+                proposal_text="User: from now on I only push to develop.",
+            )
+
+            def builder(notes, source, limit, project):
+                return propose_memories_from_text(notes, [], source=source, limit=limit)
+
+            selection = capture_proposal_selection(
+                root, record["path"], index=1, propose_memories=builder,
+            )
+            memory = str(selection["proposal"]["memory"])
+
+        self.assertIn("only push to develop", memory)
+        self.assertNotIn("feat/short-topic", memory)
+
+
+class CaptureFilenameConcurrencyTests(unittest.TestCase):
+    def test_capture_filename_never_collides_under_concurrency(self):
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as temp:
+            raw = Path(temp)
+            # Same timestamp AND title — the collision case real hooks hit
+            # when several sessions end in the same second.
+            def claim(_):
+                return capture_filename("2026-07-12T18:00:00Z", "Agent session notes", raw)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+                paths = list(ex.map(claim, range(32)))
+
+            # Every reservation is a distinct, actually-created file (checked
+            # inside the tempdir, before it is cleaned up).
+            self.assertEqual(len(paths), 32)
+            self.assertEqual(len({p.name for p in paths}), 32)
+            for p in paths:
+                self.assertTrue(p.exists())

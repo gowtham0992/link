@@ -15,14 +15,71 @@ DEFAULT_PROOF_DIR = "link-proof"
 CliHandler = Callable[..., int]
 
 
+COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Start here", (
+        "try", "onboard", "init", "demo", "proof", "welcome", "prompts",
+    )),
+    ("Memory — the core loop", (
+        "remember", "recall", "recipes", "query", "brief", "start",
+        "session-end", "semantic",
+    )),
+    ("Review & governance", (
+        "memory-inbox", "review-memory", "explain-memory", "consolidate",
+        "capture-inbox", "accept-capture", "delete-capture", "redact-capture",
+        "capture-session", "propose-memories", "update-memory",
+        "archive-memory", "restore-memory", "forget-memory",
+        "set-memory-visibility", "memory-log", "memory-audit",
+    )),
+    ("Agents & automation", (
+        "connect", "hook", "verify-mcp",
+    )),
+    ("Workspace & health", (
+        "status", "health", "doctor", "validate", "migrate", "backup",
+        "restore-backup", "operations", "seed", "ingest-status",
+        "import-obsidian",
+    )),
+    ("Sharing & viewing", (
+        "serve", "share", "snapshot", "graph-summary", "team-sync",
+        "compliance-export",
+    )),
+    ("Utilities", (
+        "version", "benchmark", "wins", "profile", "rebuild-index",
+        "rebuild-backlinks", "query-link",
+    )),
+)
+
+
+class _GroupedCommandHelp(argparse.RawDescriptionHelpFormatter):
+    """Hide the flat 60-command listing; the grouped epilog carries it."""
+
+    def _format_action(self, action):
+        if isinstance(action, argparse._SubParsersAction):
+            return ""
+        return super()._format_action(action)
+
+
+def _grouped_epilog() -> str:
+    lines = ["commands:"]
+    for group, names in COMMAND_GROUPS:
+        lines.append(f"\n  {group}:")
+        lines.append("    " + ", ".join(names))
+    lines.append("\nRun `link.py <command> --help` for that command's options.")
+    return "\n".join(lines)
+
+
 def build_cli_parser(
     default_demo_dir: str = DEFAULT_DEMO_DIR,
     default_proof_dir: str = DEFAULT_PROOF_DIR,
 ) -> argparse.ArgumentParser:
     """Build the Link CLI argument parser."""
-    parser = argparse.ArgumentParser(prog="link.py", description="Link command runner")
+    parser = argparse.ArgumentParser(
+        prog="link.py",
+        description="Link — local, review-gated memory for AI agents. New? Run: link.py try",
+        epilog=_grouped_epilog(),
+        formatter_class=_GroupedCommandHelp,
+    )
     parser.add_argument("--version", action="version", version=f"Link {LINK_VERSION}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
     sub.add_parser("version", help="print the Link CLI version")
 
@@ -179,7 +236,15 @@ def build_cli_parser(
     obsidian_cmd.add_argument("--limit", type=int, default=None, help="maximum notes to scan/import")
     obsidian_cmd.add_argument("--json", action="store_true", help="print machine-readable import status")
 
-    remember_cmd = sub.add_parser("remember", help="save a local agent memory")
+    remember_cmd = sub.add_parser(
+        "remember",
+        help="save a local agent memory",
+        epilog=(
+            "one rule for the knobs: finding it -> --trigger · fencing it -> --applies-when · "
+            "owning it -> --scope/--project/--visibility · replacing it -> --supersedes (name or title) · "
+            "aging it -> --review-after/--expires-at. When in doubt, use none; every knob can be added later."
+        ),
+    )
     remember_cmd.add_argument("text", help="memory text to save")
     remember_cmd.add_argument("target", nargs="?", default=".")
     remember_cmd.add_argument("--title", default=None, help="memory page title")
@@ -191,7 +256,12 @@ def build_cli_parser(
     remember_cmd.add_argument("--project", default=None, help="project key for project-scoped memories")
     remember_cmd.add_argument("--review-after", default=None, help="YYYY-MM-DD date when this memory should be checked again")
     remember_cmd.add_argument("--expires-at", default=None, help="YYYY-MM-DD date when this memory should leave default recall")
+    remember_cmd.add_argument("--trigger", default=None, help="short phrase describing when this memory applies (recommended for --type procedure)")
+    remember_cmd.add_argument("--applies-when", default=None, dest="applies_when", help='scoping conditions, e.g. "project:link, task:cutting a release, path:*repo*" (OR semantics)')
+    remember_cmd.add_argument("--supersedes", default=None, help="name of the active memory this one replaces; the old memory is archived with lineage")
+    remember_cmd.add_argument("--context", default=None, help="surrounding text from the memory's origin; helps recall find it, never part of the claim (600 chars max)")
     remember_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
+    remember_cmd.add_argument("--allow-secret", action="store_true", help="save even if the text looks like a credential (memory is plain files read by every agent)")
     remember_cmd.add_argument("--allow-conflict", action="store_true", help="create a memory even if it may conflict with an active memory")
     remember_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
@@ -270,6 +340,8 @@ def build_cli_parser(
     recall_cmd.add_argument("target", nargs="?", default=".")
     recall_cmd.add_argument("--limit", type=int, default=10)
     recall_cmd.add_argument("--include-archived", action="store_true", help="include archived and stale memories")
+    recall_cmd.add_argument("--as-of", default=None, dest="as_of", help="YYYY-MM-DD: recall what was active on that date (temporal recall)")
+    recall_cmd.add_argument("--type", choices=MEMORY_TYPES, default=None, dest="memory_type", help="only recall memories of this type")
     recall_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     recall_cmd.add_argument("--json", action="store_true", help="print machine-readable results")
 
@@ -315,6 +387,11 @@ def build_cli_parser(
     hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
     hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
     hook_cmd.add_argument(
+        "--explain",
+        action="store_true",
+        help="session-end: print the decision trail (what was dropped as echo/noise and why)",
+    )
+    hook_cmd.add_argument(
         "--emit",
         choices=["text", "cursor"],
         default="text",
@@ -326,6 +403,12 @@ def build_cli_parser(
     semantic_cmd.add_argument("--setup", action="store_true", help="fetch the local embedding model once and build the index")
     semantic_cmd.add_argument("--rebuild", action="store_true", help="rebuild the semantic index offline")
     semantic_cmd.add_argument("--json", action="store_true", help="print machine-readable semantic status")
+
+    recipes_cmd = sub.add_parser("recipes", help="list saved procedure memories (recipes) with their triggers")
+    recipes_cmd.add_argument("target", nargs="?", default=".")
+    recipes_cmd.add_argument("--project", default=None, help="include user/global recipes plus this project's recipes")
+    recipes_cmd.add_argument("--limit", type=int, default=50)
+    recipes_cmd.add_argument("--json", action="store_true", help="print machine-readable recipes")
 
     consolidate_cmd = sub.add_parser("consolidate", help="print a read-only plan for the capture and review backlog")
     consolidate_cmd.add_argument("target", nargs="?", default=".")
@@ -398,8 +481,15 @@ def build_cli_parser(
     rebuild_cmd = sub.add_parser("rebuild-backlinks", help="rebuild wiki/_backlinks.json")
     rebuild_cmd.add_argument("target", nargs="?", default=".")
 
-    verify_mcp_cmd = sub.add_parser("verify-mcp", help="verify link-mcp import and print MCP config")
-    verify_mcp_cmd.add_argument("target", nargs="?", default=".")
+    verify_mcp_cmd = sub.add_parser(
+        "verify-mcp",
+        help="verify link-mcp import and print MCP config; pass an agent name to check what that agent is configured to run",
+    )
+    verify_mcp_cmd.add_argument(
+        "target", nargs="?", default=".",
+        help="workspace path, or an agent name (codex, claude-code, cursor, ...) to verify that agent's written config",
+    )
+    verify_mcp_cmd.add_argument("extra_target", nargs="?", default=None, help="workspace path when the first argument is an agent name")
     verify_mcp_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
     verify_mcp_cmd.add_argument("--python", default=None, help="Python executable to verify")
 
@@ -412,7 +502,13 @@ def build_cli_parser(
     connect_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also configure session hooks so new sessions start with the Link brief (Claude Code)",
+        help="also configure session hooks so new sessions start with the Link brief (Claude Code, Codex, Cursor)",
+    )
+    connect_cmd.add_argument(
+        "--hooks-settings",
+        default=None,
+        dest="hooks_settings",
+        help="override the hooks settings file, e.g. .claude/settings.json inside a repo for project-scoped hooks",
     )
     connect_cmd.add_argument("--json", action="store_true", help="print machine-readable connection plan")
 
@@ -563,8 +659,13 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             project=args.project,
             review_after=args.review_after,
             expires_at=args.expires_at,
+            trigger=args.trigger,
+            applies_when=args.applies_when,
+            supersedes=args.supersedes,
+            context=args.context,
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
+            allow_secret=args.allow_secret,
             json_output=args.json,
         )
     if command == "propose-memories":
@@ -654,6 +755,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
             include_archived=args.include_archived,
             project=args.project,
+            as_of=args.as_of,
+            memory_type=args.memory_type,
         )
     if command in {"query", "query-link"}:
         return handlers["query"](
@@ -697,7 +800,10 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             limit=args.limit,
             project=args.project,
             emit=args.emit,
+            explain=args.explain,
         )
+    if command == "recipes":
+        return handlers["recipes"](Path(args.target), project=args.project, limit=args.limit, json_output=args.json)
     if command == "consolidate":
         return handlers["consolidate"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "semantic":
@@ -738,6 +844,15 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "rebuild-backlinks":
         return handlers["rebuild-backlinks"](Path(args.target))
     if command == "verify-mcp":
+        from .mcp_connect import agent_alias_matches
+
+        if agent_alias_matches(str(args.target)):
+            return handlers["verify-mcp"](
+                Path(args.extra_target or "."),
+                json_output=args.json,
+                python_cmd=args.python,
+                agent=str(args.target),
+            )
         return handlers["verify-mcp"](Path(args.target), json_output=args.json, python_cmd=args.python)
     if command == "connect":
         return handlers["connect"](
@@ -747,6 +862,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             config_path=args.config,
             python_cmd=args.python,
             hooks=args.hooks,
+            hooks_settings=args.hooks_settings,
             json_output=args.json,
         )
     raise ValueError(f"unknown command: {command}")
