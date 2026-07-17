@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-17
+
 ### Added
 
 - Secrets are refused at the memory gate: `remember` (CLI and both MCP tools) now detects credential-shaped text — API-token patterns plus a conservative password heuristic ("Zk9#mango42", "the wifi password is …", "PIN 1234") — and refuses with a pointer to a password manager; `--allow-secret` overrides when the text truly isn't one. Memory pages are plain files injected into every connected agent's session, so a saved credential leaks by design.
