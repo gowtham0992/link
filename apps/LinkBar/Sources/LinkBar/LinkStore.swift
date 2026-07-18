@@ -269,6 +269,31 @@ final class LinkStore: ObservableObject {
         surfaces().contains { $0.level == .warn || $0.level == .error }
     }
 
+    // MARK: Memory Palette (global-hotkey recall/remember)
+
+    /// Palette recall: returns results to a callback without disturbing the
+    /// popover's own recall state.
+    func paletteRecall(_ query: String, then: @escaping ([RecalledMemory], Abstention?) -> Void) {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { then([], nil); return }
+        Task.detached(priority: .userInitiated) {
+            let payload = try? LinkCLI.runJSON(RecallPayload.self, ["recall", q, LinkCLI.workspace, "--json"])
+            await MainActor.run { then(payload?.memories ?? [], payload?.abstention) }
+        }
+    }
+
+    /// Palette remember: review-gated write, result to a callback so the
+    /// floating panel can confirm inline (its flash is offscreen).
+    func paletteRemember(_ text: String, then: @escaping (RememberResult?) -> Void) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { then(nil); return }
+        let bounded = String(trimmed.prefix(2000))
+        Task.detached(priority: .userInitiated) {
+            let result = try? LinkCLI.runJSON(RememberResult.self, ["remember", bounded, LinkCLI.workspace, "--json"])
+            await MainActor.run { self.refresh(); then(result) }
+        }
+    }
+
     func recall(_ query: String) {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         busy = true

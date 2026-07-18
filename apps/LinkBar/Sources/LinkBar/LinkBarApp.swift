@@ -15,7 +15,10 @@ struct LinkBarApp: App {
         MenuBarExtra {
             PopoverView()
                 .environmentObject(store)
-                .onAppear { store.start() }
+                .onAppear {
+                    store.start()
+                    PaletteController.shared.install(store: store)
+                }
         } label: {
             HStack(spacing: 3) {
                 if let icon = Self.menuIcon {
@@ -52,12 +55,15 @@ struct LinkBarApp: App {
             )
         }
         store.start()
+        let palette = ProcessInfo.processInfo.environment["LINKBAR_PALETTE"] != nil
         Task { @MainActor in
             // Real AppKit backing so SF Symbols and text fields render.
             let host = NSHostingView(
-                rootView: PopoverView()
-                    .environmentObject(store)
-                    .background(Color(nsColor: .windowBackgroundColor))
+                rootView: AnyView(palette
+                    ? AnyView(PaletteView(dismiss: {}).environmentObject(store)
+                        .frame(width: 560).padding(24).background(Color.black.opacity(0.35)))
+                    : AnyView(PopoverView().environmentObject(store)
+                        .background(Color(nsColor: .windowBackgroundColor))))
             )
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 380, height: 10),
