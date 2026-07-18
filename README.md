@@ -28,6 +28,7 @@
   <a href="https://github.com/gowtham0992/link/actions/workflows/ci.yml"><img src="https://github.com/gowtham0992/link/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink"><img src="https://img.shields.io/badge/MCP_Registry-io.github.gowtham0992%2Flink-blue" alt="MCP Registry"></a>
   <a href="https://pypi.org/project/link-mcp/"><img src="https://img.shields.io/pypi/v/link-mcp" alt="PyPI"></a>
+  <a href="https://pepy.tech/projects/link-mcp"><img src="https://static.pepy.tech/personalized-badge/link-mcp?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads" alt="PyPI Downloads"></a>
 </p>
 
 <p align="center">
