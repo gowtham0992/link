@@ -139,6 +139,9 @@ final class LinkStore: ObservableObject {
                 }
                 self.busy = false
                 self.healWatchersIfNeeded()
+                if let caps = self.captures?.captures {
+                    NotificationManager.shared.announceNewCaptures(caps)
+                }
             }
             // Health surfaces are heavier (each spawns a Python probe), so
             // refresh them at most every 15s and after the fast data is on
@@ -363,6 +366,12 @@ final class LinkStore: ObservableObject {
     /// Accept a session capture proposal into the reviewed memory flow.
     func acceptCapture(_ capture: CaptureItem, index: Int = 1) {
         act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "\(index)"])
+    }
+
+    /// Accept a capture from a notification banner (path only, first proposal).
+    func acceptCaptureByPath(_ path: String) {
+        act(["accept-capture", path, LinkCLI.workspace, "--index", "1"])
+        showFlash("Accepted from notification.", tone: .success)
     }
 
     func deleteCapture(_ capture: CaptureItem) {

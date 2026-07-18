@@ -18,6 +18,7 @@ struct LinkBarApp: App {
                 .onAppear {
                     store.start()
                     PaletteController.shared.install(store: store)
+                    NotificationManager.shared.install(store: store)
                 }
         } label: {
             HStack(spacing: 3) {
@@ -44,7 +45,7 @@ struct LinkBarApp: App {
                         .frame(width: 6, height: 6)
                 }
             }
-            .onAppear { Self.snapshotIfRequested(store: store) }
+            .onAppear { Self.snapshotIfRequested(store: store); Self.notifyTestIfRequested() }
         }
         .menuBarExtraStyle(.window)
     }
@@ -52,6 +53,23 @@ struct LinkBarApp: App {
     /// Development aid: LINKBAR_SNAPSHOT=/path.png renders the popover to a
     /// PNG (after one refresh) and exits — screenshot verification without
     /// menubar clicks or screen-recording permission.
+    /// LINKBAR_NOTIFY_TEST=1 asks macOS for notification authorization,
+    /// prints the verdict, and exits — the ad-hoc-signing viability check.
+    @MainActor
+    static func notifyTestIfRequested() {
+        let marker = "/tmp/linkbar-notify-probe"
+        let byEnv = ProcessInfo.processInfo.environment["LINKBAR_NOTIFY_TEST"] != nil
+        let byFile = FileManager.default.fileExists(atPath: marker)
+        guard byEnv || byFile else { return }
+        NotificationManager.shared.probeAuthorization { result in
+            let line = "LINKBAR_NOTIFY: " + result + "\n"
+            try? line.write(toFile: "/tmp/linkbar-notify-result.txt", atomically: true, encoding: .utf8)
+            FileHandle.standardError.write(line.data(using: .utf8)!)
+            try? FileManager.default.removeItem(atPath: marker)
+            NSApplication.shared.terminate(nil)
+        }
+    }
+
     @MainActor
     static func snapshotIfRequested(store: LinkStore) {
         guard let path = ProcessInfo.processInfo.environment["LINKBAR_SNAPSHOT"] else { return }
