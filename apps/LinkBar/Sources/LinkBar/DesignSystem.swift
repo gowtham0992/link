@@ -172,3 +172,22 @@ struct StatusRow: View {
         .animation(.easeOut(duration: 0.15), value: hovering)
     }
 }
+
+/// A softly breathing green dot — "agents are working right now".
+struct PulseDot: View {
+    @State private var on = false
+    var body: some View {
+        Circle()
+            .fill(Color.green)
+            .frame(width: 7, height: 7)
+            .overlay(
+                Circle()
+                    .stroke(Color.green.opacity(0.5), lineWidth: 1.5)
+                    .scaleEffect(on ? 2.1 : 1.0)
+                    .opacity(on ? 0 : 0.8)
+            )
+            .onAppear {
+                withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { on = true }
+            }
+    }
+}

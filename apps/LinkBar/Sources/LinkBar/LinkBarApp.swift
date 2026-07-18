@@ -29,6 +29,12 @@ struct LinkBarApp: App {
                 if store.pendingCount > 0 {
                     Text("\(store.pendingCount)")
                         .font(.system(size: 11, weight: .semibold))
+                } else if !store.activeSessions.isEmpty {
+                    // Agents are writing transcripts right now and nothing
+                    // needs you: a quiet green dot says memory is being made.
+                    Circle()
+                        .fill(Color(red: 0.30, green: 0.72, blue: 0.42))
+                        .frame(width: 5, height: 5)
                 } else if store.anyUnhealthy {
                     // No pending reviews, but a Link surface needs attention
                     // (stale runtime, MCP drift, hooks not wired): a subtle

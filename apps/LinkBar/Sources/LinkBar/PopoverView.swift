@@ -87,6 +87,9 @@ struct PopoverView: View {
 
     private var inboxTab: some View {
         VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
+            if !store.activeSessions.isEmpty {
+                pulseRow
+            }
             if let warning = store.runtimeWarning {
                 runtimeBanner(warning)
             }
@@ -107,6 +110,33 @@ struct PopoverView: View {
             }
         }
         .padding(LinkBrand.pad)
+    }
+
+    /// Live agent pulse: which sessions are writing transcripts right now,
+    /// and when memory last changed — the ambient "memory is being made" row.
+    private var pulseRow: some View {
+        HStack(spacing: 8) {
+            PulseDot()
+            Text(pulseText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
+            if let last = store.activity.first?.date {
+                Text("memory · \(last.relativeLabel)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(Color.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var pulseText: String {
+        let sessions = store.activeSessions
+        let names = sessions.prefix(3).map(\.project).joined(separator: ", ")
+        let count = sessions.count == 1 ? "1 agent" : "\(sessions.count) agents"
+        return "\(count) active · \(names)"
     }
 
     // MARK: status tab (health of every Link surface)

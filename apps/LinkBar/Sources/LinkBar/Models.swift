@@ -259,3 +259,12 @@ struct SurfaceHealth: Identifiable {
 
     var id: String { name }
 }
+
+/// A live agent session detected from transcript activity — the "pulse".
+struct AgentSession: Identifiable {
+    let project: String
+    let lastActive: Date
+
+    var id: String { project }
+    var minutesAgo: Int { max(0, Int(Date().timeIntervalSince(lastActive) / 60)) }
+}

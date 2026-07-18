@@ -31,6 +31,7 @@ final class LinkStore: ObservableObject {
     @Published var semantic: SemanticStatus?
     @Published var claudeHooksWired: Bool?
     @Published var viewerRunning = false
+    @Published var activeSessions: [AgentSession] = []
     private var lastHealthAt = Date.distantPast
 
     var pendingCount: Int {
@@ -118,7 +119,9 @@ final class LinkStore: ObservableObject {
             let captures = try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"])
             let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
+            let sessions = Self.scanAgentSessions()
             await MainActor.run {
+                self.activeSessions = sessions
                 if inbox == nil && captures == nil {
                     self.lastError = "Could not reach lnk — is Link installed? (brew install gowtham0992/link/link)"
                 } else {
@@ -168,6 +171,35 @@ final class LinkStore: ObservableObject {
             self.viewerRunning = viewer
             self.lastHealthAt = Date()
         }
+    }
+
+    /// Detect live agent sessions: a Claude Code project whose newest
+    /// transcript was written in the last 5 minutes is "active now".
+    /// (Transcripts stream continuously while a session runs.) Codex/Cursor
+    /// roots can join this scan later.
+    nonisolated private static func scanAgentSessions(activeWindow: TimeInterval = 300) -> [AgentSession] {
+        let fm = FileManager.default
+        let root = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects")
+        guard let projects = try? fm.contentsOfDirectory(atPath: root) else { return [] }
+        var found: [AgentSession] = []
+        let now = Date()
+        for slug in projects where !slug.hasPrefix(".") {
+            let dir = (root as NSString).appendingPathComponent(slug)
+            guard let files = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            var newest = Date.distantPast
+            for f in files where f.hasSuffix(".jsonl") {
+                let path = (dir as NSString).appendingPathComponent(f)
+                if let m = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date, m > newest {
+                    newest = m
+                }
+            }
+            if now.timeIntervalSince(newest) < activeWindow {
+                // Slug is the full path with dashes; the tail is the repo name.
+                let project = slug.split(separator: "-").last.map(String.init) ?? slug
+                found.append(AgentSession(project: project, lastActive: newest))
+            }
+        }
+        return found.sorted { $0.lastActive > $1.lastActive }
     }
 
     /// Read Claude Code's settings.json directly to see whether Link's
