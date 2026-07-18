@@ -268,3 +268,73 @@ struct AgentSession: Identifiable {
     var id: String { project }
     var minutesAgo: Int { max(0, Int(Date().timeIntervalSince(lastActive) / 60)) }
 }
+
+/// A memory page read straight from wiki/memories/*.md — the browser shows
+/// your actual files, no intermediary. Frontmatter is simple `key: value`
+/// lines; we parse only what the browser displays.
+struct MemoryPage: Identifiable {
+    let name: String
+    let title: String
+    let memoryType: String
+    let scope: String
+    let project: String
+    let status: String          // active | archived | …
+    let reviewStatus: String    // reviewed | needs_review | …
+    let supersedes: String
+    let supersededBy: String
+    let body: String
+    let modified: Date
+
+    var id: String { name }
+    var isActive: Bool { status == "active" }
+
+    static func load(from workspace: String) -> [MemoryPage] {
+        let dir = (workspace as NSString).appendingPathComponent("wiki/memories")
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+        var pages: [MemoryPage] = []
+        for file in files where file.hasSuffix(".md") {
+            let path = (dir as NSString).appendingPathComponent(file)
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+            var meta: [String: String] = [:]
+            var body = ""
+            let parts = text.components(separatedBy: "\n---")
+            if parts.count >= 2, text.hasPrefix("---") {
+                for line in parts[0].split(separator: "\n") {
+                    guard let colon = line.firstIndex(of: ":") else { continue }
+                    let key = line[..<colon].trimmingCharacters(in: .whitespaces)
+                    var value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                    value = value.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    meta[key] = value
+                }
+                body = parts.dropFirst().joined(separator: "\n---")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let modified = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? .distantPast
+            pages.append(MemoryPage(
+                name: (file as NSString).deletingPathExtension,
+                title: meta["title"] ?? (file as NSString).deletingPathExtension,
+                memoryType: meta["memory_type"] ?? "note",
+                scope: meta["scope"] ?? "user",
+                project: meta["project"] ?? "",
+                status: meta["status"] ?? "active",
+                reviewStatus: meta["review_status"] ?? "",
+                supersedes: meta["supersedes"] ?? "",
+                supersededBy: meta["superseded_by"] ?? "",
+                body: body,
+                modified: modified
+            ))
+        }
+        return pages.sorted { $0.modified > $1.modified }
+    }
+
+    /// The memory claim itself: first non-heading body line.
+    var claim: String {
+        for line in body.split(separator: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || t.hasPrefix("#") { continue }
+            return t
+        }
+        return title
+    }
+}

@@ -1,13 +1,17 @@
 import SwiftUI
 
 struct PopoverView: View {
-    enum Tab { case inbox, status, settings }
+    enum Tab { case inbox, memory, status, settings }
 
     @EnvironmentObject var store: LinkStore
     @State private var query = ""
+    @State private var memoryQuery = ""
+    @State private var memoryTypeFilter: String? = nil
+    @State private var showArchived = false
     // Snapshot aid: LINKBAR_TAB=status opens straight to the Status tab.
     @State private var tab: Tab =
-        ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "status" ? .status : .inbox
+        ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "status" ? .status
+        : ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "memory" ? .memory : .inbox
 
     private var isFullyIdle: Bool {
         (store.inbox?.items.isEmpty ?? true)
@@ -29,6 +33,7 @@ struct PopoverView: View {
             Group {
                 switch tab {
                 case .inbox: inboxTab
+                case .memory: memoryTab
                 case .status: statusTab
                 case .settings:
                     SettingsPane(done: { tab = .inbox })
@@ -49,6 +54,7 @@ struct PopoverView: View {
     private var tabBar: some View {
         HStack(spacing: 4) {
             tabButton("Inbox", .inbox, badge: store.pendingCount)
+            tabButton("Memory", .memory)
             tabButton("Status", .status, alert: store.anyUnhealthy)
             tabButton("Settings", .settings)
             Spacer()
@@ -137,6 +143,130 @@ struct PopoverView: View {
         let names = sessions.prefix(3).map(\.project).joined(separator: ", ")
         let count = sessions.count == 1 ? "1 agent" : "\(sessions.count) agents"
         return "\(count) active · \(names)"
+    }
+
+    // MARK: memory tab (browse every memory file)
+
+    private var filteredMemories: [MemoryPage] {
+        store.memories.filter { page in
+            (showArchived || page.isActive)
+            && (memoryTypeFilter == nil || page.memoryType == memoryTypeFilter)
+            && (memoryQuery.isEmpty
+                || page.title.localizedCaseInsensitiveContains(memoryQuery)
+                || page.claim.localizedCaseInsensitiveContains(memoryQuery))
+        }
+    }
+
+    private var memoryTab: some View {
+        VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+                TextField("Filter memories…", text: $memoryQuery)
+                    .textFieldStyle(.plain).font(.system(size: 12.5))
+                if !memoryQuery.isEmpty {
+                    Button { memoryQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                    }.buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    filterChip("all", nil)
+                    ForEach(["preference", "decision", "note", "project", "procedure", "fact"], id: \.self) { t in
+                        filterChip(t, t)
+                    }
+                    Divider().frame(height: 14)
+                    Button { showArchived.toggle() } label: {
+                        Text("archived")
+                            .font(.system(size: 10.5, weight: showArchived ? .semibold : .regular))
+                            .foregroundStyle(showArchived ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(showArchived ? AnyShapeStyle(.quaternary.opacity(0.7)) : AnyShapeStyle(.clear), in: Capsule())
+                    }.buttonStyle(.plain)
+                }
+            }
+
+            SectionHeader(title: "Memories", count: filteredMemories.count)
+            if filteredMemories.isEmpty {
+                Label(store.memories.isEmpty ? "No memories yet — say something worth keeping."
+                                             : "Nothing matches this filter.",
+                      systemImage: "tray")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredMemories) { page in
+                        memoryRow(page)
+                    }
+                }
+            }
+            .frame(maxHeight: 320)
+        }
+        .padding(LinkBrand.pad)
+    }
+
+    private func filterChip(_ label: String, _ value: String?) -> some View {
+        let active = memoryTypeFilter == value
+        return Button { memoryTypeFilter = value } label: {
+            Text(label)
+                .font(.system(size: 10.5, weight: active ? .semibold : .regular))
+                .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(active ? AnyShapeStyle(LinkBrand.rust) : AnyShapeStyle(.quaternary.opacity(0.5)), in: Capsule())
+        }.buttonStyle(.plain)
+    }
+
+    private func memoryRow(_ page: MemoryPage) -> some View {
+        HoverRow {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(page.title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(page.isActive ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    Spacer()
+                    if !page.supersededBy.isEmpty {
+                        Text("superseded")
+                            .font(.system(size: 9)).foregroundStyle(.orange)
+                    } else if page.reviewStatus == "needs_review" {
+                        Text("review")
+                            .font(.system(size: 9)).foregroundStyle(LinkBrand.rust)
+                    }
+                    Text(page.modified.relativeLabel)
+                        .font(.system(size: 9.5)).foregroundStyle(.quaternary)
+                }
+                HStack(spacing: 6) {
+                    Text(page.memoryType).font(.system(size: 10)).foregroundStyle(LinkBrand.rust)
+                    Text(page.scope + (page.project.isEmpty ? "" : " · \(page.project)"))
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    if !page.supersedes.isEmpty {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 8.5)).foregroundStyle(.tertiary)
+                            .help("Supersedes: \(page.supersedes)")
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("Copy text") { store.copyText(page.claim) }
+                Button("Reveal in Finder") { store.revealMemory(named: page.name) }
+                Divider()
+                if page.isActive {
+                    Button("Archive") { store.archiveMemory(named: page.name) }
+                } else {
+                    Button("Restore") { store.restoreMemory(named: page.name) }
+                }
+            }
+            .onTapGesture(count: 2) { store.revealMemory(named: page.name) }
+        }
+        .help(page.claim)
     }
 
     // MARK: status tab (health of every Link surface)

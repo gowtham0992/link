@@ -32,6 +32,7 @@ final class LinkStore: ObservableObject {
     @Published var claudeHooksWired: Bool?
     @Published var viewerRunning = false
     @Published var activeSessions: [AgentSession] = []
+    @Published var memories: [MemoryPage] = []
     private var lastHealthAt = Date.distantPast
 
     var pendingCount: Int {
@@ -120,8 +121,10 @@ final class LinkStore: ObservableObject {
             let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
             let sessions = Self.scanAgentSessions()
+            let memories = MemoryPage.load(from: workspace)
             await MainActor.run {
                 self.activeSessions = sessions
+                self.memories = memories
                 if inbox == nil && captures == nil {
                     self.lastError = "Could not reach lnk — is Link installed? (brew install gowtham0992/link/link)"
                 } else {
@@ -366,6 +369,15 @@ final class LinkStore: ObservableObject {
     /// Accept a session capture proposal into the reviewed memory flow.
     func acceptCapture(_ capture: CaptureItem, index: Int = 1) {
         act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "\(index)"])
+    }
+
+    /// Archive/restore straight from the memory browser.
+    func archiveMemory(named name: String) {
+        act(["archive-memory", name, LinkCLI.workspace])
+    }
+
+    func restoreMemory(named name: String) {
+        act(["restore-memory", name, LinkCLI.workspace])
     }
 
     /// Accept a capture from a notification banner (path only, first proposal).
