@@ -29,6 +29,17 @@ PLIST
 codesign --force --sign - "$APP" 2>/dev/null || true
 echo "bundled: $APP"
 
+# --release-zip: produce the distributable zip the cask points at.
+if [ "$1" = "--release-zip" ]; then
+  VERSION=$(grep -o 'static let version = "[^"]*"' Sources/LinkBar/DesignSystem.swift | grep -o '"[^"]*"' | tr -d '"')
+  ZIP=".build/LinkBar-${VERSION}.0.zip"
+  rm -f "$ZIP"
+  ditto -c -k --keepParent "$APP" "$ZIP"
+  shasum -a 256 "$ZIP"
+  echo "release zip: $ZIP  (attach to the GitHub release; put the sha256 in the cask)"
+  exit 0
+fi
+
 # --install: replace /Applications/LinkBar.app with this build and relaunch.
 if [ "$1" = "--install" ]; then
   pkill -x LinkBar 2>/dev/null || true
