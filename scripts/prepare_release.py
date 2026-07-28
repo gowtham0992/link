@@ -199,8 +199,13 @@ def prepare_release(root: Path, version: str, release_date: str, dry_run: bool =
         files.core_version: update_core_version(files.core_version.read_text(encoding="utf-8"), version),
         files.server_json: update_server_json(files.server_json.read_text(encoding="utf-8"), version),
         files.changelog: update_changelog(files.changelog.read_text(encoding="utf-8"), version, release_date),
-        files.homepage: update_homepage(files.homepage.read_text(encoding="utf-8"), version),
     }
+    # The homepage is presentation, not a package artifact: update it when
+    # present (the real repo), skip it in minimal trees/tests.
+    if files.homepage.exists():
+        updates[files.homepage] = update_homepage(
+            files.homepage.read_text(encoding="utf-8"), version
+        )
 
     changed = [path for path, text in updates.items() if path.read_text(encoding="utf-8") != text]
     if not dry_run:
