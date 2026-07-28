@@ -211,6 +211,27 @@ The generated demo is the public proof wiki. Generated content inside `wiki/`,
 `raw/`, and `link-demo/` is ignored by git so personal memory is not published
 by accident.
 
+## LinkBar — the menu bar app (macOS)
+
+Link's memory, ambient. LinkBar puts the review gate in your menu bar: a
+global palette (⌥⌘M) to recall or remember from any app, native
+notifications with one-tap Accept when a session capture lands, a live
+pulse while agents are writing, and a browser over every memory file —
+all running on the same reviewed `lnk` commands as the CLI.
+
+<p align="center">
+  <img src="docs/assets/linkbar-inbox.png" alt="LinkBar inbox: live agent pulse, session captures with Will-save previews and decision trails" width="380">
+  <img src="docs/assets/linkbar-status.png" alt="LinkBar status: health dots for CLI, workspace, MCP, hooks, recall tier, and viewer with one-click fixes" width="380">
+</p>
+
+```bash
+brew install --cask gowtham0992/link/linkbar
+```
+
+Unsigned on purpose (no Apple fee inflating anything): the cask strips
+the quarantine flag on install, so it opens like any app. Building from
+source instead: `cd apps/LinkBar && bash Scripts/bundle.sh --install`.
+
 ## Killer Demo: One Memory, Two Agents
 
 This is the moment Link is built for:
