@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.gowtham0992%2Flink.svg)](https://mcptoplist.com/server/io.github.gowtham0992%2Flink)
+
 <p align="center">
   <img src="logo.svg" alt="Link" width="128">
 </p>
