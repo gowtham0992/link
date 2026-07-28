@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TYPE_ERROR_BASELINE = 387
+TYPE_ERROR_BASELINE = 385
 
 
 def main() -> int:

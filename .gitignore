@@ -84,3 +84,6 @@ Link Console Handoff.html
 
 # vhs demo render workspace
 docs/media/.aha-demo/
+
+# LinkBar build artifacts (never commit)
+apps/LinkBar/.build/

@@ -186,6 +186,26 @@ vector database or service. Semantic-only matches are labeled
 (`match: semantic`, capped confidence) so agents verify before trusting them.
 Measured results: <https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md>.
 
+## Benchmarks
+
+Plain files with no LLM in the memory layer, measured against the systems
+that have one everywhere:
+
+- **LoCoMo end-to-end QA** (all 1,540 questions, under mem0's own open
+  harness): **84.8%** vs mem0's cloud platform at 83.2% under the same
+  judge — confirmed by a second, independent judge (Tencent Hunyuan 3):
+  85.5% vs 83.6%.
+- **LongMemEval evidence retrieval**: the memory layer put the gold
+  evidence in context for **99.4%** of 500 questions (deterministic, no
+  LLM judge).
+- **Memory hygiene**: **0%** junk stored over a simulated multi-month
+  session stream (CI-enforced); the same pipeline with governance off
+  stores 23.9%.
+
+Every number is published with its config, judge models, caveats, and the
+experiments that lost:
+[benchmarks/RESULTS.md](https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md).
+
 ## Privacy and Scale
 
 - Local-first: `link-mcp` reads the wiki path you configure and does not call

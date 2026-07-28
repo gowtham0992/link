@@ -208,14 +208,19 @@ lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no 
 lnk connect cursor ~/link --hooks --write</code></pre>
         <p>Codex and Cursor hook support is new and follows those vendors' documented hook schemas; if a hook misbehaves there, please open an issue.</p>
 
-        <h2 id="semantic">10. Optional: Hybrid Semantic Recall</h2>
+        <h2 id="linkbar">10. Optional: LinkBar, the menu bar app (macOS)</h2>
+        <p>Hooks make capture automatic; LinkBar makes reviewing it ambient. It puts the review gate in your menu bar: proposals arrive as a native notification with a one-tap <strong>Accept</strong>, a global palette (<code>⌥⌘M</code>) recalls or remembers from any app, a live pulse shows which agent sessions are writing right now, and a Status tab reports the health of every Link surface (CLI, workspace, MCP, hooks, recall tier, viewer) with one-click fixes. It runs the same reviewed <code>lnk</code> commands you just wired — nothing new to trust.</p>
+        <pre><code>brew install --cask gowtham0992/link/linkbar</code></pre>
+        <p>LinkBar ships unsigned (no Apple Developer certificate); the cask clears the quarantine flag on install so it opens like any other app. Prefer building it yourself: <code>cd apps/LinkBar &amp;&amp; bash Scripts/bundle.sh --install</code>.</p>
+
+        <h2 id="semantic">11. Optional: Hybrid Semantic Recall</h2>
         <p>Lexical recall is always the default and the fallback. Two optional local tiers add paraphrase recall — "how should I structure my pull requests" finds a memory about commit style. The models load offline-only at recall time (a query can never trigger a download), embeddings are plain JSON under <code>.link-cache/</code>, and there is no vector database or service.</p>
         <pre><code>lnk semantic ~/link --setup               # installs the extras if needed + fetches the models once
 python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs</code></pre>
         <p>On Homebrew installs the runtime Python refuses direct <code>pip install</code>s (PEP&nbsp;668), so <code>--setup</code> provisions the extras into Link's managed venv (<code>~/.link-mcp-venv</code>) automatically — the same venv the MCP server runs from, and <code>lnk</code> uses it on the next command. In your own venv, <code>pip install "link-mcp[semantic]"</code> (fast tier) or <code>"link-mcp[semantic-quality]"</code> (quality tier) works as usual before running <code>--setup</code>.</p>
         <p>Recall quality is measured, not asserted: see <a href="https://github.com/gowtham0992/link/blob/main/benchmarks/RESULTS.md">benchmarks/RESULTS.md</a> for the full methodology, numbers, and honest limitations.</p>
 
-        <h2 id="faq">11. The Three Questions Everyone Asks</h2>
+        <h2 id="faq">12. The Three Questions Everyone Asks</h2>
 
         <h3>Does Link read my conversations?</h3>
         <p>Link never sees a conversation. The session <em>hooks</em> do the reading: at session end the agent's own transcript is mined <strong>locally and deterministically</strong> — no LLM, no network — for statements that look like durable preferences or decisions ("from now on I only push to develop"). Those become <em>proposals</em> in a pending inbox. Nothing is memory until you approve it, and the whole pipeline runs from plain Python files inside your own workspace that you can read (<code>link_core/agent_hooks.py</code>). If you never install hooks, Link only knows what you explicitly tell it with <code>lnk remember</code>.</p>

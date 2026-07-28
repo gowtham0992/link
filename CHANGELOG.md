@@ -6,6 +6,33 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-27
+
+Link gets a face. The memory layer is unchanged in shape — plain Markdown,
+review-gated writes, no LLM in the write path — but it is no longer only a
+CLI and an MCP server: **LinkBar** puts the review gate in your macOS menu
+bar, and memory becomes something that meets you rather than somewhere you
+go. That shift is why this is a major version.
+
+**No breaking changes.** Every CLI command, MCP tool, hook, and memory file
+from 1.7 works exactly as before; upgrading is `brew upgrade link`.
+
+### Added
+
+- **LinkBar 1.0** — Link's memory, ambient in your macOS menu bar (`apps/LinkBar`, Swift/SwiftUI, the `lnk --json` CLI is its entire backend). The review gate stops being a place you go and starts being something that meets you:
+  - **Memory Palette**: a global hotkey (⌥⌘M) opens a floating panel over any app — type to recall (copy straight into what you're writing), prefix with `+` to remember, review-gated as always.
+  - **Live agent pulse**: LinkBar detects agent sessions writing transcripts right now and shows a breathing "N agents active · project" row; the menu-bar icon carries a quiet green dot while memory is being made.
+  - **Capture notifications**: a new session capture posts a native banner — "Will save: <proposal>" — with an Accept action right on it. Confirmed working on an unsigned/ad-hoc build (no Apple Developer signature required).
+  - **Memory browser**: a Memory tab listing every memory file — search, type filters, archived toggle, supersede lineage, archive/restore — read straight from `wiki/memories/*.md`.
+  - **Status dashboard**: health dots for CLI, workspace, MCP, hooks, recall tier, and viewer, each with a one-click fix that verifies its outcome before claiming success.
+  - **Inbox**: review/accept memories and captures with "Will save" previews, decision trails ("How Link read this session"), and per-proposal Accept menus.
+  - Distributed as an unsigned cask with a postflight quarantine-strip — `brew install --cask gowtham0992/link/linkbar` — zero Gatekeeper friction, zero signing fees.
+- Homepage refresh: version banner, per-agent onboard picker (real `lnk onboard --agent <yours> --write` commands), origin-story section, and the three demo terminals as alternating side-by-side rows.
+
+### Fixed
+
+- `lnk semantic` status reported "Indexed memories: 16 of 6" — the index embeds every memory (archived included; they stay inert in default recall), so the denominator is now the total memory count, not active-only.
+
 ## [1.7.0] - 2026-07-17
 
 ### Added

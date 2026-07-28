@@ -28,6 +28,7 @@
   <a href="https://github.com/gowtham0992/link/actions/workflows/ci.yml"><img src="https://github.com/gowtham0992/link/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://registry.modelcontextprotocol.io/?q=io.github.gowtham0992%2Flink"><img src="https://img.shields.io/badge/MCP_Registry-io.github.gowtham0992%2Flink-blue" alt="MCP Registry"></a>
   <a href="https://pypi.org/project/link-mcp/"><img src="https://img.shields.io/pypi/v/link-mcp" alt="PyPI"></a>
+  <a href="https://pepy.tech/projects/link-mcp"><img src="https://static.pepy.tech/personalized-badge/link-mcp?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads" alt="PyPI Downloads"></a>
 </p>
 
 <p align="center">
@@ -209,6 +210,27 @@ viewer stays document-first — common paths in the top nav, deeper tools under
 The generated demo is the public proof wiki. Generated content inside `wiki/`,
 `raw/`, and `link-demo/` is ignored by git so personal memory is not published
 by accident.
+
+## LinkBar — the menu bar app (macOS)
+
+Link's memory, ambient. LinkBar puts the review gate in your menu bar: a
+global palette (⌥⌘M) to recall or remember from any app, native
+notifications with one-tap Accept when a session capture lands, a live
+pulse while agents are writing, and a browser over every memory file —
+all running on the same reviewed `lnk` commands as the CLI.
+
+<p align="center">
+  <img src="docs/assets/linkbar-inbox.png" alt="LinkBar inbox: live agent pulse, session captures with Will-save previews and decision trails" width="380">
+  <img src="docs/assets/linkbar-status.png" alt="LinkBar status: health dots for CLI, workspace, MCP, hooks, recall tier, and viewer with one-click fixes" width="380">
+</p>
+
+```bash
+brew install --cask gowtham0992/link/linkbar
+```
+
+Unsigned on purpose (no Apple fee inflating anything): the cask strips
+the quarantine flag on install, so it opens like any app. Building from
+source instead: `cd apps/LinkBar && bash Scripts/bundle.sh --install`.
 
 ## Killer Demo: One Memory, Two Agents
 
