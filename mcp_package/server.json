@@ -6,12 +6,12 @@
     "url": "https://github.com/gowtham0992/link",
     "source": "github"
   },
-  "version": "1.7.0",
+  "version": "2.0.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "link-mcp",
-      "version": "1.7.0",
+      "version": "2.0.0",
       "transport": {
         "type": "stdio"
       }

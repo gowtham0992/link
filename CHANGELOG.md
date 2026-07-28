@@ -6,6 +6,17 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-27
+
+Link gets a face. The memory layer is unchanged in shape — plain Markdown,
+review-gated writes, no LLM in the write path — but it is no longer only a
+CLI and an MCP server: **LinkBar** puts the review gate in your macOS menu
+bar, and memory becomes something that meets you rather than somewhere you
+go. That shift is why this is a major version.
+
+**No breaking changes.** Every CLI command, MCP tool, hook, and memory file
+from 1.7 works exactly as before; upgrading is `brew upgrade link`.
+
 ### Added
 
 - **LinkBar 1.0** — Link's memory, ambient in your macOS menu bar (`apps/LinkBar`, Swift/SwiftUI, the `lnk --json` CLI is its entire backend). The review gate stops being a place you go and starts being something that meets you:
@@ -21,7 +32,6 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 ### Fixed
 
 - `lnk semantic` status reported "Indexed memories: 16 of 6" — the index embeds every memory (archived included; they stay inert in default recall), so the denominator is now the total memory count, not active-only.
-
 
 ## [1.7.0] - 2026-07-17
 
