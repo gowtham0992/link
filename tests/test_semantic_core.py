@@ -293,3 +293,14 @@ class RerankTierTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SemanticStatusCountTests(unittest.TestCase):
+    def test_cli_semantic_counts_all_memories_not_only_active(self):
+        # The index embeds every memory (archived included), so the status
+        # denominator must be the total: "Indexed 16 of 6" was comparing
+        # all-status indexed items against the active-only count.
+        link_py = Path(__file__).resolve().parents[1] / "link.py"
+        src = link_py.read_text(encoding="utf-8")
+        self.assertIn("memory_count=total_count", src)
+        self.assertNotIn("memory_count=active_count", src)

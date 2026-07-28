@@ -2061,10 +2061,11 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     records = _memory_records(wiki_dir)
-    active_count = len([
-        record for record in records
-        if str(record.get("status") or "active").lower() == "active"
-    ])
+    # The index embeds every memory (archived included — they stay inert in
+    # default recall but let --include-archived benefit from semantic
+    # matching), so the "Indexed X of Y" denominator must be the total,
+    # not the active count: 16-of-6 was nonsense.
+    total_count = len(records)
     action_error = ""
     action_result = ""
     if setup or rebuild:
@@ -2131,7 +2132,7 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                 )
     payload = _core_build_semantic_status(
         root,
-        memory_count=active_count,
+        memory_count=total_count,
         command_target=root,
         python_cmd=sys.executable,
         externally_managed=_core_python_is_externally_managed(),
