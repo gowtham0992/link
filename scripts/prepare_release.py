@@ -27,6 +27,7 @@ class ReleaseFiles:
     core_version: Path
     server_json: Path
     changelog: Path
+    homepage: Path
 
 
 def release_files(root: Path = ROOT) -> ReleaseFiles:
@@ -36,6 +37,7 @@ def release_files(root: Path = ROOT) -> ReleaseFiles:
         core_version=root / "mcp_package/link_core/version.py",
         server_json=root / "mcp_package/server.json",
         changelog=root / "CHANGELOG.md",
+        homepage=root / "docs/index.html",
     )
 
 
@@ -168,6 +170,21 @@ def update_changelog(text: str, version: str, release_date: str) -> str:
     return header + released + rest.lstrip()
 
 
+HOMEPAGE_BANNER_RE = re.compile(r"(New \\u00b7 Link )\d+\.\d+\.\d+( is out)")
+HOMEPAGE_TAG_RE = re.compile(r"(releases\\u002Ftag\\u002Fv)\d+\.\d+\.\d+")
+
+
+def update_homepage(text: str, version: str) -> str:
+    """Point the site's release banner at the version being released.
+
+    The banner advertises a download, so a stale number sends visitors to a
+    tag that does not exist yet — keep it in the release step, not in a
+    human's memory.
+    """
+    text = HOMEPAGE_BANNER_RE.sub(rf"\g<1>{version}\g<2>", text)
+    return HOMEPAGE_TAG_RE.sub(rf"\g<1>{version}", text)
+
+
 def prepare_release(root: Path, version: str, release_date: str, dry_run: bool = False) -> list[Path]:
     files = release_files(root)
     version = normalize_version(version)
@@ -182,6 +199,7 @@ def prepare_release(root: Path, version: str, release_date: str, dry_run: bool =
         files.core_version: update_core_version(files.core_version.read_text(encoding="utf-8"), version),
         files.server_json: update_server_json(files.server_json.read_text(encoding="utf-8"), version),
         files.changelog: update_changelog(files.changelog.read_text(encoding="utf-8"), version, release_date),
+        files.homepage: update_homepage(files.homepage.read_text(encoding="utf-8"), version),
     }
 
     changed = [path for path, text in updates.items() if path.read_text(encoding="utf-8") != text]
