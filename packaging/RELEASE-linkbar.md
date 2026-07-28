@@ -4,7 +4,31 @@
 2. PR develop -> main, wait for all 10 CI checks, merge (merge commit)
 3. `git switch main && git pull --ff-only && git tag -a v2.0.0 -m v2.0.0 && git push origin v2.0.0`
 4. PyPI + mcp-publisher (same as 1.7 runbook)
-5. Formula bump in the tap (url/sha for v2.0.0 tarball)
+5. Formula bump in the tap (url/sha for v2.0.0 tarball) AND replace the
+   caveats block with the version below — it is the only place a
+   `brew install` user learns LinkBar exists, and the MCP paragraph is
+   obsolete (1.7 self-provisions ~/.link-mcp-venv):
+
+   ```ruby
+   def caveats
+     <<~EOS
+       Try Link:
+         lnk proof                 # prove cross-agent memory in ~1 second
+         lnk try                   # the full demo wiki
+
+       Wire your agent (creates ~/link, provisions MCP, writes hooks):
+         lnk onboard --agent claude-code --hooks --write
+
+       Optional, macOS: put the review gate in your menu bar —
+       notifications when memory is captured, a global palette (Opt-Cmd-M),
+       and a live view of every Link surface:
+         brew install --cask gowtham0992/link/linkbar
+
+       Optional: meaning-based recall (one-time local model download):
+         lnk semantic ~/link --setup
+     EOS
+   end
+   ```
 6. **LinkBar zip**: `cd apps/LinkBar && bash Scripts/bundle.sh --release-zip`
    - attach `.build/LinkBar-1.0.0.zip` to the v2.0.0 GitHub release
 7. **Cask**: copy `packaging/linkbar.rb` to the tap as `Casks/linkbar.rb`,
