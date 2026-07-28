@@ -220,8 +220,7 @@ pulse while agents are writing, and a browser over every memory file —
 all running on the same reviewed `lnk` commands as the CLI.
 
 <p align="center">
-  <img src="docs/assets/linkbar-inbox.png" alt="LinkBar inbox: live agent pulse, session captures with Will-save previews and decision trails" width="380">
-  <img src="docs/assets/linkbar-status.png" alt="LinkBar status: health dots for CLI, workspace, MCP, hooks, recall tier, and viewer with one-click fixes" width="380">
+  <img src="docs/assets/linkbar-tour.gif" alt="LinkBar cycling through its tabs: review inbox with live agent pulse and capture previews, memory browser, status dashboard, and settings" width="424">
 </p>
 
 ```bash

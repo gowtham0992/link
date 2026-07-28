@@ -281,9 +281,13 @@ final class LinkStore: ObservableObject {
         // Recall power (semantic tier)
         if let sem = semantic {
             if sem.enabled, let tier = sem.tier {
+                // `tier` is a full descriptive sentence ("fast (static
+                // embeddings; instant load, …)"); the row wants the tier
+                // name only, or .capitalized title-cases the whole thing.
+                let name = tier.split(separator: " ").first.map(String.init) ?? tier
                 let rerank = (sem.rerankReady == true) ? " + rerank" : ""
                 rows.append(.init(icon: "sparkle.magnifyingglass", name: "Recall", level: .ok,
-                                  detail: "\(tier.capitalized) semantic\(rerank)"))
+                                  detail: "\(name.capitalized) tier\(rerank) · \(sem.provider ?? "semantic")"))
             } else {
                 rows.append(.init(icon: "sparkle.magnifyingglass", name: "Recall", level: .info,
                                   detail: "Lexical only — no semantic matching yet",
