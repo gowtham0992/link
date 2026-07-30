@@ -9,7 +9,7 @@ import UserNotifications
 /// the code signature. `probeAuthorization` answers that on the real machine
 /// so we know whether this feature is free or needs the $99 signed build.
 @MainActor
-final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
+final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
     private let acceptAction = "LINK_ACCEPT"
@@ -106,9 +106,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// Report the current authorization status — the ad-hoc-signing answer.
     /// Invoked by `LINKBAR_NOTIFY_TEST=1` on the installed bundle.
     func probeAuthorization(_ done: @escaping (String) -> Void) {
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            center.getNotificationSettings { settings in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
                 let status: String
                 switch settings.authorizationStatus {
                 case .authorized: status = "authorized"

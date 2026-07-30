@@ -507,8 +507,38 @@ struct PopoverView: View {
 
     private func capturesSection(_ captures: CaptureInbox) -> some View {
         VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
-            SectionHeader(title: "Session captures", count: captures.count, highlight: captures.count > 0)
-            ForEach(captures.captures.prefix(3)) { capture in
+            HStack(spacing: 8) {
+                SectionHeader(title: "Session captures", count: captures.count, highlight: captures.count > 0)
+                Spacer()
+                if captures.count >= 3 {
+                    Button("Clean up") { store.dedupCaptures() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Remove captures that repeat what's already pending, accepted, or dismissed")
+                }
+            }
+            // The whole backlog is reviewable, not just the top of it — a
+            // 20-item inbox behind a 3-row window is a wall, not a review.
+            captureRows(captures)
+        }
+    }
+
+    @ViewBuilder
+    private func captureRows(_ captures: CaptureInbox) -> some View {
+        if captures.captures.count > 4 {
+            ScrollView {
+                VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+                    captureRowList(captures)
+                }
+            }
+            .frame(maxHeight: 300)
+        } else {
+            captureRowList(captures)
+        }
+    }
+
+    private func captureRowList(_ captures: CaptureInbox) -> some View {
+        ForEach(captures.captures) { capture in
                 HoverRow {
                     HStack(alignment: .center, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -578,12 +608,11 @@ struct PopoverView: View {
                         } label: { Image(systemName: "trash") }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("Discard this capture")
+                            .help("Discard this capture — Link remembers the dismissal and won't re-propose it")
                     }
                 }
             }
         }
-    }
 
     // MARK: activity, idle, footer
 

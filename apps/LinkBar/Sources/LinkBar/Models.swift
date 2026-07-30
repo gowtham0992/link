@@ -169,6 +169,21 @@ struct RememberResult: Decodable {
     let message: String?
 }
 
+/// `lnk dedup-captures --confirm --json`: which inbox captures were removed
+/// because they offered nothing new (already pending, accepted, or dismissed).
+struct DedupCapturesResult: Decodable {
+    let applied: Bool
+    let removed: [String]
+    let keptCount: Int
+    let removableCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case applied, removed
+        case keptCount = "kept_count"
+        case removableCount = "removable_count"
+    }
+}
+
 // MARK: - Status dashboard payloads
 
 /// `lnk verify-mcp --json`: is the MCP server reachable and version-matched?
