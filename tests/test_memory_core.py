@@ -1465,3 +1465,112 @@ class ProposalDurabilityRankingTests(unittest.TestCase):
         text = "I only merge with squash commits. I always run the linter before pushing."
         proposals = propose_memories_from_text(text, [])["proposals"]
         self.assertIn("squash", proposals[0]["memory"])
+
+
+class MiningQualityTests(unittest.TestCase):
+    """2.1 extraction quality: questions, hearsay, ephemeral scope, ranking."""
+
+    def test_questions_never_classify_even_with_absolutes(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        for question in (
+            "number of walkers is always fixed?",
+            "Should we always deploy on Fridays?",
+            "Why does the linter never flag this file?",
+        ):
+            self.assertIsNone(classify_memory_segment(question), question)
+
+    def test_questions_sink_in_durability_rank(self):
+        from mcp_package.link_core.memory import memory_durability_rank
+        self.assertLess(
+            memory_durability_rank("number of walkers is always fixed?"),
+            memory_durability_rank("User wants to set some conventions going forward."),
+        )
+
+    def test_bare_imperatives_outrank_meta_preambles(self):
+        from mcp_package.link_core.memory import memory_durability_rank
+        imperative = memory_durability_rank("Plot the loss curve every 500 steps.")
+        preamble = memory_durability_rank("User wants to set some conventions for this repo.")
+        concrete = memory_durability_rank("I always plot the loss curve every 500 steps.")
+        self.assertGreater(imperative, preamble)
+        self.assertGreater(concrete, imperative)
+
+    def test_pasted_hearsay_absolutes_do_not_classify(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        for hearsay in (
+            "People on Reddit emphasize that they heavily screen for candidates who do not outsource their thinking.",
+            "Reviewers never accept generic cover letters according to that thread.",
+            "The blog post says teams always squash their commits before merging.",
+        ):
+            self.assertIsNone(classify_memory_segment(hearsay), hearsay)
+
+    def test_user_voice_and_imperative_absolutes_still_classify(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        for direct in (
+            "I never commit directly to main.",
+            "never push to main directly, releases go through PRs.",
+            "Please always ask before deleting files.",
+            "The user does not prefer short release notes anymore; write detailed notes.",
+        ):
+            self.assertIsNotNone(classify_memory_segment(direct), direct)
+
+    def test_time_scoped_observations_do_not_classify(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        self.assertIsNone(classify_memory_segment(
+            "We concluded the vendor change does not affect us this quarter."
+        ))
+
+    def test_proposal_fingerprint_ignores_case_and_punctuation(self):
+        from mcp_package.link_core.memory import proposal_fingerprint
+        self.assertEqual(
+            proposal_fingerprint("User always plots the loss curve!"),
+            proposal_fingerprint("  user ALWAYS plots — the loss curve.  "),
+        )
+
+    def test_exclude_fingerprints_skips_matching_proposals(self):
+        from mcp_package.link_core.memory import (
+            proposal_fingerprint,
+            propose_memories_from_text,
+        )
+        text = "I always plot the loss curve every 500 steps."
+        mined = propose_memories_from_text(text, [])["proposals"][0]["memory"]
+        excluded = propose_memories_from_text(
+            text, [], exclude_fingerprints={proposal_fingerprint(str(mined))}
+        )
+        self.assertEqual(excluded["count"], 0)
+        self.assertEqual(excluded["skipped_count"], 1)
+
+    def test_decision_cue_outranks_bare_absolute_typing(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        revision = classify_memory_segment(
+            "We decided the backend API does not listen on port 8080 anymore; local development now binds port 9000."
+        )
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision["memory_type"], "decision")
+
+    def test_polarity_flip_is_not_an_echo(self):
+        from mcp_package.link_core.memory import is_existing_memory_echo
+        records = [{
+            "name": "ruff", "status": "active", "memory_type": "decision",
+            "title": "Python linting uses Ruff",
+            "tldr": "Project decided Python linting uses Ruff through the shared config file; CI runs it on every push.",
+            "body": "",
+        }]
+        update = "We decided Python linting does not use Ruff anymore; linting now runs through Biome with the shared config."
+        restatement = "Per your saved preference, Python linting uses Ruff through the shared config file; CI runs it on every push."
+        self.assertFalse(is_existing_memory_echo(records, update))
+        self.assertTrue(is_existing_memory_echo(records, restatement))
+
+    def test_boilerplate_overlap_does_not_create_conflicts(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        records = [{
+            "name": "squash", "status": "active", "memory_type": "decision", "scope": "project",
+            "title": "Pull requests are squash-merged",
+            "tldr": "Project decided pull requests are squash-merged; main history stays linear.",
+            "body": "",
+        }]
+        candidates = memory_conflict_candidates(
+            records,
+            "Project decided: The backend API listens on port 8080 in local development; the frontend proxies /api there.",
+            "API port", "decision", "project",
+        )
+        self.assertEqual(candidates, [])

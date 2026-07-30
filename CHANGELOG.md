@@ -6,6 +6,78 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+The inbox-zero release. 2.0 put the review gate in your menu bar; this
+release makes sure there's nothing in it twice. Every change comes from
+dogfooding the automatic pipeline against a real inbox that had grown to 20
+pending captures — five of them the same conversation captured five times.
+
+### Added
+
+- **Dismissal ledger** — deleting a capture now records its proposal
+  fingerprints in `raw/memory-captures/.dismissed-proposals.json`, so a
+  dismissed proposal never re-enters the inbox from a later session of any
+  conversation. Dismissal becomes a decision Link remembers. Inbox previews
+  and `accept-capture` indices exclude dismissed proposals consistently.
+- **One capture per conversation** — a session-end for a conversation that
+  already has a pending capture refreshes that capture in place (same file,
+  newer transcript, newer proposals) instead of stacking a near-duplicate.
+  Captures carry a `conversation:` identity in frontmatter.
+- **Cross-conversation proposal dedup** — the session-end hook drops
+  proposals already waiting for review in another capture, with an honest
+  decision-trail line naming where ("already waiting for review in ...").
+- **`lnk dedup-captures`** — collapses inbox captures that offer nothing new
+  (already pending in a newer capture, accepted as memory, or dismissed;
+  or proposal-free). Dry-run by default, `--confirm` applies, `--json` for
+  tooling. Surfaced in LinkBar as a "Clean up" button on the inbox.
+- **Memory-hygiene benchmark v2** — the fixture now contains the junk we
+  actually observed in the wild, not just the junk we predicted: quiz/debug
+  questions carrying absolute keywords, pasted third-party AI advice inside
+  user turns, and verbatim cross-session repeats (142 events, up from 112).
+  Gated junk stays **0%**; the ungated baseline rises to 36.5%.
+  Current-truth precision@1 improves to 0.857. Contradiction exposure is
+  reported honestly at 0.583 — worse on paper than v1's 0.333 because v1
+  silently measured only 9 of its 12 revisions and its false conflicts
+  masked real exposure (see benchmarks/RESULTS.md for the full disclosure).
+
+### Fixed
+
+- **Questions are no longer proposed as memories.** "number of walkers is
+  always fixed?" matched the preference cue on "always" and — worse —
+  ranked as a top durable memory. Interrogatives are now excluded from
+  classification and sunk by the durability ranker.
+- **Pasted third-party prose is no longer attributed to the user.** Bare
+  absolutes ("always", "never", "do not") now require the user's own voice
+  (first person, "please", or imperative-initial phrasing) — quoted advice
+  like "People on Reddit emphasize... never accept..." no longer becomes a
+  proposed user preference.
+- **False memory conflicts from boilerplate overlap.** "API listens on port
+  8080 in local development" conflicted with a squash-merge rule because
+  "development" read as a git branch and "decided/decision" counted as
+  shared subject matter. Boilerplate tokens no longer count as evidence.
+- **Revisions are no longer swallowed by the echo guard.** "We decided X
+  does not apply anymore" restates enough of the original claim that echo
+  containment dropped the update, keeping the stale memory alive forever. A
+  polarity flip now marks a candidate as a revision, not a restatement.
+- **Revision sentences type consistently with what they revise.** "We
+  decided X does not ... anymore" now classifies as a decision (the explicit
+  decision cue outranks the bare-absolute preference fallback), so conflict
+  detection sees the contradiction instead of skipping on a type/scope
+  mismatch.
+- Time-scoped observations ("does not affect us this quarter") are no
+  longer proposed as durable memory.
+- Bare imperative directives ("Plot the loss curve every 500 steps") now
+  outrank meta-preambles in proposal ordering instead of scoring zero.
+- **LinkBar palette**: a failed `lnk` call no longer reports "a similar or
+  conflicting memory exists" (it now says it couldn't reach `lnk`); typing
+  again within 1.1s of a confirmation no longer wipes the panel from under
+  you; a slow recall response for an old query can no longer overwrite the
+  results of a newer one.
+- **LinkBar inbox at backlog scale**: the full capture list is reviewable
+  (scrollable past 4 items) instead of showing only the top 3 of a
+  20-item backlog behind a count badge.
+- LinkBar builds with zero Swift warnings (actor-isolation conformance,
+  Sendable captures, and two lint-level warnings cleared).
+
 ## [2.0.0] - 2026-07-27
 
 Link gets a face. The memory layer is unchanged in shape — plain Markdown,

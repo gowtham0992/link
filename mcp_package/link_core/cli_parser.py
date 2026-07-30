@@ -25,8 +25,8 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Review & governance", (
         "memory-inbox", "review-memory", "explain-memory", "consolidate",
-        "capture-inbox", "accept-capture", "delete-capture", "redact-capture",
-        "capture-session", "propose-memories", "update-memory",
+        "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
+        "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
         "set-memory-visibility", "memory-log", "memory-audit",
     )),
@@ -319,6 +319,11 @@ def build_cli_parser(
     delete_capture_cmd.add_argument("target", nargs="?", default=".")
     delete_capture_cmd.add_argument("--confirm", action="store_true", help="required to delete the capture")
     delete_capture_cmd.add_argument("--json", action="store_true", help="print machine-readable deletion details")
+
+    dedup_captures_cmd = sub.add_parser("dedup-captures", help="collapse review-inbox captures that offer nothing new")
+    dedup_captures_cmd.add_argument("target", nargs="?", default=".")
+    dedup_captures_cmd.add_argument("--confirm", action="store_true", help="delete the redundant captures (dry-run without it)")
+    dedup_captures_cmd.add_argument("--json", action="store_true", help="print machine-readable dedup details")
 
     update_memory_cmd = sub.add_parser("update-memory", help="merge new text into an existing memory")
     update_memory_cmd.add_argument("identifier", help="memory page name, title, or path")
@@ -727,6 +732,12 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["delete-capture"](
             Path(args.target),
             args.capture,
+            confirm=args.confirm,
+            json_output=args.json,
+        )
+    if command == "dedup-captures":
+        return handlers["dedup-captures"](
+            Path(args.target),
             confirm=args.confirm,
             json_output=args.json,
         )

@@ -19,6 +19,7 @@ EXPECTED_CLI_COMMANDS = {
     "connect",
     "consolidate",
     "compliance-export",
+    "dedup-captures",
     "delete-capture",
     "demo",
     "doctor",

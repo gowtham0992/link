@@ -4,7 +4,7 @@ from __future__ import annotations
 import fnmatch
 import re
 import urllib.parse
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -184,6 +184,31 @@ def compact_memory_text(value: str) -> str:
         for token in re.split(r"[^a-z0-9]+", value.lower())
         if token
     )
+
+
+def proposal_fingerprint(memory: str) -> str:
+    """Stable identity for a proposed memory across captures and sessions.
+
+    Keyed on the normalized token stream so cosmetic differences (case,
+    punctuation, whitespace) don't defeat dedup when the same claim is
+    re-mined from a longer transcript of the same conversation.
+    """
+    import hashlib
+
+    compact = compact_memory_text(str(memory or ""))
+    return hashlib.sha256(compact.encode("utf-8")).hexdigest()[:16]
+
+
+def is_interrogative(text: str) -> bool:
+    """True when the sentence is a question, not a statement.
+
+    Questions from quizzes, debugging back-and-forth, and rubber-ducking
+    ("number of walkers is always fixed?") read as durable directives to the
+    cue regexes because they can contain "always"/"never"; a question is
+    never a preference the user asserted.
+    """
+    stripped = str(text or "").strip().rstrip("\"'”’)]}»")
+    return stripped.endswith("?")
 
 
 def significant_memory_tokens(value: str) -> set[str]:
@@ -2520,6 +2545,7 @@ def is_existing_memory_echo(
     candidate_tokens = stemmed_memory_tokens(significant_memory_tokens(text))
     if not candidate_tokens:
         return False
+    candidate_negated = has_negation(text)
     for record in records:
         if not is_active_memory(record):
             continue
@@ -2530,6 +2556,12 @@ def is_existing_memory_echo(
             " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")]),
             procedure_steps_excerpt(str(record.get("body") or ""), max_chars=600),
         ]
+        # A candidate that flips the stored claim's polarity ("does not use
+        # Ruff anymore" over "uses Ruff") is a revision, not a restatement —
+        # containment would swallow the update and let the stale memory live
+        # forever (found by the hygiene benchmark's revision track).
+        if candidate_negated != has_negation(views[0]):
+            continue
         for view in views:
             view_tokens = stemmed_memory_tokens(significant_memory_tokens(view))
             if len(view_tokens) < 4:
@@ -2642,6 +2674,15 @@ def memory_duplicate_candidates(
     return [candidate for _, candidate in candidates[:limit]]
 
 
+# Memory boilerplate: tokens that appear in most stored claims ("decision",
+# "project", "prefers", ...) and would connect unrelated memories if they
+# counted as evidence of a shared subject.
+_CONFLICT_CUE_TOKENS = {
+    "decision", "decid", "project", "team", "user", "prefer",
+    "use", "agent", "memory", "through", "now", "anymore",
+}
+
+
 def memory_conflict_candidates(
     records: Iterable[Mapping[str, object]],
     text: str,
@@ -2675,7 +2716,10 @@ def memory_conflict_candidates(
             continue
         record_type = str(record.get("memory_type") or "")
         record_scope = str(record.get("scope") or "")
-        if record_type != memory_type:
+        # Preferences and decisions cross-match: "we decided X" is often
+        # revised as "we don't do X anymore" (a preference-shaped sentence),
+        # and a type boundary here would let the contradiction coexist.
+        if record_type != memory_type and {record_type, memory_type} != {"preference", "decision"}:
             continue
         if scope != record_scope and "global" not in {scope, record_scope}:
             continue
@@ -2702,17 +2746,10 @@ def memory_conflict_candidates(
             re.search(r"\b(?:anymore|no longer|instead of|replace[sd]?|settled on)\b", new_text, re.IGNORECASE)
         )
         if revision_cue:
-            # Compare subjects, not phrasing: memory boilerplate tokens
-            # ("decision", "project", "prefers", ...) appear in most claims
-            # and would connect unrelated memories.
-            cue_tokens = {
-                "decision", "decid", "project", "team", "user", "prefer",
-                "use", "agent", "memory", "through", "now", "anymore",
-            }
             head_tokens = stemmed_memory_tokens(significant_memory_tokens(
                 " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")])
-            )) - cue_tokens
-            new_stemmed = stemmed_memory_tokens(new_tokens) - cue_tokens
+            )) - _CONFLICT_CUE_TOKENS
+            new_stemmed = stemmed_memory_tokens(new_tokens) - _CONFLICT_CUE_TOKENS
             head_overlap = head_tokens & new_stemmed
             if len(head_tokens) >= 3 and len(head_overlap) >= 2 and (
                 len(head_overlap) / len(head_tokens) >= 0.5
@@ -2739,7 +2776,15 @@ def memory_conflict_candidates(
                     and bool(record_all_tokens & context)
                 )
             )
-            if len(overlap) >= 2 or context_matches:
+            # Boilerplate overlap ("decided", "decision") is not evidence of
+            # a shared subject — it once connected "API listens on port 8080
+            # in local development" to a squash-merge rule via the branch
+            # word "development" (found by the hygiene benchmark).
+            meaningful_overlap = [
+                token for token in overlap
+                if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS
+            ]
+            if len(meaningful_overlap) >= 2 or context_matches:
                 score = max(score, 88)
                 reasons.append(f"different_{group}")
 
@@ -2973,12 +3018,37 @@ def _preamble_trim_candidates(text: str) -> list[str]:
     return candidates
 
 
+# Bare absolutes ("always", "never", "do not") only signal a preference when
+# the sentence is anchored to the user's own voice. Without the anchor they
+# match hearsay the user merely pasted — quiz questions, quoted advice, another
+# AI's prose ("People on Reddit emphasize... never accept...") — and the
+# pipeline attributes someone else's words to the user (found in dogfooding).
+_BARE_ABSOLUTE_CUE = r"\b(?:please\s+)?(?:always|never|avoid|do not|don't|does not|doesn't)\b"
+# "please" counts as voice: a bare "Please always ask before deleting" is the
+# user addressing the agent directly, not quoted third-party advice.
+_FIRST_PERSON_RE = re.compile(r"\b(?:i|we|my|our|me|us|user|human|please)\b")
+# Imperative-initial absolutes ("Never push to main directly") are commands
+# addressed to the agent; pasted hearsay puts a third-party subject before
+# the absolute ("reviewers never accept...", "teams always benefit...").
+_IMPERATIVE_ABSOLUTE_RE = re.compile(r"^(?:no,?\s+)?(?:please\s+)?(?:always|never|avoid|do not|don't)\b")
+
+
 def classify_memory_segment(segment: str) -> dict[str, object] | None:
     text = segment.strip()
+    if is_interrogative(text):
+        return None
     lower = text.lower()
     if any(cue in lower for cue in ("maybe", "might", "not sure", "wondering", "considering", "could later")):
         return None
+    # Time-scoped observations ("does not affect us this quarter") expire on
+    # their own; storing them as durable memory plants future staleness.
+    if any(cue in lower for cue in ("this quarter", "this week", "this sprint", "this month")):
+        return None
 
+    # Order matters: an explicit decision cue ("we decided") outranks the
+    # bare-absolute preference fallback, so "We decided X does not apply
+    # anymore" types as a decision — same type and scope as the memory it
+    # revises, which is what lets conflict detection see the contradiction.
     checks: list[tuple[str, str, int, str, tuple[str, ...]]] = [
         (
             "preference",
@@ -2987,9 +3057,7 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
             "Matched an explicit user preference cue.",
             (
                 r"\b(?:i|user|human)\s+(?:prefer|prefers|like|likes|want|wants|need|needs)\b",
-                r"\b(?:please\s+)?(?:always|never|avoid|do not|don't)\b",
                 r"\bagents?\s+should\s+(?:always|never|prefer|avoid|use)\b",
-                r"\b(?:from now on|going forward)\b",
                 r"\b(?:i|we)\s+only\s+(?:push|use|deploy|commit|merge|release|write|run|work|ship)\b",
             ),
         ),
@@ -3022,12 +3090,34 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
                 r"\b(?:i am|i work|user is|user works|user has|my role|my timezone)\b",
             ),
         ),
+        (
+            "preference",
+            "user",
+            90,
+            "Matched an explicit user preference cue.",
+            (
+                _BARE_ABSOLUTE_CUE,
+                r"\b(?:from now on|going forward)\b",
+            ),
+        ),
     ]
 
     for candidate in _preamble_trim_candidates(text):
         candidate_lower = candidate.lower()
         for memory_type, scope, score, reason, patterns in checks:
-            if any(re.search(pattern, candidate_lower) for pattern in patterns):
+            matched = False
+            for pattern in patterns:
+                if not re.search(pattern, candidate_lower):
+                    continue
+                if (
+                    pattern is _BARE_ABSOLUTE_CUE
+                    and not _FIRST_PERSON_RE.search(candidate_lower)
+                    and not _IMPERATIVE_ABSOLUTE_RE.search(candidate_lower)
+                ):
+                    continue
+                matched = True
+                break
+            if matched:
                 memory = normalize_proposed_memory(candidate, memory_type)
                 return {
                     "memory": memory,
@@ -3108,6 +3198,15 @@ _CONCRETE_DIRECTIVE_RE = re.compile(
     r"|\b(?:i|we)\s+(?:prefer|use|deploy|merge|commit|run|ship|release|test|"
     r"avoid|write|require|keep|review|pin|target)\b"
 )
+# Bare imperatives ("Plot the loss curve every 500 steps") carry a real
+# directive without a subject pronoun or absolute qualifier, so neither
+# regex above sees them and they lose ties to weak "wants to..." phrasings.
+# One tier below concrete: an explicit "I always..." still outranks them.
+_IMPERATIVE_DIRECTIVE_RE = re.compile(
+    r"(?i)^(?:please\s+)?(?:plot|use|run|keep|avoid|prefer|write|test|commit|"
+    r"merge|deploy|pin|target|ship|release|review|log|save|store|name|format|"
+    r"add|include|skip|drop|wrap|indent|check)\b"
+)
 
 
 def memory_durability_rank(memory: str) -> int:
@@ -3117,10 +3216,16 @@ def memory_durability_rank(memory: str) -> int:
     concrete directives outrank vague meta-statements about wanting rules.
     """
     text = str(memory or "").strip()
+    # A question is never a directive, even when it contains "always"/"never"
+    # ("number of walkers is always fixed?") — sink it below everything.
+    if is_interrogative(text):
+        return -3
     rank = 0
     if _CONCRETE_DIRECTIVE_RE.search(text):
         rank += 2
-    if _META_PREAMBLE_RE.search(text) and not _CONCRETE_DIRECTIVE_RE.search(text):
+    elif _IMPERATIVE_DIRECTIVE_RE.search(text):
+        rank += 1
+    if _META_PREAMBLE_RE.search(text) and rank <= 0:
         rank -= 2
     return rank
 
@@ -3133,9 +3238,11 @@ def propose_memories_from_text(
     writes_memory: bool = False,
     project: str | None = None,
     command_target: str | Path = ".",
+    exclude_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
     record_list = [dict(record) for record in records]
     project_name = normalize_project(project)
+    excluded = set(exclude_fingerprints)
     proposals: list[dict[str, object]] = []
     seen: set[str] = set()
     skipped = 0
@@ -3145,6 +3252,9 @@ def propose_memories_from_text(
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
+        if excluded and proposal_fingerprint(memory) in excluded:
+            skipped += 1
+            continue
         memory_type = "procedure"
         scope = "project" if project_name else "user"
         title = proposal_title(candidate["trigger"] or memory, memory_type)
@@ -3195,6 +3305,9 @@ def propose_memories_from_text(
             skipped += 1
             continue
         seen.add(dedupe_key)
+        if excluded and proposal_fingerprint(memory) in excluded:
+            skipped += 1
+            continue
         memory_type = str(classified["memory_type"])
         scope = str(classified["scope"])
         title = proposal_title(memory, memory_type)

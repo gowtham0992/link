@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 
 from .files import atomic_write_text
 from .frontmatter import frontmatter_string, parse_frontmatter
 from .log import utc_timestamp
 from .mcp_verify import display_command
-from .memory import normalize_project, propose_memories_from_text, slugify
+from .memory import (
+    normalize_project,
+    proposal_fingerprint,
+    propose_memories_from_text,
+    slugify,
+)
 from .security import redact_secret_values, secret_value_warnings
 
 
@@ -88,6 +93,143 @@ def capture_filename(timestamp: str, title: str, raw_dir: Path) -> Path:
             return raw_dir / f"{base}-{os.getpid()}.md"
 
 
+DISMISSED_LEDGER_LIMIT = 500
+
+
+def dismissed_ledger_path(root: Path) -> Path:
+    """The dismissed-proposals ledger (dotfile: invisible to the inbox scan)."""
+    return root.expanduser().resolve() / "raw" / "memory-captures" / ".dismissed-proposals.json"
+
+
+def load_dismissed_fingerprints(root: Path) -> dict[str, dict[str, str]]:
+    """Fingerprints of proposals the user already dismissed.
+
+    Dismissal is a decision Link remembers: without it, deleting a junk
+    capture just schedules the same proposal to reappear at the next
+    session-end of the same conversation.
+    """
+    import json
+
+    path = dismissed_ledger_path(root)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    entries = payload.get("fingerprints") if isinstance(payload, dict) else None
+    if not isinstance(entries, dict):
+        return {}
+    return {
+        str(fp): {
+            "memory": str(entry.get("memory") or "") if isinstance(entry, dict) else "",
+            "dismissed_at": str(entry.get("dismissed_at") or "") if isinstance(entry, dict) else "",
+        }
+        for fp, entry in entries.items()
+    }
+
+
+def record_dismissed_proposals(root: Path, memories: list[str]) -> int:
+    """Add proposal fingerprints to the dismissed ledger; returns count added.
+
+    Bounded FIFO (oldest dismissals fall off past DISMISSED_LEDGER_LIMIT) so
+    the ledger can't grow without limit over years of sessions.
+    """
+    import json
+
+    texts = [str(memory or "").strip() for memory in memories]
+    texts = [text for text in texts if text]
+    if not texts:
+        return 0
+    entries = load_dismissed_fingerprints(root)
+    added = 0
+    stamp = utc_timestamp()
+    for text in texts:
+        fingerprint = proposal_fingerprint(text)
+        if fingerprint in entries:
+            continue
+        entries[fingerprint] = {"memory": text[:160], "dismissed_at": stamp}
+        added += 1
+    if not added:
+        return 0
+    # dicts preserve insertion order: trimming from the front drops oldest.
+    if len(entries) > DISMISSED_LEDGER_LIMIT:
+        for stale in list(entries.keys())[: len(entries) - DISMISSED_LEDGER_LIMIT]:
+            del entries[stale]
+    path = dismissed_ledger_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, json.dumps({"fingerprints": entries}, indent=2) + "\n")
+    return added
+
+
+def capture_proposal_fingerprints(text: str, project: str | None = None) -> set[str]:
+    """Fingerprints of everything a saved capture would propose on re-mining."""
+    mining_text = capture_proposal_source(text)
+    if mining_text is None:
+        _, mining_text = capture_notes_from_markdown(text)
+    if not mining_text:
+        return set()
+    mined = propose_memories_from_text(mining_text, [], limit=10, project=project)
+    proposals = mined.get("proposals")
+    items: list[object] = proposals if isinstance(proposals, list) else []
+    return {
+        proposal_fingerprint(str(item.get("memory") or ""))
+        for item in items
+        if isinstance(item, dict) and str(item.get("memory") or "").strip()
+    }
+
+
+def pending_proposal_fingerprints(
+    root: Path,
+    *,
+    exclude_conversation: str | None = None,
+) -> dict[str, str]:
+    """Map of proposal fingerprint -> capture rel-path across pending captures.
+
+    Lets a session-end hook see what other conversations already put in the
+    review inbox, so the same claim is never waiting in two places.
+    """
+    root = root.expanduser().resolve()
+    capture_dir = root / "raw" / "memory-captures"
+    if not capture_dir.exists():
+        return {}
+    fingerprints: dict[str, str] = {}
+    for path in sorted(capture_dir.rglob("*.md")):
+        if path.name.startswith("."):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        meta, _ = parse_frontmatter(text)
+        if exclude_conversation and str(meta.get("conversation") or "") == exclude_conversation:
+            continue
+        rel = path.relative_to(root).as_posix()
+        project_name = normalize_project(str(meta.get("project") or ""))
+        for fingerprint in capture_proposal_fingerprints(text, project=project_name):
+            fingerprints.setdefault(fingerprint, rel)
+    return fingerprints
+
+
+def find_conversation_capture(root: Path, conversation_id: str) -> Path | None:
+    """The pending capture already holding this conversation, if any."""
+    conversation = str(conversation_id or "").strip()
+    if not conversation:
+        return None
+    root = root.expanduser().resolve()
+    capture_dir = root / "raw" / "memory-captures"
+    if not capture_dir.exists():
+        return None
+    for path in sorted(capture_dir.rglob("*.md")):
+        if path.name.startswith("."):
+            continue
+        try:
+            meta, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        if str(meta.get("conversation") or "") == conversation:
+            return path
+    return None
+
+
 def write_session_capture(
     root: Path,
     *,
@@ -100,6 +242,7 @@ def write_session_capture(
     path_source: bool = False,
     proposal_text: str | None = None,
     decision_trail: list[str] | None = None,
+    conversation_id: str | None = None,
 ) -> dict[str, object]:
     """Persist proposal-only session notes under raw/memory-captures.
 
@@ -125,8 +268,14 @@ def write_session_capture(
     secret_warnings = secret_value_warnings(notes)
     capture_dir = root / "raw" / "memory-captures"
     capture_dir.mkdir(parents=True, exist_ok=True)
-    capture_path = capture_filename(captured_at, capture_name, capture_dir)
+    conversation = str(conversation_id or "").strip()
+    # One capture per conversation: a session-end for a conversation that is
+    # already waiting in the inbox refreshes that file (newer transcript,
+    # newer proposals) instead of stacking a near-duplicate next to it.
+    refreshed_capture = find_conversation_capture(root, conversation) if conversation else None
+    capture_path = refreshed_capture or capture_filename(captured_at, capture_name, capture_dir)
     project_line = f'project: "{frontmatter_string(project_name)}"\n' if project_name else ""
+    conversation_line = f'conversation: "{frontmatter_string(conversation)}"\n' if conversation else ""
 
     # Proposal source: the user's own turns, redacted, so accept-time mining
     # reads exactly what the hook mined — not the assistant's prose beneath.
@@ -150,7 +299,7 @@ def write_session_capture(
 title: "{frontmatter_string(capture_name)}"
 source_type: conversation
 date_captured: "{captured_at}"
-{project_line}---
+{project_line}{conversation_line}---
 
 # {capture_name}
 
@@ -173,6 +322,8 @@ Captured locally for Link memory review. This raw note is proposal-only until th
         "project": project_name,
         "timestamp": captured_at,
         "secret_warnings": secret_warnings,
+        "conversation": conversation,
+        "refreshed": refreshed_capture is not None,
     }
 
 
@@ -388,8 +539,16 @@ def delete_capture_file(
     *,
     confirm: bool = False,
     max_capture_len: int | None = None,
+    record_dismissals: bool = True,
 ) -> dict[str, object]:
-    """Delete a saved raw capture only after explicit confirmation."""
+    """Delete a saved raw capture only after explicit confirmation.
+
+    A confirmed delete is the user declining the capture's proposals, so the
+    proposal fingerprints are recorded as dismissed — the same claims won't
+    re-enter the inbox from the next session of the same conversation.
+    (`record_dismissals=False` is for dedup cleanup, where the surviving
+    duplicate must stay proposable.)
+    """
     root = root.expanduser().resolve()
     capture_path = resolve_capture_file(root, capture, max_len=max_capture_len)
     if capture_path is None:
@@ -403,14 +562,103 @@ def delete_capture_file(
         "deleted": False,
         "path": rel_path,
         "confirmation_required": not confirm,
+        "dismissed_count": 0,
     }
     if not confirm:
         return payload
+
+    if record_dismissals:
+        try:
+            text = capture_path.read_text(encoding="utf-8", errors="replace")
+            meta, _ = parse_frontmatter(text)
+            mining_text = capture_proposal_source(text)
+            if mining_text is None:
+                _, mining_text = capture_notes_from_markdown(text)
+            mined = propose_memories_from_text(
+                mining_text or "", [], limit=10,
+                project=normalize_project(str(meta.get("project") or "")),
+            )
+            proposals = mined.get("proposals")
+            items: list[object] = proposals if isinstance(proposals, list) else []
+            memories = [
+                str(item.get("memory") or "")
+                for item in items
+                if isinstance(item, dict)
+            ]
+            payload["dismissed_count"] = record_dismissed_proposals(root, memories)
+        except OSError:
+            pass
 
     capture_path.unlink()
     payload["deleted"] = True
     payload["confirmation_required"] = False
     return payload
+
+
+def dedup_pending_captures(
+    root: Path,
+    *,
+    accepted_fingerprints: Collection[str] = (),
+    apply: bool = False,
+) -> dict[str, object]:
+    """Collapse the review inbox: drop captures that offer nothing new.
+
+    Walks pending captures newest-first (the newest copy of a conversation
+    carries the longest transcript, so it survives). A capture is removable
+    when everything it would propose is already covered — by a newer pending
+    capture, an accepted memory, or the dismissed ledger — or when it
+    proposes nothing at all. Dry-run by default; removed duplicates are NOT
+    added to the dismissed ledger, because the surviving copy must stay
+    proposable.
+    """
+    root = root.expanduser().resolve()
+    capture_dir = root / "raw" / "memory-captures"
+    covered: set[str] = set(accepted_fingerprints)
+    covered.update(load_dismissed_fingerprints(root))
+    kept: list[dict[str, object]] = []
+    removable: list[dict[str, object]] = []
+    entries: list[tuple[str, Path, str, str]] = []
+    if capture_dir.exists():
+        for path in capture_dir.rglob("*.md"):
+            if path.name.startswith("."):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            meta, _ = parse_frontmatter(text)
+            entries.append((str(meta.get("date_captured") or ""), path, text,
+                            normalize_project(str(meta.get("project") or ""))))
+    entries.sort(key=lambda item: (item[0], item[1].as_posix()), reverse=True)
+    for _, path, text, project_name in entries:
+        rel = path.relative_to(root).as_posix()
+        fingerprints = capture_proposal_fingerprints(text, project=project_name)
+        if not fingerprints:
+            removable.append({"path": rel, "reason": "no_proposals"})
+            continue
+        fresh = fingerprints - covered
+        if not fresh:
+            removable.append({"path": rel, "reason": "all_duplicates"})
+            continue
+        covered.update(fingerprints)
+        kept.append({"path": rel, "fresh_proposals": len(fresh)})
+    removed: list[str] = []
+    if apply:
+        for item in removable:
+            target = root / str(item["path"])
+            try:
+                target.unlink()
+                removed.append(str(item["path"]))
+            except OSError:
+                continue
+    return {
+        "applied": apply,
+        "kept": kept,
+        "removable": removable,
+        "removed": removed,
+        "kept_count": len(kept),
+        "removable_count": len(removable),
+    }
 
 
 def cli_capture_commands(rel_path: str, command_target: str | Path = ".") -> dict[str, str]:
@@ -443,6 +691,7 @@ def capture_records(
         return []
     project_name = normalize_project(project)
     command_builder = commands_for or cli_capture_commands
+    dismissed = set(load_dismissed_fingerprints(root))
     records: list[dict[str, object]] = []
     for path in sorted(capture_dir.rglob("*.md")):
         if path.name.startswith("."):
@@ -467,8 +716,12 @@ def capture_records(
         # What Accept will actually save: mine from the user's own turns
         # (proposal source) the same way accept-capture does, so the preview
         # matches the outcome and never surfaces the assistant's prose.
+        # Dismissed proposals stay hidden here for the same reason: accept
+        # excludes them, so showing them would desync preview from outcome.
         mining_text = capture_proposal_source(text) or notes
-        mined = propose_memories_from_text(mining_text, [], source=rel, limit=3)
+        mined = propose_memories_from_text(
+            mining_text, [], source=rel, limit=3, exclude_fingerprints=dismissed,
+        )
         proposals_obj = mined.get("proposals")
         proposal_items: list[object] = proposals_obj if isinstance(proposals_obj, list) else []
         proposal_previews: list[dict[str, object]] = []
