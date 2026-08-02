@@ -2529,6 +2529,17 @@ def memory_applicability(
 ECHO_CONTAINMENT = 0.7
 
 
+# Words agents use when restating stored memory back into a transcript
+# ("Per your saved preference...", "Just confirming what we already know").
+# They never count as content novelty when deciding echo vs update.
+_ECHO_FRAMING_TOKENS = stemmed_memory_tokens({
+    "per", "saved", "save", "preference", "prefer", "confirming", "confirm",
+    "just", "know", "known", "already", "noted", "note", "again", "keep",
+    "keeping", "following", "follow", "memory", "link", "says", "say",
+    "session", "still", "remember", "reminder",
+})
+
+
 def is_existing_memory_echo(
     records: Iterable[Mapping[str, object]],
     text: str,
@@ -2568,6 +2579,16 @@ def is_existing_memory_echo(
                 continue
             containment = len(view_tokens & candidate_tokens) / len(view_tokens)
             if containment >= threshold:
+                # Updates add content; echoes add framing. A candidate that
+                # covers the stored claim AND brings several new content
+                # tokens ("ships only from release/* branches after
+                # sign-off") is a revision the conflict detector must see —
+                # not a restatement to swallow (hygiene benchmark, revision
+                # track: polarity can't separate these when the original
+                # claim also carries a negation like "only").
+                novel = candidate_tokens - view_tokens - _ECHO_FRAMING_TOKENS
+                if len(novel) >= 3:
+                    continue
                 return True
             # Mirrored test: a partial restatement contains little of the
             # full claim, but nearly all of ITS OWN tokens live inside the
@@ -2718,10 +2739,13 @@ def memory_conflict_candidates(
         record_scope = str(record.get("scope") or "")
         # Preferences and decisions cross-match: "we decided X" is often
         # revised as "we don't do X anymore" (a preference-shaped sentence),
-        # and a type boundary here would let the contradiction coexist.
-        if record_type != memory_type and {record_type, memory_type} != {"preference", "decision"}:
+        # and a type boundary here would let the contradiction coexist. The
+        # same classification jitter moves scope (preference->user,
+        # decision->project), so the cross-pair skips the scope gate too.
+        type_cross = {record_type, memory_type} == {"preference", "decision"}
+        if record_type != memory_type and not type_cross:
             continue
-        if scope != record_scope and "global" not in {scope, record_scope}:
+        if scope != record_scope and "global" not in {scope, record_scope} and not type_cross:
             continue
 
         record_text = memory_claim_text(record)
@@ -2751,8 +2775,14 @@ def memory_conflict_candidates(
             )) - _CONFLICT_CUE_TOKENS
             new_stemmed = stemmed_memory_tokens(new_tokens) - _CONFLICT_CUE_TOKENS
             head_overlap = head_tokens & new_stemmed
-            if len(head_tokens) >= 3 and len(head_overlap) >= 2 and (
-                len(head_overlap) / len(head_tokens) >= 0.5
+            coverage = len(head_overlap) / len(head_tokens) if head_tokens else 0.0
+            # Two shapes: a short head mostly covered (>= 0.5), or a detailed
+            # head where the revision hits >= 3 subject tokens at >= 0.4 —
+            # originals often carry specifics ("fixtures", "parametrize",
+            # "before noon") the revision legitimately drops.
+            if len(head_tokens) >= 3 and (
+                (len(head_overlap) >= 2 and coverage >= 0.5)
+                or (len(head_overlap) >= 3 and coverage >= 0.4)
             ):
                 score = max(score, 90)
                 reasons.append("revises_existing_claim")

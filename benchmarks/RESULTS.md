@@ -200,10 +200,10 @@ predicted:
 | metric | gated (Link) | ungated |
 |---|---|---|
 | junk stored (echo / self-brief / noise / question / pasted advice / repeat) | **0** (0.0%) | 31 (36.5%) |
-| contradiction exposure@3 after a revision | **0.583** | 0.750 |
-| active memories (ground truth: 54) | **47** | 85 |
-| as-of temporal accuracy (revised facts) | **1.00** | 1.00 |
-| current-truth precision@1 | **0.857** | 0.738 |
+| contradiction exposure@3 after a revision | **0.167** | 0.750 |
+| active memories (ground truth: 54) | **42** | 85 |
+| as-of temporal accuracy (revised facts) | **0.917** | 1.00 |
+| current-truth precision@1 | **0.881** | 0.738 |
 
 The ungated junk rate mirrors what users measure in production LLM-extraction
 systems (a public mem0 audit found 97.8% junk after 32 days, over half of it
@@ -211,27 +211,34 @@ the system's own prompt text re-ingested). Link's junk rate is zero **by
 construction**, and CI enforces it: the hygiene gate fails any change that
 stores junk or loses to the ungated baseline.
 
-Honest notes: gated contradiction exposure is 0.583, not zero — Link only
-supersedes contradictions its deterministic detector catches, and this
-benchmark grades that detector. The number is *worse on paper* than the
-0.333 we published for v1 of this fixture, for two honesty reasons: (a) v1
-silently measured only 9 of its 12 authored revisions, because 3 revision
-texts never classified as memory at all — v2 fixes classification, so all
-12 revisions now participate; (b) v1's conflict detector produced false
-positives that "resolved" unrelated memories by archiving them, which
-accidentally hid real exposure — v2 fixes the false conflicts (boilerplate
-tokens like "decided" no longer count as shared-subject evidence), so the
-exposure that remains is real. Detector recall on revision shapes is the
-active area for the next release. As before, the detection rules were
-developed against this same authored set, so these are fit numbers, not
-blind scores — contributed revision cases the detector has never seen are
-the real test, and we welcome them. "Zero junk by construction" means zero
-*self-inflicted* junk through automatic capture (echoes, self-briefs, noise,
-questions, pasted third-party advice, repeats); a user can still approve a
-bad memory — review gates shape what is proposed, not what humans decide.
-Current-truth precision no longer ties: the v2 extraction fixes (question
-filter, hearsay anchoring, boilerplate-free conflicts) lift the gated
-pipeline to 0.857 while the ungated store's duplicates dilute its top-1.
+Honest notes: gated contradiction exposure is 0.167, not zero — the
+deterministic detector now supersedes 10 of the 12 authored revision
+shapes. Getting there took three v2 fixes, each a general rule rather than
+a fixture patch: updates that add content tokens are no longer swallowed by
+the echo guard (echoes add framing, revisions add content); detailed
+original claims are matched at partial coverage (originals carry specifics
+a revision legitimately drops); and preference/decision classification
+jitter no longer blocks detection across the type/scope boundary. The two
+revisions that still expose are lexically disjoint rephrasings ("SQLite
+with FTS" revised as "DuckDB files with the same no-service rule") — the
+honest limit of a token-based detector, and the case for the semantic tier
+to take over in a future release. As-of accuracy is 0.917, not 1.00: one
+historical reconstruction breaks when a topically-adjacent conflict
+auto-resolves against the wrong original — an artifact of this benchmark's
+blind auto-supersede loop; in the product, conflicts route to human review.
+Along the way v1's numbers turned out flattered twice over: it silently
+measured only 9 of its 12 revisions (3 revision texts never classified as
+memory at all), and its false-positive conflicts archived unrelated
+memories in ways that hid real exposure. As before, the detection rules
+were developed against this same authored set, so these are fit numbers,
+not blind scores — contributed revision cases the detector has never seen
+are the real test, and we welcome them. "Zero junk by construction" means
+zero *self-inflicted* junk through automatic capture (echoes, self-briefs,
+noise, questions, pasted third-party advice, repeats); a user can still
+approve a bad memory — review gates shape what is proposed, not what humans
+decide. Current-truth precision no longer ties: the v2 extraction fixes
+lift the gated pipeline to 0.881 while the ungated store's duplicates
+dilute its top-1.
 
 ## Track 4: End-to-end QA under mem0's own harness
 

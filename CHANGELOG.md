@@ -28,16 +28,26 @@ pending captures — five of them the same conversation captured five times.
 - **`lnk dedup-captures`** — collapses inbox captures that offer nothing new
   (already pending in a newer capture, accepted as memory, or dismissed;
   or proposal-free). Dry-run by default, `--confirm` applies, `--json` for
-  tooling. Surfaced in LinkBar as a "Clean up" button on the inbox.
+  tooling. Surfaced in LinkBar as a "Clean up" button on the inbox, and as
+  the MCP `admin` action `dedup_captures` for agents.
+- **LinkBar: "Why does Link believe this?"** — tap any memory in the browser
+  to expand its trust card: the claim, whether default recall will use it
+  (with the reason), where it came from, when it was captured and reviewed,
+  and any open quality issues — `lnk explain-memory` made ambient.
 - **Memory-hygiene benchmark v2** — the fixture now contains the junk we
   actually observed in the wild, not just the junk we predicted: quiz/debug
   questions carrying absolute keywords, pasted third-party AI advice inside
   user turns, and verbatim cross-session repeats (142 events, up from 112).
   Gated junk stays **0%**; the ungated baseline rises to 36.5%.
-  Current-truth precision@1 improves to 0.857. Contradiction exposure is
-  reported honestly at 0.583 — worse on paper than v1's 0.333 because v1
-  silently measured only 9 of its 12 revisions and its false conflicts
-  masked real exposure (see benchmarks/RESULTS.md for the full disclosure).
+  Current-truth precision@1 improves to 0.881, and contradiction exposure
+  drops to **0.167** (10 of 12 authored revisions now supersede; v1's 0.333
+  was flattered — it silently measured only 9 revisions and its false
+  conflicts masked real exposure; see benchmarks/RESULTS.md).
+- **Revision detection catches more contradiction shapes** — three general
+  detector fixes: updates that add content tokens are no longer swallowed
+  by the echo guard (echoes add framing, revisions add content); detailed
+  original claims match at partial coverage; preference/decision typing
+  jitter no longer blocks detection across the type/scope boundary.
 
 ### Fixed
 

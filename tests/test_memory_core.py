@@ -1574,3 +1574,53 @@ class MiningQualityTests(unittest.TestCase):
             "API port", "decision", "project",
         )
         self.assertEqual(candidates, [])
+
+
+class RevisionDetectionTests(unittest.TestCase):
+    """2.1 detector recall: revisions must reach conflict detection."""
+
+    def test_update_with_new_content_is_not_an_echo_despite_high_containment(self):
+        from mcp_package.link_core.memory import is_existing_memory_echo
+        records = [{
+            "name": "deploy", "status": "active", "memory_type": "decision",
+            "title": "Deploy from main",
+            "tldr": "Project decided deploys ship from the main branch only, never from feature branches, after CI passes.",
+            "body": "",
+        }]
+        update = ("We decided releases never deploy from the main branch now; "
+                  "production ships only from release branches after sign-off.")
+        framed_echo = ("Per your saved preference, deploys ship from the main branch only, "
+                       "never from feature branches, after CI passes. I will keep following that.")
+        self.assertFalse(is_existing_memory_echo(records, update))
+        self.assertTrue(is_existing_memory_echo(records, framed_echo))
+
+    def test_revision_rule_catches_detailed_heads_at_partial_coverage(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        records = [{
+            "name": "weekly", "status": "active", "memory_type": "decision", "scope": "project",
+            "title": "Weekly release trains",
+            "tldr": "Project decided releases ship weekly on Thursdays; anything merged after Wednesday noon waits for the next train.",
+            "body": "",
+        }]
+        candidates = memory_conflict_candidates(
+            records,
+            "Project decided releases never ship weekly on Thursdays now; a release train leaves every day after CI passes.",
+            "Daily release trains", "decision", "project",
+        )
+        self.assertTrue(candidates)
+        self.assertIn("revises_existing_claim", candidates[0]["conflict_reasons"])
+
+    def test_preference_decision_cross_pair_skips_scope_gate(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        records = [{
+            "name": "dark", "status": "active", "memory_type": "decision", "scope": "project",
+            "title": "Dark theme for demos",
+            "tldr": "Project decided every demo screenshot uses dark theme mode in the capture tool.",
+            "body": "",
+        }]
+        candidates = memory_conflict_candidates(
+            records,
+            "User does not use dark theme for demos anymore; capture screenshots in light mode.",
+            "Light theme for demos", "preference", "user",
+        )
+        self.assertTrue(candidates)

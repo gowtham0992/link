@@ -249,6 +249,7 @@ from link_core.capture import (
     capture_proposal_selection as _core_capture_proposal_selection,
     capture_records as _core_capture_records,
     capture_review_summary as _core_capture_review_summary,
+    dedup_pending_captures as _core_dedup_pending_captures,
     delete_capture_file as _core_delete_capture_file,
     mcp_capture_commands as _core_mcp_capture_commands,
     redact_capture_file as _core_redact_capture_file,
@@ -792,6 +793,27 @@ def _delete_capture(capture: str, confirm: bool = False) -> dict[str, object]:
         f"Deleted raw capture {payload['path']}",
         ["Deleted file only; capture contents were not logged."],
     )
+    return payload
+
+
+def _dedup_captures(confirm: bool = False) -> dict[str, object]:
+    from link_core.memory import proposal_fingerprint as _fp
+
+    root = WIKI_DIR.parent
+    accepted = {
+        _fp(str(record.get("tldr") or record.get("snippet") or ""))
+        for record in _memory_records()
+    }
+    payload = _core_dedup_pending_captures(root, accepted_fingerprints=accepted, apply=confirm)
+    removed_obj = payload.get("removed")
+    removed: list[str] = [str(path) for path in removed_obj] if isinstance(removed_obj, list) else []
+    if confirm and removed:
+        _append_log(
+            _utc_timestamp(),
+            "dedup-captures",
+            f"Removed {len(removed)} redundant capture(s) from the review inbox",
+            [f"Removed: {path}" for path in removed[:20]],
+        )
     return payload
 
 
@@ -1504,6 +1526,8 @@ def admin(action: str, arguments: str = "{}") -> str:
             return redact_capture(_str_arg(payload, "capture"), replacement=_str_arg(payload, "replacement", "[redacted-secret]"))
         if clean_action == "delete_capture":
             return delete_capture(_str_arg(payload, "capture"), confirm=_bool_arg(payload, "confirm", False))
+        if clean_action == "dedup_captures":
+            return json.dumps(_dedup_captures(confirm=_bool_arg(payload, "confirm", False)), ensure_ascii=False)
         if clean_action == "update_memory":
             return update_memory(
                 _str_arg(payload, "identifier"),
@@ -1527,7 +1551,7 @@ def admin(action: str, arguments: str = "{}") -> str:
             "search", "context", "pages", "backlinks", "graph_summary", "graph",
             "rebuild_index", "rebuild_backlinks", "seed_project", "propose_memories",
             "capture_session", "session_end", "capture_inbox", "accept_capture", "redact_capture",
-            "delete_capture", "update_memory", "set_visibility",
+            "delete_capture", "dedup_captures", "update_memory", "set_visibility",
         ],
     })
 

@@ -33,6 +33,8 @@ final class LinkStore: ObservableObject {
     @Published var viewerRunning = false
     @Published var activeSessions: [AgentSession] = []
     @Published var memories: [MemoryPage] = []
+    /// explain-memory payloads keyed by memory name, fetched on row expand.
+    @Published var explanations: [String: MemoryExplanation] = [:]
     private var lastHealthAt = Date.distantPast
 
     var pendingCount: Int {
@@ -373,6 +375,21 @@ final class LinkStore: ObservableObject {
     /// Accept a session capture proposal into the reviewed memory flow.
     func acceptCapture(_ capture: CaptureItem, index: Int = 1) {
         act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "\(index)"])
+    }
+
+    /// Why does Link believe this? Lazily fetched per memory when the row
+    /// expands; cached until the next refresh cycle replaces memories.
+    func explainMemory(named name: String) {
+        guard explanations[name] == nil else { return }
+        Task.detached(priority: .userInitiated) {
+            let payload = try? LinkCLI.runJSON(
+                MemoryExplanation.self,
+                ["explain-memory", name, LinkCLI.workspace, "--json"]
+            )
+            await MainActor.run {
+                if let payload { self.explanations[name] = payload }
+            }
+        }
     }
 
     /// Archive/restore straight from the memory browser.
