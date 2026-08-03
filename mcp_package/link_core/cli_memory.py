@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import date
 
 from .mcp_verify import display_command
 
@@ -539,13 +540,34 @@ def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, 
     return 0, "\n".join(lines)
 
 
+def _trust_marker(record: Mapping[str, object]) -> str:
+    """Honesty inline: a memory not currently trusted says so where agents read.
+
+    The brief tells agents to use these as durable context — an unreviewed
+    or aged memory must carry its provisional state in the same line.
+    """
+    status = str(record.get("review_status") or "").lower()
+    if status in {"pending", "needs_review", "needs_update"}:
+        return " · pending review"
+    review_after = str(record.get("review_after") or "").strip()
+    if review_after:
+        try:
+            if date.fromisoformat(review_after) <= date.today():
+                return " · review due"
+        except ValueError:
+            pass
+    return ""
+
+
 def render_memory_list(title: str, records: Sequence[Mapping[str, object]], *, empty: str = "none") -> str:
     lines = [title]
     if not records:
         lines.append(f"- {empty}")
         return "\n".join(lines)
     for record in records:
-        lines.append(f"- {record['title']} ({record['memory_type']} · {record['scope']})")
+        lines.append(
+            f"- {record['title']} ({record['memory_type']} · {record['scope']}{_trust_marker(record)})"
+        )
         lines.append(f"  {record['path']}")
         summary = record.get("tldr") or record.get("snippet")
         if summary:

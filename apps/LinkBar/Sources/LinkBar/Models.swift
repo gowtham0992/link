@@ -53,11 +53,15 @@ struct CaptureItem: Decodable, Identifiable {
     let snippet: String?
     let decisionTrail: [String]?
     let minedFromUserTurns: Bool?
+    /// Injection-shaped instruction labels ("guardrail-bypass instruction");
+    /// non-empty means: verify you actually said this before accepting.
+    let injectionWarnings: [String]?
 
     enum CodingKeys: String, CodingKey {
         case path, title, project, proposals, snippet
         case decisionTrail = "decision_trail"
         case minedFromUserTurns = "mined_from_user_turns"
+        case injectionWarnings = "injection_warnings"
     }
 
     var id: String { path }
@@ -167,6 +171,57 @@ struct RememberResult: Decodable {
     let created: Bool
     let secret: Bool?
     let message: String?
+}
+
+/// `lnk explain-memory --json`: why Link believes a memory — provenance,
+/// review state, quality issues, and whether default recall will use it.
+struct MemoryExplanation: Decodable {
+    struct RecallState: Decodable {
+        let state: String
+        let reason: String
+    }
+    struct ReviewIssue: Decodable {
+        let severity: String?
+        let message: String?
+    }
+    struct ReviewInfo: Decodable {
+        let status: String?
+        let reviewedAt: String?
+        let issues: [ReviewIssue]?
+
+        enum CodingKeys: String, CodingKey {
+            case status, issues
+            case reviewedAt = "reviewed_at"
+        }
+    }
+    struct Provenance: Decodable {
+        let source: String?
+        let dateCaptured: String?
+
+        enum CodingKeys: String, CodingKey {
+            case source
+            case dateCaptured = "date_captured"
+        }
+    }
+    let found: Bool
+    let recall: RecallState?
+    let review: ReviewInfo?
+    let provenance: Provenance?
+}
+
+/// `lnk dedup-captures --confirm --json`: which inbox captures were removed
+/// because they offered nothing new (already pending, accepted, or dismissed).
+struct DedupCapturesResult: Decodable {
+    let applied: Bool
+    let removed: [String]
+    let keptCount: Int
+    let removableCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case applied, removed
+        case keptCount = "kept_count"
+        case removableCount = "removable_count"
+    }
 }
 
 // MARK: - Status dashboard payloads
@@ -331,8 +386,15 @@ struct MemoryPage: Identifiable {
     /// The memory claim itself: first non-heading body line.
     var claim: String {
         for line in body.split(separator: "\n") {
-            let t = line.trimmingCharacters(in: .whitespaces)
+            var t = line.trimmingCharacters(in: .whitespaces)
             if t.isEmpty || t.hasPrefix("#") { continue }
+            // Strip the page's markdown dressing (blockquote + TLDR label)
+            // so surfaces show the claim, not its markup.
+            while t.hasPrefix(">") { t = String(t.dropFirst()).trimmingCharacters(in: .whitespaces) }
+            for label in ["**TLDR:**", "TLDR:"] where t.hasPrefix(label) {
+                t = String(t.dropFirst(label.count)).trimmingCharacters(in: .whitespaces)
+            }
+            if t.isEmpty { continue }
             return t
         }
         return title

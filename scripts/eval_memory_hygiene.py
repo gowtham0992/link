@@ -32,6 +32,9 @@ Exit: non-zero if the gated pipeline stores any junk, or fails to beat the
 """
 from __future__ import annotations
 
+import os
+os.environ["LINK_SEMANTIC"] = "off"  # published numbers stay deterministic: never use a local model
+
 import argparse
 import json
 import sys
@@ -133,7 +136,16 @@ def measure(wiki: Path, state: dict[str, object]) -> dict[str, float]:
     queries = {name: intent_queries[0] for name, _d, _t, _tl, _b, intent_queries in INTENTS}
 
     active = [r for r in records if str(r.get("status") or "active") == "active"]
-    junk = [entry for entry in ledger if entry["kind"] in {"echo", "brief_echo", "noise"}]
+    # v2 junk classes: question and pasted_ai came from real dogfooding (quiz
+    # questions and pasted third-party AI advice proposed as user memory);
+    # repeat measures cross-session re-proposal of the same claim.
+    junk_kinds = {"echo", "brief_echo", "noise", "question", "pasted_ai", "repeat"}
+    junk = [entry for entry in ledger if entry["kind"] in junk_kinds]
+    junk_by_kind = {
+        kind: len([entry for entry in junk if entry["kind"] == kind])
+        for kind in sorted(junk_kinds)
+        if any(entry["kind"] == kind for entry in junk)
+    }
 
     precision_hits = 0
     exposure_hits = 0
@@ -160,6 +172,7 @@ def measure(wiki: Path, state: dict[str, object]) -> dict[str, float]:
         "stored_entries": len(ledger),
         "active_memories": len(active),
         "junk_stored": len(junk),
+        "junk_by_kind": junk_by_kind,
         "junk_rate": round(len(junk) / len(ledger), 4) if ledger else 0.0,
         "current_truth_precision@1": round(precision_hits / measured, 4) if measured else 0.0,
         "contradiction_exposure@3": round(exposure_hits / revised_measured, 4),
@@ -195,6 +208,11 @@ def main() -> int:
         width = max(len(k) for k in gated)
         print(f"\n{'metric':{width}}  {'gated (Link)':>14}  {'ungated':>10}")
         for key in gated:
+            if isinstance(gated[key], dict):
+                gated_kinds = ", ".join(f"{k}:{v}" for k, v in gated[key].items()) or "none"
+                ungated_kinds = ", ".join(f"{k}:{v}" for k, v in ungated[key].items()) or "none"
+                print(f"{key:{width}}  gated: {gated_kinds} | ungated: {ungated_kinds}")
+                continue
             print(f"{key:{width}}  {gated[key]:>14}  {ungated[key]:>10}")
 
     gated, ungated = report["gated"], report["ungated"]

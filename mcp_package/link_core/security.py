@@ -75,6 +75,47 @@ def secret_value_warnings(text: str) -> list[str]:
     return warnings
 
 
+# Injected-instruction shapes: text that commands an agent to weaken its own
+# guardrails or leak data. When such a sentence becomes a durable memory it
+# is injected into every future session — the highest-value target for
+# prompt injection via poisoned pages, docs, or pasted AI output. These are
+# WARNING labels, never blocks: a human may genuinely hold a "never ask
+# confirmation before builds" preference — the risk is attribution, so the
+# label asks the user to verify they actually said it.
+INJECTED_INSTRUCTION_PATTERNS = (
+    ("guardrail-bypass instruction", re.compile(
+        r"(?is)\b(?:ignore|bypass|skip|disable|override|forget)\b[^.!?\n]{0,60}"
+        r"\b(?:previous instructions|safety|confirmation|approvals?|review|checks?|"
+        r"guardrails?|restrictions?|permissions?|rules)\b")),
+    ("unattended-execution instruction", re.compile(
+        r"(?is)\b(?:without|no need for|don't wait for|never ask for)\b[^.!?\n]{0,40}"
+        r"\b(?:asking|confirmation|approval|permission|review)\b"
+        r"|\balways\b[^.!?\n]{0,40}\b(?:sudo|--force|--no-verify|rm -rf)\b")),
+    ("data-exfiltration instruction", re.compile(
+        # Gap allows "." because the targets themselves are dotfiles (.env).
+        r"(?is)\b(?:include|send|paste|upload|attach|forward|copy|post)\b[^!?\n]{0,60}"
+        r"(?:\.ssh\b|\.env\b|\.aws\b|\b(?:credentials?|secrets?|api keys?|tokens?|"
+        r"passwords?|private keys?|keychain)\b)")),
+    ("spoofed-approval framing", re.compile(
+        r"(?is)\b(?:the user|user|admin|system) (?:has (?:already )?)?"
+        r"(?:approved|authorized|consented to|pre-?approved)\b[^.!?\n]{0,60}"
+        r"\b(?:stor(?:e|ing)|sav(?:e|ing)|remember|memory)\b"
+        r"|^\s*(?:\[?system\]?|assistant)\s*:")),
+    ("agent-directed durable command", re.compile(
+        r"(?is)\b(?:you|the agent|the assistant|the ai|all agents)\s+"
+        r"(?:must|should|are (?:required|instructed) to)\s+(?:always|never)\b")),
+)
+
+
+def injected_instruction_warnings(text: str) -> list[str]:
+    """Return labels for injection-shaped instructions found in text."""
+    warnings: list[str] = []
+    for label, pattern in INJECTED_INSTRUCTION_PATTERNS:
+        if pattern.search(text):
+            warnings.append(label)
+    return warnings
+
+
 def secret_file_warnings(path: Path, chunk_size: int = 65536, tail_size: int = 512) -> list[str]:
     """Return secret-looking labels from a file without loading it all at once."""
     return list(secret_file_scan(path, chunk_size=chunk_size, tail_size=tail_size)["labels"])

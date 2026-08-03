@@ -279,3 +279,23 @@ class McpConnectCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DetectInstalledAgentsTests(unittest.TestCase):
+    def test_detects_agents_by_config_footprint(self):
+        import tempfile
+        from pathlib import Path
+        from mcp_package.link_core.mcp_connect import detect_installed_agents
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            self.assertEqual(detect_installed_agents(home=home), [])
+            (home / ".claude").mkdir()
+            (home / ".codex").mkdir()
+            (home / ".cursor").mkdir()
+            (home / ".codeium" / "windsurf").mkdir(parents=True)
+            (home / ".config" / "zed").mkdir(parents=True)
+            detected = detect_installed_agents(home=home)
+            self.assertEqual(sorted(detected), ["claude-code", "codex", "cursor", "windsurf", "zed"])
+            # Project-scoped configs (.vscode) never auto-detect.
+            (home / ".vscode").mkdir()
+            self.assertNotIn("vscode", detect_installed_agents(home=home))

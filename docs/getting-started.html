@@ -108,8 +108,11 @@ lnk brief "working on agent memory" link-demo
 lnk benchmark "agent memory" link-demo
 lnk health link-demo</code></pre>
 
-        <h2 id="onboard">2. Onboard A Real Workspace</h2>
-        <p>Use <code>lnk onboard</code> when you are ready to create or repair your real <code>~/link</code> memory workspace. It checks health, prints the first agent prompts, and previews MCP wiring without changing agent config files unless you pass <code>--write</code>.</p>
+        <h2 id="onboard">2. Make It Yours — One Command</h2>
+        <p><code>lnk setup</code> is install day and every upgrade after it: it detects every agent installed on your machine — Claude Code, Codex, Cursor, Windsurf, Zed, Kiro, Gemini CLI — and wires them all at once: workspace create/repair, MCP provisioning, and session hooks for agents that have them. It is idempotent, so after any <code>brew upgrade</code> you just run it again.</p>
+        <pre><code>lnk setup            # every detected agent, wired
+lnk setup --preview  # show the plan without writing agent configs</code></pre>
+        <p>Prefer the guided single-agent flow? <code>lnk onboard</code> checks health, prints the first agent prompts, and previews MCP wiring without changing agent config files unless you pass <code>--write</code>.</p>
         <pre><code>lnk onboard
 lnk onboard --first-memory "I prefer concise release notes"
 lnk onboard --seed-project .

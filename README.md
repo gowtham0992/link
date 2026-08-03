@@ -109,7 +109,8 @@ that have one everywhere:
 |---|---|---|
 | **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
-| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 23.9% |
+| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 36.5% |
+| **Memory poisoning** — 15 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
 | **Bundled 1,176-case recall benchmark** — deterministic, runs offline in CI | hit@1 **0.749**, +rerank **0.839** | gates every change; a regression fails the build |
 
 Every number ships with its config, judge model, caveats, and the
@@ -127,9 +128,18 @@ Two commands: see it work, then make it yours.
 
 ```bash
 brew install gowtham0992/link/link
-lnk proof                              # see the promise (~1 second, no setup)
-lnk onboard --agent claude-code --write   # wire your agent for real memory
+lnk proof     # see the promise (~1 second, no setup)
+lnk setup     # wire every agent you have — workspace, MCP, session hooks, one command
 ```
+
+`lnk setup` detects the agents installed on your machine — Claude Code,
+Codex, Cursor, Windsurf, Zed, Kiro, Gemini CLI — and wires them all at
+once; Link is agent-agnostic by design (one MCP server, one workspace,
+every agent reads the same memory). It is
+idempotent: after any `brew upgrade`, run it again and everything —
+workspace runtime, MCP provisioning, hooks — is refreshed. Prefer to wire
+one agent explicitly? `lnk onboard --agent claude-code --write --hooks`
+still does exactly that.
 
 `lnk proof` creates a throwaway workspace, writes one reviewed memory, and
 recalls it through the same path the CLI, skills, and MCP use — the core

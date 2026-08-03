@@ -4,7 +4,7 @@ from __future__ import annotations
 import fnmatch
 import re
 import urllib.parse
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -186,6 +186,31 @@ def compact_memory_text(value: str) -> str:
     )
 
 
+def proposal_fingerprint(memory: str) -> str:
+    """Stable identity for a proposed memory across captures and sessions.
+
+    Keyed on the normalized token stream so cosmetic differences (case,
+    punctuation, whitespace) don't defeat dedup when the same claim is
+    re-mined from a longer transcript of the same conversation.
+    """
+    import hashlib
+
+    compact = compact_memory_text(str(memory or ""))
+    return hashlib.sha256(compact.encode("utf-8")).hexdigest()[:16]
+
+
+def is_interrogative(text: str) -> bool:
+    """True when the sentence is a question, not a statement.
+
+    Questions from quizzes, debugging back-and-forth, and rubber-ducking
+    ("number of walkers is always fixed?") read as durable directives to the
+    cue regexes because they can contain "always"/"never"; a question is
+    never a preference the user asserted.
+    """
+    stripped = str(text or "").strip().rstrip("\"'”’)]}»")
+    return stripped.endswith("?")
+
+
 def significant_memory_tokens(value: str) -> set[str]:
     return {
         token
@@ -359,6 +384,41 @@ def _today(today: str | None = None) -> date:
     return _parse_review_date(today) if today else date.today()
 
 
+# Trust lifecycle: how long each memory type stays trusted before Link asks
+# the user to reconfirm it (months). Project context rots fastest — repos
+# change tooling in weeks; decisions and stable facts hold the longest.
+# Review re-arms the window; nothing is ever archived or hidden by age —
+# an aged memory is *labeled* due for review, honestly, on every surface.
+MEMORY_REVIEW_INTERVAL_MONTHS: dict[str, int] = {
+    "preference": 6,
+    "decision": 12,
+    "fact": 12,
+    "note": 6,
+    "procedure": 6,
+    "project": 3,
+}
+DEFAULT_REVIEW_INTERVAL_MONTHS = 6
+
+
+def _add_months(base: date, months: int) -> date:
+    month_index = base.month - 1 + months
+    year = base.year + month_index // 12
+    month = month_index % 12 + 1
+    # Clamp the day for short months (Jan 31 + 1 month -> Feb 28).
+    day = min(base.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                         31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+    return date(year, month, day)
+
+
+def default_review_after(memory_type: str, from_date: str | None = None) -> str:
+    """The date this memory type should be reconfirmed, from from_date/today."""
+    interval = MEMORY_REVIEW_INTERVAL_MONTHS.get(
+        str(memory_type or "").strip().lower(), DEFAULT_REVIEW_INTERVAL_MONTHS
+    )
+    base = _today(str(from_date)[:10] if from_date else None)
+    return _add_months(base, interval).isoformat()
+
+
 def memory_active_at(record: Mapping[str, object], as_of: str) -> bool:
     """Whether this memory was active on a given YYYY-MM-DD date.
 
@@ -526,6 +586,25 @@ def memory_review_issues(
                     "code": "review_due",
                     "severity": "medium",
                     "message": f"Memory review is due after {review_after}.",
+                    "suggested_action": f"Confirm it is still accurate, then run {review_command}.",
+                })
+    elif status == "active":
+        # Trust lifecycle: memories written before review scheduling existed
+        # still age. From the last review (or capture), each type has a
+        # trusted window; past it, the memory is honestly labeled due —
+        # never hidden, never archived by age.
+        base_value = (str(record.get("reviewed_at") or "") or str(record.get("date_captured") or ""))[:10]
+        if DATE_RE.match(base_value):
+            interval = MEMORY_REVIEW_INTERVAL_MONTHS.get(memory_type, DEFAULT_REVIEW_INTERVAL_MONTHS)
+            aged_due = _add_months(date.fromisoformat(base_value), interval)
+            if aged_due <= _today(today):
+                issues.append({
+                    "code": "review_due",
+                    "severity": "medium",
+                    "message": (
+                        f"Memory has aged past its {interval}-month trust window "
+                        f"(last confirmed {base_value})."
+                    ),
                     "suggested_action": f"Confirm it is still accurate, then run {review_command}.",
                 })
 
@@ -1317,7 +1396,18 @@ def mark_memory_reviewed(
     }
     if clean_note:
         updates["review_note"] = f'"{frontmatter_string(clean_note)}"'
-    changed = previous_review_status != "reviewed" or bool(clean_note)
+    # Trust lifecycle: reviewing re-arms the trust window for another typed
+    # interval — unless the user set their own future date, which is kept.
+    existing_review_after = str(record.get("review_after") or "").strip()
+    try:
+        existing_due = _parse_review_date(existing_review_after) if existing_review_after else None
+    except ValueError:
+        existing_due = None
+    rearmed = ""
+    if existing_due is None or existing_due <= _today(str(timestamp)[:10]):
+        rearmed = default_review_after(str(record.get("memory_type") or ""), from_date=timestamp)
+        updates["review_after"] = f'"{rearmed}"'
+    changed = previous_review_status != "reviewed" or bool(clean_note) or bool(rearmed)
     if changed:
         with operation_journal(
             wiki_dir,
@@ -1527,6 +1617,10 @@ def write_memory_page(
     clean_review_after = str(review_after or "").strip()
     if clean_review_after:
         _parse_review_date(clean_review_after)
+    else:
+        # Trust lifecycle: every memory gets a review window at birth, sized
+        # by type. Review re-arms it; passing review_after overrides it.
+        clean_review_after = default_review_after(memory_type, from_date=timestamp)
     clean_expires_at = str(expires_at or "").strip()
     if clean_expires_at:
         _parse_expires_date(clean_expires_at)
@@ -2504,6 +2598,17 @@ def memory_applicability(
 ECHO_CONTAINMENT = 0.7
 
 
+# Words agents use when restating stored memory back into a transcript
+# ("Per your saved preference...", "Just confirming what we already know").
+# They never count as content novelty when deciding echo vs update.
+_ECHO_FRAMING_TOKENS = stemmed_memory_tokens({
+    "per", "saved", "save", "preference", "prefer", "confirming", "confirm",
+    "just", "know", "known", "already", "noted", "note", "again", "keep",
+    "keeping", "following", "follow", "memory", "link", "says", "say",
+    "session", "still", "remember", "reminder",
+})
+
+
 def is_existing_memory_echo(
     records: Iterable[Mapping[str, object]],
     text: str,
@@ -2520,6 +2625,7 @@ def is_existing_memory_echo(
     candidate_tokens = stemmed_memory_tokens(significant_memory_tokens(text))
     if not candidate_tokens:
         return False
+    candidate_negated = has_negation(text)
     for record in records:
         if not is_active_memory(record):
             continue
@@ -2530,12 +2636,28 @@ def is_existing_memory_echo(
             " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")]),
             procedure_steps_excerpt(str(record.get("body") or ""), max_chars=600),
         ]
+        # A candidate that flips the stored claim's polarity ("does not use
+        # Ruff anymore" over "uses Ruff") is a revision, not a restatement —
+        # containment would swallow the update and let the stale memory live
+        # forever (found by the hygiene benchmark's revision track).
+        if candidate_negated != has_negation(views[0]):
+            continue
         for view in views:
             view_tokens = stemmed_memory_tokens(significant_memory_tokens(view))
             if len(view_tokens) < 4:
                 continue
             containment = len(view_tokens & candidate_tokens) / len(view_tokens)
             if containment >= threshold:
+                # Updates add content; echoes add framing. A candidate that
+                # covers the stored claim AND brings several new content
+                # tokens ("ships only from release/* branches after
+                # sign-off") is a revision the conflict detector must see —
+                # not a restatement to swallow (hygiene benchmark, revision
+                # track: polarity can't separate these when the original
+                # claim also carries a negation like "only").
+                novel = candidate_tokens - view_tokens - _ECHO_FRAMING_TOKENS
+                if len(novel) >= 3:
+                    continue
                 return True
             # Mirrored test: a partial restatement contains little of the
             # full claim, but nearly all of ITS OWN tokens live inside the
@@ -2642,6 +2764,44 @@ def memory_duplicate_candidates(
     return [candidate for _, candidate in candidates[:limit]]
 
 
+# Memory boilerplate: tokens that appear in most stored claims ("decision",
+# "project", "prefers", ...) and would connect unrelated memories if they
+# counted as evidence of a shared subject.
+_CONFLICT_CUE_TOKENS = {
+    "decision", "decid", "project", "team", "user", "prefer",
+    "use", "agent", "memory", "through", "now", "anymore",
+}
+
+# Semantic revision tier: lexically disjoint revisions ("SQLite with FTS"
+# revised as "DuckDB files") share no subject tokens, so no token rule can
+# see them. When the local embedding tier is installed, revision-cued text
+# is also compared by meaning. Calibrated on the hygiene fixture with
+# model2vec: true revisions score 0.60-0.82, unrelated pairs <= 0.18.
+SEMANTIC_REVISION_THRESHOLD = 0.55
+_conflict_embedder_cache: list[object] = []
+
+
+def _default_conflict_embedder() -> Callable[[list[str]], list[list[float]]] | None:
+    """Memoized local embedder for conflict checks; None when tier absent."""
+    if _conflict_embedder_cache:
+        cached = _conflict_embedder_cache[0]
+        return cached if callable(cached) else None
+    try:
+        from .semantic import load_embedder
+        embedder = load_embedder()
+    except Exception:
+        embedder = None
+    _conflict_embedder_cache.append(embedder)
+    return embedder
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
+
 def memory_conflict_candidates(
     records: Iterable[Mapping[str, object]],
     text: str,
@@ -2651,8 +2811,14 @@ def memory_conflict_candidates(
     project: str | None = None,
     limit: int = 3,
     exclude_names: Iterable[str] | None = None,
+    embedder: Callable[[list[str]], list[list[float]]] | None = None,
 ) -> list[dict[str, object]]:
-    """Find active memories that may contradict the proposed memory."""
+    """Find active memories that may contradict the proposed memory.
+
+    `embedder` overrides the lazily-loaded semantic tier (tests inject a
+    deterministic stub); when the tier is absent, detection is purely
+    lexical and fully deterministic.
+    """
     if memory_type not in MEMORY_CONFLICT_TYPES:
         return []
 
@@ -2666,6 +2832,7 @@ def memory_conflict_candidates(
     project_name = normalize_project(project)
     excluded = {name for name in (exclude_names or []) if name}
     candidates: list[tuple[int, dict[str, object]]] = []
+    semantic_pool: list[tuple[Mapping[str, object], str, list[str]]] = []
 
     for record in records:
         name = str(record.get("name") or "")
@@ -2675,9 +2842,15 @@ def memory_conflict_candidates(
             continue
         record_type = str(record.get("memory_type") or "")
         record_scope = str(record.get("scope") or "")
-        if record_type != memory_type:
+        # Preferences and decisions cross-match: "we decided X" is often
+        # revised as "we don't do X anymore" (a preference-shaped sentence),
+        # and a type boundary here would let the contradiction coexist. The
+        # same classification jitter moves scope (preference->user,
+        # decision->project), so the cross-pair skips the scope gate too.
+        type_cross = {record_type, memory_type} == {"preference", "decision"}
+        if record_type != memory_type and not type_cross:
             continue
-        if scope != record_scope and "global" not in {scope, record_scope}:
+        if scope != record_scope and "global" not in {scope, record_scope} and not type_cross:
             continue
 
         record_text = memory_claim_text(record)
@@ -2702,20 +2875,19 @@ def memory_conflict_candidates(
             re.search(r"\b(?:anymore|no longer|instead of|replace[sd]?|settled on)\b", new_text, re.IGNORECASE)
         )
         if revision_cue:
-            # Compare subjects, not phrasing: memory boilerplate tokens
-            # ("decision", "project", "prefers", ...) appear in most claims
-            # and would connect unrelated memories.
-            cue_tokens = {
-                "decision", "decid", "project", "team", "user", "prefer",
-                "use", "agent", "memory", "through", "now", "anymore",
-            }
             head_tokens = stemmed_memory_tokens(significant_memory_tokens(
                 " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")])
-            )) - cue_tokens
-            new_stemmed = stemmed_memory_tokens(new_tokens) - cue_tokens
+            )) - _CONFLICT_CUE_TOKENS
+            new_stemmed = stemmed_memory_tokens(new_tokens) - _CONFLICT_CUE_TOKENS
             head_overlap = head_tokens & new_stemmed
-            if len(head_tokens) >= 3 and len(head_overlap) >= 2 and (
-                len(head_overlap) / len(head_tokens) >= 0.5
+            coverage = len(head_overlap) / len(head_tokens) if head_tokens else 0.0
+            # Two shapes: a short head mostly covered (>= 0.5), or a detailed
+            # head where the revision hits >= 3 subject tokens at >= 0.4 —
+            # originals often carry specifics ("fixtures", "parametrize",
+            # "before noon") the revision legitimately drops.
+            if len(head_tokens) >= 3 and (
+                (len(head_overlap) >= 2 and coverage >= 0.5)
+                or (len(head_overlap) >= 3 and coverage >= 0.4)
             ):
                 score = max(score, 90)
                 reasons.append("revises_existing_claim")
@@ -2739,7 +2911,15 @@ def memory_conflict_candidates(
                     and bool(record_all_tokens & context)
                 )
             )
-            if len(overlap) >= 2 or context_matches:
+            # Boilerplate overlap ("decided", "decision") is not evidence of
+            # a shared subject — it once connected "API listens on port 8080
+            # in local development" to a squash-merge rule via the branch
+            # word "development" (found by the hygiene benchmark).
+            meaningful_overlap = [
+                token for token in overlap
+                if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS
+            ]
+            if len(meaningful_overlap) >= 2 or context_matches:
                 score = max(score, 88)
                 reasons.append(f"different_{group}")
 
@@ -2751,12 +2931,38 @@ def memory_conflict_candidates(
                     reasons.append("reversed_preference")
 
         if score < 85:
+            # Semantic tier: a revision-cued claim with no lexical link may
+            # still revise this record by meaning ("SQLite with FTS" ->
+            # "DuckDB files"). Compared in one batch after the loop.
+            if revision_cue:
+                # Claim vs claim: titles are short editorial labels that
+                # dilute meaning-similarity, so they stay out of the vectors.
+                record_claim = str(record.get("tldr") or "") or record_text
+                semantic_pool.append((record, record_claim, overlap))
             continue
         candidate = slim_memory(record)
         candidate["conflict_score"] = min(score, 100)
         candidate["conflict_reasons"] = sorted(set(reasons))
         candidate["matching_terms"] = overlap[:12]
         candidates.append((int(candidate["conflict_score"]), candidate))
+
+    if semantic_pool:
+        active_embedder = embedder if embedder is not None else _default_conflict_embedder()
+        if active_embedder is not None:
+            try:
+                vectors = active_embedder([text] + [claim for _, claim, _ in semantic_pool])
+            except Exception:
+                vectors = []
+            if len(vectors) == len(semantic_pool) + 1:
+                new_vector = vectors[0]
+                for (record, _, overlap), vector in zip(semantic_pool, vectors[1:]):
+                    if _cosine_similarity(new_vector, vector) < SEMANTIC_REVISION_THRESHOLD:
+                        continue
+                    candidate = slim_memory(record)
+                    candidate["conflict_score"] = 86
+                    candidate["conflict_reasons"] = ["semantic_revision"]
+                    candidate["matching_terms"] = overlap[:12]
+                    candidates.append((86, candidate))
 
     candidates.sort(key=lambda item: (-item[0], str(item[1]["title"]).lower()))
     return [candidate for _, candidate in candidates[:limit]]
@@ -2783,6 +2989,12 @@ def memory_proposal_segments(text: str) -> list[str]:
 def normalize_proposed_memory(text: str, memory_type: str) -> str:
     value = text.strip()
     value = re.sub(r"^please remember(?: that)?\s+", "", value, flags=re.IGNORECASE)
+    # Durability lead-ins earn the proposal but are noise in the stored
+    # claim: "From now on I only push to develop" should live (and title)
+    # as "I only push to develop".
+    value = re.sub(r"^(?:from now on|going forward|starting now|starting today)[,\s]+", "", value, flags=re.IGNORECASE)
+    if value and value[0].islower():
+        value = value[0].upper() + value[1:]
     replacements = [
         (r"^i prefer\b", "User prefers"),
         (r"^i like\b", "User likes"),
@@ -2973,12 +3185,37 @@ def _preamble_trim_candidates(text: str) -> list[str]:
     return candidates
 
 
+# Bare absolutes ("always", "never", "do not") only signal a preference when
+# the sentence is anchored to the user's own voice. Without the anchor they
+# match hearsay the user merely pasted — quiz questions, quoted advice, another
+# AI's prose ("People on Reddit emphasize... never accept...") — and the
+# pipeline attributes someone else's words to the user (found in dogfooding).
+_BARE_ABSOLUTE_CUE = r"\b(?:please\s+)?(?:always|never|avoid|do not|don't|does not|doesn't)\b"
+# "please" counts as voice: a bare "Please always ask before deleting" is the
+# user addressing the agent directly, not quoted third-party advice.
+_FIRST_PERSON_RE = re.compile(r"\b(?:i|we|my|our|me|us|user|human|please)\b")
+# Imperative-initial absolutes ("Never push to main directly") are commands
+# addressed to the agent; pasted hearsay puts a third-party subject before
+# the absolute ("reviewers never accept...", "teams always benefit...").
+_IMPERATIVE_ABSOLUTE_RE = re.compile(r"^(?:no,?\s+)?(?:please\s+)?(?:always|never|avoid|do not|don't)\b")
+
+
 def classify_memory_segment(segment: str) -> dict[str, object] | None:
     text = segment.strip()
+    if is_interrogative(text):
+        return None
     lower = text.lower()
     if any(cue in lower for cue in ("maybe", "might", "not sure", "wondering", "considering", "could later")):
         return None
+    # Time-scoped observations ("does not affect us this quarter") expire on
+    # their own; storing them as durable memory plants future staleness.
+    if any(cue in lower for cue in ("this quarter", "this week", "this sprint", "this month")):
+        return None
 
+    # Order matters: an explicit decision cue ("we decided") outranks the
+    # bare-absolute preference fallback, so "We decided X does not apply
+    # anymore" types as a decision — same type and scope as the memory it
+    # revises, which is what lets conflict detection see the contradiction.
     checks: list[tuple[str, str, int, str, tuple[str, ...]]] = [
         (
             "preference",
@@ -2987,9 +3224,7 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
             "Matched an explicit user preference cue.",
             (
                 r"\b(?:i|user|human)\s+(?:prefer|prefers|like|likes|want|wants|need|needs)\b",
-                r"\b(?:please\s+)?(?:always|never|avoid|do not|don't)\b",
                 r"\bagents?\s+should\s+(?:always|never|prefer|avoid|use)\b",
-                r"\b(?:from now on|going forward)\b",
                 r"\b(?:i|we)\s+only\s+(?:push|use|deploy|commit|merge|release|write|run|work|ship)\b",
             ),
         ),
@@ -3022,12 +3257,34 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
                 r"\b(?:i am|i work|user is|user works|user has|my role|my timezone)\b",
             ),
         ),
+        (
+            "preference",
+            "user",
+            90,
+            "Matched an explicit user preference cue.",
+            (
+                _BARE_ABSOLUTE_CUE,
+                r"\b(?:from now on|going forward)\b",
+            ),
+        ),
     ]
 
     for candidate in _preamble_trim_candidates(text):
         candidate_lower = candidate.lower()
         for memory_type, scope, score, reason, patterns in checks:
-            if any(re.search(pattern, candidate_lower) for pattern in patterns):
+            matched = False
+            for pattern in patterns:
+                if not re.search(pattern, candidate_lower):
+                    continue
+                if (
+                    pattern is _BARE_ABSOLUTE_CUE
+                    and not _FIRST_PERSON_RE.search(candidate_lower)
+                    and not _IMPERATIVE_ABSOLUTE_RE.search(candidate_lower)
+                ):
+                    continue
+                matched = True
+                break
+            if matched:
                 memory = normalize_proposed_memory(candidate, memory_type)
                 return {
                     "memory": memory,
@@ -3108,6 +3365,15 @@ _CONCRETE_DIRECTIVE_RE = re.compile(
     r"|\b(?:i|we)\s+(?:prefer|use|deploy|merge|commit|run|ship|release|test|"
     r"avoid|write|require|keep|review|pin|target)\b"
 )
+# Bare imperatives ("Plot the loss curve every 500 steps") carry a real
+# directive without a subject pronoun or absolute qualifier, so neither
+# regex above sees them and they lose ties to weak "wants to..." phrasings.
+# One tier below concrete: an explicit "I always..." still outranks them.
+_IMPERATIVE_DIRECTIVE_RE = re.compile(
+    r"(?i)^(?:please\s+)?(?:plot|use|run|keep|avoid|prefer|write|test|commit|"
+    r"merge|deploy|pin|target|ship|release|review|log|save|store|name|format|"
+    r"add|include|skip|drop|wrap|indent|check)\b"
+)
 
 
 def memory_durability_rank(memory: str) -> int:
@@ -3117,10 +3383,16 @@ def memory_durability_rank(memory: str) -> int:
     concrete directives outrank vague meta-statements about wanting rules.
     """
     text = str(memory or "").strip()
+    # A question is never a directive, even when it contains "always"/"never"
+    # ("number of walkers is always fixed?") — sink it below everything.
+    if is_interrogative(text):
+        return -3
     rank = 0
     if _CONCRETE_DIRECTIVE_RE.search(text):
         rank += 2
-    if _META_PREAMBLE_RE.search(text) and not _CONCRETE_DIRECTIVE_RE.search(text):
+    elif _IMPERATIVE_DIRECTIVE_RE.search(text):
+        rank += 1
+    if _META_PREAMBLE_RE.search(text) and rank <= 0:
         rank -= 2
     return rank
 
@@ -3133,9 +3405,11 @@ def propose_memories_from_text(
     writes_memory: bool = False,
     project: str | None = None,
     command_target: str | Path = ".",
+    exclude_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
     record_list = [dict(record) for record in records]
     project_name = normalize_project(project)
+    excluded = set(exclude_fingerprints)
     proposals: list[dict[str, object]] = []
     seen: set[str] = set()
     skipped = 0
@@ -3145,6 +3419,9 @@ def propose_memories_from_text(
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
+        if excluded and proposal_fingerprint(memory) in excluded:
+            skipped += 1
+            continue
         memory_type = "procedure"
         scope = "project" if project_name else "user"
         title = proposal_title(candidate["trigger"] or memory, memory_type)
@@ -3195,6 +3472,9 @@ def propose_memories_from_text(
             skipped += 1
             continue
         seen.add(dedupe_key)
+        if excluded and proposal_fingerprint(memory) in excluded:
+            skipped += 1
+            continue
         memory_type = str(classified["memory_type"])
         scope = str(classified["scope"])
         title = proposal_title(memory, memory_type)

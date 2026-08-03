@@ -61,6 +61,39 @@ ECHO_TEMPLATES = (
     "Just confirming what we already know: {claim}",
 )
 
+# Question sessions: quiz/debug questions that contain absolute keywords.
+# Found in real dogfooding — "always" inside a question matched the preference
+# cue and a quiz question ranked as a top durable memory. A perfect system
+# proposes none of these.
+QUESTION_SESSIONS = (
+    "Is the number of walkers always fixed in this design, or can it change per round?",
+    "Should we always deploy on Fridays, or does that break the on-call rotation?",
+    "Why does the linter never flag this file even when the rule is enabled?",
+    "Do we only support Python 3.12 in CI, and what happens below that?",
+    "Wait, the cache never invalidates on write? How does the read path stay fresh?",
+    "Is it true that failed jobs are never retried by the scheduler?",
+)
+
+# Pasted third-party prose: the user pastes advice from another AI, a forum,
+# or a blog into their own turn. The words sit in a user turn but are not the
+# user's claims — storing them attributes someone else's advice to the user
+# (found in real dogfooding: Gemini's prose proposed as the user's memory).
+PASTED_AI_SESSIONS = (
+    "Pasting what the other assistant told me for context. People on Reddit "
+    "emphasize that companies always screen for candidates who do not outsource "
+    "their thinking. Reviewers never accept generic cover letters, according to "
+    "several threads on the hiring process.",
+    "From the blog post: successful maintainers always squash their commits before "
+    "merging, and popular projects never allow force-pushes to shared branches. "
+    "The post recommends branch protection for everything.",
+    "Copying the guide here. The tutorial says beginners should avoid premature "
+    "optimization, and that profiling always comes before rewriting hot loops. "
+    "It also says garbage collection never runs during a benchmark window.",
+    "Here is the other model's summary for reference. It claims teams always "
+    "benefit from trunk-based development and never need long-lived feature "
+    "branches once CI is fast enough.",
+)
+
 # Sessions with nothing memory-worthy (no decision/preference cues).
 NOISE_SESSIONS = (
     "Looked through the failing test output together and reran the suite twice. "
@@ -102,6 +135,8 @@ def build_event_stream() -> list[dict[str, str]]:
     day = 0
     noise_cursor = 0
     echo_cursor = 0
+    question_cursor = 0
+    pasted_cursor = 0
     for position, (name, _domain, title, _tldr, body, _queries) in enumerate(intents):
         # The user states a durable fact.
         events.append({
@@ -132,6 +167,31 @@ def build_event_stream() -> list[dict[str, str]]:
                 "text": NOISE_SESSIONS[noise_cursor % len(NOISE_SESSIONS)],
             })
             noise_cursor += 1
+            day += 1
+        # Quiz/debug questions carrying absolute keywords ("always", "never").
+        if position % 5 == 0:
+            events.append({
+                "kind": "question", "date": _day(day), "intent": "",
+                "text": QUESTION_SESSIONS[question_cursor % len(QUESTION_SESSIONS)],
+            })
+            question_cursor += 1
+            day += 1
+        # Pasted third-party advice inside a user turn.
+        if position % 6 == 0:
+            events.append({
+                "kind": "pasted_ai", "date": _day(day), "intent": "",
+                "text": PASTED_AI_SESSIONS[pasted_cursor % len(PASTED_AI_SESSIONS)],
+            })
+            pasted_cursor += 1
+            day += 1
+        # The same conversation continues in a later session and restates the
+        # fact verbatim — cross-session re-proposal. A perfect system keeps
+        # exactly one copy.
+        if position % 3 == 1:
+            events.append({
+                "kind": "repeat", "date": _day(day), "intent": name,
+                "text": f"We decided: {body}",
+            })
             day += 1
 
     # Mid-stream, the user revises a third of the facts.

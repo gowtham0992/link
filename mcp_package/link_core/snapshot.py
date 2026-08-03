@@ -17,62 +17,73 @@ from .wiki import build_wiki_cache
 
 
 SNAPSHOT_SCHEMA = "link-snapshot-v1"
+# Brand system (docs/index.html and LinkBar share it): cream paper, warm
+# ink, rust accent, serif voice. The snapshot is often the first Link
+# artifact a stranger sees — it must look like the product, not a printout.
 SNAPSHOT_CSS = """
 :root {
   color-scheme: light;
-  --bg: #fbf7df;
-  --ink: #17130d;
-  --muted: #5f5a50;
-  --line: #1b1711;
-  --panel: #fffdf1;
-  --accent: #ffd84d;
+  --bg: #fbf7ed;
+  --ink: #221c12;
+  --muted: #6b6257;
+  --line: rgba(34, 28, 18, .8);
+  --hairline: rgba(34, 28, 18, .16);
+  --panel: #fffdf7;
+  --rust: #a8492f;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background:
-    linear-gradient(rgba(0,0,0,.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,0,0,.035) 1px, transparent 1px),
-    var(--bg);
-  background-size: 24px 24px;
+  background: var(--bg);
   color: var(--ink);
-  font: 16px/1.55 Georgia, "Times New Roman", serif;
+  font: 16px/1.6 Georgia, "Times New Roman", serif;
 }
-a { color: #064fb0; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a { color: var(--rust); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
 header, main, footer { max-width: 1040px; margin: 0 auto; padding: 24px; }
-header { border-bottom: 3px solid var(--line); background: rgba(255,253,241,.88); }
+header { border-bottom: 2px solid var(--line); }
+header p { margin: 0 0 6px; color: var(--muted); font-size: .9rem; }
 .brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.brand h1 { margin: 0; font-size: clamp(2.2rem, 6vw, 5rem); line-height: .95; }
-.brand span { color: var(--muted); font-size: 1.05rem; }
+.brand h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.6rem); line-height: 1; letter-spacing: -.02em; }
+.brand span { color: var(--muted); font-size: 1rem; }
 .notice, .card {
   background: var(--panel);
-  border: 2px solid var(--line);
-  box-shadow: 6px 6px 0 var(--line);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  box-shadow: 0 1px 0 var(--hairline);
   padding: 18px;
   margin: 18px 0;
 }
-.notice { border-color: #8c6a00; box-shadow: 5px 5px 0 #8c6a00; }
+.notice { border-left: 3px solid var(--rust); border-radius: 0 6px 6px 0; }
+.card h2 {
+  margin-top: 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--rust); font-family: ui-sans-serif, system-ui, sans-serif;
+}
 .meta { color: var(--muted); font-size: .94rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
 .page-list { list-style: none; margin: 0; padding: 0; }
-.page-list li { padding: 10px 0; border-bottom: 1px solid rgba(23,19,13,.18); }
+.page-list li { padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+.page-list li:last-child { border-bottom: none; }
 .page-list small { display: block; color: var(--muted); }
 article {
-  background: rgba(255,253,241,.76);
-  border-left: 4px solid var(--line);
-  padding: 8px 0 8px 20px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 10px 24px 18px;
 }
 article h1, article h2, article h3 { line-height: 1.15; }
+article h2 { border-bottom: 1px solid var(--hairline); padding-bottom: 6px; }
 article code, pre {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: rgba(0,0,0,.075);
+  background: rgba(34, 28, 18, .06);
+  border-radius: 4px;
 }
 article code { padding: 2px 4px; }
 pre { overflow: auto; padding: 14px; }
-blockquote { margin-left: 0; padding-left: 14px; border-left: 3px solid #aaa; color: #3f3a32; }
+blockquote { margin-left: 0; padding-left: 14px; border-left: 3px solid var(--rust); color: #4a4238; }
 table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
-th, td { border: 1px solid rgba(23,19,13,.22); padding: 6px 8px; text-align: left; }
-footer { color: var(--muted); border-top: 2px solid rgba(23,19,13,.18); }
+th, td { border: 1px solid var(--hairline); padding: 6px 8px; text-align: left; }
+footer { color: var(--muted); border-top: 1px solid var(--hairline); font-size: .9rem; }
 """.strip() + "\n"
 
 

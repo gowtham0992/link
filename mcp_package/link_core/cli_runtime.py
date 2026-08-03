@@ -252,6 +252,9 @@ def render_try_text(
         "",
         "More first-run prompts:",
         f"  {next_command}",
+        "",
+        "Ready for real use? One command wires every agent you have:",
+        "  lnk setup",
     ])
 
 
@@ -281,8 +284,8 @@ def render_proof_text(payload: Mapping[str, object]) -> tuple[int, str]:
         "",
         "What this means for you",
         "- Save something once; any of your agents can recall it later, from plain local files.",
-        "- Ready for real use? Create your durable workspace and wire an agent:",
-        f"    {display_command(['lnk', 'onboard'])}",
+        "- Ready for real use? One command wires every agent you have:",
+        f"    {display_command(['lnk', 'setup'])}",
         "    (this proof workspace is a demo — your memory will live at ~/link)",
         "",
         "Try it with two agents",

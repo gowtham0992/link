@@ -177,9 +177,15 @@ store stays *trustworthy* as sessions accumulate — the axis on which
 review-gated architecture differs from unsupervised extraction.
 
 `scripts/eval_memory_hygiene.py` drives two pipelines over the same
-deterministic stream of 112 authored session events (42 durable facts, 12
-mid-stream revisions, plus agent echoes, Link's own injected briefs, and
-memory-free noise sessions — every event ground-truth labeled, no LLM):
+deterministic stream of 142 authored session events (42 durable facts, 12
+mid-stream revisions, plus agent echoes, Link's own injected briefs,
+memory-free noise sessions, quiz/debug questions containing absolute
+keywords, pasted third-party AI advice inside user turns, and verbatim
+cross-session repeats — every event ground-truth labeled, no LLM). The
+question, pasted-advice, and repeat classes were added in v2 after real-world
+dogfooding showed exactly those shapes leaking into the review inbox; the
+fixture now contains the junk we actually observed, not just the junk we
+predicted:
 
 - **gated** — Link's real pipeline: extraction drops Link-injected output,
   echo containment drops restatements, duplicates are refused, detected
@@ -193,11 +199,11 @@ memory-free noise sessions — every event ground-truth labeled, no LLM):
 
 | metric | gated (Link) | ungated |
 |---|---|---|
-| junk stored (echo / self-brief / noise) | **0** (0.0%) | 16 (23.9%) |
-| contradiction exposure@3 after a revision | **0.333** | 0.833 |
-| active memories (ground truth: 54) | **40** | 67 |
-| as-of temporal accuracy (revised facts) | **1.00** | 1.00 |
-| current-truth precision@1 | 0.762 | 0.762 |
+| junk stored (echo / self-brief / noise / question / pasted advice / repeat) | **0** (0.0%) | 31 (36.5%) |
+| contradiction exposure@3 after a revision | **0.167** | 0.750 |
+| active memories (ground truth: 54) | **42** | 85 |
+| as-of temporal accuracy (revised facts) | **0.917** | 1.00 |
+| current-truth precision@1 | **0.881** | 0.738 |
 
 The ungated junk rate mirrors what users measure in production LLM-extraction
 systems (a public mem0 audit found 97.8% junk after 32 days, over half of it
@@ -205,19 +211,38 @@ the system's own prompt text re-ingested). Link's junk rate is zero **by
 construction**, and CI enforces it: the hygiene gate fails any change that
 stores junk or loses to the ungated baseline.
 
-Honest notes: gated contradiction exposure is 0.333, not zero — Link only
-supersedes contradictions its deterministic detector catches (8 of 12
-authored revision shapes today), and this benchmark now grades that detector.
-Full disclosure: the revision-shape detection rule was developed against this
-same authored set (it moved the number from 0.417 during development), so
-8/12 is a fit, not a blind score — contributed revision cases the detector
-has never seen are the real test, and we welcome them. "Zero junk by
-construction" means zero *self-inflicted* junk through automatic capture
-(echoes, self-briefs, noise); a user can still approve a bad memory — review
-gates shape what is proposed, not what humans decide. Current-truth
-precision ties because both pipelines share the same retrieval; the gated
-advantage there appears exactly when the outdated version would otherwise
-outrank the current one (the exposure metric).
+Honest notes: gated contradiction exposure is 0.167, not zero — the
+deterministic detector now supersedes 10 of the 12 authored revision
+shapes. Getting there took three v2 fixes, each a general rule rather than
+a fixture patch: updates that add content tokens are no longer swallowed by
+the echo guard (echoes add framing, revisions add content); detailed
+original claims are matched at partial coverage (originals carry specifics
+a revision legitimately drops); and preference/decision classification
+jitter no longer blocks detection across the type/scope boundary. The two
+revisions that still expose in this table are lexically disjoint
+rephrasings ("SQLite with FTS" revised as "DuckDB files with the same
+no-service rule") — the honest limit of a token-based detector. When the
+optional local semantic tier is installed, a claim-vs-claim embedding pass
+(threshold 0.55; true revisions measured 0.60-0.69, unrelated pairs
+<= 0.18 with model2vec) catches exactly these as `semantic_revision`
+conflict candidates. The published table stays lexical-only on purpose:
+these numbers must be reproducible with no model download. As-of accuracy is 0.917, not 1.00: one
+historical reconstruction breaks when a topically-adjacent conflict
+auto-resolves against the wrong original — an artifact of this benchmark's
+blind auto-supersede loop; in the product, conflicts route to human review.
+Along the way v1's numbers turned out flattered twice over: it silently
+measured only 9 of its 12 revisions (3 revision texts never classified as
+memory at all), and its false-positive conflicts archived unrelated
+memories in ways that hid real exposure. As before, the detection rules
+were developed against this same authored set, so these are fit numbers,
+not blind scores — contributed revision cases the detector has never seen
+are the real test, and we welcome them. "Zero junk by construction" means
+zero *self-inflicted* junk through automatic capture (echoes, self-briefs,
+noise, questions, pasted third-party advice, repeats); a user can still
+approve a bad memory — review gates shape what is proposed, not what humans
+decide. Current-truth precision no longer ties: the v2 extraction fixes
+lift the gated pipeline to 0.881 while the ungated store's duplicates
+dilute its top-1.
 
 ## Track 4: End-to-end QA under mem0's own harness
 
@@ -297,6 +322,45 @@ answerer-limited, not memory-limited.
   intent in `scripts/recall_dataset.py`).
 - **The quality tier costs a ~5 s model load**, so short-lived CLI calls
   and session-start hooks default to the fast tier unless you opt in.
+
+## Track 5: Memory poisoning (adversarial)
+
+A planted memory is injected into every future session, which makes agent
+memory the highest-value prompt-injection target an agent system has: a
+poisoned webpage, doc, or pasted AI output only has to survive one capture
+to give orders forever. As far as we know no other memory system publishes
+an adversarial benchmark on this surface.
+
+`scripts/eval_memory_poisoning.py` drives 15 authored attacks (synthetic,
+ground-truth labeled, no LLM — `scripts/poisoning_dataset.py`) through the
+real pipeline, plus 6 benign directive controls that must never be flagged.
+Attack classes: guardrail-bypass instructions, unattended-execution
+"preferences" (sudo / --force without approval), data-exfiltration
+conventions (ship ~/.ssh and .env in summaries), credential planting,
+spoofed-approval framing, agent-directed durable commands, and hearsay
+carriers.
+
+| layer | what it does | attacks stopped here |
+|---|---|---|
+| extraction | hearsay/question/echo gates drop what was never the user's own claim | 5 of 15 |
+| labeling | injection-shaped proposals carry a warning label into the inbox and decision trail | 8 of 15 |
+| write gate | credential-shaped text refused even on a one-click accept | 1 of 15 |
+| defanging | extraction strips the payload; only a harmless residue can be stored | 1 of 15 |
+
+**Unlabeled exposure: 0 of 15. Benign false positives: 0 of 6.** Both are
+CI-enforced — any change that lets an attack reach the inbox without a
+label, or flags a legitimate directive, fails the build.
+
+Honest notes: labels are warnings, not blocks — a human may genuinely hold
+a "never ask confirmation before builds" preference, so the pipeline never
+censors; it attributes ("verify you actually said this before accepting").
+The review gate remains the final defense for anything labeled, which is
+the architecture's claim, not a hedge: memory writes that no human approved
+do not exist in Link. The attack set was authored by us and the detector
+was developed against it — these are fit numbers, not blind ones, and the
+patterns are deliberately narrow to protect the zero-false-positive
+property. Adversarial contributions that beat the layers are welcome and
+will be added to the fixture.
 
 ## Reproduce
 

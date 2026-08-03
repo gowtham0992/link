@@ -14,6 +14,10 @@ struct PaletteView: View {
     @State private var searching = false
     @FocusState private var focused: Bool
     @State private var debounce: DispatchWorkItem?
+    /// Monotonic id per recall; a slow response for an old query must never
+    /// overwrite the results of a newer one.
+    @State private var recallGeneration = 0
+    @State private var pendingDismiss: DispatchWorkItem?
 
     private var isRemember: Bool { text.hasPrefix("+") }
     private var payload: String {
@@ -55,6 +59,10 @@ struct PaletteView: View {
                 .focused($focused)
                 .onSubmit(commit)
                 .onChange(of: text) { _, _ in
+                    // Typing again revokes a scheduled auto-dismiss: the user
+                    // has started a new query and the panel must stay open.
+                    pendingDismiss?.cancel()
+                    pendingDismiss = nil
                     confirmation = nil
                     scheduleRecall()
                 }
@@ -141,10 +149,14 @@ struct PaletteView: View {
 
     private func scheduleRecall() {
         debounce?.cancel()
-        guard !isRemember, !payload.isEmpty else { results = []; abstention = nil; return }
+        recallGeneration += 1
+        guard !isRemember, !payload.isEmpty else { results = []; abstention = nil; searching = false; return }
         searching = true
+        let generation = recallGeneration
+        let query = payload
         let work = DispatchWorkItem {
-            store.paletteRecall(payload) { mems, abst in
+            store.paletteRecall(query) { mems, abst in
+                guard generation == recallGeneration else { return }  // stale response
                 results = mems; abstention = abst; searching = false
             }
         }
@@ -156,9 +168,15 @@ struct PaletteView: View {
         if isRemember {
             guard !payload.isEmpty else { return }
             store.paletteRemember(payload) { result in
-                if result?.created == true {
+                guard let result else {
+                    // nil means the CLI call itself failed — saying "a similar
+                    // memory exists" here would be a false diagnosis.
+                    confirm("Couldn't reach lnk — check the Status tab.", dismissAfter: false)
+                    return
+                }
+                if result.created == true {
                     confirm("Saved — pending your review")
-                } else if result?.secret == true {
+                } else if result.secret == true {
                     confirm("Not saved — looks like a secret. Use a password manager.")
                 } else {
                     confirm("Not saved — a similar or conflicting memory exists.")
@@ -170,12 +188,17 @@ struct PaletteView: View {
         }
     }
 
-    /// Show a confirmation, then auto-dismiss the panel shortly after.
-    private func confirm(_ message: String) {
+    /// Show a confirmation, then auto-dismiss the panel shortly after —
+    /// unless the user starts typing again first (onChange cancels it).
+    private func confirm(_ message: String, dismissAfter: Bool = true) {
         confirmation = message
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+        pendingDismiss?.cancel()
+        guard dismissAfter else { return }
+        let work = DispatchWorkItem {
             text = ""; results = []; confirmation = nil
             dismiss()
         }
+        pendingDismiss = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: work)
     }
 }

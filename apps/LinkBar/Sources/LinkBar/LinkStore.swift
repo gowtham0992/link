@@ -33,6 +33,8 @@ final class LinkStore: ObservableObject {
     @Published var viewerRunning = false
     @Published var activeSessions: [AgentSession] = []
     @Published var memories: [MemoryPage] = []
+    /// explain-memory payloads keyed by memory name, fetched on row expand.
+    @Published var explanations: [String: MemoryExplanation] = [:]
     private var lastHealthAt = Date.distantPast
 
     var pendingCount: Int {
@@ -232,7 +234,7 @@ final class LinkStore: ObservableObject {
         }
 
         // Workspace
-        if let runtimeWarning {
+        if runtimeWarning != nil {
             rows.append(.init(icon: "shippingbox", name: "Workspace", level: .warn,
                               detail: "runtime is stale — recall may use old logic",
                               fix: .init(label: "Refresh") { [weak self] in self?.repairRuntime() }))
@@ -375,6 +377,21 @@ final class LinkStore: ObservableObject {
         act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "\(index)"])
     }
 
+    /// Why does Link believe this? Lazily fetched per memory when the row
+    /// expands; cached until the next refresh cycle replaces memories.
+    func explainMemory(named name: String) {
+        guard explanations[name] == nil else { return }
+        Task.detached(priority: .userInitiated) {
+            let payload = try? LinkCLI.runJSON(
+                MemoryExplanation.self,
+                ["explain-memory", name, LinkCLI.workspace, "--json"]
+            )
+            await MainActor.run {
+                if let payload { self.explanations[name] = payload }
+            }
+        }
+    }
+
     /// Archive/restore straight from the memory browser.
     func archiveMemory(named name: String) {
         act(["archive-memory", name, LinkCLI.workspace])
@@ -392,6 +409,35 @@ final class LinkStore: ObservableObject {
 
     func deleteCapture(_ capture: CaptureItem) {
         act(["delete-capture", capture.path, LinkCLI.workspace, "--confirm"])
+    }
+
+    /// Collapse inbox captures that offer nothing new (already pending in a
+    /// newer capture, accepted as memory, or previously dismissed). Outcome
+    /// comes from the command's own JSON, never assumed from exit 0.
+    func dedupCaptures() {
+        busy = true
+        Task.detached(priority: .userInitiated) {
+            do {
+                let result = try LinkCLI.runJSON(
+                    DedupCapturesResult.self,
+                    ["dedup-captures", LinkCLI.workspace, "--confirm", "--json"]
+                )
+                await MainActor.run {
+                    if result.removed.isEmpty {
+                        self.showFlash("Nothing redundant — every capture offers something new.", tone: .info)
+                        self.busy = false
+                    } else {
+                        self.showFlash("Removed \(result.removed.count) redundant capture\(result.removed.count == 1 ? "" : "s").", tone: .success)
+                        self.refresh()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.lastError = String(describing: error)
+                    self.busy = false
+                }
+            }
+        }
     }
 
     /// Save typed text as a memory — review-gated like every other write.

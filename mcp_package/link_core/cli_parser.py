@@ -17,7 +17,7 @@ CliHandler = Callable[..., int]
 
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Start here", (
-        "try", "onboard", "init", "demo", "proof", "welcome", "prompts",
+        "try", "setup", "onboard", "init", "demo", "proof", "welcome", "prompts",
     )),
     ("Memory — the core loop", (
         "remember", "recall", "recipes", "query", "brief", "start",
@@ -25,8 +25,8 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Review & governance", (
         "memory-inbox", "review-memory", "explain-memory", "consolidate",
-        "capture-inbox", "accept-capture", "delete-capture", "redact-capture",
-        "capture-session", "propose-memories", "update-memory",
+        "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
+        "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
         "set-memory-visibility", "memory-log", "memory-audit",
     )),
@@ -107,6 +107,11 @@ def build_cli_parser(
     proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
     proof_cmd.add_argument("--port", type=int, default=3000)
     proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
+
+    setup_cmd = sub.add_parser("setup", help="one command for install day and every upgrade: workspace + every detected agent, wired")
+    setup_cmd.add_argument("target", nargs="?", default="~/link")
+    setup_cmd.add_argument("--preview", action="store_true", help="show what would be configured without writing agent configs")
+    setup_cmd.add_argument("--json", action="store_true", help="print machine-readable setup details")
 
     onboard_cmd = sub.add_parser("onboard", help="set up a real Link workspace and print the agent-first next steps")
     onboard_cmd.add_argument("target", nargs="?", default="~/link")
@@ -248,7 +253,8 @@ def build_cli_parser(
     remember_cmd.add_argument("text", help="memory text to save")
     remember_cmd.add_argument("target", nargs="?", default=".")
     remember_cmd.add_argument("--title", default=None, help="memory page title")
-    remember_cmd.add_argument("--type", choices=MEMORY_TYPES, default="note", dest="memory_type")
+    remember_cmd.add_argument("--type", choices=MEMORY_TYPES, default=None, dest="memory_type",
+                              help="memory type; inferred from the text's cues when omitted (falls back to note)")
     remember_cmd.add_argument("--scope", choices=MEMORY_SCOPES, default="user")
     remember_cmd.add_argument("--visibility", choices=MEMORY_VISIBILITIES, default=None, help="sharing intent: private, project, or team")
     remember_cmd.add_argument("--tags", default=None, help="comma-separated tags")
@@ -319,6 +325,11 @@ def build_cli_parser(
     delete_capture_cmd.add_argument("target", nargs="?", default=".")
     delete_capture_cmd.add_argument("--confirm", action="store_true", help="required to delete the capture")
     delete_capture_cmd.add_argument("--json", action="store_true", help="print machine-readable deletion details")
+
+    dedup_captures_cmd = sub.add_parser("dedup-captures", help="collapse review-inbox captures that offer nothing new")
+    dedup_captures_cmd.add_argument("target", nargs="?", default=".")
+    dedup_captures_cmd.add_argument("--confirm", action="store_true", help="delete the redundant captures (dry-run without it)")
+    dedup_captures_cmd.add_argument("--json", action="store_true", help="print machine-readable dedup details")
 
     update_memory_cmd = sub.add_parser("update-memory", help="merge new text into an existing memory")
     update_memory_cmd.add_argument("identifier", help="memory page name, title, or path")
@@ -465,8 +476,10 @@ def build_cli_parser(
     memory_log_cmd.add_argument("--json", action="store_true", help="print machine-readable memory log")
 
     review_cmd = sub.add_parser("review-memory", help="mark a memory as reviewed")
-    review_cmd.add_argument("identifier", help="memory page name, title, or path")
+    review_cmd.add_argument("identifier", nargs="?", default=None, help="memory page name, title, or path (omit with --all)")
     review_cmd.add_argument("target", nargs="?", default=".")
+    review_cmd.add_argument("--all", action="store_true", dest="review_all", help="review every memory that is pending or due (lists first; requires --confirm)")
+    review_cmd.add_argument("--confirm", action="store_true", help="required with --all to actually mark them reviewed")
     review_cmd.add_argument("--note", default=None, help="optional review note")
     review_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
@@ -540,6 +553,12 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             force=args.force,
             serve=args.serve,
             port=args.port,
+            json_output=args.json,
+        )
+    if command == "setup":
+        return handlers["setup"](
+            Path(args.target),
+            preview=args.preview,
             json_output=args.json,
         )
     if command == "onboard":
@@ -730,6 +749,12 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             confirm=args.confirm,
             json_output=args.json,
         )
+    if command == "dedup-captures":
+        return handlers["dedup-captures"](
+            Path(args.target),
+            confirm=args.confirm,
+            json_output=args.json,
+        )
     if command == "update-memory":
         return handlers["update-memory"](
             Path(args.target),
@@ -836,7 +861,10 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
         )
     if command == "review-memory":
-        return handlers["review-memory"](Path(args.target), args.identifier, note=args.note, json_output=args.json)
+        return handlers["review-memory"](
+            Path(args.target), args.identifier, note=args.note,
+            review_all=args.review_all, confirm=args.confirm, json_output=args.json,
+        )
     if command == "explain-memory":
         return handlers["explain-memory"](Path(args.target), args.identifier, json_output=args.json)
     if command == "rebuild-index":

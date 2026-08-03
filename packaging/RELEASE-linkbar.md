@@ -16,8 +16,9 @@
          lnk proof                 # prove cross-agent memory in ~1 second
          lnk try                   # the full demo wiki
 
-       Wire your agent (creates ~/link, provisions MCP, writes hooks):
-         lnk onboard --agent claude-code --hooks --write
+       Make it yours — one command wires every agent you have
+       (workspace, MCP, session hooks; re-run after any upgrade):
+         lnk setup
 
        Optional, macOS: put the review gate in your menu bar —
        notifications when memory is captured, a global palette (Opt-Cmd-M),

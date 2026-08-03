@@ -714,7 +714,7 @@ class MemoryCoreTests(unittest.TestCase):
 
         self.assertEqual(len(memories), 2)
         self.assertTrue(any("develop branch" in m for m in memories))
-        self.assertTrue(any("never push to main" in m for m in memories))
+        self.assertTrue(any("push to main" in m.lower() for m in memories))
         for proposal in payload["proposals"]:
             self.assertEqual(proposal["memory_type"], "preference")
 
@@ -726,7 +726,7 @@ class MemoryCoreTests(unittest.TestCase):
         )
         self.assertEqual(
             [p["memory"] for p in payload["proposals"]],
-            ["from now on I only push to the develop branch."],
+            ["I only push to the develop branch."],
         )
 
         payload = propose_memories_from_text("ok so I prefer tabs over spaces.", [], source="unit test")
@@ -734,7 +734,7 @@ class MemoryCoreTests(unittest.TestCase):
 
     def test_preamble_trim_keeps_full_text_when_tail_does_not_classify(self):
         payload = propose_memories_from_text("never push to main — thanks!", [], source="unit test")
-        self.assertEqual([p["memory"] for p in payload["proposals"]], ["never push to main — thanks!"])
+        self.assertEqual([p["memory"] for p in payload["proposals"]], ["Never push to main — thanks!"])
 
     def test_narrative_only_is_not_a_preference(self):
         payload = propose_memories_from_text(
@@ -1465,3 +1465,337 @@ class ProposalDurabilityRankingTests(unittest.TestCase):
         text = "I only merge with squash commits. I always run the linter before pushing."
         proposals = propose_memories_from_text(text, [])["proposals"]
         self.assertIn("squash", proposals[0]["memory"])
+
+
+class MiningQualityTests(unittest.TestCase):
+    """2.1 extraction quality: questions, hearsay, ephemeral scope, ranking."""
+
+    def test_questions_never_classify_even_with_absolutes(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        for question in (
+            "number of walkers is always fixed?",
+            "Should we always deploy on Fridays?",
+            "Why does the linter never flag this file?",
+        ):
+            self.assertIsNone(classify_memory_segment(question), question)
+
+    def test_questions_sink_in_durability_rank(self):
+        from mcp_package.link_core.memory import memory_durability_rank
+        self.assertLess(
+            memory_durability_rank("number of walkers is always fixed?"),
+            memory_durability_rank("User wants to set some conventions going forward."),
+        )
+
+    def test_bare_imperatives_outrank_meta_preambles(self):
+        from mcp_package.link_core.memory import memory_durability_rank
+        imperative = memory_durability_rank("Plot the loss curve every 500 steps.")
+        preamble = memory_durability_rank("User wants to set some conventions for this repo.")
+        concrete = memory_durability_rank("I always plot the loss curve every 500 steps.")
+        self.assertGreater(imperative, preamble)
+        self.assertGreater(concrete, imperative)
+
+    def test_pasted_hearsay_absolutes_do_not_classify(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        for hearsay in (
+            "People on Reddit emphasize that they heavily screen for candidates who do not outsource their thinking.",
+            "Reviewers never accept generic cover letters according to that thread.",
+            "The blog post says teams always squash their commits before merging.",
+        ):
+            self.assertIsNone(classify_memory_segment(hearsay), hearsay)
+
+    def test_user_voice_and_imperative_absolutes_still_classify(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        for direct in (
+            "I never commit directly to main.",
+            "never push to main directly, releases go through PRs.",
+            "Please always ask before deleting files.",
+            "The user does not prefer short release notes anymore; write detailed notes.",
+        ):
+            self.assertIsNotNone(classify_memory_segment(direct), direct)
+
+    def test_time_scoped_observations_do_not_classify(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        self.assertIsNone(classify_memory_segment(
+            "We concluded the vendor change does not affect us this quarter."
+        ))
+
+    def test_proposal_fingerprint_ignores_case_and_punctuation(self):
+        from mcp_package.link_core.memory import proposal_fingerprint
+        self.assertEqual(
+            proposal_fingerprint("User always plots the loss curve!"),
+            proposal_fingerprint("  user ALWAYS plots — the loss curve.  "),
+        )
+
+    def test_exclude_fingerprints_skips_matching_proposals(self):
+        from mcp_package.link_core.memory import (
+            proposal_fingerprint,
+            propose_memories_from_text,
+        )
+        text = "I always plot the loss curve every 500 steps."
+        mined = propose_memories_from_text(text, [])["proposals"][0]["memory"]
+        excluded = propose_memories_from_text(
+            text, [], exclude_fingerprints={proposal_fingerprint(str(mined))}
+        )
+        self.assertEqual(excluded["count"], 0)
+        self.assertEqual(excluded["skipped_count"], 1)
+
+    def test_decision_cue_outranks_bare_absolute_typing(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        revision = classify_memory_segment(
+            "We decided the backend API does not listen on port 8080 anymore; local development now binds port 9000."
+        )
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision["memory_type"], "decision")
+
+    def test_polarity_flip_is_not_an_echo(self):
+        from mcp_package.link_core.memory import is_existing_memory_echo
+        records = [{
+            "name": "ruff", "status": "active", "memory_type": "decision",
+            "title": "Python linting uses Ruff",
+            "tldr": "Project decided Python linting uses Ruff through the shared config file; CI runs it on every push.",
+            "body": "",
+        }]
+        update = "We decided Python linting does not use Ruff anymore; linting now runs through Biome with the shared config."
+        restatement = "Per your saved preference, Python linting uses Ruff through the shared config file; CI runs it on every push."
+        self.assertFalse(is_existing_memory_echo(records, update))
+        self.assertTrue(is_existing_memory_echo(records, restatement))
+
+    def test_boilerplate_overlap_does_not_create_conflicts(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        records = [{
+            "name": "squash", "status": "active", "memory_type": "decision", "scope": "project",
+            "title": "Pull requests are squash-merged",
+            "tldr": "Project decided pull requests are squash-merged; main history stays linear.",
+            "body": "",
+        }]
+        candidates = memory_conflict_candidates(
+            records,
+            "Project decided: The backend API listens on port 8080 in local development; the frontend proxies /api there.",
+            "API port", "decision", "project",
+        )
+        self.assertEqual(candidates, [])
+
+
+class RevisionDetectionTests(unittest.TestCase):
+    """2.1 detector recall: revisions must reach conflict detection."""
+
+    def test_update_with_new_content_is_not_an_echo_despite_high_containment(self):
+        from mcp_package.link_core.memory import is_existing_memory_echo
+        records = [{
+            "name": "deploy", "status": "active", "memory_type": "decision",
+            "title": "Deploy from main",
+            "tldr": "Project decided deploys ship from the main branch only, never from feature branches, after CI passes.",
+            "body": "",
+        }]
+        update = ("We decided releases never deploy from the main branch now; "
+                  "production ships only from release branches after sign-off.")
+        framed_echo = ("Per your saved preference, deploys ship from the main branch only, "
+                       "never from feature branches, after CI passes. I will keep following that.")
+        self.assertFalse(is_existing_memory_echo(records, update))
+        self.assertTrue(is_existing_memory_echo(records, framed_echo))
+
+    def test_revision_rule_catches_detailed_heads_at_partial_coverage(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        records = [{
+            "name": "weekly", "status": "active", "memory_type": "decision", "scope": "project",
+            "title": "Weekly release trains",
+            "tldr": "Project decided releases ship weekly on Thursdays; anything merged after Wednesday noon waits for the next train.",
+            "body": "",
+        }]
+        candidates = memory_conflict_candidates(
+            records,
+            "Project decided releases never ship weekly on Thursdays now; a release train leaves every day after CI passes.",
+            "Daily release trains", "decision", "project",
+        )
+        self.assertTrue(candidates)
+        self.assertIn("revises_existing_claim", candidates[0]["conflict_reasons"])
+
+    def test_preference_decision_cross_pair_skips_scope_gate(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        records = [{
+            "name": "dark", "status": "active", "memory_type": "decision", "scope": "project",
+            "title": "Dark theme for demos",
+            "tldr": "Project decided every demo screenshot uses dark theme mode in the capture tool.",
+            "body": "",
+        }]
+        candidates = memory_conflict_candidates(
+            records,
+            "User does not use dark theme for demos anymore; capture screenshots in light mode.",
+            "Light theme for demos", "preference", "user",
+        )
+        self.assertTrue(candidates)
+
+
+class TrustLifecycleTests(unittest.TestCase):
+    """Memory ages honestly: typed windows, re-arm on review, no silent hiding."""
+
+    def _wiki(self):
+        import tempfile
+        from pathlib import Path
+        temp = Path(tempfile.mkdtemp(prefix="link-lifecycle-"))
+        (temp / "memories").mkdir(parents=True)
+        (temp / "index.md").write_text("# Index\n", encoding="utf-8")
+        (temp / "log.md").write_text("# Log\n", encoding="utf-8")
+        return temp
+
+    def test_write_stamps_typed_review_window(self):
+        from mcp_package.link_core.memory import memory_records, write_memory_page
+        wiki = self._wiki()
+        write_memory_page(wiki, "I prefer tabs over spaces.", title="Tabs",
+                          memory_type="preference", scope="user", tags=None,
+                          source="unit", timestamp="2026-08-02T00:00:00Z")
+        write_memory_page(wiki, "This project uses uv for env management.", title="Uv",
+                          memory_type="project", scope="project", project="demo",
+                          tags=None, source="unit", timestamp="2026-08-02T00:00:00Z")
+        by_title = {str(r["title"]): r for r in memory_records(wiki)}
+        self.assertEqual(by_title["Tabs"]["review_after"], "2027-02-02")     # 6 months
+        self.assertEqual(by_title["Uv"]["review_after"], "2026-11-02")       # 3 months
+
+    def test_explicit_review_after_wins(self):
+        from mcp_package.link_core.memory import memory_records, write_memory_page
+        wiki = self._wiki()
+        result = write_memory_page(wiki, "Releases deploy from the release branch.", title="Pin",
+                                   memory_type="decision", scope="project", project="demo",
+                                   tags=None, source="unit", timestamp="2026-08-02T00:00:00Z",
+                                   review_after="2026-09-15")
+        self.assertTrue(result.get("created"), result)
+        record = memory_records(wiki)[0]
+        self.assertEqual(record["review_after"], "2026-09-15")
+
+    def test_review_rearms_due_window_but_keeps_future_custom_date(self):
+        from mcp_package.link_core.memory import (
+            mark_memory_reviewed, memory_records, write_memory_page,
+        )
+        wiki = self._wiki()
+        write_memory_page(wiki, "I prefer rebase over merge.", title="Rebase",
+                          memory_type="preference", scope="user", tags=None,
+                          source="unit", timestamp="2026-01-01T00:00:00Z",
+                          review_after="2026-06-01")
+        mark_memory_reviewed(wiki, "Rebase", None, "2026-08-02T00:00:00Z")
+        record = memory_records(wiki)[0]
+        self.assertEqual(record["review_after"], "2027-02-02")  # re-armed 6 months
+
+        write_memory_page(wiki, "Keep the beta flag until Q4.", title="Beta",
+                          memory_type="note", scope="user", tags=None,
+                          source="unit", timestamp="2026-08-01T00:00:00Z",
+                          review_after="2026-12-01")
+        mark_memory_reviewed(wiki, "Beta", None, "2026-08-02T00:00:00Z")
+        beta = next(r for r in memory_records(wiki) if r["title"] == "Beta")
+        self.assertEqual(beta["review_after"], "2026-12-01")  # custom future date kept
+
+    def test_memories_without_review_after_age_implicitly(self):
+        from mcp_package.link_core.memory import memory_review_issues
+        record = {
+            "status": "active", "review_status": "reviewed", "memory_type": "preference",
+            "scope": "user", "visibility": "private", "review_after": "", "expires_at": "",
+            "reviewed_at": "2026-01-05T00:00:00Z", "date_captured": "2025-12-01T00:00:00Z",
+            "title": "t", "tldr": "x", "source": "unit",
+        }
+        codes = [i["code"] for i in memory_review_issues(record, today="2026-08-02")]
+        self.assertIn("review_due", codes)
+        fresh = dict(record, reviewed_at="2026-06-01T00:00:00Z")
+        codes = [i["code"] for i in memory_review_issues(fresh, today="2026-08-02")]
+        self.assertNotIn("review_due", codes)
+
+    def test_month_arithmetic_clamps_short_months(self):
+        from datetime import date
+        from mcp_package.link_core.memory import _add_months
+        self.assertEqual(_add_months(date(2026, 1, 31), 1), date(2026, 2, 28))
+        self.assertEqual(_add_months(2028 and date(2028, 1, 31), 1), date(2028, 2, 29))
+        self.assertEqual(_add_months(date(2026, 12, 15), 1), date(2027, 1, 15))
+
+
+class FrictionRoundTests(unittest.TestCase):
+    """Cold-walk fixes: lead-in trim, trust markers, type inference cues."""
+
+    def test_durability_lead_ins_trimmed_from_stored_claim(self):
+        from mcp_package.link_core.memory import normalize_proposed_memory
+        self.assertEqual(
+            normalize_proposed_memory("from now on I only push to develop", "preference"),
+            "I only push to develop.",
+        )
+        self.assertEqual(
+            normalize_proposed_memory("Going forward, we always tag releases.", "preference"),
+            "We always tag releases.",
+        )
+
+    def test_trust_marker_flags_pending_and_due(self):
+        from mcp_package.link_core.cli_memory import _trust_marker
+        self.assertEqual(_trust_marker({"review_status": "pending"}), " · pending review")
+        self.assertEqual(
+            _trust_marker({"review_status": "reviewed", "review_after": "2020-01-01"}),
+            " · review due",
+        )
+        self.assertEqual(
+            _trust_marker({"review_status": "reviewed", "review_after": "2999-01-01"}), "",
+        )
+
+    def test_remember_type_cues_classify_for_inference(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        self.assertEqual(classify_memory_segment("I prefer dark mode in every editor.")["memory_type"], "preference")
+        self.assertEqual(classify_memory_segment("We decided sprints are two weeks.")["memory_type"], "decision")
+        self.assertIsNone(classify_memory_segment("The meeting moved to Thursday afternoon room 4."))
+
+
+class SemanticRevisionTests(unittest.TestCase):
+    """Lexically disjoint revisions caught by meaning when the tier exists."""
+
+    RECORDS = [{
+        "name": "sqlite", "status": "active", "memory_type": "decision", "scope": "project",
+        "title": "Embedded storage engine",
+        "tldr": "Local data lives in SQLite with FTS enabled; queries use the embedded engine and no external database service runs.",
+        "body": "",
+    }, {
+        "name": "squash", "status": "active", "memory_type": "decision", "scope": "project",
+        "title": "Squash-merge pull requests",
+        "tldr": "Pull requests are squash-merged; main history stays linear.",
+        "body": "",
+    }]
+    REVISION = ("Project decided local data does not live in SQLite anymore; "
+                "we settled on DuckDB files.")
+
+    @staticmethod
+    def _stub_embedder(texts):
+        # Deterministic stand-in: storage-topic texts share an axis,
+        # merge-topic texts another — mirrors what the real model showed
+        # (true revisions 0.60-0.82, unrelated pairs <= 0.18).
+        def vec(text):
+            lower = text.lower()
+            storage = 1.0 if ("sqlite" in lower or "duckdb" in lower) else 0.0
+            merging = 1.0 if ("squash" in lower or "merge" in lower) else 0.0
+            return [storage, merging, 0.1]
+        return [vec(text) for text in texts]
+
+    def _reasons(self, candidates, name):
+        for candidate in candidates:
+            if str(candidate.get("name")) == name:
+                return list(candidate.get("conflict_reasons") or [])
+        return []
+
+    def test_semantic_tier_catches_disjoint_revision(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        candidates = memory_conflict_candidates(
+            self.RECORDS, self.REVISION, "DuckDB decision",
+            "decision", "project", embedder=self._stub_embedder,
+        )
+        self.assertIn("semantic_revision", self._reasons(candidates, "sqlite"))
+        self.assertEqual(self._reasons(candidates, "squash"), [])
+
+    def test_without_embedder_detection_stays_lexical(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        candidates = memory_conflict_candidates(
+            self.RECORDS, self.REVISION, "DuckDB decision",
+            "decision", "project", embedder=lambda texts: [],
+        )
+        for candidate in candidates:
+            self.assertNotIn("semantic_revision", candidate.get("conflict_reasons") or [])
+
+    def test_semantic_pass_needs_revision_cue(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        plain = "The project stores analytics in DuckDB files."
+        candidates = memory_conflict_candidates(
+            self.RECORDS, plain, "DuckDB analytics",
+            "decision", "project", embedder=self._stub_embedder,
+        )
+        for candidate in candidates:
+            self.assertNotIn("semantic_revision", candidate.get("conflict_reasons") or [])

@@ -58,6 +58,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Collection
 from pathlib import Path
 from typing import Callable
 
@@ -122,6 +123,7 @@ if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
 from link_core.memory import (
+    classify_memory_segment as _core_classify_memory_segment,
     list_recipes as _core_list_recipes,
     render_recipes_text as _core_render_recipes_text,
     is_existing_memory_echo as _core_is_existing_memory_echo,
@@ -138,6 +140,7 @@ from link_core.memory import (
     memory_audit_next_actions as _core_memory_audit_next_actions,
     memory_records as _core_memory_records,
     memory_review_issues as _core_memory_review_issues,
+    proposal_fingerprint as _core_proposal_fingerprint,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memories,
     recall_abstention as _core_recall_abstention,
@@ -231,9 +234,14 @@ from link_core.capture import (
     capture_inbox as _core_capture_inbox,
     capture_proposal_selection as _core_capture_proposal_selection,
     capture_records as _core_capture_records,
+    capture_proposal_fingerprints as _core_capture_proposal_fingerprints,
     capture_review_summary as _core_capture_review_summary,
     cli_capture_commands as _core_cli_capture_commands,
+    dedup_pending_captures as _core_dedup_pending_captures,
     delete_capture_file as _core_delete_capture_file,
+    find_conversation_capture as _core_find_conversation_capture,
+    load_dismissed_fingerprints as _core_load_dismissed_fingerprints,
+    pending_proposal_fingerprints as _core_pending_proposal_fingerprints,
     render_accept_capture_text as _core_render_accept_capture_text,
     render_capture_session_text as _core_render_capture_session_text,
     render_capture_inbox_text as _core_render_capture_inbox_text,
@@ -267,6 +275,7 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    detect_installed_agents as _core_detect_installed_agents,
     read_agent_link_server as _core_read_agent_link_server,
     supported_agents as _core_supported_agents,
 )
@@ -310,6 +319,7 @@ from link_core.schema import (
 )
 from link_core.security import (
     clean_text_input as _clean_text_input,
+    injected_instruction_warnings as _core_injected_instruction_warnings,
 )
 from link_core.query import (
     query_link as _core_query_link,
@@ -555,6 +565,7 @@ def _propose_memories_from_text(
     limit: int = 10,
     project: str | None = None,
     command_target: str | Path = ".",
+    exclude_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
     return _core_propose_memories_from_text(
         text,
@@ -564,6 +575,7 @@ def _propose_memories_from_text(
         writes_memory=False,
         project=project,
         command_target=command_target,
+        exclude_fingerprints=exclude_fingerprints,
     )
 
 
@@ -1119,7 +1131,7 @@ def remember(
     target: Path,
     text: str,
     title: str | None = None,
-    memory_type: str = "note",
+    memory_type: str | None = None,
     scope: str = "user",
     tags: str | None = None,
     source: str = "manual",
@@ -1139,6 +1151,12 @@ def remember(
     if not text or not text.strip():
         print("Memory text is required", file=sys.stderr)
         return 1
+    if memory_type is None:
+        # "I prefer X" saved as a generic note gets the wrong trust window
+        # and misses preference-scoped conflict checks. When the user didn't
+        # choose a type, use the same cues the capture pipeline trusts.
+        classified = _core_classify_memory_segment(text.strip().splitlines()[0])
+        memory_type = str(classified["memory_type"]) if classified else "note"
     try:
         result = _write_memory_page(
             target,
@@ -1304,6 +1322,8 @@ def session_end(
     project: str | None = None,
     proposal_text: str | None = None,
     decision_trail: list[str] | None = None,
+    conversation_id: str | None = None,
+    exclude_fingerprints: Collection[str] = (),
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -1328,6 +1348,7 @@ def session_end(
         path_source=True,
         proposal_text=proposal_text,
         decision_trail=decision_trail,
+        conversation_id=conversation_id,
     )
     rel_path = str(capture_record["path"])
     # The raw capture keeps the full session for review context, but memory
@@ -1340,6 +1361,7 @@ def session_end(
         limit=max(1, min(limit, 10)),
         project=project_name,
         command_target=root,
+        exclude_fingerprints=exclude_fingerprints,
     )
     payload = {
         "captured": True,
@@ -1446,6 +1468,8 @@ def accept_capture(
             index=index,
             project=project,
             default_project=_default_project(root),
+            # Exclude dismissed proposals exactly like inbox previews do, so
+            # "accept proposal 1" targets the same item the user saw listed.
             propose_memories=lambda notes, rel_path, proposal_limit, project_name: _propose_memories_from_text(
                 wiki_dir,
                 notes,
@@ -1453,6 +1477,7 @@ def accept_capture(
                 limit=proposal_limit,
                 project=project_name,
                 command_target=root,
+                exclude_fingerprints=set(_core_load_dismissed_fingerprints(root)),
             ),
         )
     except ValueError as exc:
@@ -1494,6 +1519,27 @@ def accept_capture(
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
+        # A capture is proposal-only staging. Once its accepted claim is a
+        # memory, the file only earns its inbox slot if it still offers
+        # something fresh — otherwise the user would have to delete what
+        # they already handled (found in the cold walk).
+        try:
+            capture_path = selection.get("capture_path")
+            if isinstance(capture_path, Path) and capture_path.is_file():
+                remaining = _core_capture_proposal_fingerprints(
+                    capture_path.read_text(encoding="utf-8", errors="replace"),
+                    project=str(memory_args["project"]) or None,
+                )
+                accepted_now = {
+                    _core_proposal_fingerprint(str(record.get("tldr") or record.get("snippet") or ""))
+                    for record in _memory_records(wiki_dir)
+                }
+                covered = accepted_now | set(_core_load_dismissed_fingerprints(root))
+                if remaining and remaining <= covered:
+                    capture_path.unlink()
+                    payload["capture_cleared"] = True
+        except OSError:
+            pass
         _append_log(
             wiki_dir,
             _utc_timestamp(),
@@ -1502,7 +1548,7 @@ def accept_capture(
             [
                 f"Memory: {result['path']}",
                 f"Project: {result.get('project') or 'none'}",
-            ],
+            ] + (["Capture cleared: nothing left to review."] if payload.get("capture_cleared") else []),
         )
 
     if json_output:
@@ -1593,6 +1639,55 @@ def delete_capture(
     code, text = _core_render_delete_capture_text(payload, target=target)
     _print_text(text)
     return code
+
+
+def dedup_captures(
+    target: Path,
+    confirm: bool = False,
+    json_output: bool = False,
+) -> int:
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    accepted = {
+        _core_proposal_fingerprint(str(record.get("tldr") or record.get("snippet") or ""))
+        for record in _memory_records(wiki_dir)
+    }
+    payload = _core_dedup_pending_captures(root, accepted_fingerprints=accepted, apply=confirm)
+    if confirm and payload["removed"]:
+        _append_log(
+            wiki_dir,
+            _utc_timestamp(),
+            "dedup-captures",
+            f"Removed {len(payload['removed'])} redundant capture(s) from the review inbox",
+            [f"Removed: {path}" for path in payload["removed"][:20]],
+        )
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    removable = payload["removable"] if isinstance(payload["removable"], list) else []
+    kept_count = payload["kept_count"]
+    lines = ["Capture inbox dedup"]
+    if not removable:
+        lines.append(f"Nothing redundant: {kept_count} capture(s), each offers something new.")
+        _print_text("\n".join(lines))
+        return 0
+    verb = "Removed" if confirm else "Would remove"
+    lines.append(f"{verb} {len(removable)} capture(s); keeping {kept_count} with fresh proposals.")
+    for item in removable:
+        if isinstance(item, dict):
+            reason = "no proposals" if item.get("reason") == "no_proposals" else "everything already covered"
+            lines.append(f"  - {item.get('path')} ({reason})")
+    if not confirm:
+        lines.extend(["", "Apply:", f"  {_shell_words_for_target('dedup-captures', target, '--confirm')}"])
+    _print_text("\n".join(lines))
+    return 0
+
+
+def _shell_words_for_target(command: str, target: Path, *flags: str) -> str:
+    return _core_display_command(["link", command, str(target), *flags])
 
 
 def update_memory(
@@ -1814,7 +1909,19 @@ def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_o
     )
 
 
-def review_memory(target: Path, identifier: str, note: str | None = None, json_output: bool = False) -> int:
+def review_memory(
+    target: Path,
+    identifier: str | None,
+    note: str | None = None,
+    review_all: bool = False,
+    confirm: bool = False,
+    json_output: bool = False,
+) -> int:
+    if review_all:
+        return _review_all_pending(target, note=note, confirm=confirm, json_output=json_output)
+    if not identifier:
+        print("Memory identifier is required (or pass --all).", file=sys.stderr)
+        return 1
     try:
         result = _mark_memory_reviewed(target, identifier, note=note)
     except (FileNotFoundError, ValueError) as exc:
@@ -1822,6 +1929,57 @@ def review_memory(target: Path, identifier: str, note: str | None = None, json_o
         return 1
 
     return _emit_json_or_text(result, json_output, _core_render_review_memory_text)
+
+
+def _review_all_pending(
+    target: Path, note: str | None, confirm: bool, json_output: bool,
+) -> int:
+    """Bulk review: the human confirms the whole pending/due list at once.
+
+    Still deliberate — the dry run lists exactly which memories will be
+    marked reviewed, and nothing happens without --confirm.
+    """
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    due: list[dict[str, object]] = []
+    for record in _memory_records(wiki_dir):
+        if str(record.get("status") or "active") != "active":
+            continue
+        codes = {issue["code"] for issue in _core_memory_review_issues(record)}
+        if codes & {"pending_review", "review_due"}:
+            due.append(record)
+    if not due:
+        payload: dict[str, object] = {"reviewed": [], "count": 0, "confirmed": confirm}
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            _print_text("Nothing pending: every active memory is reviewed and inside its trust window.")
+        return 0
+    if not confirm:
+        lines = [f"{len(due)} memories would be marked reviewed:"]
+        lines.extend(f"  - {record.get('title')} ({record.get('memory_type')})" for record in due)
+        lines.extend(["", "Only proceed if the human confirmed each one is still accurate.",
+                      f"Apply: {_shell_words_for_target('review-memory', target, '--all', '--confirm')}"])
+        if json_output:
+            print(json.dumps({"reviewed": [], "count": len(due), "confirmed": False,
+                              "pending": [str(r.get("name")) for r in due]}, indent=2))
+        else:
+            _print_text("\n".join(lines))
+        return 1
+    reviewed: list[str] = []
+    for record in due:
+        try:
+            _mark_memory_reviewed(target, str(record.get("name")), note=note)
+            reviewed.append(str(record.get("name")))
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"Could not review {record.get('name')}: {exc}", file=sys.stderr)
+    if json_output:
+        print(json.dumps({"reviewed": reviewed, "count": len(reviewed), "confirmed": True}, indent=2))
+    else:
+        _print_text(f"Marked {len(reviewed)} memories reviewed; trust windows re-armed.")
+    return 0
 
 
 def explain_memory(target: Path, identifier: str, json_output: bool = False) -> int:
@@ -2337,6 +2495,12 @@ def _hook_session_end(
     # Automatic capture keeps only fresh or conflicting proposals; deliberate
     # refinements still flow through manual `lnk session-end`.
     records = _memory_records(wiki_dir)
+    # A conversation is its transcript: the same chat continued across hours
+    # keeps one identity, so its capture refreshes instead of stacking. Hashed
+    # so capture files carry no machine-specific paths.
+    conversation_id = hashlib.sha256(str(transcript_path).encode("utf-8")).hexdigest()[:16]
+    dismissed = set(_core_load_dismissed_fingerprints(root))
+    pending = _core_pending_proposal_fingerprints(root, exclude_conversation=conversation_id)
     fresh = []
     for proposal in proposals:
         if not isinstance(proposal, dict):
@@ -2348,10 +2512,27 @@ def _hook_session_end(
         if _core_is_existing_memory_echo(records, str(proposal.get("memory") or "")):
             _trace(f"dropped '{title}': restates an existing memory (echo guard, layer 2).")
             continue
+        fingerprint = _core_proposal_fingerprint(str(proposal.get("memory") or ""))
+        if fingerprint in dismissed:
+            _trace(f"dropped '{title}': you already dismissed this proposal.")
+            continue
+        if fingerprint in pending:
+            _trace(f"dropped '{title}': already waiting for review in {pending[fingerprint]}.")
+            continue
+        injection_labels = _core_injected_instruction_warnings(str(proposal.get("memory") or ""))
+        if injection_labels:
+            # Kept, never censored — but the trail says what shape it has so
+            # the reviewer knows to check whether they actually said it.
+            _trace(
+                f"flagged '{title}': {injection_labels[0]} — looks like an injected "
+                "instruction; verify you actually said this before accepting."
+            )
         fresh.append(proposal)
     if not fresh:
         _trace("no fresh proposals left; no capture stored.")
         return 0
+    if _core_find_conversation_capture(root, conversation_id) is not None:
+        _trace("Refreshed this conversation's existing capture in place — one conversation, one review item.")
     _trace(f"Stored a proposal-only capture with {len(fresh)} fresh proposal(s) for your review.")
     code = session_end(
         target,
@@ -2361,6 +2542,8 @@ def _hook_session_end(
         project=project_name,
         proposal_text=user_notes,
         decision_trail=trail,
+        conversation_id=conversation_id,
+        exclude_fingerprints=dismissed | set(pending),
     )
     if code == 0:
         try:
@@ -2641,6 +2824,58 @@ def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str
     requested: list[str] = list(_core_supported_agents()) if all_agents else []
     requested.extend(agents or [])
     return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
+
+
+def setup(
+    target: Path,
+    *,
+    preview: bool = False,
+    json_output: bool = False,
+) -> int:
+    """One command for install day and every upgrade after it.
+
+    Detects every agent installed on this machine, then runs the same
+    onboard machinery for all of them at once: workspace create/repair,
+    runtime refresh, MCP provisioning, session hooks. Idempotent — after
+    `brew upgrade`, re-running it refreshes everything in one step.
+    """
+    detected = _core_detect_installed_agents()
+    hookable = [name for name in detected if _core_supports_agent_hooks(name)]
+    if not json_output:
+        if detected:
+            display = ", ".join(detected)
+            _print_text(f"Detected agents: {display}")
+            if not preview:
+                _print_text("Wiring MCP" + (" + session hooks" if hookable else "") + " for all of them.\n")
+        else:
+            _print_text(
+                "No agent configs detected (looked for Claude Code, Codex, Cursor, "
+                "Windsurf, Zed, Kiro, Gemini CLI). Setting up the workspace; connect "
+                "an agent later with: lnk onboard --agent <name> --write --hooks\n"
+            )
+    code = onboard(
+        target,
+        agents=detected or None,
+        write=bool(detected) and not preview,
+        hooks=bool(hookable) and not preview,
+        json_output=json_output,
+    )
+    if code == 0 and not json_output:
+        extras: list[str] = []
+        try:
+            from link_core.semantic import model_available, provider_installed
+            if not (provider_installed() and model_available()):
+                extras.append("Meaning-based recall (one-time local model download):  lnk semantic --setup")
+        except Exception:
+            pass
+        if sys.platform == "darwin" and not Path("/Applications/LinkBar.app").exists():
+            extras.append("Menu-bar review gate:  brew install --cask gowtham0992/link/linkbar")
+        if extras:
+            _print_text("\nOptional, when you want them:")
+            for extra in extras:
+                _print_text(f"  {extra}")
+        _print_text("\nUpgrades stay this easy: brew upgrade, then lnk setup again.")
+    return code
 
 
 def onboard(
@@ -3194,7 +3429,8 @@ _WORKSPACE_COMMANDS = {
     "remember", "recall", "recipes", "query", "query-link", "brief", "start",
     "session-end", "end", "propose-memories", "capture-session",
     "capture-inbox", "accept-capture", "redact-capture", "delete-capture",
-    "update-memory", "set-memory-visibility", "memory-inbox", "memory-log",
+    "dedup-captures", "update-memory", "set-memory-visibility",
+    "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
     "semantic", "status", "health", "doctor", "validate", "operations",
@@ -3231,6 +3467,21 @@ def main(argv: list[str] | None = None) -> int:
     # commands never pay a multi-second model load. Explicit provider wins;
     # the MCP server (its own entry point) still prefers the quality tier.
     os.environ.setdefault("LINK_SEMANTIC_SURFACE", "cli")
+    # A bare `lnk` is most people's first keystroke — greet, don't error.
+    effective_argv = sys.argv[1:] if argv is None else argv
+    if not effective_argv:
+        _print_text("\n".join([
+            "Link — local, source-backed memory for AI agents.",
+            "",
+            "  lnk proof     see cross-agent memory work (~1 second, throwaway)",
+            "  lnk try       build a full demo wiki you can explore",
+            "  lnk setup     make it yours: wire every agent you have, one command",
+            "  lnk status    is my workspace healthy?",
+            "  lnk --help    everything else, grouped by task",
+            "",
+            "Docs: https://gowtham0992.github.io/link/",
+        ]))
+        return 0
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
     _apply_default_workspace(args)
@@ -3243,6 +3494,7 @@ def main(argv: list[str] | None = None) -> int:
             "try": try_link,
             "proof": proof,
             "onboard": onboard,
+            "setup": setup,
             "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,
@@ -3268,6 +3520,7 @@ def main(argv: list[str] | None = None) -> int:
             "accept-capture": accept_capture,
             "redact-capture": redact_capture,
             "delete-capture": delete_capture,
+            "dedup-captures": dedup_captures,
             "update-memory": update_memory,
             "set-memory-visibility": set_memory_visibility,
             "recall": recall,

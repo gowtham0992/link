@@ -6,6 +6,10 @@ struct PopoverView: View {
     @EnvironmentObject var store: LinkStore
     @State private var query = ""
     @State private var memoryQuery = ""
+    // Snapshot aid: LINKBAR_EXPLAIN=<memory-name> opens with that row's
+    // "why does Link believe this" card expanded.
+    @State private var expandedMemory: String? =
+        ProcessInfo.processInfo.environment["LINKBAR_EXPLAIN"]
     @State private var memoryTypeFilter: String? = nil
     @State private var showArchived = false
     // Snapshot aid: LINKBAR_TAB=status opens straight to the Status tab.
@@ -250,6 +254,13 @@ struct PopoverView: View {
                             .font(.system(size: 8.5)).foregroundStyle(.tertiary)
                             .help("Supersedes: \(page.supersedes)")
                     }
+                    Spacer()
+                    Image(systemName: expandedMemory == page.name ? "chevron.up" : "questionmark.circle")
+                        .font(.system(size: 9)).foregroundStyle(.quaternary)
+                        .help("Why does Link believe this?")
+                }
+                if expandedMemory == page.name {
+                    explainCard(page)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -265,8 +276,78 @@ struct PopoverView: View {
                 }
             }
             .onTapGesture(count: 2) { store.revealMemory(named: page.name) }
+            .onTapGesture {
+                if expandedMemory == page.name {
+                    expandedMemory = nil
+                } else {
+                    expandedMemory = page.name
+                    store.explainMemory(named: page.name)
+                }
+            }
         }
         .help(page.claim)
+    }
+
+    /// Why does Link believe this — the review gate's receipt, inline.
+    @ViewBuilder
+    private func explainCard(_ page: MemoryPage) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(page.claim)
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let explanation = store.explanations[page.name] {
+                if let recall = explanation.recall {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(recall.state == "ready" ? Color.green
+                                  : recall.state == "needs_review" ? Color(red: 0.90, green: 0.62, blue: 0.20)
+                                  : Color.orange)
+                            .frame(width: 5, height: 5)
+                        Text(recall.reason)
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                HStack(spacing: 8) {
+                    if let source = explanation.provenance?.source, !source.isEmpty {
+                        Label(source, systemImage: "arrow.down.doc")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .help("Where this memory came from")
+                    }
+                    if let captured = explanation.provenance?.dateCaptured, captured.count >= 10 {
+                        Text("captured \(captured.prefix(10))")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    if let reviewed = explanation.review?.reviewedAt, reviewed.count >= 10 {
+                        Text("reviewed \(reviewed.prefix(10))")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                if let issues = explanation.review?.issues, !issues.isEmpty {
+                    ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(issue.severity == "high" ? "!" : "·")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(issue.severity == "high" ? .orange : .secondary)
+                            Text(issue.message ?? "")
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.mini)
+                    Text("Asking Link why…").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 7))
+        .padding(.top, 3)
+        // Fetch on appear (not only on tap): covers the snapshot harness and
+        // any future path that expands a row programmatically.
+        .onAppear { store.explainMemory(named: page.name) }
     }
 
     // MARK: status tab (health of every Link surface)
@@ -507,8 +588,38 @@ struct PopoverView: View {
 
     private func capturesSection(_ captures: CaptureInbox) -> some View {
         VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
-            SectionHeader(title: "Session captures", count: captures.count, highlight: captures.count > 0)
-            ForEach(captures.captures.prefix(3)) { capture in
+            HStack(spacing: 8) {
+                SectionHeader(title: "Session captures", count: captures.count, highlight: captures.count > 0)
+                Spacer()
+                if captures.count >= 3 {
+                    Button("Clean up") { store.dedupCaptures() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Remove captures that repeat what's already pending, accepted, or dismissed")
+                }
+            }
+            // The whole backlog is reviewable, not just the top of it — a
+            // 20-item inbox behind a 3-row window is a wall, not a review.
+            captureRows(captures)
+        }
+    }
+
+    @ViewBuilder
+    private func captureRows(_ captures: CaptureInbox) -> some View {
+        if captures.captures.count > 4 {
+            ScrollView {
+                VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+                    captureRowList(captures)
+                }
+            }
+            .frame(maxHeight: 300)
+        } else {
+            captureRowList(captures)
+        }
+    }
+
+    private func captureRowList(_ captures: CaptureInbox) -> some View {
+        ForEach(captures.captures) { capture in
                 HoverRow {
                     HStack(alignment: .center, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -530,6 +641,19 @@ struct PopoverView: View {
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(2)
+                            }
+                            if let warnings = capture.injectionWarnings, !warnings.isEmpty {
+                                Label {
+                                    Text("\(warnings[0]) — verify you actually said this")
+                                        .font(.caption2)
+                                } icon: {
+                                    Image(systemName: "exclamationmark.shield")
+                                        .font(.system(size: 9.5))
+                                }
+                                .foregroundStyle(.orange)
+                                .help("This session contains injection-shaped instructions (" +
+                                      warnings.joined(separator: ", ") +
+                                      "). Confirm the words are yours before accepting them as memory.")
                             }
                             if let trail = capture.decisionTrail, !trail.isEmpty {
                                 DisclosureGroup {
@@ -578,12 +702,11 @@ struct PopoverView: View {
                         } label: { Image(systemName: "trash") }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("Discard this capture")
+                            .help("Discard this capture — Link remembers the dismissal and won't re-propose it")
                     }
                 }
             }
         }
-    }
 
     // MARK: activity, idle, footer
 

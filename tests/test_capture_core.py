@@ -635,3 +635,159 @@ class CaptureFilenameConcurrencyTests(unittest.TestCase):
             self.assertEqual(len({p.name for p in paths}), 32)
             for p in paths:
                 self.assertTrue(p.exists())
+
+
+class CaptureDedupTests(unittest.TestCase):
+    """2.1 inbox-zero behaviors: ledger, per-conversation refresh, dedup."""
+
+    RULE = "I always plot the loss curve every 500 steps."
+    OTHER = "I only merge to main with squash commits after CI passes."
+
+    def _mined_memories(self, text):
+        from mcp_package.link_core.memory import propose_memories_from_text
+        return [str(p["memory"]) for p in propose_memories_from_text(text, [])["proposals"]]
+
+    def test_dismissed_ledger_roundtrip_and_cap(self):
+        from mcp_package.link_core.capture import (
+            load_dismissed_fingerprints,
+            record_dismissed_proposals,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            added = record_dismissed_proposals(root, [self.RULE, self.RULE, ""])
+            self.assertEqual(added, 1)
+            entries = load_dismissed_fingerprints(root)
+            self.assertEqual(len(entries), 1)
+            memory = next(iter(entries.values()))["memory"]
+            self.assertIn("loss curve", memory)
+
+    def test_delete_capture_records_dismissals(self):
+        from mcp_package.link_core.capture import load_dismissed_fingerprints
+        from mcp_package.link_core.memory import proposal_fingerprint
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            payload = write_session_capture(root, text=self.RULE, source="inline")
+            result = delete_capture_file(root, str(payload["path"]), confirm=True)
+            self.assertTrue(result["deleted"])
+            self.assertGreaterEqual(int(result["dismissed_count"]), 1)
+            mined = self._mined_memories(self.RULE)
+            fingerprints = set(load_dismissed_fingerprints(root))
+            self.assertIn(proposal_fingerprint(mined[0]), fingerprints)
+
+    def test_dedup_cleanup_delete_skips_ledger(self):
+        from mcp_package.link_core.capture import load_dismissed_fingerprints
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            payload = write_session_capture(root, text=self.RULE, source="inline")
+            delete_capture_file(root, str(payload["path"]), confirm=True, record_dismissals=False)
+            self.assertEqual(load_dismissed_fingerprints(root), {})
+
+    def test_write_session_capture_refreshes_conversation_in_place(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = write_session_capture(
+                root, text=self.RULE, source="session-end",
+                conversation_id="conv-abc", timestamp="2026-07-01T00:00:00Z",
+            )
+            second = write_session_capture(
+                root, text=self.RULE + " " + self.OTHER, source="session-end",
+                conversation_id="conv-abc", timestamp="2026-07-02T00:00:00Z",
+            )
+            self.assertEqual(first["path"], second["path"])
+            self.assertTrue(second["refreshed"])
+            files = list((root / "raw" / "memory-captures").glob("*.md"))
+            self.assertEqual(len(files), 1)
+            text = files[0].read_text(encoding="utf-8")
+            self.assertIn('conversation: "conv-abc"', text)
+            self.assertIn("squash commits", text)
+
+    def test_different_conversations_keep_separate_captures(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_session_capture(root, text=self.RULE, source="session-end",
+                                  conversation_id="conv-a", timestamp="2026-07-01T00:00:00Z")
+            second = write_session_capture(root, text=self.OTHER, source="session-end",
+                                           conversation_id="conv-b", timestamp="2026-07-02T00:00:00Z")
+            self.assertFalse(second["refreshed"])
+            files = list((root / "raw" / "memory-captures").glob("*.md"))
+            self.assertEqual(len(files), 2)
+
+    def test_pending_proposal_fingerprints_excludes_own_conversation(self):
+        from mcp_package.link_core.capture import pending_proposal_fingerprints
+        from mcp_package.link_core.memory import proposal_fingerprint
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_session_capture(root, text=self.RULE, source="session-end",
+                                  conversation_id="conv-a", timestamp="2026-07-01T00:00:00Z")
+            write_session_capture(root, text=self.OTHER, source="session-end",
+                                  conversation_id="conv-b", timestamp="2026-07-02T00:00:00Z")
+            pending = pending_proposal_fingerprints(root, exclude_conversation="conv-a")
+            mined_other = proposal_fingerprint(self._mined_memories(self.OTHER)[0])
+            mined_rule = proposal_fingerprint(self._mined_memories(self.RULE)[0])
+            self.assertIn(mined_other, pending)
+            self.assertNotIn(mined_rule, pending)
+
+    def test_dedup_pending_captures_keeps_newest_and_removes_covered(self):
+        from mcp_package.link_core.capture import dedup_pending_captures
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            # Two captures proposing the same rule (older is redundant), one
+            # proposal-free capture, one unique capture.
+            write_session_capture(root, text=self.RULE, source="session-end",
+                                  timestamp="2026-07-01T00:00:00Z", title="Old duplicate")
+            write_session_capture(root, text=self.RULE, source="session-end",
+                                  timestamp="2026-07-03T00:00:00Z", title="New duplicate")
+            write_session_capture(root, text="Nothing durable happened in this session at all.",
+                                  source="session-end", timestamp="2026-07-02T00:00:00Z",
+                                  title="No proposals")
+            write_session_capture(root, text=self.OTHER, source="session-end",
+                                  timestamp="2026-07-04T00:00:00Z", title="Unique")
+
+            dry = dedup_pending_captures(root)
+            self.assertFalse(dry["applied"])
+            removable = {item["path"]: item["reason"] for item in dry["removable"]}
+            self.assertEqual(len(removable), 2)
+            self.assertIn("all_duplicates", removable.values())
+            self.assertIn("no_proposals", removable.values())
+            kept_paths = {item["path"] for item in dry["kept"]}
+            self.assertTrue(any("new-duplicate" in path for path in kept_paths))
+            self.assertTrue(all("old-duplicate" not in path for path in kept_paths))
+
+            applied = dedup_pending_captures(root, apply=True)
+            self.assertEqual(len(applied["removed"]), 2)
+            remaining = list((root / "raw" / "memory-captures").glob("*.md"))
+            self.assertEqual(len(remaining), 2)
+
+    def test_dedup_respects_accepted_and_dismissed_fingerprints(self):
+        from mcp_package.link_core.capture import (
+            dedup_pending_captures,
+            record_dismissed_proposals,
+        )
+        from mcp_package.link_core.memory import proposal_fingerprint
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_session_capture(root, text=self.RULE, source="session-end",
+                                  timestamp="2026-07-01T00:00:00Z", title="Covered by accept")
+            write_session_capture(root, text=self.OTHER, source="session-end",
+                                  timestamp="2026-07-02T00:00:00Z", title="Covered by dismissal")
+            accepted = {proposal_fingerprint(self._mined_memories(self.RULE)[0])}
+            record_dismissed_proposals(root, [self._mined_memories(self.OTHER)[0]])
+            report = dedup_pending_captures(root, accepted_fingerprints=accepted)
+            self.assertEqual(report["removable_count"], 2)
+            self.assertEqual(report["kept_count"], 0)
+
+    def test_capture_records_hides_dismissed_proposals(self):
+        from mcp_package.link_core.capture import record_dismissed_proposals
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_session_capture(
+                root, text=self.RULE + " " + self.OTHER, source="session-end",
+                timestamp="2026-07-01T00:00:00Z",
+            )
+            before = capture_records(root)[0]
+            self.assertEqual(before["proposal_count"], 2)
+            record_dismissed_proposals(root, [self._mined_memories(self.RULE)[0]])
+            after = capture_records(root)[0]
+            self.assertEqual(after["proposal_count"], 1)
+            memories = " ".join(str(p["memory"]) for p in after["proposals"])
+            self.assertNotIn("loss curve", memories)
