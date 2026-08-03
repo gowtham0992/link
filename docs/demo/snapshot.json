@@ -1,0 +1,14 @@
+{
+  "schema": "link-snapshot-v1",
+  "created": true,
+  "created_at": "2026-08-03T03:04:22Z",
+  "page_count": 12,
+  "include_memories": true,
+  "include_private_memories": false,
+  "excluded_counts": {
+    "memories": 2,
+    "private_memories": 2,
+    "root": 2
+  },
+  "privacy_note": "Snapshot includes rendered wiki pages only. Raw sources, raw captures, operation markers, and live MCP state are not exported."
+}
