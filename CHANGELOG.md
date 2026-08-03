@@ -94,6 +94,12 @@ pending captures — five of them the same conversation captured five times.
 
 ### Fixed
 
+- **Product-finder round** (walked the whole funnel as a stranger —
+  homepage, install, first five minutes): bare `lnk` now greets with the
+  four commands that matter instead of an argparse error; `lnk proof` and
+  `lnk try` end with the make-it-yours command (`lnk setup`); the homepage
+  Setup section and getting-started guide lead with the one-command flow
+  and the agent picker gained Windsurf and Zed.
 - **Cold-walk friction round** (found by walking the product end-to-end as a
   new user): durability lead-ins ("From now on…", "Going forward…") are
   trimmed from stored claims and titles; accepting a capture clears it from

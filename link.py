@@ -3467,6 +3467,21 @@ def main(argv: list[str] | None = None) -> int:
     # commands never pay a multi-second model load. Explicit provider wins;
     # the MCP server (its own entry point) still prefers the quality tier.
     os.environ.setdefault("LINK_SEMANTIC_SURFACE", "cli")
+    # A bare `lnk` is most people's first keystroke — greet, don't error.
+    effective_argv = sys.argv[1:] if argv is None else argv
+    if not effective_argv:
+        _print_text("\n".join([
+            "Link — local, source-backed memory for AI agents.",
+            "",
+            "  lnk proof     see cross-agent memory work (~1 second, throwaway)",
+            "  lnk try       build a full demo wiki you can explore",
+            "  lnk setup     make it yours: wire every agent you have, one command",
+            "  lnk status    is my workspace healthy?",
+            "  lnk --help    everything else, grouped by task",
+            "",
+            "Docs: https://gowtham0992.github.io/link/",
+        ]))
+        return 0
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
     _apply_default_workspace(args)
