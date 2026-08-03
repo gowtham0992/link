@@ -13,23 +13,30 @@ Release notes: [CHANGELOG.md](https://github.com/gowtham0992/link/blob/main/CHAN
 `link-mcp` is the MCP server. It needs a Link wiki to read from. The normal
 wiki location is `~/link/wiki`, created by the main Link installers.
 
-Recommended setup:
+Recommended setup — two commands, agent-agnostic:
+
+```bash
+brew install gowtham0992/link/link
+lnk setup
+```
+
+`lnk setup` detects every agent installed on your machine (Claude Code,
+Codex, Cursor, Windsurf, Zed, Kiro, Gemini CLI), creates `~/link`, provisions
+this MCP server, and writes session hooks for agents that support them. It is
+idempotent — after any upgrade, run it again.
+
+Without Homebrew, clone and use the same flow from source:
 
 ```bash
 git clone https://github.com/gowtham0992/link.git
-bash link/integrations/codex/install.sh   # or claude-code, cursor, kiro, vscode
+python3 link/link.py setup
 ```
 
-The installer scaffolds `~/link/`, installs or upgrades `link-mcp`, writes agent
-instructions, and prints the exact MCP config for your machine.
-
-If Link is already installed and you only need to wire MCP into an agent, use
-the CLI helper from the main Link package:
+If Link is already installed and you only need to wire MCP into one agent:
 
 ```bash
-link connect codex ~/link
-link connect codex ~/link --write
-link verify-mcp ~/link
+lnk connect codex ~/link --write
+lnk verify-mcp ~/link
 ```
 
 After install, ask your agent:
