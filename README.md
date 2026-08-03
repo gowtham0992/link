@@ -128,9 +128,18 @@ Two commands: see it work, then make it yours.
 
 ```bash
 brew install gowtham0992/link/link
-lnk proof                              # see the promise (~1 second, no setup)
-lnk onboard --agent claude-code --write   # wire your agent for real memory
+lnk proof     # see the promise (~1 second, no setup)
+lnk setup     # wire every agent you have — workspace, MCP, session hooks, one command
 ```
+
+`lnk setup` detects the agents installed on your machine — Claude Code,
+Codex, Cursor, Windsurf, Zed, Kiro, Gemini CLI — and wires them all at
+once; Link is agent-agnostic by design (one MCP server, one workspace,
+every agent reads the same memory). It is
+idempotent: after any `brew upgrade`, run it again and everything —
+workspace runtime, MCP provisioning, hooks — is refreshed. Prefer to wire
+one agent explicitly? `lnk onboard --agent claude-code --write --hooks`
+still does exactly that.
 
 `lnk proof` creates a throwaway workspace, writes one reviewed memory, and
 recalls it through the same path the CLI, skills, and MCP use — the core

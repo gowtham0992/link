@@ -13,6 +13,16 @@ pending captures — five of them the same conversation captured five times.
 
 ### Added
 
+- **`lnk setup` — one command for install day and every upgrade.** Detects
+  every agent installed on the machine and wires them all at once:
+  workspace create/repair, runtime refresh, MCP provisioning, session
+  hooks for agents that have them. Idempotent — after `brew upgrade`, the
+  same command refreshes everything. `--preview` shows the plan without
+  writing. The quickstart is now two commands total.
+- **Agent-agnostic by design: Windsurf and Zed join the roster** (7 → 9
+  supported agents). Zed's `context_servers` schema (with its required
+  `source: custom` entry) is supported natively, and writes into Zed's
+  main settings.json merge safely — existing user settings are preserved.
 - **Memory poisoning benchmark (Track 5) + injection labeling.** A planted
   memory is injected into every future session — the highest-value prompt-
   injection target an agent system has. 15 authored attacks (guardrail

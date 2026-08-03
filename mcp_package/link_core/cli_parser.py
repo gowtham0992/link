@@ -17,7 +17,7 @@ CliHandler = Callable[..., int]
 
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Start here", (
-        "try", "onboard", "init", "demo", "proof", "welcome", "prompts",
+        "try", "setup", "onboard", "init", "demo", "proof", "welcome", "prompts",
     )),
     ("Memory — the core loop", (
         "remember", "recall", "recipes", "query", "brief", "start",
@@ -107,6 +107,11 @@ def build_cli_parser(
     proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
     proof_cmd.add_argument("--port", type=int, default=3000)
     proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
+
+    setup_cmd = sub.add_parser("setup", help="one command for install day and every upgrade: workspace + every detected agent, wired")
+    setup_cmd.add_argument("target", nargs="?", default="~/link")
+    setup_cmd.add_argument("--preview", action="store_true", help="show what would be configured without writing agent configs")
+    setup_cmd.add_argument("--json", action="store_true", help="print machine-readable setup details")
 
     onboard_cmd = sub.add_parser("onboard", help="set up a real Link workspace and print the agent-first next steps")
     onboard_cmd.add_argument("target", nargs="?", default="~/link")
@@ -548,6 +553,12 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             force=args.force,
             serve=args.serve,
             port=args.port,
+            json_output=args.json,
+        )
+    if command == "setup":
+        return handlers["setup"](
+            Path(args.target),
+            preview=args.preview,
             json_output=args.json,
         )
     if command == "onboard":

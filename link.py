@@ -275,6 +275,7 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    detect_installed_agents as _core_detect_installed_agents,
     read_agent_link_server as _core_read_agent_link_server,
     supported_agents as _core_supported_agents,
 )
@@ -2825,6 +2826,58 @@ def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str
     return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
 
 
+def setup(
+    target: Path,
+    *,
+    preview: bool = False,
+    json_output: bool = False,
+) -> int:
+    """One command for install day and every upgrade after it.
+
+    Detects every agent installed on this machine, then runs the same
+    onboard machinery for all of them at once: workspace create/repair,
+    runtime refresh, MCP provisioning, session hooks. Idempotent — after
+    `brew upgrade`, re-running it refreshes everything in one step.
+    """
+    detected = _core_detect_installed_agents()
+    hookable = [name for name in detected if _core_supports_agent_hooks(name)]
+    if not json_output:
+        if detected:
+            display = ", ".join(detected)
+            _print_text(f"Detected agents: {display}")
+            if not preview:
+                _print_text("Wiring MCP" + (" + session hooks" if hookable else "") + " for all of them.\n")
+        else:
+            _print_text(
+                "No agent configs detected (looked for Claude Code, Codex, Cursor, "
+                "Windsurf, Zed, Kiro, Gemini CLI). Setting up the workspace; connect "
+                "an agent later with: lnk onboard --agent <name> --write --hooks\n"
+            )
+    code = onboard(
+        target,
+        agents=detected or None,
+        write=bool(detected) and not preview,
+        hooks=bool(hookable) and not preview,
+        json_output=json_output,
+    )
+    if code == 0 and not json_output:
+        extras: list[str] = []
+        try:
+            from link_core.semantic import model_available, provider_installed
+            if not (provider_installed() and model_available()):
+                extras.append("Meaning-based recall (one-time local model download):  lnk semantic --setup")
+        except Exception:
+            pass
+        if sys.platform == "darwin" and not Path("/Applications/LinkBar.app").exists():
+            extras.append("Menu-bar review gate:  brew install --cask gowtham0992/link/linkbar")
+        if extras:
+            _print_text("\nOptional, when you want them:")
+            for extra in extras:
+                _print_text(f"  {extra}")
+        _print_text("\nUpgrades stay this easy: brew upgrade, then lnk setup again.")
+    return code
+
+
 def onboard(
     target: Path,
     *,
@@ -3426,6 +3479,7 @@ def main(argv: list[str] | None = None) -> int:
             "try": try_link,
             "proof": proof,
             "onboard": onboard,
+            "setup": setup,
             "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,

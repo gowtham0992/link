@@ -58,6 +58,7 @@ EXPECTED_CLI_COMMANDS = {
     "seed",
     "semantic",
     "serve",
+    "setup",
     "set-memory-visibility",
     "session-end",
     "share",

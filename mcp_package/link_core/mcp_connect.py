@@ -26,6 +26,9 @@ class AgentMcpConfig:
     top_key: str = "mcpServers"
     include_type: bool = False
     include_disabled: bool = False
+    # Extra fixed keys some clients require on each server entry
+    # (e.g. Zed's context_servers need "source": "custom").
+    extra_entry_keys: tuple[tuple[str, str], ...] = ()
     restart_hint: str = "Restart the agent, then ask: is Link ready?"
 
 
@@ -67,6 +70,22 @@ AGENT_CONFIGS: tuple[AgentMcpConfig, ...] = (
         config_format="json",
     ),
     AgentMcpConfig(
+        name="windsurf",
+        display_name="Windsurf",
+        aliases=("windsurf", "codeium"),
+        default_config="~/.codeium/windsurf/mcp_config.json",
+        config_format="json",
+    ),
+    AgentMcpConfig(
+        name="zed",
+        display_name="Zed",
+        aliases=("zed",),
+        default_config="~/.config/zed/settings.json",
+        config_format="json",
+        top_key="context_servers",
+        extra_entry_keys=(("source", "custom"),),
+    ),
+    AgentMcpConfig(
         name="vscode",
         display_name="VS Code",
         aliases=("vscode", "vs-code", "visual-studio-code"),
@@ -90,6 +109,31 @@ AGENT_CONFIGS: tuple[AgentMcpConfig, ...] = (
 def supported_agents() -> tuple[str, ...]:
     """Return canonical agent names supported by `lnk connect`."""
     return tuple(config.name for config in AGENT_CONFIGS)
+
+
+def detect_installed_agents(home: Path | None = None) -> list[str]:
+    """Agents whose config footprint exists on this machine.
+
+    Powers `lnk setup`: one command wires every agent the user actually
+    has, instead of asking them to name each one. Only agents with a
+    global (home-relative) config participate — project-scoped configs
+    (.vscode) need explicit intent.
+    """
+    base = (home or Path.home()).expanduser()
+    detected: list[str] = []
+    for config in AGENT_CONFIGS:
+        default = str(config.default_config)
+        if not default.startswith("~/"):
+            continue
+        path = base / default[2:]
+        probes = [path]
+        if path.parent != base:
+            probes.append(path.parent)
+        if config.name == "claude-code":
+            probes.append(base / ".claude")
+        if any(probe.exists() for probe in probes):
+            detected.append(config.name)
+    return detected
 
 
 def _agent_by_name(agent: str) -> AgentMcpConfig:
@@ -117,6 +161,8 @@ def _server_config(config: AgentMcpConfig, python_cmd: str, wiki_dir: Path) -> d
         server["type"] = "stdio"
     if config.include_disabled:
         server["disabled"] = False
+    for key, value in config.extra_entry_keys:
+        server[key] = value
     return server
 
 
