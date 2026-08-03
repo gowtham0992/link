@@ -714,7 +714,7 @@ class MemoryCoreTests(unittest.TestCase):
 
         self.assertEqual(len(memories), 2)
         self.assertTrue(any("develop branch" in m for m in memories))
-        self.assertTrue(any("never push to main" in m for m in memories))
+        self.assertTrue(any("push to main" in m.lower() for m in memories))
         for proposal in payload["proposals"]:
             self.assertEqual(proposal["memory_type"], "preference")
 
@@ -726,7 +726,7 @@ class MemoryCoreTests(unittest.TestCase):
         )
         self.assertEqual(
             [p["memory"] for p in payload["proposals"]],
-            ["from now on I only push to the develop branch."],
+            ["I only push to the develop branch."],
         )
 
         payload = propose_memories_from_text("ok so I prefer tabs over spaces.", [], source="unit test")
@@ -734,7 +734,7 @@ class MemoryCoreTests(unittest.TestCase):
 
     def test_preamble_trim_keeps_full_text_when_tail_does_not_classify(self):
         payload = propose_memories_from_text("never push to main — thanks!", [], source="unit test")
-        self.assertEqual([p["memory"] for p in payload["proposals"]], ["never push to main — thanks!"])
+        self.assertEqual([p["memory"] for p in payload["proposals"]], ["Never push to main — thanks!"])
 
     def test_narrative_only_is_not_a_preference(self):
         payload = propose_memories_from_text(
@@ -1703,3 +1703,35 @@ class TrustLifecycleTests(unittest.TestCase):
         self.assertEqual(_add_months(date(2026, 1, 31), 1), date(2026, 2, 28))
         self.assertEqual(_add_months(2028 and date(2028, 1, 31), 1), date(2028, 2, 29))
         self.assertEqual(_add_months(date(2026, 12, 15), 1), date(2027, 1, 15))
+
+
+class FrictionRoundTests(unittest.TestCase):
+    """Cold-walk fixes: lead-in trim, trust markers, type inference cues."""
+
+    def test_durability_lead_ins_trimmed_from_stored_claim(self):
+        from mcp_package.link_core.memory import normalize_proposed_memory
+        self.assertEqual(
+            normalize_proposed_memory("from now on I only push to develop", "preference"),
+            "I only push to develop.",
+        )
+        self.assertEqual(
+            normalize_proposed_memory("Going forward, we always tag releases.", "preference"),
+            "We always tag releases.",
+        )
+
+    def test_trust_marker_flags_pending_and_due(self):
+        from mcp_package.link_core.cli_memory import _trust_marker
+        self.assertEqual(_trust_marker({"review_status": "pending"}), " · pending review")
+        self.assertEqual(
+            _trust_marker({"review_status": "reviewed", "review_after": "2020-01-01"}),
+            " · review due",
+        )
+        self.assertEqual(
+            _trust_marker({"review_status": "reviewed", "review_after": "2999-01-01"}), "",
+        )
+
+    def test_remember_type_cues_classify_for_inference(self):
+        from mcp_package.link_core.memory import classify_memory_segment
+        self.assertEqual(classify_memory_segment("I prefer dark mode in every editor.")["memory_type"], "preference")
+        self.assertEqual(classify_memory_segment("We decided sprints are two weeks.")["memory_type"], "decision")
+        self.assertIsNone(classify_memory_segment("The meeting moved to Thursday afternoon room 4."))

@@ -123,6 +123,7 @@ if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
 from link_core.memory import (
+    classify_memory_segment as _core_classify_memory_segment,
     list_recipes as _core_list_recipes,
     render_recipes_text as _core_render_recipes_text,
     is_existing_memory_echo as _core_is_existing_memory_echo,
@@ -233,6 +234,7 @@ from link_core.capture import (
     capture_inbox as _core_capture_inbox,
     capture_proposal_selection as _core_capture_proposal_selection,
     capture_records as _core_capture_records,
+    capture_proposal_fingerprints as _core_capture_proposal_fingerprints,
     capture_review_summary as _core_capture_review_summary,
     cli_capture_commands as _core_cli_capture_commands,
     dedup_pending_captures as _core_dedup_pending_captures,
@@ -1127,7 +1129,7 @@ def remember(
     target: Path,
     text: str,
     title: str | None = None,
-    memory_type: str = "note",
+    memory_type: str | None = None,
     scope: str = "user",
     tags: str | None = None,
     source: str = "manual",
@@ -1147,6 +1149,12 @@ def remember(
     if not text or not text.strip():
         print("Memory text is required", file=sys.stderr)
         return 1
+    if memory_type is None:
+        # "I prefer X" saved as a generic note gets the wrong trust window
+        # and misses preference-scoped conflict checks. When the user didn't
+        # choose a type, use the same cues the capture pipeline trusts.
+        classified = _core_classify_memory_segment(text.strip().splitlines()[0])
+        memory_type = str(classified["memory_type"]) if classified else "note"
     try:
         result = _write_memory_page(
             target,
@@ -1509,6 +1517,27 @@ def accept_capture(
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
+        # A capture is proposal-only staging. Once its accepted claim is a
+        # memory, the file only earns its inbox slot if it still offers
+        # something fresh — otherwise the user would have to delete what
+        # they already handled (found in the cold walk).
+        try:
+            capture_path = selection.get("capture_path")
+            if isinstance(capture_path, Path) and capture_path.is_file():
+                remaining = _core_capture_proposal_fingerprints(
+                    capture_path.read_text(encoding="utf-8", errors="replace"),
+                    project=str(memory_args["project"]) or None,
+                )
+                accepted_now = {
+                    _core_proposal_fingerprint(str(record.get("tldr") or record.get("snippet") or ""))
+                    for record in _memory_records(wiki_dir)
+                }
+                covered = accepted_now | set(_core_load_dismissed_fingerprints(root))
+                if remaining and remaining <= covered:
+                    capture_path.unlink()
+                    payload["capture_cleared"] = True
+        except OSError:
+            pass
         _append_log(
             wiki_dir,
             _utc_timestamp(),
@@ -1517,7 +1546,7 @@ def accept_capture(
             [
                 f"Memory: {result['path']}",
                 f"Project: {result.get('project') or 'none'}",
-            ],
+            ] + (["Capture cleared: nothing left to review."] if payload.get("capture_cleared") else []),
         )
 
     if json_output:
@@ -1878,7 +1907,19 @@ def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_o
     )
 
 
-def review_memory(target: Path, identifier: str, note: str | None = None, json_output: bool = False) -> int:
+def review_memory(
+    target: Path,
+    identifier: str | None,
+    note: str | None = None,
+    review_all: bool = False,
+    confirm: bool = False,
+    json_output: bool = False,
+) -> int:
+    if review_all:
+        return _review_all_pending(target, note=note, confirm=confirm, json_output=json_output)
+    if not identifier:
+        print("Memory identifier is required (or pass --all).", file=sys.stderr)
+        return 1
     try:
         result = _mark_memory_reviewed(target, identifier, note=note)
     except (FileNotFoundError, ValueError) as exc:
@@ -1886,6 +1927,57 @@ def review_memory(target: Path, identifier: str, note: str | None = None, json_o
         return 1
 
     return _emit_json_or_text(result, json_output, _core_render_review_memory_text)
+
+
+def _review_all_pending(
+    target: Path, note: str | None, confirm: bool, json_output: bool,
+) -> int:
+    """Bulk review: the human confirms the whole pending/due list at once.
+
+    Still deliberate — the dry run lists exactly which memories will be
+    marked reviewed, and nothing happens without --confirm.
+    """
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    due: list[dict[str, object]] = []
+    for record in _memory_records(wiki_dir):
+        if str(record.get("status") or "active") != "active":
+            continue
+        codes = {issue["code"] for issue in _core_memory_review_issues(record)}
+        if codes & {"pending_review", "review_due"}:
+            due.append(record)
+    if not due:
+        payload: dict[str, object] = {"reviewed": [], "count": 0, "confirmed": confirm}
+        if json_output:
+            print(json.dumps(payload, indent=2))
+        else:
+            _print_text("Nothing pending: every active memory is reviewed and inside its trust window.")
+        return 0
+    if not confirm:
+        lines = [f"{len(due)} memories would be marked reviewed:"]
+        lines.extend(f"  - {record.get('title')} ({record.get('memory_type')})" for record in due)
+        lines.extend(["", "Only proceed if the human confirmed each one is still accurate.",
+                      f"Apply: {_shell_words_for_target('review-memory', target, '--all', '--confirm')}"])
+        if json_output:
+            print(json.dumps({"reviewed": [], "count": len(due), "confirmed": False,
+                              "pending": [str(r.get("name")) for r in due]}, indent=2))
+        else:
+            _print_text("\n".join(lines))
+        return 1
+    reviewed: list[str] = []
+    for record in due:
+        try:
+            _mark_memory_reviewed(target, str(record.get("name")), note=note)
+            reviewed.append(str(record.get("name")))
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"Could not review {record.get('name')}: {exc}", file=sys.stderr)
+    if json_output:
+        print(json.dumps({"reviewed": reviewed, "count": len(reviewed), "confirmed": True}, indent=2))
+    else:
+        _print_text(f"Marked {len(reviewed)} memories reviewed; trust windows re-armed.")
+    return 0
 
 
 def explain_memory(target: Path, identifier: str, json_output: bool = False) -> int:

@@ -1250,7 +1250,7 @@ def recall(
 def remember(
     text: str,
     title: str = "",
-    memory_type: str = "note",
+    memory_type: str = "",
     scope: str = "user",
     tags: str = "",
     source: str = "mcp",
@@ -1278,6 +1278,12 @@ def remember(
     memory to a context; scope/project/visibility say whose memory it is;
     supersedes REPLACES an old claim with lineage. When unsure, omit them.
     """
+    if not memory_type.strip():
+        # Same cue-based inference as the CLI: "I prefer X" is a preference,
+        # not a generic note — typing drives trust windows and conflict scope.
+        from link_core.memory import classify_memory_segment as _classify
+        classified = _classify(text.strip().splitlines()[0] if text.strip() else "")
+        memory_type = str(classified["memory_type"]) if classified else "note"
     try:
         result = _write_mcp_memory_page(
             text,

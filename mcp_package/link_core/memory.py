@@ -2927,6 +2927,12 @@ def memory_proposal_segments(text: str) -> list[str]:
 def normalize_proposed_memory(text: str, memory_type: str) -> str:
     value = text.strip()
     value = re.sub(r"^please remember(?: that)?\s+", "", value, flags=re.IGNORECASE)
+    # Durability lead-ins earn the proposal but are noise in the stored
+    # claim: "From now on I only push to develop" should live (and title)
+    # as "I only push to develop".
+    value = re.sub(r"^(?:from now on|going forward|starting now|starting today)[,\s]+", "", value, flags=re.IGNORECASE)
+    if value and value[0].islower():
+        value = value[0].upper() + value[1:]
     replacements = [
         (r"^i prefer\b", "User prefers"),
         (r"^i like\b", "User likes"),

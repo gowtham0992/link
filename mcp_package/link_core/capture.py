@@ -851,6 +851,8 @@ def render_accept_capture_text(payload: dict[str, object], *, target: object = "
     ]
     if result.get("project"):
         lines.append(f"Project: {result.get('project')}")
+    if payload.get("capture_cleared"):
+        lines.append("Capture cleared from the inbox — nothing left to review in it.")
     lines.extend(["", "Next:", f"  {_shell_words('python3', 'link.py', 'review-memory', result.get('name'), target)}"])
     return 0, "\n".join(lines)
 

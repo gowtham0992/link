@@ -65,6 +65,15 @@ pending captures — five of them the same conversation captured five times.
 
 ### Fixed
 
+- **Cold-walk friction round** (found by walking the product end-to-end as a
+  new user): durability lead-ins ("From now on…", "Going forward…") are
+  trimmed from stored claims and titles; accepting a capture clears it from
+  the inbox when nothing fresh remains; `review-memory --all` bulk-reviews
+  every pending/due memory (lists first, requires `--confirm`); the session
+  brief marks unreviewed and aged memories inline (`· pending review`,
+  `· review due`) where agents read them; and `remember` infers the memory
+  type from the text's own cues — "I prefer X" saves as a preference with a
+  preference's trust window, not a generic note (CLI and MCP).
 - **Questions are no longer proposed as memories.** "number of walkers is
   always fixed?" matched the preference cue on "always" and — worse —
   ranked as a top durable memory. Interrogatives are now excluded from

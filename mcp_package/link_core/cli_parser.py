@@ -248,7 +248,8 @@ def build_cli_parser(
     remember_cmd.add_argument("text", help="memory text to save")
     remember_cmd.add_argument("target", nargs="?", default=".")
     remember_cmd.add_argument("--title", default=None, help="memory page title")
-    remember_cmd.add_argument("--type", choices=MEMORY_TYPES, default="note", dest="memory_type")
+    remember_cmd.add_argument("--type", choices=MEMORY_TYPES, default=None, dest="memory_type",
+                              help="memory type; inferred from the text's cues when omitted (falls back to note)")
     remember_cmd.add_argument("--scope", choices=MEMORY_SCOPES, default="user")
     remember_cmd.add_argument("--visibility", choices=MEMORY_VISIBILITIES, default=None, help="sharing intent: private, project, or team")
     remember_cmd.add_argument("--tags", default=None, help="comma-separated tags")
@@ -470,8 +471,10 @@ def build_cli_parser(
     memory_log_cmd.add_argument("--json", action="store_true", help="print machine-readable memory log")
 
     review_cmd = sub.add_parser("review-memory", help="mark a memory as reviewed")
-    review_cmd.add_argument("identifier", help="memory page name, title, or path")
+    review_cmd.add_argument("identifier", nargs="?", default=None, help="memory page name, title, or path (omit with --all)")
     review_cmd.add_argument("target", nargs="?", default=".")
+    review_cmd.add_argument("--all", action="store_true", dest="review_all", help="review every memory that is pending or due (lists first; requires --confirm)")
+    review_cmd.add_argument("--confirm", action="store_true", help="required with --all to actually mark them reviewed")
     review_cmd.add_argument("--note", default=None, help="optional review note")
     review_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
@@ -847,7 +850,10 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
         )
     if command == "review-memory":
-        return handlers["review-memory"](Path(args.target), args.identifier, note=args.note, json_output=args.json)
+        return handlers["review-memory"](
+            Path(args.target), args.identifier, note=args.note,
+            review_all=args.review_all, confirm=args.confirm, json_output=args.json,
+        )
     if command == "explain-memory":
         return handlers["explain-memory"](Path(args.target), args.identifier, json_output=args.json)
     if command == "rebuild-index":
