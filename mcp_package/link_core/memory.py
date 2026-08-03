@@ -384,6 +384,41 @@ def _today(today: str | None = None) -> date:
     return _parse_review_date(today) if today else date.today()
 
 
+# Trust lifecycle: how long each memory type stays trusted before Link asks
+# the user to reconfirm it (months). Project context rots fastest — repos
+# change tooling in weeks; decisions and stable facts hold the longest.
+# Review re-arms the window; nothing is ever archived or hidden by age —
+# an aged memory is *labeled* due for review, honestly, on every surface.
+MEMORY_REVIEW_INTERVAL_MONTHS: dict[str, int] = {
+    "preference": 6,
+    "decision": 12,
+    "fact": 12,
+    "note": 6,
+    "procedure": 6,
+    "project": 3,
+}
+DEFAULT_REVIEW_INTERVAL_MONTHS = 6
+
+
+def _add_months(base: date, months: int) -> date:
+    month_index = base.month - 1 + months
+    year = base.year + month_index // 12
+    month = month_index % 12 + 1
+    # Clamp the day for short months (Jan 31 + 1 month -> Feb 28).
+    day = min(base.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                         31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+    return date(year, month, day)
+
+
+def default_review_after(memory_type: str, from_date: str | None = None) -> str:
+    """The date this memory type should be reconfirmed, from from_date/today."""
+    interval = MEMORY_REVIEW_INTERVAL_MONTHS.get(
+        str(memory_type or "").strip().lower(), DEFAULT_REVIEW_INTERVAL_MONTHS
+    )
+    base = _today(str(from_date)[:10] if from_date else None)
+    return _add_months(base, interval).isoformat()
+
+
 def memory_active_at(record: Mapping[str, object], as_of: str) -> bool:
     """Whether this memory was active on a given YYYY-MM-DD date.
 
@@ -551,6 +586,25 @@ def memory_review_issues(
                     "code": "review_due",
                     "severity": "medium",
                     "message": f"Memory review is due after {review_after}.",
+                    "suggested_action": f"Confirm it is still accurate, then run {review_command}.",
+                })
+    elif status == "active":
+        # Trust lifecycle: memories written before review scheduling existed
+        # still age. From the last review (or capture), each type has a
+        # trusted window; past it, the memory is honestly labeled due —
+        # never hidden, never archived by age.
+        base_value = (str(record.get("reviewed_at") or "") or str(record.get("date_captured") or ""))[:10]
+        if DATE_RE.match(base_value):
+            interval = MEMORY_REVIEW_INTERVAL_MONTHS.get(memory_type, DEFAULT_REVIEW_INTERVAL_MONTHS)
+            aged_due = _add_months(date.fromisoformat(base_value), interval)
+            if aged_due <= _today(today):
+                issues.append({
+                    "code": "review_due",
+                    "severity": "medium",
+                    "message": (
+                        f"Memory has aged past its {interval}-month trust window "
+                        f"(last confirmed {base_value})."
+                    ),
                     "suggested_action": f"Confirm it is still accurate, then run {review_command}.",
                 })
 
@@ -1342,7 +1396,18 @@ def mark_memory_reviewed(
     }
     if clean_note:
         updates["review_note"] = f'"{frontmatter_string(clean_note)}"'
-    changed = previous_review_status != "reviewed" or bool(clean_note)
+    # Trust lifecycle: reviewing re-arms the trust window for another typed
+    # interval — unless the user set their own future date, which is kept.
+    existing_review_after = str(record.get("review_after") or "").strip()
+    try:
+        existing_due = _parse_review_date(existing_review_after) if existing_review_after else None
+    except ValueError:
+        existing_due = None
+    rearmed = ""
+    if existing_due is None or existing_due <= _today(str(timestamp)[:10]):
+        rearmed = default_review_after(str(record.get("memory_type") or ""), from_date=timestamp)
+        updates["review_after"] = f'"{rearmed}"'
+    changed = previous_review_status != "reviewed" or bool(clean_note) or bool(rearmed)
     if changed:
         with operation_journal(
             wiki_dir,
@@ -1552,6 +1617,10 @@ def write_memory_page(
     clean_review_after = str(review_after or "").strip()
     if clean_review_after:
         _parse_review_date(clean_review_after)
+    else:
+        # Trust lifecycle: every memory gets a review window at birth, sized
+        # by type. Review re-arms it; passing review_after overrides it.
+        clean_review_after = default_review_after(memory_type, from_date=timestamp)
     clean_expires_at = str(expires_at or "").strip()
     if clean_expires_at:
         _parse_expires_date(clean_expires_at)

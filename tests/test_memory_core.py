@@ -1624,3 +1624,82 @@ class RevisionDetectionTests(unittest.TestCase):
             "Light theme for demos", "preference", "user",
         )
         self.assertTrue(candidates)
+
+
+class TrustLifecycleTests(unittest.TestCase):
+    """Memory ages honestly: typed windows, re-arm on review, no silent hiding."""
+
+    def _wiki(self):
+        import tempfile
+        from pathlib import Path
+        temp = Path(tempfile.mkdtemp(prefix="link-lifecycle-"))
+        (temp / "memories").mkdir(parents=True)
+        (temp / "index.md").write_text("# Index\n", encoding="utf-8")
+        (temp / "log.md").write_text("# Log\n", encoding="utf-8")
+        return temp
+
+    def test_write_stamps_typed_review_window(self):
+        from mcp_package.link_core.memory import memory_records, write_memory_page
+        wiki = self._wiki()
+        write_memory_page(wiki, "I prefer tabs over spaces.", title="Tabs",
+                          memory_type="preference", scope="user", tags=None,
+                          source="unit", timestamp="2026-08-02T00:00:00Z")
+        write_memory_page(wiki, "This project uses uv for env management.", title="Uv",
+                          memory_type="project", scope="project", project="demo",
+                          tags=None, source="unit", timestamp="2026-08-02T00:00:00Z")
+        by_title = {str(r["title"]): r for r in memory_records(wiki)}
+        self.assertEqual(by_title["Tabs"]["review_after"], "2027-02-02")     # 6 months
+        self.assertEqual(by_title["Uv"]["review_after"], "2026-11-02")       # 3 months
+
+    def test_explicit_review_after_wins(self):
+        from mcp_package.link_core.memory import memory_records, write_memory_page
+        wiki = self._wiki()
+        result = write_memory_page(wiki, "Releases deploy from the release branch.", title="Pin",
+                                   memory_type="decision", scope="project", project="demo",
+                                   tags=None, source="unit", timestamp="2026-08-02T00:00:00Z",
+                                   review_after="2026-09-15")
+        self.assertTrue(result.get("created"), result)
+        record = memory_records(wiki)[0]
+        self.assertEqual(record["review_after"], "2026-09-15")
+
+    def test_review_rearms_due_window_but_keeps_future_custom_date(self):
+        from mcp_package.link_core.memory import (
+            mark_memory_reviewed, memory_records, write_memory_page,
+        )
+        wiki = self._wiki()
+        write_memory_page(wiki, "I prefer rebase over merge.", title="Rebase",
+                          memory_type="preference", scope="user", tags=None,
+                          source="unit", timestamp="2026-01-01T00:00:00Z",
+                          review_after="2026-06-01")
+        mark_memory_reviewed(wiki, "Rebase", None, "2026-08-02T00:00:00Z")
+        record = memory_records(wiki)[0]
+        self.assertEqual(record["review_after"], "2027-02-02")  # re-armed 6 months
+
+        write_memory_page(wiki, "Keep the beta flag until Q4.", title="Beta",
+                          memory_type="note", scope="user", tags=None,
+                          source="unit", timestamp="2026-08-01T00:00:00Z",
+                          review_after="2026-12-01")
+        mark_memory_reviewed(wiki, "Beta", None, "2026-08-02T00:00:00Z")
+        beta = next(r for r in memory_records(wiki) if r["title"] == "Beta")
+        self.assertEqual(beta["review_after"], "2026-12-01")  # custom future date kept
+
+    def test_memories_without_review_after_age_implicitly(self):
+        from mcp_package.link_core.memory import memory_review_issues
+        record = {
+            "status": "active", "review_status": "reviewed", "memory_type": "preference",
+            "scope": "user", "visibility": "private", "review_after": "", "expires_at": "",
+            "reviewed_at": "2026-01-05T00:00:00Z", "date_captured": "2025-12-01T00:00:00Z",
+            "title": "t", "tldr": "x", "source": "unit",
+        }
+        codes = [i["code"] for i in memory_review_issues(record, today="2026-08-02")]
+        self.assertIn("review_due", codes)
+        fresh = dict(record, reviewed_at="2026-06-01T00:00:00Z")
+        codes = [i["code"] for i in memory_review_issues(fresh, today="2026-08-02")]
+        self.assertNotIn("review_due", codes)
+
+    def test_month_arithmetic_clamps_short_months(self):
+        from datetime import date
+        from mcp_package.link_core.memory import _add_months
+        self.assertEqual(_add_months(date(2026, 1, 31), 1), date(2026, 2, 28))
+        self.assertEqual(_add_months(2028 and date(2028, 1, 31), 1), date(2028, 2, 29))
+        self.assertEqual(_add_months(date(2026, 12, 15), 1), date(2027, 1, 15))

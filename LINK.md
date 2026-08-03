@@ -305,7 +305,8 @@ Rules:
 - If `remember` reports a duplicate candidate, inspect it with `python3 link.py explain-memory "<name-or-title>" .` and merge new information with `python3 link.py update-memory "<name-or-title>" "new detail" .` instead of creating another one. Use `--allow-duplicate` only when the human confirms it should be separate.
 - If `remember`, `update-memory`, or `propose-memories` reports conflict candidates, stop and ask the human whether the older memory should be updated, archived, or allowed to coexist. Use `--allow-conflict` only when the human confirms both memories are true in different contexts.
 - After updating a memory, review it again with the human because `update-memory` resets `review_status` to `pending`.
-- After the human confirms a memory is accurate, run `python3 link.py review-memory "<name-or-title>" .`.
+- After the human confirms a memory is accurate, run `python3 link.py review-memory "<name-or-title>" .`. Reviewing re-arms the memory's trust window (`review_after`): project context stays trusted for 3 months, preferences/notes/procedures for 6, decisions and stable facts for 12.
+- Memories past their trust window are labeled `review_due` in the inbox, audit, and explain output. Treat them as provisional: confirm with the human before relying on one for an important decision, then review it to re-arm the window.
 - Run `python3 link.py explain-memory "<name-or-title>" .` when the human asks why an agent knows something or whether a memory is safe to use.
 - If a memory is stale or wrong, archive it with `python3 link.py archive-memory "<name-or-title>" . --reason "why"`. Do not delete memory pages unless the human explicitly asks for permanent removal.
 - Before broad repair work or risky local wiki edits, create a local backup with `python3 link.py backup .` or MCP `admin` action `backup`. Do not include `raw/` unless the human explicitly asks because raw sources and captures can contain sensitive material.
