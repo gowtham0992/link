@@ -642,6 +642,19 @@ struct PopoverView: View {
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(2)
                             }
+                            if let warnings = capture.injectionWarnings, !warnings.isEmpty {
+                                Label {
+                                    Text("\(warnings[0]) — verify you actually said this")
+                                        .font(.caption2)
+                                } icon: {
+                                    Image(systemName: "exclamationmark.shield")
+                                        .font(.system(size: 9.5))
+                                }
+                                .foregroundStyle(.orange)
+                                .help("This session contains injection-shaped instructions (" +
+                                      warnings.joined(separator: ", ") +
+                                      "). Confirm the words are yours before accepting them as memory.")
+                            }
                             if let trail = capture.decisionTrail, !trail.isEmpty {
                                 DisclosureGroup {
                                     VStack(alignment: .leading, spacing: 2) {

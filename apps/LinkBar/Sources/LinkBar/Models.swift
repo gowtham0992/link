@@ -53,11 +53,15 @@ struct CaptureItem: Decodable, Identifiable {
     let snippet: String?
     let decisionTrail: [String]?
     let minedFromUserTurns: Bool?
+    /// Injection-shaped instruction labels ("guardrail-bypass instruction");
+    /// non-empty means: verify you actually said this before accepting.
+    let injectionWarnings: [String]?
 
     enum CodingKeys: String, CodingKey {
         case path, title, project, proposals, snippet
         case decisionTrail = "decision_trail"
         case minedFromUserTurns = "mined_from_user_turns"
+        case injectionWarnings = "injection_warnings"
     }
 
     var id: String { path }
