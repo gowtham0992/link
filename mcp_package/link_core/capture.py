@@ -15,7 +15,11 @@ from .memory import (
     propose_memories_from_text,
     slugify,
 )
-from .security import redact_secret_values, secret_value_warnings
+from .security import (
+    injected_instruction_warnings,
+    redact_secret_values,
+    secret_value_warnings,
+)
 
 
 CaptureCommands = Callable[[str], dict[str, str]]
@@ -712,6 +716,7 @@ def capture_records(
         if project_name and capture_project and capture_project != project_name:
             continue
         warnings = secret_value_warnings(text)
+        injection_warnings = injected_instruction_warnings(text)
         safe_notes, _, _ = redact_secret_values(notes)
         # What Accept will actually save: mine from the user's own turns
         # (proposal source) the same way accept-capture does, so the preview
@@ -743,6 +748,7 @@ def capture_records(
             "size_bytes": stat.st_size,
             "secret_warnings": warnings,
             "warning_count": len(warnings),
+            "injection_warnings": injection_warnings,
             "snippet": re.sub(r"\s+", " ", safe_notes).strip()[:180],
             "proposal_count": len(proposal_items),
             "proposals": proposal_previews,
@@ -819,6 +825,14 @@ def render_capture_inbox_text(payload: dict[str, object]) -> str:
             lines.append(f"   Project: {capture.get('project')}")
         if secret_warnings:
             lines.append("   Secret-looking values: " + ", ".join(str(label) for label in secret_warnings))
+        injection_obj = capture.get("injection_warnings")
+        injection_list: list[object] = injection_obj if isinstance(injection_obj, list) else []
+        if injection_list:
+            lines.append(
+                "   Injection-shaped instructions: "
+                + ", ".join(str(label) for label in injection_list)
+                + " — verify you actually said this before accepting."
+            )
         lines.append(f"   Accept: {commands.get('accept')}")
         if secret_warnings:
             lines.append(f"   Redact: {commands.get('redact')}")

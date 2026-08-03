@@ -13,6 +13,17 @@ pending captures — five of them the same conversation captured five times.
 
 ### Added
 
+- **Memory poisoning benchmark (Track 5) + injection labeling.** A planted
+  memory is injected into every future session — the highest-value prompt-
+  injection target an agent system has. 15 authored attacks (guardrail
+  bypass, unattended-execution "preferences", data-exfiltration
+  conventions, credential planting, spoofed approvals, agent-directed
+  commands) now run through the real pipeline in CI: **0 reach the inbox
+  unlabeled, 0 false positives** on benign directives. Injection-shaped
+  proposals carry a warning in the capture inbox and the decision trail
+  ("verify you actually said this before accepting") — labels, never
+  censorship; the review gate stays the final defense. To our knowledge
+  the only published adversarial benchmark on an agent-memory write path.
 - **Dismissal ledger** — deleting a capture now records its proposal
   fingerprints in `raw/memory-captures/.dismissed-proposals.json`, so a
   dismissed proposal never re-enters the inbox from a later session of any

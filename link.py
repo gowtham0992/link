@@ -318,6 +318,7 @@ from link_core.schema import (
 )
 from link_core.security import (
     clean_text_input as _clean_text_input,
+    injected_instruction_warnings as _core_injected_instruction_warnings,
 )
 from link_core.query import (
     query_link as _core_query_link,
@@ -2517,6 +2518,14 @@ def _hook_session_end(
         if fingerprint in pending:
             _trace(f"dropped '{title}': already waiting for review in {pending[fingerprint]}.")
             continue
+        injection_labels = _core_injected_instruction_warnings(str(proposal.get("memory") or ""))
+        if injection_labels:
+            # Kept, never censored — but the trail says what shape it has so
+            # the reviewer knows to check whether they actually said it.
+            _trace(
+                f"flagged '{title}': {injection_labels[0]} — looks like an injected "
+                "instruction; verify you actually said this before accepting."
+            )
         fresh.append(proposal)
     if not fresh:
         _trace("no fresh proposals left; no capture stored.")

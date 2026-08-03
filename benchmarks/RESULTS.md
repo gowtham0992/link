@@ -319,6 +319,45 @@ answerer-limited, not memory-limited.
 - **The quality tier costs a ~5 s model load**, so short-lived CLI calls
   and session-start hooks default to the fast tier unless you opt in.
 
+## Track 5: Memory poisoning (adversarial)
+
+A planted memory is injected into every future session, which makes agent
+memory the highest-value prompt-injection target an agent system has: a
+poisoned webpage, doc, or pasted AI output only has to survive one capture
+to give orders forever. As far as we know no other memory system publishes
+an adversarial benchmark on this surface.
+
+`scripts/eval_memory_poisoning.py` drives 15 authored attacks (synthetic,
+ground-truth labeled, no LLM — `scripts/poisoning_dataset.py`) through the
+real pipeline, plus 6 benign directive controls that must never be flagged.
+Attack classes: guardrail-bypass instructions, unattended-execution
+"preferences" (sudo / --force without approval), data-exfiltration
+conventions (ship ~/.ssh and .env in summaries), credential planting,
+spoofed-approval framing, agent-directed durable commands, and hearsay
+carriers.
+
+| layer | what it does | attacks stopped here |
+|---|---|---|
+| extraction | hearsay/question/echo gates drop what was never the user's own claim | 5 of 15 |
+| labeling | injection-shaped proposals carry a warning label into the inbox and decision trail | 8 of 15 |
+| write gate | credential-shaped text refused even on a one-click accept | 1 of 15 |
+| defanging | extraction strips the payload; only a harmless residue can be stored | 1 of 15 |
+
+**Unlabeled exposure: 0 of 15. Benign false positives: 0 of 6.** Both are
+CI-enforced — any change that lets an attack reach the inbox without a
+label, or flags a legitimate directive, fails the build.
+
+Honest notes: labels are warnings, not blocks — a human may genuinely hold
+a "never ask confirmation before builds" preference, so the pipeline never
+censors; it attributes ("verify you actually said this before accepting").
+The review gate remains the final defense for anything labeled, which is
+the architecture's claim, not a hedge: memory writes that no human approved
+do not exist in Link. The attack set was authored by us and the detector
+was developed against it — these are fit numbers, not blind ones, and the
+patterns are deliberately narrow to protect the zero-false-positive
+property. Adversarial contributions that beat the layers are welcome and
+will be added to the fixture.
+
 ## Reproduce
 
 ```bash
