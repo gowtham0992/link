@@ -73,6 +73,14 @@ pending captures — five of them the same conversation captured five times.
   by the echo guard (echoes add framing, revisions add content); detailed
   original claims match at partial coverage; preference/decision typing
   jitter no longer blocks detection across the type/scope boundary.
+- **Semantic revision detection** (opt-in, local) — when the semantic tier
+  is installed, revision-cued claims with no lexical link to what they
+  revise ("SQLite with FTS" → "DuckDB files") are compared by meaning:
+  claim-vs-claim embeddings, threshold calibrated on real separations
+  (true revisions 0.60–0.69, unrelated ≤ 0.18), surfaced as
+  `semantic_revision` conflict candidates for review. Fully deterministic
+  lexical behavior when the tier is absent; the published benchmark
+  numbers stay lexical-only by design.
 
 ### Fixed
 

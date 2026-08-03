@@ -32,6 +32,9 @@ Exit: non-zero if the gated pipeline stores any junk, or fails to beat the
 """
 from __future__ import annotations
 
+import os
+os.environ["LINK_SEMANTIC"] = "off"  # published numbers stay deterministic: never use a local model
+
 import argparse
 import json
 import sys

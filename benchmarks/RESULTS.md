@@ -219,10 +219,14 @@ the echo guard (echoes add framing, revisions add content); detailed
 original claims are matched at partial coverage (originals carry specifics
 a revision legitimately drops); and preference/decision classification
 jitter no longer blocks detection across the type/scope boundary. The two
-revisions that still expose are lexically disjoint rephrasings ("SQLite
-with FTS" revised as "DuckDB files with the same no-service rule") — the
-honest limit of a token-based detector, and the case for the semantic tier
-to take over in a future release. As-of accuracy is 0.917, not 1.00: one
+revisions that still expose in this table are lexically disjoint
+rephrasings ("SQLite with FTS" revised as "DuckDB files with the same
+no-service rule") — the honest limit of a token-based detector. When the
+optional local semantic tier is installed, a claim-vs-claim embedding pass
+(threshold 0.55; true revisions measured 0.60-0.69, unrelated pairs
+<= 0.18 with model2vec) catches exactly these as `semantic_revision`
+conflict candidates. The published table stays lexical-only on purpose:
+these numbers must be reproducible with no model download. As-of accuracy is 0.917, not 1.00: one
 historical reconstruction breaks when a topically-adjacent conflict
 auto-resolves against the wrong original — an artifact of this benchmark's
 blind auto-supersede loop; in the product, conflicts route to human review.

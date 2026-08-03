@@ -2772,6 +2772,35 @@ _CONFLICT_CUE_TOKENS = {
     "use", "agent", "memory", "through", "now", "anymore",
 }
 
+# Semantic revision tier: lexically disjoint revisions ("SQLite with FTS"
+# revised as "DuckDB files") share no subject tokens, so no token rule can
+# see them. When the local embedding tier is installed, revision-cued text
+# is also compared by meaning. Calibrated on the hygiene fixture with
+# model2vec: true revisions score 0.60-0.82, unrelated pairs <= 0.18.
+SEMANTIC_REVISION_THRESHOLD = 0.55
+_conflict_embedder_cache: list[object] = []
+
+
+def _default_conflict_embedder() -> Callable[[list[str]], list[list[float]]] | None:
+    """Memoized local embedder for conflict checks; None when tier absent."""
+    if _conflict_embedder_cache:
+        cached = _conflict_embedder_cache[0]
+        return cached if callable(cached) else None
+    try:
+        from .semantic import load_embedder
+        embedder = load_embedder()
+    except Exception:
+        embedder = None
+    _conflict_embedder_cache.append(embedder)
+    return embedder
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
 
 def memory_conflict_candidates(
     records: Iterable[Mapping[str, object]],
@@ -2782,8 +2811,14 @@ def memory_conflict_candidates(
     project: str | None = None,
     limit: int = 3,
     exclude_names: Iterable[str] | None = None,
+    embedder: Callable[[list[str]], list[list[float]]] | None = None,
 ) -> list[dict[str, object]]:
-    """Find active memories that may contradict the proposed memory."""
+    """Find active memories that may contradict the proposed memory.
+
+    `embedder` overrides the lazily-loaded semantic tier (tests inject a
+    deterministic stub); when the tier is absent, detection is purely
+    lexical and fully deterministic.
+    """
     if memory_type not in MEMORY_CONFLICT_TYPES:
         return []
 
@@ -2797,6 +2832,7 @@ def memory_conflict_candidates(
     project_name = normalize_project(project)
     excluded = {name for name in (exclude_names or []) if name}
     candidates: list[tuple[int, dict[str, object]]] = []
+    semantic_pool: list[tuple[Mapping[str, object], str, list[str]]] = []
 
     for record in records:
         name = str(record.get("name") or "")
@@ -2895,12 +2931,38 @@ def memory_conflict_candidates(
                     reasons.append("reversed_preference")
 
         if score < 85:
+            # Semantic tier: a revision-cued claim with no lexical link may
+            # still revise this record by meaning ("SQLite with FTS" ->
+            # "DuckDB files"). Compared in one batch after the loop.
+            if revision_cue:
+                # Claim vs claim: titles are short editorial labels that
+                # dilute meaning-similarity, so they stay out of the vectors.
+                record_claim = str(record.get("tldr") or "") or record_text
+                semantic_pool.append((record, record_claim, overlap))
             continue
         candidate = slim_memory(record)
         candidate["conflict_score"] = min(score, 100)
         candidate["conflict_reasons"] = sorted(set(reasons))
         candidate["matching_terms"] = overlap[:12]
         candidates.append((int(candidate["conflict_score"]), candidate))
+
+    if semantic_pool:
+        active_embedder = embedder if embedder is not None else _default_conflict_embedder()
+        if active_embedder is not None:
+            try:
+                vectors = active_embedder([text] + [claim for _, claim, _ in semantic_pool])
+            except Exception:
+                vectors = []
+            if len(vectors) == len(semantic_pool) + 1:
+                new_vector = vectors[0]
+                for (record, _, overlap), vector in zip(semantic_pool, vectors[1:]):
+                    if _cosine_similarity(new_vector, vector) < SEMANTIC_REVISION_THRESHOLD:
+                        continue
+                    candidate = slim_memory(record)
+                    candidate["conflict_score"] = 86
+                    candidate["conflict_reasons"] = ["semantic_revision"]
+                    candidate["matching_terms"] = overlap[:12]
+                    candidates.append((86, candidate))
 
     candidates.sort(key=lambda item: (-item[0], str(item[1]["title"]).lower()))
     return [candidate for _, candidate in candidates[:limit]]

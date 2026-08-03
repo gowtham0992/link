@@ -1735,3 +1735,67 @@ class FrictionRoundTests(unittest.TestCase):
         self.assertEqual(classify_memory_segment("I prefer dark mode in every editor.")["memory_type"], "preference")
         self.assertEqual(classify_memory_segment("We decided sprints are two weeks.")["memory_type"], "decision")
         self.assertIsNone(classify_memory_segment("The meeting moved to Thursday afternoon room 4."))
+
+
+class SemanticRevisionTests(unittest.TestCase):
+    """Lexically disjoint revisions caught by meaning when the tier exists."""
+
+    RECORDS = [{
+        "name": "sqlite", "status": "active", "memory_type": "decision", "scope": "project",
+        "title": "Embedded storage engine",
+        "tldr": "Local data lives in SQLite with FTS enabled; queries use the embedded engine and no external database service runs.",
+        "body": "",
+    }, {
+        "name": "squash", "status": "active", "memory_type": "decision", "scope": "project",
+        "title": "Squash-merge pull requests",
+        "tldr": "Pull requests are squash-merged; main history stays linear.",
+        "body": "",
+    }]
+    REVISION = ("Project decided local data does not live in SQLite anymore; "
+                "we settled on DuckDB files.")
+
+    @staticmethod
+    def _stub_embedder(texts):
+        # Deterministic stand-in: storage-topic texts share an axis,
+        # merge-topic texts another — mirrors what the real model showed
+        # (true revisions 0.60-0.82, unrelated pairs <= 0.18).
+        def vec(text):
+            lower = text.lower()
+            storage = 1.0 if ("sqlite" in lower or "duckdb" in lower) else 0.0
+            merging = 1.0 if ("squash" in lower or "merge" in lower) else 0.0
+            return [storage, merging, 0.1]
+        return [vec(text) for text in texts]
+
+    def _reasons(self, candidates, name):
+        for candidate in candidates:
+            if str(candidate.get("name")) == name:
+                return list(candidate.get("conflict_reasons") or [])
+        return []
+
+    def test_semantic_tier_catches_disjoint_revision(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        candidates = memory_conflict_candidates(
+            self.RECORDS, self.REVISION, "DuckDB decision",
+            "decision", "project", embedder=self._stub_embedder,
+        )
+        self.assertIn("semantic_revision", self._reasons(candidates, "sqlite"))
+        self.assertEqual(self._reasons(candidates, "squash"), [])
+
+    def test_without_embedder_detection_stays_lexical(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        candidates = memory_conflict_candidates(
+            self.RECORDS, self.REVISION, "DuckDB decision",
+            "decision", "project", embedder=lambda texts: [],
+        )
+        for candidate in candidates:
+            self.assertNotIn("semantic_revision", candidate.get("conflict_reasons") or [])
+
+    def test_semantic_pass_needs_revision_cue(self):
+        from mcp_package.link_core.memory import memory_conflict_candidates
+        plain = "The project stores analytics in DuckDB files."
+        candidates = memory_conflict_candidates(
+            self.RECORDS, plain, "DuckDB analytics",
+            "decision", "project", embedder=self._stub_embedder,
+        )
+        for candidate in candidates:
+            self.assertNotIn("semantic_revision", candidate.get("conflict_reasons") or [])

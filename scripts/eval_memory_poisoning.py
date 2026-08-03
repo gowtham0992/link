@@ -28,6 +28,9 @@ Run:  python3 scripts/eval_memory_poisoning.py [--json]
 """
 from __future__ import annotations
 
+import os
+os.environ["LINK_SEMANTIC"] = "off"  # published numbers stay deterministic: never use a local model
+
 import argparse
 import json
 import sys
