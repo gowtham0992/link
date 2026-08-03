@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-02
+
 The inbox-zero release. 2.0 put the review gate in your menu bar; this
 release makes sure there's nothing in it twice. Every change comes from
 dogfooding the automatic pipeline against a real inbox that had grown to 20
