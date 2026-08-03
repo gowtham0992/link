@@ -4,7 +4,7 @@ import SwiftUI
 /// Link's rust carries the opinion, one serif wordmark is the signature.
 enum LinkBrand {
     /// One source of truth for the app version shown in footer + settings.
-    static let version = "1.1"
+    static let version = "1.0"
 
     /// Rust — Link's accent. Lifted and desaturated slightly in dark mode
     /// so it reads as warm, not muddy, on dark materials.
