@@ -12,6 +12,16 @@ before they travel.
 
 ### Added
 
+- **Memory pushes itself to every agent, not just the ones with hooks.**
+  Session hooks exist for three of the nine agents Link supports; for the
+  other six, nothing put memory in front of the agent unless it decided to
+  ask. Now the **first MCP tool response of a session carries the memory
+  brief** — whatever tool was called, even `status` — under
+  `link_session_brief`, with a note telling the agent to treat it as
+  context it already has. Once per session, skipped when there is nothing
+  to say, recorded as a retrieval so `lnk wins` can prove it happened, and
+  disabled with `LINK_MCP_AUTOBRIEF=off`. Push, through the one door every
+  agent already opens.
 - **Retrieval observability — proof your agents actually use memory.** Every
   memory system can tell you what it stored; none could tell you whether an
   agent ever read it back, which made "your agents have memory" a hope

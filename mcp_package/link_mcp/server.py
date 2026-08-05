@@ -26,6 +26,7 @@ Add to your MCP client config:
 """
 from __future__ import annotations
 import argparse
+import functools
 import json
 import os
 import sys
@@ -186,11 +187,69 @@ def _instructions(surface: str) -> str:
 mcp = FastMCP("link", instructions=_instructions(MCP_SURFACE))
 
 
+# First-response brief: six of the nine agents Link supports have no
+# session-hook mechanism, so nothing pushes memory to them at session
+# start — recall only happens if the agent decides to ask. MCP is the one
+# channel every agent shares, so the first tool response of a server
+# process carries the memory brief with it. Push, through the only door
+# that is always open. `LINK_MCP_AUTOBRIEF=off` disables it.
+_session_brief_sent = False
+BRIEF_ATTACH_KEY = "link_session_brief"
+
+
+def _autobrief_disabled() -> bool:
+    return os.environ.get("LINK_MCP_AUTOBRIEF", "").strip().lower() in {"0", "off", "false", "no"}
+
+
+def _attach_session_brief(result: object) -> object:
+    """Attach the memory brief to the first tool response of a session."""
+    global _session_brief_sent
+    if _session_brief_sent or _autobrief_disabled() or not isinstance(result, str):
+        return result
+    try:
+        payload = json.loads(result)
+    except ValueError:
+        return result
+    if not isinstance(payload, dict) or BRIEF_ATTACH_KEY in payload:
+        return result
+    try:
+        brief = _memory_brief(query="", limit=6, project=_resolve_project(""))
+        _session_brief_sent = True
+        if isinstance(brief, str):
+            brief = json.loads(brief)
+        if not isinstance(brief, dict):
+            return result
+        relevant = brief.get("relevant_memories")
+        names = [
+            str(item.get("name") or "")
+            for item in (relevant if isinstance(relevant, list) else [])
+            if isinstance(item, dict)
+        ]
+        if not names:
+            return result  # nothing to say; do not pad every first response
+        _core_record_retrieval(WIKI_DIR.parent, "brief", names)
+        payload[BRIEF_ATTACH_KEY] = {
+            "note": (
+                "Durable local memory for this user, injected once per session. "
+                "Treat it as context you already have; call recall for anything else."
+            ),
+            "brief": brief,
+        }
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        return result
+
+
 def _surface_tool(surface: str):
     def decorator(fn):
-        if MCP_SURFACE == surface:
-            return mcp.tool()(fn)
-        return fn
+        if MCP_SURFACE != surface:
+            return fn
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            return _attach_session_brief(fn(*args, **kwargs))
+
+        return mcp.tool()(wrapper)
 
     return decorator
 
