@@ -95,7 +95,10 @@ struct LinkBarApp: App {
             )
             window.contentView = host
             window.setContentSize(host.fittingSize)
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            // Health probes each spawn a Python process; LINKBAR_SNAPSHOT_WAIT
+            // lets a verification run give them time to land.
+            let waitSeconds = Double(ProcessInfo.processInfo.environment["LINKBAR_SNAPSHOT_WAIT"] ?? "") ?? 4
+            try? await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
             window.setContentSize(host.fittingSize)
             host.layoutSubtreeIfNeeded()
             if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {

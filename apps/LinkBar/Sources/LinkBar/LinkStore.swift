@@ -23,6 +23,7 @@ final class LinkStore: ObservableObject {
     @Published var busy = false
     @Published var linkVersion: String = ""
     @Published var stats: StatusPayload?
+    @Published var digest: DigestPayload?
     @Published var runtimeWarning: String?
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
@@ -172,9 +173,11 @@ final class LinkStore: ObservableObject {
         let semantic = try? LinkCLI.runJSON(SemanticStatus.self, ["semantic", workspace, "--json"])
         let hooks = Self.claudeHooksAreWired()
         let viewer = await Self.viewerResponds()
+        let digest = try? LinkCLI.runJSON(DigestPayload.self, ["digest", workspace, "--json"])
         await MainActor.run {
             self.mcp = mcp ?? self.mcp
             self.semantic = semantic ?? self.semantic
+            self.digest = digest ?? self.digest
             self.claudeHooksWired = hooks
             self.viewerRunning = viewer
             self.lastHealthAt = Date()
@@ -278,6 +281,25 @@ final class LinkStore: ObservableObject {
                               fix: .init(label: "Wire") { [weak self] in self?.wireClaudeHooks() }))
         case .none:
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .info, detail: "checking…"))
+        }
+
+        // Memory in use — the honest answer to "are my agents reading this?"
+        if let usage = digest?.usage {
+            if !usage.tracking {
+                rows.append(.init(icon: "waveform.path.ecg", name: "Memory in use", level: .info,
+                                  detail: "retrieval tracking is off (LINK_USAGE=off)"))
+            } else if !usage.hasData {
+                rows.append(.init(icon: "waveform.path.ecg", name: "Memory in use", level: .info,
+                                  detail: "no reads recorded yet — start a session"))
+            } else {
+                let window = digest?.windowDays ?? 7
+                var detail = "\(usage.retrievals) read(s) · \(usage.briefs) brief(s) in \(window)d"
+                if usage.neverRetrievedCount > 0 {
+                    detail += " · \(usage.neverRetrievedCount) never used"
+                }
+                rows.append(.init(icon: "waveform.path.ecg", name: "Memory in use",
+                                  level: usage.retrievals > 0 ? .ok : .warn, detail: detail))
+            }
         }
 
         // Recall power (semantic tier)
