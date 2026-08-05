@@ -123,6 +123,35 @@ layer — that's what the 99.4% evidence-retrieval row above isolates.
 Full methodology and reproduction steps:
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
+## Memory You Can Take Anywhere — And Prove Is Working
+
+Three questions every memory system should answer, and how Link answers
+them with mechanisms instead of promises:
+
+**"Is it on all my machines?"** `lnk sync` moves reviewed memory through
+a git remote *you* control — a private GitHub repo, a homelab bare repo —
+with no server and no account. Secrets are scanned before anything
+leaves, conflicts become review items instead of git markers, and private
+captures never sync. `lnk team-sync` runs a shared team brain on the same
+rails.
+
+**"What did I believe back then?"** Ask in plain language: `lnk recall
+"where does local data live in March"` returns what was true *then*,
+reconstructed from the dated files and their supersede lineage — while
+the same question without the date returns today's truth. Deterministic:
+a regex and a calendar, no model. Point-in-time accuracy from plain
+language: 0.917, identical to asking with an ISO date.
+
+**"Is my agent actually using this?"** The question most memory systems
+cannot answer about themselves. Link records retrievals locally — session
+briefs pushed to agents, recalls they chose to make — and `lnk wins`
+answers with counts, while `lnk digest` reports the weekly story
+including memories that have *never* been retrieved. The ledger stores
+which memory was read and when, never what you asked; it never syncs, and
+`LINK_USAGE=off` disables it. And memory reaches every agent, not just
+the hooked ones: the first MCP tool response of a session carries the
+brief, whatever tool was called.
+
 ## Quick Start
 
 Two commands: see it work, then make it yours.
