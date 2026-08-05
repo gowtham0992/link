@@ -160,3 +160,50 @@ class FirstResponseBriefTests(unittest.TestCase):
             (wiki / "log.md").write_text("# Log\n", encoding="utf-8")
             server = self._server(root)
             self.assertNotIn("link_session_brief", json.loads(server.status()))
+
+
+class ColdWalkRegressionTests(unittest.TestCase):
+    """Frictions found by the fresh-user walk must stay fixed."""
+
+    def test_day_one_memory_is_not_dead_weight(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            record_retrieval(root, "recall", [])
+            records = [
+                {"name": "saved-today", "date_captured": "2026-08-05T10:00:00Z"},
+                {"name": "old-and-unused", "date_captured": "2026-01-01T00:00:00Z"},
+            ]
+            summary = usage_summary(root, days=7, records=records, today="2026-08-05")
+            self.assertNotIn("saved-today", summary["never_retrieved"])
+            self.assertIn("old-and-unused", summary["never_retrieved"])
+
+    def test_wins_note_never_claims_reads_that_did_not_happen(self):
+        from link_core.memory_wins import _honest_note
+        note = _honest_note({
+            "tracking": True, "has_data": True, "window_days": 7,
+            "retrievals": 3, "briefs": 0, "memories_surfaced": 0,
+        })
+        self.assertIn("reached for memory", note)
+        self.assertIn("no memories matched yet", note)
+        self.assertNotIn("read memory back", note)
+
+    def test_recall_miss_hint_matches_store_state(self):
+        from link_core.cli_memory import render_recall_text
+        _code, empty_store = render_recall_text(
+            query="anything", results=[], target=".", store_count=0)
+        self.assertIn("Add one", empty_store)
+        _code, full_store = render_recall_text(
+            query="anything", results=[], target=".", store_count=5)
+        self.assertNotIn("Add one", full_store)
+        self.assertIn("Try different words", full_store)
+        self.assertIn("match by meaning", full_store)
+
+    def test_offline_guard_also_silences_progress_bars(self):
+        import os
+        from link_core.semantic import _set_offline_guard
+        _set_offline_guard(False)
+        try:
+            self.assertEqual(os.environ.get("HF_HUB_OFFLINE"), "1")
+            self.assertEqual(os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS"), "1")
+        finally:
+            _set_offline_guard(True)

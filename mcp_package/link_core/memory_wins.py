@@ -175,11 +175,14 @@ def _honest_note(usage: Mapping[str, object] | None) -> str:
     retrievals = usage.get("retrievals") or 0
     briefs = usage.get("briefs") or 0
     surfaced = usage.get("memories_surfaced") or 0
-    return (
+    lead = (
         f"Local signals, not telemetry. In the last {usage.get('window_days', 7)} days "
-        f"agents read memory back {retrievals} time(s) ({briefs} session brief(s)), "
-        f"surfacing {surfaced} distinct memory(ies)."
+        f"agents reached for memory {retrievals} time(s) ({briefs} session brief(s))"
     )
+    if surfaced:
+        return f"{lead}, surfacing {surfaced} distinct memory(ies)."
+    # A lookup that found nothing is still a lookup - say so, don't imply reads.
+    return f"{lead}; no memories matched yet."
 
 
 def _int_value(value: object) -> int:

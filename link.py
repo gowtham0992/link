@@ -1893,6 +1893,7 @@ def recall(
         include_archived=include_archived,
         project=project_name,
         target=target,
+        store_count=len(_memory_records(wiki_dir)) if not results else -1,
     )
     _print_text(text)
     return code

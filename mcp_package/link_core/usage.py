@@ -143,7 +143,12 @@ def usage_summary(
         never_used = sorted(
             str(record.get("name"))
             for record in records
-            if str(record.get("name") or "") and str(record.get("name")) not in ever_surfaced
+            if str(record.get("name") or "")
+            and str(record.get("name")) not in ever_surfaced
+            # Grace period: a memory younger than the window has not had a
+            # fair chance to be recalled — day-one users must never be told
+            # their first memory is dead weight.
+            and not _within(record.get("date_captured"), days, now)
         )
 
     return {

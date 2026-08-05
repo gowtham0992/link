@@ -131,8 +131,13 @@ def _set_offline_guard(allow_download: bool) -> None:
     if not allow_download:
         # Force offline so recall can never silently reach the network.
         os.environ["HF_HUB_OFFLINE"] = "1"
+        # And silence the hub's cache-scan progress bars: a recall that
+        # prints "Fetching 10 files" looks like a download even when it is
+        # a purely local cache check, which undermines the offline promise.
+        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     else:
         os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
 
 
 def _load_model(allow_download: bool = False):

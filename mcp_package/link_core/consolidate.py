@@ -402,7 +402,8 @@ def render_digest_text(payload: Mapping[str, object]) -> str:
     lines = [
         f"Link memory digest — last {days} days",
         "",
-        (f"{payload.get('active_memories', 0)} active memories · "
+        (f"{payload.get('active_memories', 0)} active "
+         f"{'memory' if payload.get('active_memories') == 1 else 'memories'} · "
          f"{payload.get('learned_count', 0)} new · "
          f"{payload.get('reviewed_count', 0)} reviewed"),
     ]
@@ -449,7 +450,7 @@ def render_digest_text(payload: Mapping[str, object]) -> str:
     if usage.get("has_data"):
         retrievals = usage.get("retrievals") or 0
         briefs = usage.get("briefs") or 0
-        lines.extend(["", f"How memory got used: {retrievals} retrieval(s), "
+        lines.extend(["", f"How memory got used: {retrievals} lookup(s), "
                           f"{briefs} session brief(s)"])
         top_obj = usage.get("top_memories")
         for item in (top_obj if isinstance(top_obj, list) else [])[:3]:
