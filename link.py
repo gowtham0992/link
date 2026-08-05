@@ -257,6 +257,10 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
     atomic_write_text as _core_atomic_write_text,
 )
+from link_core.usage import (
+    record_retrieval as _core_record_retrieval,
+    usage_summary as _core_usage_summary,
+)
 from link_core.sync import (
     SyncError as _core_sync_error,
     sync_init as _core_sync_init,
@@ -1854,6 +1858,11 @@ def recall(
         print(f"Could not recall: {exc}", file=sys.stderr)
         return 1
 
+    _core_record_retrieval(
+        _resolve_link_root(target), "recall",
+        [str(item.get("name") or "") for item in results], project=project_name or "",
+    )
+
     if json_output:
         print(json.dumps({
             "query": query,
@@ -1997,7 +2006,13 @@ def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_o
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
-    payload = _core_memory_wins_payload(wiki_dir, limit=limit, project=project)
+    payload = _core_memory_wins_payload(
+        wiki_dir, limit=limit, project=project,
+        usage=_core_usage_summary(
+            _resolve_link_root(target), days=30,
+            records=[r for r in _memory_records(wiki_dir) if str(r.get("status") or "active") == "active"],
+        ),
+    )
     return _emit_json_or_text(
         payload,
         json_output,
@@ -2229,7 +2244,16 @@ def start(
         command_target=_resolve_link_root(target),
     )
     query_text = task or "your current task"
-    relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
+    relevant_obj = brief_payload.get("relevant_memories")
+    relevant_list: list[object] = relevant_obj if isinstance(relevant_obj, list) else []
+    # The push path: memory reached the agent without it deciding anything.
+    # Recording it is what turns "your agents have memory" into a number.
+    _core_record_retrieval(
+        _resolve_link_root(target), "brief",
+        [str(item.get("name") or "") for item in relevant_list if isinstance(item, dict)],
+        project=project_name or "",
+    )
+    relevant_count = int(brief_payload.get("relevant_count") or len(relevant_list))
     project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
         status_payload.get("content_page_count") or 0
     )
@@ -2939,6 +2963,10 @@ def digest(target: Path, days: int = 7, json_output: bool = False) -> int:
         merge_candidates=_core_memory_merge_candidates(records),
         capture_count=int(captures.get("count") or 0),
         review_items=[item for item in inbox_items if isinstance(item, dict)],
+        usage=_core_usage_summary(
+            root, days=max(1, min(days, 365)),
+            records=[r for r in records if str(r.get("status") or "active") == "active"],
+        ),
         days=max(1, min(days, 365)),
         command_target=root,
     )

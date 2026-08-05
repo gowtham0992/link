@@ -28,6 +28,7 @@ def memory_wins_payload(
     limit: int = 6,
     project: str | None = None,
     records: Iterable[Mapping[str, object]] | None = None,
+    usage: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Summarize local, non-telemetry signals that Link memory is carrying value."""
     limit = max(1, min(int(limit or 6), 50))
@@ -154,11 +155,31 @@ def memory_wins_payload(
             review_count=len(review_records),
             project=project_name,
         ),
-        "honest_note": (
-            "These are local wiki signals, not telemetry. "
-            "Link does not track whether an agent used a memory."
-        ),
+        "usage": dict(usage) if usage else {},
+        "honest_note": _honest_note(usage),
     }
+
+
+def _honest_note(usage: Mapping[str, object] | None) -> str:
+    """Say what is actually known about retrieval — no more, no less."""
+    if not usage or not usage.get("tracking"):
+        return (
+            "These are local wiki signals, not telemetry. Retrieval tracking is "
+            "off (LINK_USAGE=off), so whether an agent read these back is unknown."
+        )
+    if not usage.get("has_data"):
+        return (
+            "These are local wiki signals. Retrieval tracking is on but has not "
+            "recorded a read yet — start a session or run a recall, then check back."
+        )
+    retrievals = usage.get("retrievals") or 0
+    briefs = usage.get("briefs") or 0
+    surfaced = usage.get("memories_surfaced") or 0
+    return (
+        f"Local signals, not telemetry. In the last {usage.get('window_days', 7)} days "
+        f"agents read memory back {retrievals} time(s) ({briefs} session brief(s)), "
+        f"surfacing {surfaced} distinct memory(ies)."
+    )
 
 
 def _int_value(value: object) -> int:

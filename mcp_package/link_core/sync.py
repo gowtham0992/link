@@ -45,6 +45,7 @@ SYNC_IGNORE_LINES = (
     "/logo.svg",
     "/logo.png",
     "/.link-team.json",
+    "/.link-usage.json",
 )
 
 TEAM_CONFIG_FILE = ".link-team.json"

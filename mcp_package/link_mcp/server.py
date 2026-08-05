@@ -255,6 +255,7 @@ from link_core.capture import (
     redact_capture_file as _core_redact_capture_file,
     write_session_capture as _core_write_session_capture,
 )
+from link_core.usage import record_retrieval as _core_record_retrieval
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
 )
@@ -1187,6 +1188,25 @@ def status(include_validation: bool = False) -> str:
     return json.dumps(_link_status(include_validation=include_validation), ensure_ascii=False)
 
 
+def _record_brief_retrieval(brief: object, project: str) -> None:
+    """Log that a brief actually reached an agent (the MCP push path)."""
+    payload = brief
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return
+    if not isinstance(payload, dict):
+        return
+    relevant = payload.get("relevant_memories")
+    names = [
+        str(item.get("name") or "")
+        for item in (relevant if isinstance(relevant, list) else [])
+        if isinstance(item, dict)
+    ]
+    _core_record_retrieval(WIKI_DIR.parent, "brief", names, project=project)
+
+
 @_slim_tool()
 def recall(
     query: str = "",
@@ -1213,11 +1233,13 @@ def recall(
     parsed_limit = _parse_limit(limit, default=6, max_limit=20)
 
     if clean_mode == "brief" or (clean_mode == "auto" and not clean_query):
+        brief = _memory_brief(query=clean_query, limit=parsed_limit, project=clean_project)
+        _record_brief_retrieval(brief, clean_project)
         return json.dumps({
             "surface": "slim",
             "tool": "recall",
             "mode": "brief",
-            "brief": _memory_brief(query=clean_query, limit=parsed_limit, project=clean_project),
+            "brief": brief,
         }, ensure_ascii=False)
 
     if clean_mode == "memory":
@@ -1721,6 +1743,10 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
         return json.dumps({"error": "query required", "query": "", "count": 0, "memories": []})
     project_name = _resolve_project(project)
     memories = _recall_memory_results(query, limit=limit, include_archived=include_archived, project=project_name)
+    _core_record_retrieval(
+        WIKI_DIR.parent, "recall",
+        [str(item.get("name") or "") for item in memories], project=project_name,
+    )
     return json.dumps({
         "query": query,
         "count": len(memories),

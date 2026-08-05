@@ -338,6 +338,7 @@ def build_digest(
     merge_candidates: list[dict[str, object]],
     capture_count: int,
     review_items: list[Mapping[str, object]],
+    usage: Mapping[str, object] | None = None,
     days: int = 7,
     today: str | None = None,
     command_target: str | Path = ".",
@@ -386,6 +387,7 @@ def build_digest(
         "drifting_count": len(merge_candidates),
         "pending_captures": capture_count,
         "needs_review": len(review_items),
+        "usage": dict(usage) if usage else {},
         "next_commands": {
             "review": display_command(["link", "review-memory", str(command_target), "--all"]),
             "consolidate": display_command(["link", "consolidate", str(command_target)]),
@@ -441,6 +443,21 @@ def render_digest_text(payload: Mapping[str, object]) -> str:
                     f"  ~ '{item.get('survivor_title')}' and '{item.get('absorbed_title')}'"
                 )
         lines.append(f"  Merge with review: {_digest_command(payload, 'consolidate')}")
+
+    usage_obj = payload.get("usage")
+    usage: Mapping[str, object] = usage_obj if isinstance(usage_obj, Mapping) else {}
+    if usage.get("has_data"):
+        retrievals = usage.get("retrievals") or 0
+        briefs = usage.get("briefs") or 0
+        lines.extend(["", f"How memory got used: {retrievals} retrieval(s), "
+                          f"{briefs} session brief(s)"])
+        top_obj = usage.get("top_memories")
+        for item in (top_obj if isinstance(top_obj, list) else [])[:3]:
+            if isinstance(item, Mapping):
+                lines.append(f"  * {item.get('memory')} ({item.get('times')}x)")
+        never = usage.get("never_retrieved_count") or 0
+        if never:
+            lines.append(f"  {never} memory(ies) have never been retrieved — candidates to archive")
 
     waiting_obj = payload.get("pending_captures")
     waiting = waiting_obj if isinstance(waiting_obj, int) else 0

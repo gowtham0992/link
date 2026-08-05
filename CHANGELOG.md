@@ -12,6 +12,22 @@ before they travel.
 
 ### Added
 
+- **Retrieval observability — proof your agents actually use memory.** Every
+  memory system can tell you what it stored; none could tell you whether an
+  agent ever read it back, which made "your agents have memory" a hope
+  rather than a measurement. Link now records retrievals locally: session
+  briefs (the automatic push path) and recalls (CLI and MCP), with the
+  memory names that came back. `lnk wins` drops its old hedge — *"Link does
+  not track whether an agent used a memory"* — and answers with facts:
+  *"agents read memory back 12 times (4 session briefs), surfacing 7
+  distinct memories."* `lnk digest` gains a "how memory got used" section
+  including the honest other half: **memories that have never been
+  retrieved**, which are candidates to archive.
+  Privacy is the point: the ledger records *that* a memory was used and
+  *which* one — never the query, the answer, the conversation, or anything
+  about the machine. It lives in `.link-usage.json`, is bounded to recent
+  events, never syncs (behavior is not memory), and switches off with
+  `LINK_USAGE=off`.
 - **`lnk digest` — the weekly reflection.** Consolidation answers "what
   should I clean up?" when asked; the digest answers "is my memory
   healthy?" without being asked. One bounded, read-only look back: what

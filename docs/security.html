@@ -65,6 +65,7 @@
           <li>SQLite search, when available, is an in-memory derived index. Markdown remains the source of truth.</li>
           <li>Optional semantic recall stays local: embedding models load offline-only at recall time (only the explicit <code>lnk semantic --setup</code> may fetch a model, once), embeddings live in plain JSON under <code>.link-cache/</code>, and CI blocks outbound network code in the runtime.</li>
           <li>Automatic session hooks store proposal-only notes; no durable memory is written without explicit review, and transcript extraction skips tool calls and tool outputs.</li>
+          <li>Retrieval observability is local-only and minimal. So you can answer "are my agents actually using this?", Link records that a brief or recall happened, when, and which memory names came back — in <code>.link-usage.json</code> at the workspace root. It never records your queries, the answers, the conversation, or anything about the machine; it is bounded to the most recent events; it is excluded from <code>lnk sync</code> (behavior is not memory, and it never leaves this machine); and it is switched off entirely with <code>LINK_USAGE=off</code>.</li>
         </ul>
         <p>The public GitHub Pages documentation may use lightweight analytics to understand install interest. It does not run inside Link, read local wiki data, or capture source/memory content.</p>
 
