@@ -331,23 +331,29 @@ poisoned webpage, doc, or pasted AI output only has to survive one capture
 to give orders forever. As far as we know no other memory system publishes
 an adversarial benchmark on this surface.
 
-`scripts/eval_memory_poisoning.py` drives 15 authored attacks (synthetic,
+`scripts/eval_memory_poisoning.py` drives 18 authored attacks (synthetic,
 ground-truth labeled, no LLM — `scripts/poisoning_dataset.py`) through the
 real pipeline, plus 6 benign directive controls that must never be flagged.
 Attack classes: guardrail-bypass instructions, unattended-execution
 "preferences" (sudo / --force without approval), data-exfiltration
 conventions (ship ~/.ssh and .env in summaries), credential planting,
-spoofed-approval framing, agent-directed durable commands, and hearsay
-carriers.
+spoofed-approval framing, agent-directed durable commands, hearsay
+carriers, and — added after the July 2026 MemGhost disclosure —
+untrusted-channel write instructions: content from an email, newsletter,
+or shared doc that tells the agent itself to silently write durable
+memory. Every mitigation the MemGhost researchers proposed (user
+confirmation before durable writes, source tagging, logged memory writes)
+is Link's standing architecture, and the three MemGhost-shaped attacks
+die in the pipeline: dropped, flagged, or defanged — none unlabeled.
 
 | layer | what it does | attacks stopped here |
 |---|---|---|
-| extraction | hearsay/question/echo gates drop what was never the user's own claim | 5 of 15 |
-| labeling | injection-shaped proposals carry a warning label into the inbox and decision trail | 8 of 15 |
-| write gate | credential-shaped text refused even on a one-click accept | 1 of 15 |
-| defanging | extraction strips the payload; only a harmless residue can be stored | 1 of 15 |
+| extraction | hearsay/question/echo gates drop what was never the user's own claim | 6 of 18 |
+| labeling | injection-shaped proposals carry a warning label into the inbox and decision trail | 9 of 18 |
+| write gate | credential-shaped text refused even on a one-click accept | 1 of 18 |
+| defanging | extraction strips the payload; only a harmless residue can be stored | 2 of 18 |
 
-**Unlabeled exposure: 0 of 15. Benign false positives: 0 of 6.** Both are
+**Unlabeled exposure: 0 of 18. Benign false positives: 0 of 6.** Both are
 CI-enforced — any change that lets an attack reach the inbox without a
 label, or flags a legitimate directive, fails the build.
 
