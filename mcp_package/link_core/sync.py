@@ -22,11 +22,13 @@ provides its own), caches and backups.
 """
 from __future__ import annotations
 
-import socket
+import json
+import platform
 import subprocess
 from pathlib import Path
 from typing import Callable
 
+from .frontmatter import parse_frontmatter
 from .log import append_log, merge_log_texts, utc_timestamp
 from .security import secret_value_warnings
 
@@ -42,7 +44,10 @@ SYNC_IGNORE_LINES = (
     "/LINK.md",
     "/logo.svg",
     "/logo.png",
+    "/.link-team.json",
 )
+
+TEAM_CONFIG_FILE = ".link-team.json"
 
 # Regenerated after every merge instead of being merged.
 GENERATED_WIKI_FILES = ("wiki/index.md", "wiki/_backlinks.json", "wiki/_link_schema.json")
@@ -207,7 +212,7 @@ def _resolve_conflicts(
             # original path; the local version becomes a sibling memory the
             # consolidate/duplicate machinery will pair for review.
             path.write_text(theirs, encoding="utf-8")
-            sibling = path.with_name(f"{path.stem}-local-{socket.gethostname().split('.')[0]}{path.suffix}")
+            sibling = path.with_name(f"{path.stem}-local-{platform.node().split('.')[0]}{path.suffix}")
             counter = 2
             while sibling.exists():
                 sibling = path.with_name(f"{path.stem}-local-{counter}{path.suffix}")
@@ -251,7 +256,7 @@ def sync_workspace(
     _git(root, "add", "-A")
     committed = False
     if _git(root, "status", "--porcelain").stdout.strip():
-        host = socket.gethostname().split(".")[0]
+        host = platform.node().split(".")[0]
         _git(root, "commit", "-m", f"link sync: {host} {utc_timestamp()}")
         committed = True
 
@@ -266,7 +271,10 @@ def sync_workspace(
         behind = _git(root, "rev-list", "--count", f"HEAD..origin/{branch}", check=False).stdout.strip()
         pulled = int(behind or 0)
         if pulled:
-            merge = _git(root, "merge", "--no-edit", f"origin/{branch}", check=False)
+            # --allow-unrelated-histories: two teammates (or two machines)
+            # that ran --init independently share a remote without a common
+            # ancestor; their first sync is exactly this bootstrap merge.
+            merge = _git(root, "merge", "--no-edit", "--allow-unrelated-histories", f"origin/{branch}", check=False)
             if merge.returncode != 0:
                 conflicted = [
                     line.strip() for line in
@@ -319,4 +327,154 @@ def sync_workspace(
         "resolutions": resolutions,
         "secret_findings": [],
         "both_versions": [r for r in resolutions if r["resolution"] == "both_versions"],
+    }
+
+
+# ── Team memory: shared visibility:team memories on the same sync rails ──
+# The team repo is deliberately a mini Link workspace (wiki/memories plus
+# its own tamper-evident log), so every sync guarantee — secret push-gate,
+# both-versions conflicts, log-chain union — applies to the shared brain
+# verbatim. Only memories the user explicitly marked visibility: team ever
+# enter it; private and project memories never leave the personal wiki.
+
+
+def team_config(root: Path) -> dict[str, str] | None:
+    """The machine-local team configuration, or None when not set up."""
+    path = root.expanduser().resolve() / TEAM_CONFIG_FILE
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    team_dir = str(payload.get("dir") or "").strip()
+    return {"dir": team_dir} if team_dir else None
+
+
+def team_init(root: Path, team_dir: Path, remote: str | None = None) -> dict[str, object]:
+    """Create/attach the shared team workspace and remember where it lives."""
+    root = root.expanduser().resolve()
+    team_root = team_dir.expanduser().resolve()
+    team_wiki = team_root / "wiki"
+    (team_wiki / "memories").mkdir(parents=True, exist_ok=True)
+    log_path = team_wiki / "log.md"
+    if not log_path.exists():
+        log_path.write_text("# Link Team Log\n\n", encoding="utf-8")
+    readme = team_root / "README.md"
+    if not readme.exists():
+        readme.write_text(
+            "# Link team memory\n\n"
+            "Shared `visibility: team` memories, synced by `lnk team-sync`.\n"
+            "Every entry was reviewed by the teammate who shared it; the log\n"
+            "is hash-chained and merges declare their re-anchor.\n",
+            encoding="utf-8",
+        )
+    init_report = sync_init(team_root, remote=remote)
+    (root / TEAM_CONFIG_FILE).write_text(
+        json.dumps({"dir": str(team_root)}, indent=2) + "\n", encoding="utf-8",
+    )
+    ensure_sync_gitignore(root)
+    return {**init_report, "team_dir": str(team_root)}
+
+
+def _memory_visibility(path: Path) -> str:
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return ""
+    return str(meta.get("visibility") or "").strip().lower()
+
+
+def _memory_is_active(path: Path) -> bool:
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return False
+    return str(meta.get("status") or "active").strip().lower() == "active"
+
+
+def export_team_memories(wiki_dir: Path, team_wiki: Path) -> list[str]:
+    """Mirror local active visibility:team memories into the team repo."""
+    exported: list[str] = []
+    source_dir = wiki_dir / "memories"
+    target_dir = team_wiki / "memories"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not source_dir.exists():
+        return exported
+    for path in sorted(source_dir.glob("*.md")):
+        if _memory_visibility(path) != "team" or not _memory_is_active(path):
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        target = target_dir / path.name
+        if target.exists() and target.read_text(encoding="utf-8", errors="replace") == content:
+            continue
+        target.write_text(content, encoding="utf-8")
+        exported.append(path.stem)
+    return exported
+
+
+def import_team_memories(team_wiki: Path, wiki_dir: Path) -> dict[str, list[str]]:
+    """Bring teammates' memories into the local wiki; local versions win."""
+    imported: list[str] = []
+    conflicts: list[str] = []
+    source_dir = team_wiki / "memories"
+    target_dir = wiki_dir / "memories"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not source_dir.exists():
+        return {"imported": imported, "conflicts": conflicts}
+    for path in sorted(source_dir.glob("*.md")):
+        content = path.read_text(encoding="utf-8", errors="replace")
+        target = target_dir / path.name
+        if not target.exists():
+            target.write_text(content, encoding="utf-8")
+            imported.append(path.stem)
+            continue
+        if target.read_text(encoding="utf-8", errors="replace") != content:
+            # The local version wins; the pair is the human's to reconcile
+            # (edit and re-share, or accept the team version deliberately).
+            conflicts.append(path.stem)
+    return {"imported": imported, "conflicts": conflicts}
+
+
+def team_sync_workspace(
+    root: Path,
+    wiki_dir: Path,
+    *,
+    regenerate: Callable[[], None],
+) -> dict[str, object]:
+    """Export team memories, sync the shared repo, import teammates' memories."""
+    root = root.expanduser().resolve()
+    config = team_config(root)
+    if not config:
+        raise SyncError(
+            "team memory is not set up (run: lnk team-sync --init --remote <git-url>)"
+        )
+    team_root = Path(config["dir"])
+    team_wiki = team_root / "wiki"
+    if not team_wiki.exists():
+        raise SyncError(f"team workspace missing at {team_root} (re-run: lnk team-sync --init)")
+
+    exported = export_team_memories(wiki_dir, team_wiki)
+    if exported:
+        append_log(
+            team_wiki, utc_timestamp(), "team-export",
+            f"Shared {len(exported)} team memory(ies) from {platform.node().split('.')[0]}",
+            [f"memory: {name}" for name in exported],
+        )
+    sync_report = sync_workspace(team_root, team_wiki, regenerate=lambda: None)
+    imports = import_team_memories(team_wiki, wiki_dir)
+    if imports["imported"] or imports["conflicts"]:
+        append_log(
+            wiki_dir, utc_timestamp(), "team-sync",
+            f"Imported {len(imports['imported'])} team memory(ies); "
+            f"{len(imports['conflicts'])} kept local over team version",
+            [f"imported: {name}" for name in imports["imported"]]
+            + [f"kept local: {name}" for name in imports["conflicts"]],
+        )
+        if imports["imported"]:
+            regenerate()
+    return {
+        "exported": exported,
+        "imported": imports["imported"],
+        "conflicts": imports["conflicts"],
+        "team_dir": str(team_root),
+        "sync": sync_report,
     }

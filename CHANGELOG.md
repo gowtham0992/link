@@ -30,6 +30,20 @@ before they travel.
   `lnk sync` daily; `--status` shows ahead/behind. Verified end to end
   against a local bare remote: round trip, conflict drill with a clean
   chain, secret push-block.
+- **Team memory: a shared brain with no memory server.** `lnk team-sync`
+  graduates from printing git guidance to running the whole loop: your
+  active `visibility: team` memories are exported to a shared team
+  workspace, synced through a git remote the team controls, and
+  teammates' memories are imported into your wiki — recallable by your
+  agents like anything else. The team repo is itself a mini Link
+  workspace with its own tamper-evident log, so every sync guarantee
+  (secret push-gate, both-versions conflicts, chain-verified merges)
+  applies to the shared brain verbatim. Private and project memories
+  never leave your machine; when your copy and the team's differ, yours
+  wins locally and the difference is reported. Setup:
+  `lnk team-sync --init --remote <shared-git-url>`, then `lnk team-sync`
+  whenever. The `visibility: team` field finally does what its name
+  always promised.
 - **Consolidation v2: merge suggestions for accepted memories.** Write-time
   duplicate refusal blocks strong duplicates at creation, but accepted
   memories drift into overlap over months ("short PR descriptions" saved

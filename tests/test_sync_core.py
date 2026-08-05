@@ -155,3 +155,90 @@ class SyncRoundTripTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TeamMemoryTests(unittest.TestCase):
+    """Two teammates share visibility:team memories; private never leaves."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="link-team-")
+        base = Path(self.temp.name)
+        self.remote = base / "team-remote.git"
+        subprocess.run(["git", "init", "--bare", str(self.remote)], capture_output=True)
+        from link_core.sync import team_init
+        self.alice = base / "alice"
+        self.alice.mkdir()
+        self.wiki_alice = _make_workspace(self.alice)
+        team_init(self.alice, base / "alice-team", remote=str(self.remote))
+        _configure_git_identity(base / "alice-team")
+        self.bob = base / "bob"
+        self.bob.mkdir()
+        self.wiki_bob = _make_workspace(self.bob)
+        team_init(self.bob, base / "bob-team", remote=str(self.remote))
+        _configure_git_identity(base / "bob-team")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    @staticmethod
+    def _write_visible(wiki: Path, name: str, text: str, visibility: str) -> None:
+        (wiki / "memories" / f"{name}.md").write_text(
+            "---\n"
+            f"title: \"{name}\"\n"
+            "type: decision\n"
+            "scope: project\n"
+            "status: active\n"
+            f"visibility: {visibility}\n"
+            "---\n\n"
+            f"# {name}\n\n{text}\n",
+            encoding="utf-8",
+        )
+
+    def test_team_memories_travel_and_private_never_leaves(self):
+        from link_core.sync import team_sync_workspace
+        self._write_visible(self.wiki_alice, "deploy-window", "Deploys happen on Tuesdays.", "team")
+        self._write_visible(self.wiki_alice, "my-secret-habit", "I check twitter first.", "private")
+
+        report = team_sync_workspace(self.alice, self.wiki_alice, regenerate=lambda: None)
+        self.assertEqual(report["exported"], ["deploy-window"])
+
+        report = team_sync_workspace(self.bob, self.wiki_bob, regenerate=lambda: None)
+        self.assertEqual(report["imported"], ["deploy-window"])
+        imported = self.wiki_bob / "memories" / "deploy-window.md"
+        self.assertTrue(imported.exists())
+        self.assertIn("visibility: team", imported.read_text(encoding="utf-8"))
+        # Privacy: the shared remote never saw the private memory.
+        remote_files = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", "HEAD"],
+            cwd=self.remote, capture_output=True, text=True,
+        ).stdout
+        self.assertIn("deploy-window", remote_files)
+        self.assertNotIn("my-secret-habit", remote_files)
+        self.assertFalse((self.wiki_bob / "memories" / "my-secret-habit.md").exists())
+
+    def test_local_edit_wins_over_team_version(self):
+        from link_core.sync import team_sync_workspace
+        self._write_visible(self.wiki_alice, "deploy-window", "Deploys happen on Tuesdays.", "team")
+        team_sync_workspace(self.alice, self.wiki_alice, regenerate=lambda: None)
+        team_sync_workspace(self.bob, self.wiki_bob, regenerate=lambda: None)
+
+        # Bob edits his copy locally; Alice re-shares a different wording.
+        self._write_visible(self.wiki_bob, "deploy-window", "Deploys happen on Wednesdays.", "team")
+        self._write_visible(self.wiki_alice, "deploy-window", "Deploys happen on Tuesdays after standup.", "team")
+        team_sync_workspace(self.alice, self.wiki_alice, regenerate=lambda: None)
+        report = team_sync_workspace(self.bob, self.wiki_bob, regenerate=lambda: None)
+
+        # Bob exported his version too; the team repo resolves via sync's
+        # both-versions machinery, and Bob's local wiki keeps his wording.
+        local = (self.wiki_bob / "memories" / "deploy-window.md").read_text(encoding="utf-8")
+        self.assertIn("Wednesdays", local)
+        self.assertTrue(report["conflicts"] or report["exported"], report)
+
+    def test_unconfigured_team_sync_raises_with_guidance(self):
+        from link_core.sync import SyncError, team_sync_workspace
+        with tempfile.TemporaryDirectory() as temp:
+            loose = Path(temp) / "loose"
+            loose.mkdir()
+            wiki = _make_workspace(loose)
+            with self.assertRaises(SyncError):
+                team_sync_workspace(loose, wiki, regenerate=lambda: None)

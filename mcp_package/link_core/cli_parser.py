@@ -201,10 +201,12 @@ def build_cli_parser(
     compliance_cmd.add_argument("--limit", type=int, default=100, help="maximum memories/log entries to include")
     compliance_cmd.add_argument("--json", action="store_true", help="print machine-readable export status after writing --output")
 
-    team_sync_cmd = sub.add_parser("team-sync", help="print a safe Git plan for sharing reviewed Link memory")
+    team_sync_cmd = sub.add_parser("team-sync", help="share visibility:team memories with your team through a git remote (no server)")
     team_sync_cmd.add_argument("target", nargs="?", default=".")
-    team_sync_cmd.add_argument("--remote", default=None, help="optional Git remote URL to include in setup commands")
-    team_sync_cmd.add_argument("--json", action="store_true", help="print machine-readable team sync guidance")
+    team_sync_cmd.add_argument("--init", action="store_true", dest="team_init", help="set up the shared team workspace (idempotent)")
+    team_sync_cmd.add_argument("--remote", default=None, help="shared git remote URL (with --init)")
+    team_sync_cmd.add_argument("--dir", default=None, dest="team_dir", help="where the team workspace lives (default: sibling of the workspace)")
+    team_sync_cmd.add_argument("--json", action="store_true", help="print machine-readable team sync details")
 
     share_cmd = sub.add_parser("share", help="print a local viewer permalink for a page or memory")
     share_cmd.add_argument("identifier", help="page name, title, path, alias, or search query")
@@ -643,7 +645,10 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
         )
     if command == "team-sync":
-        return handlers["team-sync"](Path(args.target), remote=args.remote, json_output=args.json)
+        return handlers["team-sync"](
+            Path(args.target), remote=args.remote, init=args.team_init,
+            team_dir=args.team_dir, json_output=args.json,
+        )
     if command == "share":
         return handlers["share"](
             Path(args.target),

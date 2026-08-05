@@ -261,6 +261,9 @@ from link_core.sync import (
     sync_init as _core_sync_init,
     sync_status as _core_sync_status,
     sync_workspace as _core_sync_workspace,
+    team_config as _core_team_config,
+    team_init as _core_team_init,
+    team_sync_workspace as _core_team_sync_workspace,
 )
 from link_core.ingest import (
     collect_ingest_status as _core_collect_ingest_status,
@@ -1014,14 +1017,77 @@ def compliance_export(
     return 0
 
 
-def team_sync(target: Path, remote: str | None = None, json_output: bool = False) -> int:
+def team_sync(
+    target: Path,
+    remote: str | None = None,
+    init: bool = False,
+    team_dir: str | None = None,
+    json_output: bool = False,
+) -> int:
     target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    try:
+        if init:
+            if not wiki_dir.exists():
+                return _missing_wiki_error(wiki_dir)
+            chosen = Path(team_dir).expanduser() if team_dir else root.parent / f"{root.name}-team"
+            payload: dict[str, object] = _core_team_init(root, chosen, remote=remote)
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            lines = [f"Team workspace ready: {payload.get('team_dir')}"]
+            if payload.get("remote"):
+                lines.append(f"Shared remote: {payload.get('remote')}")
+            else:
+                lines.append("Add the shared remote your team pushes to: "
+                             + _shell_words_for_target("team-sync", target, "--init", "--remote", "<git-url>"))
+            lines.append("Only memories you mark visibility: team are ever shared.")
+            lines.append(f"Daily: {_shell_words_for_target('team-sync', target)}")
+            _print_text("\n".join(lines))
+            return 0
+        if _core_team_config(root):
+            if not wiki_dir.exists():
+                return _missing_wiki_error(wiki_dir)
+            payload = _core_team_sync_workspace(
+                root, wiki_dir,
+                regenerate=lambda: (_core_rebuild_index(wiki_dir), _rebuild_backlinks_quiet(wiki_dir)),
+            )
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            exported_obj = payload.get("exported")
+            exported: list[object] = exported_obj if isinstance(exported_obj, list) else []
+            imported_obj = payload.get("imported")
+            imported: list[object] = imported_obj if isinstance(imported_obj, list) else []
+            conflicts_obj = payload.get("conflicts")
+            conflicts: list[object] = conflicts_obj if isinstance(conflicts_obj, list) else []
+            parts = []
+            if exported:
+                parts.append(f"shared {len(exported)}")
+            if imported:
+                parts.append(f"imported {len(imported)}")
+            _print_text("Team sync: " + (", ".join(parts) if parts else "already up to date"))
+            for name in imported:
+                _print_text(f"  new from the team: {name}")
+            if conflicts:
+                _print_text(f"  {len(conflicts)} memory(ies) differ from the team version — kept yours:")
+                for name in conflicts:
+                    _print_text(f"    {name} (edit and re-share, or adopt the team version deliberately)")
+            return 0
+    except _core_sync_error as exc:
+        print(f"Team sync failed: {exc}", file=sys.stderr)
+        return 1
+    # Unconfigured and not initializing: keep the read-only guidance plan.
     payload = _core_build_team_sync_payload(target, remote=remote)
     if json_output:
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_team_sync_text(payload)
     _print_text(text)
+    if code == 0:
+        _print_text("\nOr let Link run the whole loop: "
+                    + _shell_words_for_target("team-sync", target, "--init", "--remote", "<git-url>"))
     return code
 
 
