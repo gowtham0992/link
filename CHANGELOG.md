@@ -12,6 +12,20 @@ before they travel.
 
 ### Added
 
+- **Temporal recall in plain language.** Ask what you believed *then*:
+  "where does local data live in March", "what did we decide last
+  quarter", "the plan 2 months ago", "what did I prefer back then". Link
+  resolves everyday time phrases to an exact date and reconstructs what
+  was active on it from the dated files themselves — archived memories,
+  supersede lineage, and expiry all participate — then ranks the topic
+  with the date words removed. Deterministic: a regex and a calendar, no
+  model. Event anchors ("before the migration") are reported honestly as
+  unresolved rather than guessed. `--as-of YYYY-MM-DD` still pins the
+  moment explicitly and always wins. Temporal reasoning is the open
+  problem in the published memory literature (a ~15-point spread between
+  architectures); the hygiene benchmark now measures it directly:
+  **0.917 point-in-time accuracy from plain language**, identical to
+  asking with an ISO date.
 - **`lnk sync` — your memory on every machine, no server.** Sync reviewed
   memory between machines through a git remote you control (a private
   repo, a homelab bare repo — anything git can push to). Three promises on

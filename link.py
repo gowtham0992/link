@@ -141,6 +141,7 @@ from link_core.memory import (
     memory_records as _core_memory_records,
     memory_merge_candidates as _core_memory_merge_candidates,
     memory_review_issues as _core_memory_review_issues,
+    parse_time_expression as _core_parse_time_expression,
     proposal_fingerprint as _core_proposal_fingerprint,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memories,
@@ -1829,10 +1830,18 @@ def recall(
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
+    # Temporal recall in plain language: "what did we decide last quarter"
+    # resolves to the exact as-of date and the topic is ranked without the
+    # date words. An explicit --as-of always wins.
+    search_query = query
+    temporal = None if as_of else _core_parse_time_expression(query)
+    if temporal and temporal.get("as_of"):
+        as_of = str(temporal["as_of"])
+        search_query = str(temporal["residual_query"]) or query
     try:
         results = _recall_memories(
             wiki_dir,
-            query,
+            search_query,
             limit=limit,
             include_archived=include_archived,
             project=project_name,
@@ -1850,10 +1859,22 @@ def recall(
             "include_archived": include_archived,
             "project": project_name,
             "as_of": as_of or "",
+            "temporal": temporal or {},
             "abstention": _core_recall_abstention(results),
             "memories": results,
         }, indent=2))
         return 0
+
+    if temporal and temporal.get("as_of"):
+        _print_text(
+            f"Temporal recall: \"{temporal['phrase']}\" -> as of {as_of} "
+            f"(what was active then, not what is true now)\n"
+        )
+    elif temporal and temporal.get("unresolved_event"):
+        _print_text(
+            f"Note: \"{temporal['unresolved_event']}\" names an event, not a date — "
+            f"searching by topic. Use --as-of YYYY-MM-DD to pin the moment.\n"
+        )
 
     code, text = _core_render_recall_text(
         query=query,

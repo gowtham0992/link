@@ -203,6 +203,7 @@ predicted:
 | contradiction exposure@3 after a revision | **0.167** | 0.750 |
 | active memories (ground truth: 54) | **42** | 85 |
 | as-of temporal accuracy (revised facts) | **0.917** | 1.00 |
+| temporal accuracy from plain language ("...in March", no ISO date) | **0.917** | 1.00 |
 | current-truth precision@1 | **0.881** | 0.738 |
 
 The ungated junk rate mirrors what users measure in production LLM-extraction

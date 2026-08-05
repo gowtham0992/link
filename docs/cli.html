@@ -114,7 +114,14 @@ lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
 lnk delete-capture raw/memory-captures/&lt;capture&gt;.md --confirm
 lnk dedup-captures            # collapse inbox captures that offer nothing new (--confirm applies)</code></pre>
 
-        <h2 id="sync">Sync Between Machines</h2>
+                <h2 id="temporal">Temporal Recall</h2>
+        <p>Ask what you believed <em>then</em>, in plain language. Link resolves everyday time phrases ("last quarter", "in March", "2 months ago", "back then") to an exact date and reconstructs what was active on it from the dated files themselves — archived memories, supersede lineage, and expiry all participate. No model, no clock magic. <code>--as-of YYYY-MM-DD</code> still pins the moment explicitly.</p>
+        <pre><code>lnk recall "where does local data live"              # today's truth
+lnk recall "where does local data live in March"     # what was true then
+lnk recall "what did we decide last quarter"
+lnk recall "deploy process" --as-of 2026-03-31</code></pre>
+
+<h2 id="sync">Sync Between Machines</h2>
         <p><code>lnk sync</code> moves reviewed memory between your machines through a git remote you control (a private repo, a homelab bare repo) — no server, no service. Secrets are scanned before anything is pushed; conflicting memory edits are kept as both versions and surfaced by <code>lnk consolidate</code> for review (git conflict markers never touch wiki files); the tamper-evident log merges with a declared re-anchor. <code>raw/</code> captures and the runtime never sync.</p>
         <pre><code>lnk sync --init --remote git@github.com:you/link-memory.git
 lnk sync                      # daily: commit, pull, resolve, gate secrets, push

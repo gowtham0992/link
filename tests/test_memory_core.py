@@ -1871,3 +1871,60 @@ class MergeCandidateTests(unittest.TestCase):
         ]
         candidates = memory_merge_candidates(records, embedder=lambda texts: [])
         self.assertEqual(candidates, [])
+
+
+class TemporalExpressionTests(unittest.TestCase):
+    """Plain-language time phrases resolve to exact as-of dates."""
+
+    TODAY = "2026-08-03"
+
+    def _parse(self, query):
+        from mcp_package.link_core.memory import parse_time_expression
+        return parse_time_expression(query, today=self.TODAY)
+
+    def test_relative_windows_resolve(self):
+        cases = {
+            "what did we decide last quarter": "2026-05-05",
+            "the plan 2 months ago": "2026-06-04",
+            "releases this year": "2026-01-01",
+            "stack in 2025": "2025-12-31",
+            "database choice in March": "2026-03-31",
+            "api port as of 2026-01-15": "2026-01-15",
+        }
+        for query, expected in cases.items():
+            parsed = self._parse(query)
+            self.assertIsNotNone(parsed, query)
+            self.assertEqual(parsed["as_of"], expected, query)
+
+    def test_residual_query_drops_the_date_words(self):
+        parsed = self._parse("where does local data live in March")
+        self.assertEqual(parsed["residual_query"], "where does local data live")
+
+    def test_vague_phrases_anchor_honestly(self):
+        for phrase in ("what did I prefer back then", "the setup at the time"):
+            parsed = self._parse(phrase)
+            self.assertEqual(parsed["as_of"], "2026-05-05")
+
+    def test_event_anchors_are_reported_not_guessed(self):
+        parsed = self._parse("decisions before the migration")
+        self.assertIsNotNone(parsed)
+        self.assertIsNone(parsed["as_of"])
+        self.assertIn("before the migration", str(parsed["unresolved_event"]))
+        # The topic words stay in the query so ranking can use them.
+        self.assertIn("migration", str(parsed["residual_query"]))
+
+    def test_queries_without_time_are_untouched(self):
+        self.assertIsNone(self._parse("where does local data live"))
+        self.assertIsNone(self._parse("what is the deploy process"))
+
+    def test_point_in_time_reconstruction_picks_the_old_era(self):
+        from mcp_package.link_core.memory import memory_active_at
+        old = {"name": "sqlite", "status": "archived",
+               "date_captured": "2026-01-10T00:00:00Z",
+               "archived_at": "2026-06-01T00:00:00Z"}
+        new = {"name": "duckdb", "status": "active",
+               "date_captured": "2026-06-01T00:00:00Z"}
+        self.assertTrue(memory_active_at(old, "2026-03-31"))
+        self.assertFalse(memory_active_at(new, "2026-03-31"))
+        self.assertFalse(memory_active_at(old, self.TODAY))
+        self.assertTrue(memory_active_at(new, self.TODAY))

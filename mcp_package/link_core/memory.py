@@ -5,7 +5,7 @@ import fnmatch
 import re
 import urllib.parse
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .consolidate import memory_backlog_summary
@@ -3637,4 +3637,126 @@ def propose_memories_from_text(
         "skipped_count": skipped,
         "proposals": proposals,
         "writes_memory": writes_memory,
+    }
+
+
+# ── Temporal recall: what did I believe *then*? ───────────────────────────
+# The field's open problem is temporal reasoning — published work measures a
+# ~15-point spread between architectures on time-scoped questions, and notes
+# that retrieval "underutilizes the semantic time encoded" in the store.
+# Link's advantage is structural, not clever: every memory is a dated file
+# with lifecycle fields, so point-in-time reconstruction is exact rather
+# than inferred. What was missing is the human phrasing — nobody types
+# 2026-03-31. This maps everyday time language onto the exact machinery.
+
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+_TIME_PHRASE_RE = re.compile(
+    r"(?i)\b("
+    r"as of \d{4}-\d{2}-\d{2}"
+    r"|back then|at the time|originally|initially"
+    r"|last (?:week|month|quarter|year)"
+    r"|this (?:week|month|quarter|year)"
+    r"|(?:a |one )?(?:week|month|quarter|year)s? ago"
+    r"|\d+ (?:days?|weeks?|months?|years?) ago"
+    r"|in (?:january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"|in \d{4}"
+    r"|before the [a-z0-9-]+|since the [a-z0-9-]+"
+    r")\b"
+)
+
+
+def _end_of_month(year: int, month: int) -> date:
+    if month == 12:
+        return date(year, 12, 31)
+    return date(year, month + 1, 1) - timedelta(days=1)
+
+
+def parse_time_expression(query: str, today: str | None = None) -> dict[str, object] | None:
+    """Map a natural time phrase in a query to an exact as-of date.
+
+    Returns the matched phrase, the resolved YYYY-MM-DD, and the residual
+    query with the phrase removed (so ranking scores the topic, not the
+    date words). Deterministic and offline — no model, no clock magic
+    beyond `today`. Unrecognized phrasing returns None and recall behaves
+    exactly as it always has.
+    """
+    text = str(query or "")
+    match = _TIME_PHRASE_RE.search(text)
+    if not match:
+        return None
+    phrase = match.group(1)
+    lower = phrase.lower()
+    now = _today(today)
+    resolved: date | None = None
+
+    if lower.startswith("as of "):
+        try:
+            resolved = date.fromisoformat(lower[len("as of "):].strip())
+        except ValueError:
+            return None
+    elif lower in {"back then", "at the time", "originally", "initially"}:
+        # Deliberately vague: the honest reading is "before recent changes",
+        # which we anchor a quarter back rather than pretending precision.
+        resolved = now - timedelta(days=90)
+    elif lower.startswith("last "):
+        unit = lower.split()[1]
+        resolved = {
+            "week": now - timedelta(days=7),
+            "month": now - timedelta(days=30),
+            "quarter": now - timedelta(days=90),
+            "year": now - timedelta(days=365),
+        }[unit]
+    elif lower.startswith("this "):
+        unit = lower.split()[1]
+        resolved = {
+            "week": now - timedelta(days=now.weekday()),
+            "month": now.replace(day=1),
+            "quarter": now.replace(month=((now.month - 1) // 3) * 3 + 1, day=1),
+            "year": now.replace(month=1, day=1),
+        }[unit]
+    elif lower.endswith(" ago"):
+        parts = lower[: -len(" ago")].split()
+        count_text, unit = (parts[0], parts[-1]) if len(parts) >= 2 else ("1", parts[0])
+        count = 1 if count_text in {"a", "one"} else int(count_text) if count_text.isdigit() else 1
+        days = {"day": 1, "days": 1, "week": 7, "weeks": 7, "month": 30,
+                "months": 30, "quarter": 90, "quarters": 90, "year": 365,
+                "years": 365}.get(unit)
+        if days is None:
+            return None
+        resolved = now - timedelta(days=count * days)
+    elif lower.startswith("in "):
+        token = lower[3:].strip()
+        if token.isdigit() and len(token) == 4:
+            year = int(token)
+            resolved = _end_of_month(year, 12) if year < now.year else now
+        elif token in _MONTHS:
+            month = _MONTHS[token]
+            year = now.year if month <= now.month else now.year - 1
+            resolved = min(_end_of_month(year, month), now)
+    elif lower.startswith("before the ") or lower.startswith("since the "):
+        # Event-anchored phrasing ("before the migration"): the event name is
+        # a topic, not a date. Keep the words in the query for ranking and
+        # report the phrase so surfaces can say the anchor was not resolved.
+        return {
+            "phrase": phrase,
+            "as_of": None,
+            "residual_query": text.strip(),
+            "unresolved_event": phrase,
+        }
+    if resolved is None:
+        return None
+    residual = (text[: match.start(1)] + text[match.end(1):]).strip()
+    residual = re.sub(r"\s{2,}", " ", residual).strip(" ,")
+    return {
+        "phrase": phrase,
+        "as_of": resolved.isoformat(),
+        "residual_query": residual or text.strip(),
+        "unresolved_event": "",
     }
