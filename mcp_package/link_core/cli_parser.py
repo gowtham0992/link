@@ -24,7 +24,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "session-end", "semantic",
     )),
     ("Review & governance", (
-        "memory-inbox", "review-memory", "explain-memory", "consolidate",
+        "memory-inbox", "review-memory", "explain-memory", "consolidate", "digest",
         "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
         "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
@@ -107,6 +107,11 @@ def build_cli_parser(
     proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
     proof_cmd.add_argument("--port", type=int, default=3000)
     proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
+
+    digest_cmd = sub.add_parser("digest", help="weekly reflection: what you taught Link, what is aging, what is drifting")
+    digest_cmd.add_argument("target", nargs="?", default=".")
+    digest_cmd.add_argument("--days", type=int, default=7, help="look-back window in days (default 7)")
+    digest_cmd.add_argument("--json", action="store_true", help="print machine-readable digest")
 
     sync_cmd = sub.add_parser("sync", help="sync memory between machines through your own git remote (no server)")
     sync_cmd.add_argument("target", nargs="?", default=".")
@@ -564,6 +569,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             port=args.port,
             json_output=args.json,
         )
+    if command == "digest":
+        return handlers["digest"](Path(args.target), days=args.days, json_output=args.json)
     if command == "sync":
         return handlers["sync"](
             Path(args.target),

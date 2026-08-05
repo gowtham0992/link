@@ -8,6 +8,8 @@ hooks use the same backlog summary to nudge agents to offer consolidation.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from datetime import date
 from pathlib import Path
 
 from .mcp_verify import display_command
@@ -309,3 +311,150 @@ def render_consolidate_text(payload: dict[str, object]) -> tuple[int, str]:
 
     lines.extend(["", str(payload.get("safety") or "")])
     return 0, "\n".join(line for line in lines if line is not None)
+
+
+# ── Reflection: the weekly digest ────────────────────────────────────────
+# Consolidation answers "what should I clean up?" on demand. The digest is
+# the ritual around it: a bounded, deterministic look back that answers
+# "is my memory healthy?" without being asked. Every number comes from
+# machinery that already exists (lifecycle windows, merge candidates,
+# review issues, capture inbox) — nothing here computes new truth, it
+# just tells the story of the week.
+
+
+def _within_days(stamp: object, days: int, today: date) -> bool:
+    text = str(stamp or "")[:10]
+    if not text:
+        return False
+    try:
+        return (today - date.fromisoformat(text)).days <= days
+    except ValueError:
+        return False
+
+
+def build_digest(
+    *,
+    records: list[Mapping[str, object]],
+    merge_candidates: list[dict[str, object]],
+    capture_count: int,
+    review_items: list[Mapping[str, object]],
+    days: int = 7,
+    today: str | None = None,
+    command_target: str | Path = ".",
+) -> dict[str, object]:
+    """A bounded weekly look at memory health. Read-only, no LLM."""
+    now = date.fromisoformat(today) if today else date.today()
+    active = [r for r in records if str(r.get("status") or "active") == "active"]
+
+    learned = [
+        {"title": str(r.get("title") or ""), "type": str(r.get("memory_type") or "")}
+        for r in active
+        if _within_days(r.get("date_captured"), days, now)
+    ]
+    reviewed = [
+        r for r in active if _within_days(r.get("reviewed_at"), days, now)
+    ]
+
+    due_soon: list[dict[str, str]] = []
+    overdue: list[dict[str, str]] = []
+    for record in active:
+        raw = str(record.get("review_after") or "")[:10]
+        if not raw:
+            continue
+        try:
+            due = date.fromisoformat(raw)
+        except ValueError:
+            continue
+        entry = {"title": str(record.get("title") or ""), "review_after": raw}
+        if due <= now:
+            overdue.append(entry)
+        elif (due - now).days <= days:
+            due_soon.append(entry)
+
+    return {
+        "window_days": days,
+        "generated_for": now.isoformat(),
+        "active_memories": len(active),
+        "learned": learned[:10],
+        "learned_count": len(learned),
+        "reviewed_count": len(reviewed),
+        "overdue": overdue[:10],
+        "overdue_count": len(overdue),
+        "due_soon": due_soon[:10],
+        "due_soon_count": len(due_soon),
+        "drifting": merge_candidates[:5],
+        "drifting_count": len(merge_candidates),
+        "pending_captures": capture_count,
+        "needs_review": len(review_items),
+        "next_commands": {
+            "review": display_command(["link", "review-memory", str(command_target), "--all"]),
+            "consolidate": display_command(["link", "consolidate", str(command_target)]),
+            "captures": display_command(["link", "capture-inbox", str(command_target)]),
+        },
+    }
+
+
+def render_digest_text(payload: Mapping[str, object]) -> str:
+    """Render the digest as something worth reading on a Monday."""
+    days = payload.get("window_days", 7)
+    lines = [
+        f"Link memory digest — last {days} days",
+        "",
+        (f"{payload.get('active_memories', 0)} active memories · "
+         f"{payload.get('learned_count', 0)} new · "
+         f"{payload.get('reviewed_count', 0)} reviewed"),
+    ]
+
+    learned_obj = payload.get("learned")
+    learned: list[object] = learned_obj if isinstance(learned_obj, list) else []
+    if learned:
+        lines.extend(["", "What you taught Link:"])
+        for item in learned:
+            if isinstance(item, dict):
+                lines.append(f"  + {item.get('title')} ({item.get('type')})")
+        learned_total = payload.get("learned_count")
+        remaining = (learned_total if isinstance(learned_total, int) else 0) - len(learned)
+        if remaining > 0:
+            lines.append(f"  … and {remaining} more")
+
+    overdue_obj = payload.get("overdue")
+    overdue: list[object] = overdue_obj if isinstance(overdue_obj, list) else []
+    due_soon_obj = payload.get("due_soon")
+    due_soon: list[object] = due_soon_obj if isinstance(due_soon_obj, list) else []
+    if overdue or due_soon:
+        lines.extend(["", "Aging out of its trust window:"])
+        for item in overdue:
+            if isinstance(item, dict):
+                lines.append(f"  ! {item.get('title')} (due {item.get('review_after')})")
+        for item in due_soon:
+            if isinstance(item, dict):
+                lines.append(f"  · {item.get('title')} (due {item.get('review_after')})")
+        lines.append(f"  Confirm what still holds: {_digest_command(payload, 'review')}")
+
+    drifting_obj = payload.get("drifting")
+    drifting: list[object] = drifting_obj if isinstance(drifting_obj, list) else []
+    if drifting:
+        lines.extend(["", "Saying the same thing twice:"])
+        for item in drifting:
+            if isinstance(item, dict):
+                lines.append(
+                    f"  ~ '{item.get('survivor_title')}' and '{item.get('absorbed_title')}'"
+                )
+        lines.append(f"  Merge with review: {_digest_command(payload, 'consolidate')}")
+
+    waiting_obj = payload.get("pending_captures")
+    waiting = waiting_obj if isinstance(waiting_obj, int) else 0
+    if waiting:
+        lines.extend(["", f"Waiting for you: {waiting} session capture(s)",
+                      f"  {_digest_command(payload, 'captures')}"])
+
+    if not learned and not overdue and not due_soon and not drifting and not waiting:
+        lines.extend(["", "Nothing needs you. Memory is current, reviewed, and free of overlap."])
+    return "\n".join(lines)
+
+
+def _digest_command(payload: Mapping[str, object], key: str) -> str:
+    commands = payload.get("next_commands")
+    if isinstance(commands, Mapping):
+        return str(commands.get(key) or "")
+    return ""

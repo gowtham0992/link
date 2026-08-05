@@ -22,6 +22,7 @@ EXPECTED_CLI_COMMANDS = {
     "dedup-captures",
     "delete-capture",
     "demo",
+    "digest",
     "doctor",
     "end",
     "explain-memory",

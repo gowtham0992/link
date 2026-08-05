@@ -12,6 +12,16 @@ before they travel.
 
 ### Added
 
+- **`lnk digest` — the weekly reflection.** Consolidation answers "what
+  should I clean up?" when asked; the digest answers "is my memory
+  healthy?" without being asked. One bounded, read-only look back: what
+  you taught Link this week, what is aging out of its trust window
+  (overdue vs due soon), which memories are drifting into saying the same
+  thing, and what is still waiting for review — each with the exact
+  follow-up command. Deterministic and offline: it reuses the lifecycle,
+  consolidation, and inbox engines rather than computing new truth. A
+  quiet week says so plainly. `--days` widens the window, `--json` feeds
+  dashboards and agents.
 - **Temporal recall in plain language.** Ask what you believed *then*:
   "where does local data live in March", "what did we decide last
   quarter", "the plan 2 months ago", "what did I prefer back then". Link

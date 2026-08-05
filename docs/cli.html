@@ -114,7 +114,13 @@ lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
 lnk delete-capture raw/memory-captures/&lt;capture&gt;.md --confirm
 lnk dedup-captures            # collapse inbox captures that offer nothing new (--confirm applies)</code></pre>
 
-                <h2 id="temporal">Temporal Recall</h2>
+                <h2 id="digest">Weekly Digest</h2>
+        <p><code>lnk digest</code> is the reflection ritual: what you taught Link this week, what is aging out of its trust window, which memories are drifting into saying the same thing, and what is still waiting for review. Read-only and deterministic — it reuses the lifecycle, consolidation, and inbox engines rather than computing new truth. A quiet week says so.</p>
+        <pre><code>lnk digest              # the last 7 days
+lnk digest --days 30    # a monthly look back
+lnk digest --json       # for dashboards and agents</code></pre>
+
+        <h2 id="temporal">Temporal Recall</h2>
         <p>Ask what you believed <em>then</em>, in plain language. Link resolves everyday time phrases ("last quarter", "in March", "2 months ago", "back then") to an exact date and reconstructs what was active on it from the dated files themselves — archived memories, supersede lineage, and expiry all participate. No model, no clock magic. <code>--as-of YYYY-MM-DD</code> still pins the moment explicitly.</p>
         <pre><code>lnk recall "where does local data live"              # today's truth
 lnk recall "where does local data live in March"     # what was true then

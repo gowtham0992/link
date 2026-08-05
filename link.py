@@ -298,6 +298,8 @@ from link_core.agent_hooks import (
 )
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
+    build_digest as _core_build_digest,
+    render_digest_text as _core_render_digest_text,
     render_consolidate_text as _core_render_consolidate_text,
 )
 from link_core.semantic import (
@@ -2921,6 +2923,32 @@ def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str
     return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
 
 
+def digest(target: Path, days: int = 7, json_output: bool = False) -> int:
+    """Weekly reflection: what changed, what is aging, what is drifting."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    records = _memory_records(wiki_dir)
+    captures = _core_capture_inbox(root, limit=50)
+    inbox = _memory_inbox(wiki_dir, limit=50)
+    inbox_items = inbox.get("items") if isinstance(inbox.get("items"), list) else []
+    payload = _core_build_digest(
+        records=records,
+        merge_candidates=_core_memory_merge_candidates(records),
+        capture_count=int(captures.get("count") or 0),
+        review_items=[item for item in inbox_items if isinstance(item, dict)],
+        days=max(1, min(days, 365)),
+        command_target=root,
+    )
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    _print_text(_core_render_digest_text(payload))
+    return 0
+
+
 def sync(
     target: Path,
     *,
@@ -3620,7 +3648,7 @@ _WORKSPACE_COMMANDS = {
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
-    "semantic", "status", "sync", "health", "doctor", "validate", "operations",
+    "semantic", "status", "sync", "digest", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
@@ -3702,6 +3730,7 @@ def main(argv: list[str] | None = None) -> int:
             "onboard": onboard,
             "setup": setup,
             "sync": sync,
+            "digest": digest,
             "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,
