@@ -111,6 +111,7 @@ that have one everywhere:
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
 | **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 36.5% |
 | **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
+| **Token economics** — real recall packets, measured through the real query path | **1,951–4,835 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.58×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; both properties CI-enforced |
 | **Bundled 1,176-case recall benchmark** — deterministic, runs offline in CI | hit@1 **0.749**, +rerank **0.839** | gates every change; a regression fails the build |
 
 Every number ships with its config, judge model, caveats, and the

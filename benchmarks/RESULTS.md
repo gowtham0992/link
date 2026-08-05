@@ -369,6 +369,53 @@ patterns are deliberately narrow to protect the zero-false-positive
 property. Adversarial contributions that beat the layers are welcome and
 will be added to the fixture.
 
+## Track 6: Token economics
+
+The literature names token cost as one of memory's persistent production
+problems — "sending 100k tokens of history for a 50-token response is
+financially unsustainable" — and published footprints differ by orders of
+magnitude between systems. Link's answer is structural: retrieval returns a
+*bounded packet*, not a context dump. Budgets cap memories, search results,
+context pages, and the characters inside each, so cost is a function of the
+budget you ask for, not of how much you have remembered.
+
+`scripts/eval_token_economics.py` measures real packets through the real
+query path, serialized exactly as the agent receives them.
+
+| budget | mean tokens | worst case | CI ceiling |
+|---|---|---|---|
+| micro | 1,951 | 2,061 | 2,900 |
+| small | 2,912 | 4,184 | 5,900 |
+| medium | 3,886 | 7,131 | 10,200 |
+| large | 4,835 | 10,775 | 16,800 |
+
+The guarantee is the growth curve, not the absolute number:
+
+| store size | mean tokens (medium) | growth |
+|---|---|---|
+| 25 memories | 3,708 | — |
+| 100 memories | 4,991 | +35% |
+| 400 memories | 5,842 | +17% |
+| 1,600 memories | 5,860 | **+0.3%** |
+
+**A 64x larger store produces a 1.58x larger packet, and the final
+quadrupling moves it 0.3%.** Packet size climbs while the budget's slots
+fill, then stops. Both properties are CI-enforced: every budget's worst
+packet must stay under its ceiling, and the last quadrupling of the store
+must not move the packet more than 5%.
+
+Honest notes: token counts use the 4-chars-per-token approximation Link
+uses for its own budget reporting — exact counts vary by tokenizer, so
+treat these as order-of-magnitude and, more importantly, as a *shape*.
+Comparisons to published per-conversation figures from other systems are
+not apples-to-apples: these are per-recall numbers, and a conversation
+contains several recalls. What the table supports is narrower and more
+useful — Link's cost is bounded and predictable, and does not degrade as
+memory accumulates. One measured wrinkle worth stating: at the micro
+budget roughly a fifth of the packet is fixed scaffolding (agent guidance,
+follow-up actions, budget reporting) rather than retrieved content, which
+is the obvious place to look for further savings.
+
 ## Reproduce
 
 ```bash

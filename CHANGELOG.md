@@ -48,6 +48,20 @@ before they travel.
   consolidation, and inbox engines rather than computing new truth. A
   quiet week says so plainly. `--days` widens the window, `--json` feeds
   dashboards and agents.
+- **Token-economics benchmark (Track 6).** The field's persistent
+  production complaint is cost — published footprints differ by orders of
+  magnitude between systems. Link's answer is structural: a recall returns
+  a *bounded packet*, and now that claim is measured, not asserted. Real
+  packets through the real query path: 1,951–4,835 tokens mean per recall
+  (micro→large budget), and the growth curve that matters — **a 64×
+  larger store produces a 1.58× larger packet, with the final quadrupling
+  (400→1,600 memories) moving it 0.3%**. Packet size climbs while the
+  budget's slots fill, then plateaus: cost tracks the budget you ask for,
+  not how much you have remembered. Both properties are CI-enforced
+  (per-budget worst-case ceilings + a deceleration gate), with the honest
+  caveats stated in RESULTS.md: 4-chars-per-token approximation, and
+  per-recall numbers are not comparable to other systems'
+  per-conversation figures.
 - **Temporal recall in plain language.** Ask what you believed *then*:
   "where does local data live in March", "what did we decide last
   quarter", "the plan 2 months ago", "what did I prefer back then". Link
