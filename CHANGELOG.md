@@ -12,6 +12,24 @@ before they travel.
 
 ### Added
 
+- **`lnk sync` — your memory on every machine, no server.** Sync reviewed
+  memory between machines through a git remote you control (a private
+  repo, a homelab bare repo — anything git can push to). Three promises on
+  top of plain git: **secrets never leave** (every outgoing wiki change is
+  scanned with the memory gate's own detector before push; a
+  credential-shaped value blocks the push with the file named);
+  **conflicts become review items, never markers** (when two machines edit
+  the same memory, the remote version keeps its path and the local version
+  is preserved as a sibling memory — both recallable, paired by
+  `lnk consolidate` for the human to merge; git conflict markers never
+  touch wiki files); and **the log stays tamper-evident** (diverged logs
+  union entry-by-entry into a freshly rebuilt hash chain, with a
+  sync-merge entry declaring the re-anchor). `raw/` captures and the
+  runtime never sync — private stays local, each machine's installed Link
+  provides its own runtime. `lnk sync --init --remote <url>` once, then
+  `lnk sync` daily; `--status` shows ahead/behind. Verified end to end
+  against a local bare remote: round trip, conflict drill with a clean
+  chain, secret push-block.
 - **Consolidation v2: merge suggestions for accepted memories.** Write-time
   duplicate refusal blocks strong duplicates at creation, but accepted
   memories drift into overlap over months ("short PR descriptions" saved

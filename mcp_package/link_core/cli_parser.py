@@ -39,7 +39,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "import-obsidian",
     )),
     ("Sharing & viewing", (
-        "serve", "share", "snapshot", "graph-summary", "team-sync",
+        "sync", "serve", "share", "snapshot", "graph-summary", "team-sync",
         "compliance-export",
     )),
     ("Utilities", (
@@ -107,6 +107,13 @@ def build_cli_parser(
     proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
     proof_cmd.add_argument("--port", type=int, default=3000)
     proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
+
+    sync_cmd = sub.add_parser("sync", help="sync memory between machines through your own git remote (no server)")
+    sync_cmd.add_argument("target", nargs="?", default=".")
+    sync_cmd.add_argument("--init", action="store_true", dest="sync_init", help="turn the workspace into a sync repo (idempotent)")
+    sync_cmd.add_argument("--remote", default=None, help="git remote URL to sync through (with --init)")
+    sync_cmd.add_argument("--status", action="store_true", dest="sync_status", help="show sync state without syncing")
+    sync_cmd.add_argument("--json", action="store_true", help="print machine-readable sync details")
 
     setup_cmd = sub.add_parser("setup", help="one command for install day and every upgrade: workspace + every detected agent, wired")
     setup_cmd.add_argument("target", nargs="?", default="~/link")
@@ -553,6 +560,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             force=args.force,
             serve=args.serve,
             port=args.port,
+            json_output=args.json,
+        )
+    if command == "sync":
+        return handlers["sync"](
+            Path(args.target),
+            init=args.sync_init,
+            remote=args.remote,
+            status=args.sync_status,
             json_output=args.json,
         )
     if command == "setup":

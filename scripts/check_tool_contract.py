@@ -65,6 +65,7 @@ EXPECTED_CLI_COMMANDS = {
     "snapshot",
     "start",
     "status",
+    "sync",
     "team-sync",
     "try",
     "update-memory",

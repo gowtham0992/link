@@ -256,6 +256,12 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
     atomic_write_text as _core_atomic_write_text,
 )
+from link_core.sync import (
+    SyncError as _core_sync_error,
+    sync_init as _core_sync_init,
+    sync_status as _core_sync_status,
+    sync_workspace as _core_sync_workspace,
+)
 from link_core.ingest import (
     collect_ingest_status as _core_collect_ingest_status,
     render_ingest_status_text as _core_render_ingest_status_text,
@@ -2828,6 +2834,98 @@ def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str
     return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
 
 
+def sync(
+    target: Path,
+    *,
+    init: bool = False,
+    remote: str | None = None,
+    status: bool = False,
+    json_output: bool = False,
+) -> int:
+    """Sync memory between machines through the user's own git remote."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    try:
+        if init:
+            payload: dict[str, object] = _core_sync_init(root, remote=remote)
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            lines = ["Sync repo ready" if payload.get("remote") else "Sync repo created (no remote yet)"]
+            lines.append(f"Branch: {payload.get('branch')}")
+            if payload.get("remote"):
+                lines.append(f"Remote: {payload.get('remote')}")
+            else:
+                lines.append("Add your private remote: " + _shell_words_for_target("sync", target, "--init", "--remote", "<git-url>"))
+            lines.append("raw/ captures and the runtime never sync; reviewed memory does.")
+            lines.append(f"Daily: {_shell_words_for_target('sync', target)}")
+            _print_text("\n".join(lines))
+            return 0
+        if status:
+            payload = _core_sync_status(root)
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            if not payload.get("ready"):
+                _print_text(f"Sync not ready: {payload.get('reason')}")
+                return 1
+            _print_text(
+                f"Branch {payload.get('branch')} -> {payload.get('remote')}\n"
+                f"Local changes: {'yes' if payload.get('dirty') else 'no'} · "
+                f"ahead {payload.get('ahead')} · behind {payload.get('behind')}"
+            )
+            return 0
+        payload = _core_sync_workspace(
+            root, wiki_dir,
+            regenerate=lambda: (_core_rebuild_index(wiki_dir), _rebuild_backlinks_quiet(wiki_dir)),
+        )
+        if json_output:
+            print(json.dumps(payload, indent=2))
+            return 0 if payload.get("synced") else 1
+        if not payload.get("synced"):
+            findings_obj = payload.get("secret_findings")
+            findings: list[object] = findings_obj if isinstance(findings_obj, list) else []
+            lines = ["Sync stopped before push — secrets never leave this machine."]
+            for finding in findings:
+                if isinstance(finding, dict):
+                    lines.append(f"  {finding.get('path')}: {finding.get('label')}")
+            lines.append(str(payload.get("message") or ""))
+            _print_text("\n".join(lines))
+            return 1
+        parts = []
+        if payload.get("committed"):
+            parts.append("committed local changes")
+        pulled = int(str(payload.get("pulled") or 0))
+        if pulled:
+            parts.append(f"pulled {pulled} commit(s)")
+        if payload.get("pushed"):
+            parts.append("pushed")
+        lines = ["Synced: " + (", ".join(parts) if parts else "already up to date")]
+        both_obj = payload.get("both_versions")
+        both: list[object] = both_obj if isinstance(both_obj, list) else []
+        if both:
+            lines.append(f"{len(both)} memory conflict(s) kept as both versions — review and merge:")
+            for item in both:
+                if isinstance(item, dict):
+                    lines.append(f"  {item.get('path')}  +  {item.get('local_copy')}")
+            lines.append(f"  {_shell_words_for_target('consolidate', target)}")
+        _print_text("\n".join(lines))
+        return 0
+    except _core_sync_error as exc:
+        print(f"Sync failed: {exc}", file=sys.stderr)
+        return 1
+
+
+def _rebuild_backlinks_quiet(wiki_dir: Path) -> None:
+    try:
+        _core_atomic_write_json(wiki_dir / "_backlinks.json", _build_backlinks(wiki_dir))
+    except OSError:
+        pass
+
+
 def setup(
     target: Path,
     *,
@@ -3435,7 +3533,7 @@ _WORKSPACE_COMMANDS = {
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
-    "semantic", "status", "health", "doctor", "validate", "operations",
+    "semantic", "status", "sync", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
@@ -3516,6 +3614,7 @@ def main(argv: list[str] | None = None) -> int:
             "proof": proof,
             "onboard": onboard,
             "setup": setup,
+            "sync": sync,
             "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,

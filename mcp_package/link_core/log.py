@@ -152,6 +152,76 @@ def redact_log_references(
     return {"redacted_entries": touched, "rechained": True}
 
 
+def _parse_log_text(text: str) -> tuple[list[str], list[tuple[str, tuple[str, ...]]]]:
+    """Split a log into (preamble lines, [(heading, detail lines)]).
+
+    Hash lines and separators are dropped — they are recomputed whenever a
+    chain is rebuilt.
+    """
+    preamble: list[str] = []
+    entries: list[tuple[str, tuple[str, ...]]] = []
+    heading: str | None = None
+    details: list[str] = []
+    preamble_done = False
+    for line in text.splitlines():
+        if line.startswith("## ["):
+            if heading is not None:
+                entries.append((heading, tuple(details)))
+            preamble_done = True
+            heading = line
+            details = []
+            continue
+        if not preamble_done:
+            preamble.append(line)
+            continue
+        if LOG_HASH_RE.match(line) or LOG_PREVIOUS_HASH_RE.match(line):
+            continue
+        if line.strip() == "---" or (heading is not None and not line.strip() and not details):
+            continue
+        if heading is not None and line.startswith("- "):
+            details.append(line)
+    if heading is not None:
+        entries.append((heading, tuple(details)))
+    return preamble, entries
+
+
+def _render_chained_log(preamble: list[str], entries: list[tuple[str, tuple[str, ...]]]) -> str:
+    out = list(preamble)
+    previous_hash = LOG_GENESIS_HASH
+    for heading, details in entries:
+        entry_hash = _hash_log_entry(previous_hash, heading, list(details))
+        out.append(heading)
+        out.append("")
+        out.extend(details)
+        out.append(f"- log_previous_hash: {previous_hash}")
+        out.append(f"- log_entry_hash: {entry_hash}")
+        out.extend(["", "---", ""])
+        previous_hash = entry_hash
+    return "\n".join(out).rstrip() + "\n"
+
+
+def merge_log_texts(ours: str, theirs: str) -> str:
+    """Union two machines' logs into one freshly chained log.
+
+    Sync brings together two append-only logs that diverged from a common
+    ancestor. Entries are identified by (heading, details) — identical
+    entries dedupe, distinct ones interleave by their timestamp heading —
+    and the whole chain is rebuilt from genesis. The caller must declare
+    the re-anchor by appending a sync-merge entry, mirroring how log
+    redaction declares its re-chain.
+    """
+    preamble, our_entries = _parse_log_text(ours)
+    _, their_entries = _parse_log_text(theirs)
+    seen = set(our_entries)
+    merged = list(our_entries)
+    for entry in their_entries:
+        if entry not in seen:
+            merged.append(entry)
+            seen.add(entry)
+    merged.sort(key=lambda entry: entry[0][: len("## [2026-01-01T00:00:00Z]") + 2])
+    return _render_chained_log(preamble, merged)
+
+
 def _log_entry_blocks(log_path: Path) -> list[dict[str, Any]]:
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
