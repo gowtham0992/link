@@ -48,6 +48,20 @@ before they travel.
   consolidation, and inbox engines rather than computing new truth. A
   quiet week says so plainly. `--days` widens the window, `--json` feeds
   dashboards and agents.
+- **`lnk setup` now heals stale agent instruction files.** Real-world
+  failure that motivated this: a Kiro steering file written by a pre-2.0
+  installer named MCP tools from the old full surface (`query_link`,
+  `memory_brief`), the configured slim server exposed none of them, and
+  Kiro fell back to grepping the wiki by hand — 4x the cost for the same
+  answer. Setup already refreshed MCP configs on every run; it now gives
+  Link-owned instruction sections the same idempotent treatment across
+  Kiro, Claude Code, Codex, Cursor, and Antigravity/Gemini. Strictly
+  refresh-only: a file is touched only when it carries Link's own section
+  marker and that section has drifted from the current template; user
+  content in shared files (your CLAUDE.md, your AGENTS.md) is preserved
+  byte for byte, and files Link never wrote are never created. `--preview`
+  lists what would be refreshed. On the machine that surfaced the bug,
+  setup found and healed three more stale files beyond Kiro's.
 - **Token-economics benchmark (Track 6).** The field's persistent
   production complaint is cost — published footprints differ by orders of
   magnitude between systems. Link's answer is structural: a recall returns

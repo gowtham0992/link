@@ -257,6 +257,10 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
     atomic_write_text as _core_atomic_write_text,
 )
+from link_core.agent_instructions import (
+    instruction_file_status as _core_instruction_file_status,
+    refresh_instruction_file as _core_refresh_instruction_file,
+)
 from link_core.usage import (
     record_retrieval as _core_record_retrieval,
     usage_summary as _core_usage_summary,
@@ -3104,6 +3108,29 @@ def setup(
         hooks=bool(hookable) and not preview,
         json_output=json_output,
     )
+    # Instruction files rot the same way MCP configs do — a steering file
+    # from an older Link can name tools the configured server no longer
+    # exposes, sending the agent back to grep. Same idempotent treatment:
+    # refresh any Link-owned section that no longer matches the template.
+    # Refresh-only: files Link never wrote are never created here.
+    refreshed_instructions: list[str] = []
+    stale_instructions: list[str] = []
+    if code == 0:
+        for agent in detected:
+            status = _core_instruction_file_status(agent)
+            if not status.get("present") or not status.get("stale"):
+                continue
+            if preview:
+                stale_instructions.append(str(status.get("path")))
+                continue
+            result = _core_refresh_instruction_file(agent)
+            if result.get("refreshed"):
+                refreshed_instructions.append(str(result.get("path")))
+    if not json_output:
+        for path in stale_instructions:
+            _print_text(f"Instruction file is stale (would refresh): {path}")
+        for path in refreshed_instructions:
+            _print_text(f"Refreshed Link instructions: {path}")
     if code == 0 and not json_output:
         extras: list[str] = []
         try:
