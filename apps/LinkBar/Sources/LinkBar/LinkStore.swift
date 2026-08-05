@@ -24,6 +24,7 @@ final class LinkStore: ObservableObject {
     @Published var linkVersion: String = ""
     @Published var stats: StatusPayload?
     @Published var digest: DigestPayload?
+    @Published var syncState: SyncStatus?
     @Published var runtimeWarning: String?
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
@@ -174,10 +175,12 @@ final class LinkStore: ObservableObject {
         let hooks = Self.claudeHooksAreWired()
         let viewer = await Self.viewerResponds()
         let digest = try? LinkCLI.runJSON(DigestPayload.self, ["digest", workspace, "--json"])
+        let syncState = try? LinkCLI.runJSON(SyncStatus.self, ["sync", workspace, "--status", "--json"])
         await MainActor.run {
             self.mcp = mcp ?? self.mcp
             self.semantic = semantic ?? self.semantic
             self.digest = digest ?? self.digest
+            self.syncState = syncState ?? self.syncState
             self.claudeHooksWired = hooks
             self.viewerRunning = viewer
             self.lastHealthAt = Date()
@@ -223,6 +226,18 @@ final class LinkStore: ObservableObject {
     }
 
     /// The live dashboard rows, most-critical surfaces first.
+
+    /// "git@github.com:user/link-memory.git" -> "user/link-memory".
+    private func shortRemote(_ remote: String?) -> String {
+        guard var text = remote, !text.isEmpty else { return "remote" }
+        if text.hasSuffix(".git") { text = String(text.dropLast(4)) }
+        if let colon = text.lastIndex(of: ":"), text.contains("@") {
+            return String(text[text.index(after: colon)...])
+        }
+        let parts = text.split(separator: "/")
+        return parts.count >= 2 ? parts.suffix(2).joined(separator: "/") : text
+    }
+
     func surfaces() -> [SurfaceHealth] {
         var rows: [SurfaceHealth] = []
 
@@ -300,6 +315,23 @@ final class LinkStore: ObservableObject {
                 rows.append(.init(icon: "waveform.path.ecg", name: "Memory in use",
                                   level: usage.retrievals > 0 ? .ok : .warn, detail: detail))
             }
+        }
+
+        // Sync — only shown once the workspace is a sync repo; a
+        // non-syncing local workspace is a fine steady state, not a warning.
+        if let sync = syncState, sync.ready {
+            let ahead = sync.ahead ?? 0
+            let behind = sync.behind ?? 0
+            var detail = shortRemote(sync.remote)
+            if ahead == 0 && behind == 0 && sync.dirty != true {
+                detail += " · in sync"
+            } else {
+                if ahead > 0 { detail += " · \(ahead) to push" }
+                if behind > 0 { detail += " · \(behind) to pull" }
+                if sync.dirty == true { detail += " · local changes" }
+            }
+            rows.append(.init(icon: "arrow.triangle.2.circlepath", name: "Sync",
+                              level: behind > 0 ? .warn : .ok, detail: detail))
         }
 
         // Recall power (semantic tier)

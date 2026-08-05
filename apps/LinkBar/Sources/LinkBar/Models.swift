@@ -433,3 +433,14 @@ struct DigestPayload: Decodable {
         case driftingCount = "drifting_count"
     }
 }
+
+/// `lnk sync --status --json`: is this workspace syncing, and is it current?
+struct SyncStatus: Decodable {
+    let ready: Bool
+    let reason: String?
+    let branch: String?
+    let remote: String?
+    let dirty: Bool?
+    let ahead: Int?
+    let behind: Int?
+}

@@ -46,6 +46,10 @@ SYNC_IGNORE_LINES = (
     "/logo.png",
     "/.link-team.json",
     "/.link-usage.json",
+    # Obsidian's per-machine UI state: changes on every open, and syncing it
+    # between machines produces pointless conflicts. Themes/plugins in the
+    # rest of .obsidian/ still sync so the vault feels the same everywhere.
+    "/wiki/.obsidian/workspace.json",
 )
 
 TEAM_CONFIG_FILE = ".link-team.json"
