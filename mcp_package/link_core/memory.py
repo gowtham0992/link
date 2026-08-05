@@ -2968,6 +2968,113 @@ def memory_conflict_candidates(
     return [candidate for _, candidate in candidates[:limit]]
 
 
+MERGE_TOKEN_JACCARD_THRESHOLD = 0.45
+MERGE_MIN_SHARED_TOKENS = 4
+MERGE_SEMANTIC_THRESHOLD = 0.70  # stricter than revisions: merging asserts sameness
+
+
+def memory_merge_candidates(
+    records: Iterable[Mapping[str, object]],
+    *,
+    limit: int = 10,
+    embedder: Callable[[list[str]], list[list[float]]] | None = None,
+) -> list[dict[str, object]]:
+    """Pairs of active memories that likely say the same thing.
+
+    Write-time duplicate refusal blocks strong duplicates at creation, but
+    accepted memories drift into overlap over months ("short PR
+    descriptions" saved twice with different wording a quarter apart).
+    Suggestions only — merging is always the human's call:
+
+    - same memory_type and scope only (cross-type overlap is the conflict
+      detector's business, not a merge)
+    - opposite polarity is excluded (that is a contradiction, not a merge)
+    - pairs already linked by supersede lineage are excluded
+    - survivor = the reviewed one, else the more recently captured one
+    """
+    active = [
+        record for record in records
+        if is_active_memory(record) and str(record.get("name") or "")
+    ]
+    token_sets = {
+        str(record.get("name")): stemmed_memory_tokens(
+            significant_memory_tokens(memory_claim_text(record))
+        )
+        for record in active
+    }
+    lineage: set[tuple[str, str]] = set()
+    for record in active:
+        name = str(record.get("name"))
+        for key in ("supersedes", "superseded_by"):
+            other = str(record.get(key) or "").strip()
+            if other:
+                lineage.add((name, other))
+                lineage.add((other, name))
+
+    pairs: list[tuple[float, Mapping[str, object], Mapping[str, object], str]] = []
+    semantic_pool: list[tuple[Mapping[str, object], Mapping[str, object]]] = []
+    for i, first in enumerate(active):
+        for second in active[i + 1:]:
+            if str(first.get("memory_type")) != str(second.get("memory_type")):
+                continue
+            if str(first.get("scope")) != str(second.get("scope")):
+                continue
+            name_a, name_b = str(first.get("name")), str(second.get("name"))
+            if (name_a, name_b) in lineage:
+                continue
+            claim_a = str(first.get("tldr") or "") or memory_claim_text(first)
+            claim_b = str(second.get("tldr") or "") or memory_claim_text(second)
+            if has_negation(claim_a) != has_negation(claim_b):
+                continue
+            tokens_a, tokens_b = token_sets[name_a], token_sets[name_b]
+            shared = tokens_a & tokens_b
+            union = tokens_a | tokens_b
+            jaccard = len(shared) / len(union) if union else 0.0
+            if len(shared) >= MERGE_MIN_SHARED_TOKENS and jaccard >= MERGE_TOKEN_JACCARD_THRESHOLD:
+                pairs.append((jaccard, first, second, "token_overlap"))
+            elif union:
+                semantic_pool.append((first, second))
+
+    if semantic_pool:
+        active_embedder = embedder if embedder is not None else _default_conflict_embedder()
+        if active_embedder is not None:
+            texts: list[str] = []
+            for first, second in semantic_pool:
+                texts.append(str(first.get("tldr") or "") or memory_claim_text(first))
+                texts.append(str(second.get("tldr") or "") or memory_claim_text(second))
+            try:
+                vectors = active_embedder(texts)
+            except Exception:
+                vectors = []
+            if len(vectors) == len(texts):
+                for index, (first, second) in enumerate(semantic_pool):
+                    similarity = _cosine_similarity(vectors[2 * index], vectors[2 * index + 1])
+                    if similarity >= MERGE_SEMANTIC_THRESHOLD:
+                        pairs.append((similarity, first, second, "semantic"))
+
+    def _reviewed(record: Mapping[str, object]) -> bool:
+        return str(record.get("review_status") or "") == "reviewed"
+
+    candidates: list[dict[str, object]] = []
+    for similarity, first, second, reason in sorted(pairs, key=lambda item: -item[0]):
+        survivor, absorbed = first, second
+        if _reviewed(second) and not _reviewed(first):
+            survivor, absorbed = second, first
+        elif _reviewed(first) == _reviewed(second):
+            if str(second.get("date_captured") or "") > str(first.get("date_captured") or ""):
+                survivor, absorbed = second, first
+        candidates.append({
+            "survivor": str(survivor.get("name")),
+            "survivor_title": str(survivor.get("title") or ""),
+            "absorbed": str(absorbed.get("name")),
+            "absorbed_title": str(absorbed.get("title") or ""),
+            "absorbed_claim": str(absorbed.get("tldr") or "")[:240],
+            "similarity": round(similarity, 3),
+            "reason": reason,
+        })
+    return candidates[:max(1, min(limit, 25))]
+
+
 def memory_proposal_segments(text: str) -> list[str]:
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     segments: list[str] = []

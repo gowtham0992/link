@@ -6,6 +6,29 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+Start of the 2.2 cycle: "your memory, everywhere" — git-based sync with no
+server is the flagship; consolidation v2 lands first so stores are clean
+before they travel.
+
+### Added
+
+- **Consolidation v2: merge suggestions for accepted memories.** Write-time
+  duplicate refusal blocks strong duplicates at creation, but accepted
+  memories drift into overlap over months ("short PR descriptions" saved
+  twice with different wording a quarter apart). `lnk consolidate` now
+  pairs active memories that likely say the same thing — token overlap plus
+  the optional semantic tier — recommends a survivor (reviewed beats newer),
+  and prints copy-ready merge and archive commands. Suggestions only:
+  opposite-polarity pairs are contradictions (left to the conflict
+  detector), supersede-linked pairs are excluded, and nothing merges
+  without the human.
+
+### Fixed
+
+- `lnk review-memory --all <workspace>` treated the workspace argument as a
+  memory identifier and silently reviewed the default workspace instead
+  (found in dogfooding). With `--all`, a lone positional is the target.
+
 ## [2.1.0] - 2026-08-02
 
 The inbox-zero release. 2.0 put the review gate in your menu bar; this

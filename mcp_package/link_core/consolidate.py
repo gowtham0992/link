@@ -137,6 +137,7 @@ def build_consolidation_plan(
     inbox_payload: dict[str, object],
     command_target: str | Path = ".",
     project: str | None = None,
+    merge_candidates: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Build a read-only consolidation plan from capture and review backlogs."""
     captures = captures_payload.get("captures") if isinstance(captures_payload.get("captures"), list) else []
@@ -185,6 +186,24 @@ def build_consolidation_plan(
         needs_review_count=needs_review_count,
         command_target=command_target,
     )
+    merge_plan: list[dict[str, object]] = []
+    for candidate in merge_candidates or []:
+        if not isinstance(candidate, dict):
+            continue
+        survivor = str(candidate.get("survivor") or "")
+        absorbed = str(candidate.get("absorbed") or "")
+        absorbed_claim = str(candidate.get("absorbed_claim") or "")
+        merge_plan.append({
+            **candidate,
+            "merge_command": display_command([
+                "link", "update-memory", survivor, absorbed_claim, str(command_target),
+            ]),
+            "archive_command": display_command([
+                "link", "archive-memory", absorbed, str(command_target),
+                "--reason", f"merged into {survivor}",
+            ]),
+        })
+
     return {
         "project": project or "",
         "backlog": backlog,
@@ -193,6 +212,7 @@ def build_consolidation_plan(
         "duplicate_groups": duplicate_groups,
         "duplicate_capture_count": duplicate_count,
         "recurring_themes": recurring_themes,
+        "merge_candidates": merge_plan,
         "captures": capture_plan,
         "review_queue": review_plan,
         "safety": (
@@ -242,6 +262,22 @@ def render_consolidate_text(payload: dict[str, object]) -> tuple[int, str]:
             for capture_path in theme.get("captures", []):
                 lines.append(f"    {capture_path}")
             lines.append(f"  {theme.get('suggestion')}")
+
+    merge_obj = payload.get("merge_candidates")
+    merge_candidates: list[object] = merge_obj if isinstance(merge_obj, list) else []
+    if merge_candidates:
+        lines.extend(["", "Accepted memories that likely say the same thing (merge after the user confirms):"])
+        for candidate in merge_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            lines.append(
+                f"- Keep '{candidate.get('survivor_title')}' · absorb '{candidate.get('absorbed_title')}' "
+                f"(similarity {candidate.get('similarity')}, {candidate.get('reason')})"
+            )
+            if candidate.get("merge_command"):
+                lines.append(f"  Merge:   {candidate.get('merge_command')}")
+            if candidate.get("archive_command"):
+                lines.append(f"  Archive: {candidate.get('archive_command')}")
 
     captures = payload.get("captures") if isinstance(payload.get("captures"), list) else []
     unique_captures = [c for c in captures if isinstance(c, dict) and not c.get("duplicate")]

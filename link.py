@@ -139,6 +139,7 @@ from link_core.memory import (
     memory_audit_report as _core_memory_audit_report,
     memory_audit_next_actions as _core_memory_audit_next_actions,
     memory_records as _core_memory_records,
+    memory_merge_candidates as _core_memory_merge_candidates,
     memory_review_issues as _core_memory_review_issues,
     proposal_fingerprint as _core_proposal_fingerprint,
     propose_memories_from_text as _core_propose_memories_from_text,
@@ -2347,6 +2348,7 @@ def consolidate(target: Path, limit: int = 50, project: str | None = None, json_
         inbox_payload=inbox_payload,
         command_target=root,
         project=project,
+        merge_candidates=_core_memory_merge_candidates(_memory_records(wiki_dir)),
     )
     return _emit_json_or_text(payload, json_output, _core_render_consolidate_text)
 
@@ -3445,6 +3447,24 @@ def _default_workspace() -> Path:
     return Path(os.environ.get("LINK_WORKSPACE") or (Path.home() / "link")).expanduser()
 
 
+def _normalize_review_all_args(args) -> None:
+    """With --all there is no identifier: a lone positional is the target.
+
+    `lnk review-memory --all ~/link` parsed the workspace as an identifier
+    and the command silently reviewed the default workspace instead (found
+    in dogfooding). Must run before the default-workspace fallback rewrites
+    the target.
+    """
+    if (
+        getattr(args, "command", "") == "review-memory"
+        and getattr(args, "review_all", False)
+        and getattr(args, "identifier", None)
+        and getattr(args, "target", ".") == "."
+    ):
+        args.target = args.identifier
+        args.identifier = None
+
+
 def _apply_default_workspace(args) -> None:
     if getattr(args, "command", "") not in _WORKSPACE_COMMANDS:
         return
@@ -3484,6 +3504,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
+    _normalize_review_all_args(args)
     _apply_default_workspace(args)
     _configure_link_command_display()
     try:

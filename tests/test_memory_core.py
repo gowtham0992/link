@@ -1799,3 +1799,75 @@ class SemanticRevisionTests(unittest.TestCase):
         )
         for candidate in candidates:
             self.assertNotIn("semantic_revision", candidate.get("conflict_reasons") or [])
+
+
+class MergeCandidateTests(unittest.TestCase):
+    """Consolidation v2: accepted memories that likely say the same thing."""
+
+    @staticmethod
+    def _record(name, tldr, memory_type="preference", scope="user",
+                review_status="pending", date="2026-08-01T00:00:00Z", **extra):
+        return {"name": name, "title": tldr[:50], "tldr": tldr, "snippet": tldr,
+                "body": "", "status": "active", "memory_type": memory_type,
+                "scope": scope, "review_status": review_status,
+                "date_captured": date, **extra}
+
+    def test_token_overlap_pair_detected_with_survivor_preference(self):
+        from mcp_package.link_core.memory import memory_merge_candidates
+        records = [
+            self._record("a", "I prefer short PR descriptions with a test plan section.",
+                         review_status="reviewed"),
+            self._record("b", "Short PR descriptions and always a test plan section included.",
+                         date="2026-08-02T00:00:00Z"),
+            self._record("c", "We deploy the payments service only on Fridays."),
+        ]
+        candidates = memory_merge_candidates(records)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["survivor"], "a")   # reviewed beats newer
+        self.assertEqual(candidates[0]["absorbed"], "b")
+        self.assertEqual(candidates[0]["reason"], "token_overlap")
+
+    def test_polarity_flip_is_never_a_merge(self):
+        from mcp_package.link_core.memory import memory_merge_candidates
+        records = [
+            self._record("a", "I always include a test plan section in PR descriptions."),
+            self._record("b", "I never include a test plan section in PR descriptions."),
+        ]
+        self.assertEqual(memory_merge_candidates(records), [])
+
+    def test_lineage_and_type_gates(self):
+        from mcp_package.link_core.memory import memory_merge_candidates
+        linked = [
+            self._record("a", "Short PR descriptions with a test plan section.",
+                         superseded_by="b"),
+            self._record("b", "Short PR descriptions with a test plan section please.",
+                         supersedes="a"),
+        ]
+        self.assertEqual(memory_merge_candidates(linked), [])
+        cross_type = [
+            self._record("a", "Short PR descriptions with a test plan section."),
+            self._record("b", "Short PR descriptions with a test plan section please.",
+                         memory_type="note"),
+        ]
+        self.assertEqual(memory_merge_candidates(cross_type), [])
+
+    def test_semantic_pair_via_stub_embedder(self):
+        from mcp_package.link_core.memory import memory_merge_candidates
+        records = [
+            self._record("a", "Keep pull request summaries brief and attach testing steps."),
+            self._record("b", "PR descriptions stay short with a validation checklist."),
+        ]
+        def stub(texts):
+            return [[1.0, 0.0] for _ in texts]  # everything identical in meaning
+        candidates = memory_merge_candidates(records, embedder=stub)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["reason"], "semantic")
+
+    def test_no_embedder_means_lexical_only(self):
+        from mcp_package.link_core.memory import memory_merge_candidates
+        records = [
+            self._record("a", "Keep pull request summaries brief and attach testing steps."),
+            self._record("b", "PR descriptions stay short with a validation checklist."),
+        ]
+        candidates = memory_merge_candidates(records, embedder=lambda texts: [])
+        self.assertEqual(candidates, [])

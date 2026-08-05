@@ -476,3 +476,23 @@ class CliMemoryCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewAllArgNormalizationTests(unittest.TestCase):
+    def test_lone_positional_with_all_is_the_target(self):
+        import argparse
+        import link
+        args = argparse.Namespace(command="review-memory", review_all=True,
+                                  identifier="~/somewhere/link", target=".")
+        link._normalize_review_all_args(args)
+        self.assertEqual(args.target, "~/somewhere/link")
+        self.assertIsNone(args.identifier)
+
+    def test_explicit_identifier_and_target_untouched_without_all(self):
+        import argparse
+        import link
+        args = argparse.Namespace(command="review-memory", review_all=False,
+                                  identifier="my-memory", target="~/link")
+        link._normalize_review_all_args(args)
+        self.assertEqual(args.identifier, "my-memory")
+        self.assertEqual(args.target, "~/link")
