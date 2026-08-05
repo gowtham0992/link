@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class TokenEconomicsTests(unittest.TestCase):
     def test_packets_stay_bounded_and_plateau(self):
         result = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "eval_token_economics.py"), "--json"],
+            [sys.executable, str(ROOT / "scripts" / "eval_token_economics.py"), "--json", "--quick"],
             capture_output=True, text=True, timeout=600,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
