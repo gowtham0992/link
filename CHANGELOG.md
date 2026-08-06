@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-06
+
 Start of the 2.2 cycle: "your memory, everywhere" — git-based sync with no
 server is the flagship; consolidation v2 lands first so stores are clean
 before they travel.
