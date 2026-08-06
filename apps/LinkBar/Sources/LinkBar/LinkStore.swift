@@ -181,6 +181,7 @@ final class LinkStore: ObservableObject {
             self.semantic = semantic ?? self.semantic
             self.digest = digest ?? self.digest
             self.syncState = syncState ?? self.syncState
+            if let digest { NotificationManager.shared.announceWeeklyDigest(digest) }
             self.claudeHooksWired = hooks
             self.viewerRunning = viewer
             self.lastHealthAt = Date()

@@ -48,6 +48,11 @@ before they travel.
   consolidation, and inbox engines rather than computing new truth. A
   quiet week says so plainly. `--days` widens the window, `--json` feeds
   dashboards and agents.
+- **LinkBar: the digest delivers itself.** Once a week, when the digest
+  has something to say, one notification says it — "Your week with Link:
+  4 new · 2 aging · 1 saying the same thing twice · 3 never used". A
+  quiet week posts nothing: a reflection ritual that requires discipline
+  is not a ritual.
 - **`lnk import` — bring your scattered memory home.** Link's pitch is
   memory that is not locked inside one vendor profile, and now there is a
   door out of those profiles: `lnk import claude-code` (CLAUDE.md +
