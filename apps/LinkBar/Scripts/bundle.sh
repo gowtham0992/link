@@ -19,7 +19,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>LinkBar</string>
     <key>CFBundleExecutable</key><string>LinkBar</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.2.0</string>
+    <key>CFBundleShortVersionString</key><string>1.2.1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -32,7 +32,7 @@ echo "bundled: $APP"
 # --release-zip: produce the distributable zip the cask points at.
 if [ "$1" = "--release-zip" ]; then
   VERSION=$(grep -o 'static let version = "[^"]*"' Sources/LinkBar/DesignSystem.swift | grep -o '"[^"]*"' | tr -d '"')
-  ZIP=".build/LinkBar-${VERSION}.0.zip"
+  ZIP=".build/LinkBar-${VERSION}.zip"
   rm -f "$ZIP"
   ditto -c -k --keepParent "$APP" "$ZIP"
   shasum -a 256 "$ZIP"

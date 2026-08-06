@@ -591,6 +591,12 @@ struct PopoverView: View {
             HStack(spacing: 8) {
                 SectionHeader(title: "Session captures", count: captures.count, highlight: captures.count > 0)
                 Spacer()
+                if captures.count > 0 {
+                    Button("Review all") { store.openDashboard(path: "/captures") }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Open the full capture review in the local viewer")
+                }
                 if captures.count >= 3 {
                     Button("Clean up") { store.dedupCaptures() }
                         .buttonStyle(.bordered)
@@ -618,12 +624,18 @@ struct PopoverView: View {
         }
     }
 
+    /// Captures whose full proposal list is expanded (keyed by path).
+    @State private var expandedCaptures: Set<String> = []
+
     private func captureRowList(_ captures: CaptureInbox) -> some View {
         ForEach(captures.captures) { capture in
                 HoverRow {
                     HStack(alignment: .center, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
+                                Image(systemName: expandedCaptures.contains(capture.path) ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 8.5, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
                                 Text(capture.displayTitle)
                                     .font(.system(size: 12.5, weight: .medium))
                                     .lineLimit(1)
@@ -672,8 +684,40 @@ struct PopoverView: View {
                                         .foregroundStyle(LinkBrand.rust)
                                 }
                             }
+                            if expandedCaptures.contains(capture.path),
+                               let proposals = capture.proposals, proposals.count > 1 {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(Array(proposals.enumerated()), id: \.offset) { position, proposal in
+                                        HStack(alignment: .top, spacing: 6) {
+                                            Text("\(position + 1).")
+                                                .font(.caption2).foregroundStyle(.tertiary)
+                                                .frame(width: 18, alignment: .trailing)
+                                            Text(proposal.memory ?? proposal.title ?? "")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            Spacer(minLength: 4)
+                                            Button("Accept") { store.acceptCapture(capture, index: position + 1) }
+                                                .buttonStyle(.borderless)
+                                                .font(.caption)
+                                                .foregroundStyle(LinkBrand.rust)
+                                        }
+                                    }
+                                }
+                                .padding(.top, 4)
+                                .padding(.leading, 2)
+                            }
                         }
                         .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard (capture.proposals?.count ?? 0) > 1 else { return }
+                            if expandedCaptures.contains(capture.path) {
+                                expandedCaptures.remove(capture.path)
+                            } else {
+                                expandedCaptures.insert(capture.path)
+                            }
+                        }
                         .contextMenu {
                             Button("Reveal in Finder") { store.revealCapture(capture) }
                         }

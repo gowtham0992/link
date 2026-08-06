@@ -4,7 +4,7 @@ import SwiftUI
 /// Link's rust carries the opinion, one serif wordmark is the signature.
 enum LinkBrand {
     /// One source of truth for the app version shown in footer + settings.
-    static let version = "1.2"
+    static let version = "1.2.1"
 
     /// Rust — Link's accent. Lifted and desaturated slightly in dark mode
     /// so it reads as warm, not muddy, on dark materials.
@@ -154,6 +154,13 @@ struct StatusRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                ForEach(surface.sub, id: \.self) { line in
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             Spacer(minLength: 6)
             if let fix = surface.fix {

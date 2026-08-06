@@ -121,7 +121,11 @@ final class LinkStore: ObservableObject {
         Task.detached(priority: .userInitiated) {
             let workspace = LinkCLI.workspace
             let inbox = try? LinkCLI.runJSON(MemoryInbox.self, ["memory-inbox", workspace, "--json"])
-            let captures = try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"])
+            // --proposals ships with lnk 2.2.1; against an older CLI the flag
+            // is an argparse error, so fall back to the capped preview rather
+            // than showing an empty inbox on version skew.
+            let captures = (try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json", "--proposals", "50"]))
+                ?? (try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"]))
             let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
             let sessions = Self.scanAgentSessions()
@@ -313,8 +317,10 @@ final class LinkStore: ObservableObject {
                 if usage.neverRetrievedCount > 0 {
                     detail += " · \(usage.neverRetrievedCount) never used"
                 }
+                let top = (usage.topMemories ?? []).prefix(3).map { "\($0.memory) · \($0.times)\u{00D7}" }
                 rows.append(.init(icon: "waveform.path.ecg", name: "Memory in use",
-                                  level: usage.retrievals > 0 ? .ok : .warn, detail: detail))
+                                  level: usage.retrievals > 0 ? .ok : .warn, detail: detail,
+                                  sub: Array(top)))
             }
         }
 
@@ -479,7 +485,15 @@ final class LinkStore: ObservableObject {
                 )
                 await MainActor.run {
                     if result.removed.isEmpty {
-                        self.showFlash("Nothing redundant — every capture offers something new.", tone: .info)
+                        // A full inbox with nothing redundant means the work
+                        // is review, not cleanup — say so instead of leaving
+                        // the user with a button that "did nothing".
+                        let waiting = self.captures?.count ?? 0
+                        if waiting > 0 {
+                            self.showFlash("Nothing redundant — these \(waiting) need review: expand a capture to accept or dismiss its proposals.", tone: .info)
+                        } else {
+                            self.showFlash("Inbox is clear.", tone: .success)
+                        }
                         self.busy = false
                     } else {
                         self.showFlash("Removed \(result.removed.count) redundant capture\(result.removed.count == 1 ? "" : "s").", tone: .success)
@@ -685,10 +699,10 @@ final class LinkStore: ObservableObject {
     /// Open the full Memory Dashboard in the browser, starting the local
     /// viewer first if it is not already running (127.0.0.1 only — the
     /// viewer refuses to bind anywhere else by design).
-    func openDashboard() {
+    func openDashboard(path: String = "/memory") {
         busy = true
         Task.detached(priority: .userInitiated) {
-            let dashboard = URL(string: "http://127.0.0.1:3000/memory")!
+            let dashboard = URL(string: "http://127.0.0.1:3000\(path)")!
             if await Self.viewerResponds() {
                 await MainActor.run {
                     NSWorkspace.shared.open(dashboard)

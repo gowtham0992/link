@@ -320,6 +320,8 @@ def build_cli_parser(
     capture_inbox_cmd.add_argument("--limit", type=int, default=20)
     capture_inbox_cmd.add_argument("--project", default=None, help="include global captures plus this project")
     capture_inbox_cmd.add_argument("--json", action="store_true", help="print machine-readable capture inbox")
+    capture_inbox_cmd.add_argument("--proposals", type=int, default=3, dest="proposal_limit",
+                                   help="proposal previews per capture (1-50; accept can reach them all regardless)")
 
     accept_capture_cmd = sub.add_parser("accept-capture", help="accept one proposal from a raw session capture")
     accept_capture_cmd.add_argument("capture", help="raw capture path or filename")
@@ -758,6 +760,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             limit=args.limit,
             project=args.project,
             json_output=args.json,
+            proposal_limit=args.proposal_limit,
         )
     if command == "accept-capture":
         return handlers["accept-capture"](

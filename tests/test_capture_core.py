@@ -791,3 +791,25 @@ class CaptureDedupTests(unittest.TestCase):
             self.assertEqual(after["proposal_count"], 1)
             memories = " ".join(str(p["memory"]) for p in after["proposals"])
             self.assertNotIn("loss curve", memories)
+
+
+class CapturePreviewLimitTests(unittest.TestCase):
+    """The inbox preview must be able to show everything accept can reach."""
+
+    def test_proposal_limit_uncaps_previews_and_import_previews_curated(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "wiki").mkdir()
+            lines = "\n".join(
+                f"Always run check number {index} before shipping." for index in range(8)
+            )
+            write_session_capture(
+                root, text=lines, source="import:test", title="Imported rules",
+                source_type="import",
+            )
+            capped = capture_records(root)
+            self.assertEqual(len(capped[0]["proposals"]), 3)
+            full = capture_records(root, proposal_limit=50)
+            # Curated preview: all 8 deliberate lines visible, not just the
+            # chat-shaped subset.
+            self.assertEqual(len(full[0]["proposals"]), 8)
