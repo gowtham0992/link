@@ -23,7 +23,7 @@ from .security import (
 
 
 CaptureCommands = Callable[[str], dict[str, str]]
-CaptureProposalBuilder = Callable[[str, str, int, str], dict[str, object]]
+CaptureProposalBuilder = Callable[[str, str, int, str, bool], dict[str, object]]
 
 
 def _shell_words(*parts: object) -> str:
@@ -247,6 +247,7 @@ def write_session_capture(
     proposal_text: str | None = None,
     decision_trail: list[str] | None = None,
     conversation_id: str | None = None,
+    source_type: str = "conversation",
 ) -> dict[str, object]:
     """Persist proposal-only session notes under raw/memory-captures.
 
@@ -301,7 +302,7 @@ def write_session_capture(
         capture_path,
         f"""---
 title: "{frontmatter_string(capture_name)}"
-source_type: conversation
+source_type: {source_type}
 date_captured: "{captured_at}"
 {project_line}{conversation_line}---
 
@@ -438,11 +439,15 @@ def capture_proposal_selection(
     # never re-attributes the assistant's prose. Fall back to full notes for
     # older captures written before proposal-source provenance existed.
     mining_text = capture_proposal_source(raw_text) or notes
+    # Imported captures mine in curated mode: the source was a deliberate
+    # instruction file, so chat-junk heuristics do not apply to it.
+    curated = str(meta.get("source_type") or "").strip().lower() == "import"
     proposals = propose_memories(
         mining_text,
         rel_path,
         max(1, min(max(proposal_index, 10), 50)),
         project_name,
+        curated,
     )
     proposal_items = proposals.get("proposals")
     if not isinstance(proposal_items, list):

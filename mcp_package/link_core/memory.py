@@ -3504,6 +3504,63 @@ def memory_durability_rank(memory: str) -> int:
     return rank
 
 
+# ── Curated import: mining a file someone already wrote as instructions ──
+
+_CURATED_SKIP_PREFIXES = ("#", ">", "|", "```", "---", "<!--")
+
+
+def curated_candidate_lines(text: str) -> list[str]:
+    """Candidate statements from a curated instruction/memory file.
+
+    One candidate per bullet or line: markers stripped, headings, code
+    fences, tables, and questions skipped. Curated files earn line-level
+    trust — every surviving line still passes review before it is memory.
+    """
+    lines: list[str] = []
+    in_fence = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence or not line:
+            continue
+        if any(line.startswith(prefix) for prefix in _CURATED_SKIP_PREFIXES):
+            continue
+        line = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", line).strip()
+        line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+        if len(line) < 8 or len(line) > 400:
+            continue
+        if is_interrogative(line):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _curated_fallback_classification(segment: str) -> dict[str, object] | None:
+    """Classification for a curated line the conversational rules declined."""
+    lowered = segment.lower()
+    if re.match(r"^(always|never|don't|do not|use|prefer|avoid|run|keep|write|only)\b", lowered):
+        memory_type = "preference"
+    elif re.search(r"\b(?:is|are|lives?|runs? on|uses?)\b", lowered):
+        memory_type = "fact"
+    else:
+        memory_type = "note"
+    memory = normalize_proposed_memory(segment, memory_type)
+    if not memory:
+        return None
+    return {
+        "memory": memory,
+        "memory_type": memory_type,
+        "scope": "user",
+        "confidence_score": 70,
+        "reason": (
+            "Imported from a curated file: kept as a deliberate statement "
+            "even without conversational cues. Review before accepting."
+        ),
+    }
+
+
 def propose_memories_from_text(
     text: str,
     records: Iterable[Mapping[str, object]],
@@ -3513,6 +3570,7 @@ def propose_memories_from_text(
     project: str | None = None,
     command_target: str | Path = ".",
     exclude_fingerprints: Collection[str] = (),
+    curated: bool = False,
 ) -> dict[str, object]:
     record_list = [dict(record) for record in records]
     project_name = normalize_project(project)
@@ -3557,12 +3615,19 @@ def propose_memories_from_text(
         }
         proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
         proposals.append(proposal)
-    segments = memory_proposal_segments(text)
+    segments = curated_candidate_lines(text) if curated else memory_proposal_segments(text)
     for index, segment in enumerate(segments):
         classified = classify_memory_segment(segment)
         if not classified:
-            skipped += 1
-            continue
+            if curated:
+                # Curated sources (an instruction file, an exported memory
+                # list) carry deliberate statements, not chat — a line that
+                # lacks conversational cues is still a real candidate. The
+                # review gate stays; only the chat-junk heuristics relax.
+                classified = _curated_fallback_classification(segment)
+            if not classified:
+                skipped += 1
+                continue
         # Retrieval context: the neighboring sentences around the claim's
         # origin (the LoCoMo-measured +/-1 window). Helps recall find the
         # memory later; never part of the claim itself.
@@ -3570,7 +3635,7 @@ def propose_memories_from_text(
             segments[j] for j in (index - 1, index + 1) if 0 <= j < len(segments)
         ).strip()
         score = int(str(classified["confidence_score"]))
-        if score < MEMORY_PROPOSAL_MIN_SCORE:
+        if score < MEMORY_PROPOSAL_MIN_SCORE and not curated:
             skipped += 1
             continue
         memory = str(classified["memory"])

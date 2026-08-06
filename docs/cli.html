@@ -114,7 +114,14 @@ lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
 lnk delete-capture raw/memory-captures/&lt;capture&gt;.md --confirm
 lnk dedup-captures            # collapse inbox captures that offer nothing new (--confirm applies)</code></pre>
 
-                <h2 id="digest">Weekly Digest</h2>
+                <h2 id="import">Import Your Scattered Memory</h2>
+        <p>Your memory already exists — in <code>~/.claude/CLAUDE.md</code> and Claude Code's auto-memory, Cursor rules, a hand-tended <code>AGENTS.md</code>, or memories copied out of ChatGPT. <code>lnk import</code> reads those surfaces and turns each deliberate line into a reviewable proposal in the capture inbox — through the same dedup, secret-scanning, and injection-labeling gates as any capture. Nothing is ever auto-accepted, Link's own instruction sections are excluded, and re-running an import is a no-op for anything already pending, dismissed, or saved.</p>
+        <pre><code>lnk import claude-code    # CLAUDE.md + auto-memory
+lnk import cursor         # rules files
+lnk import codex          # AGENTS.md (minus Link's own section)
+lnk import file --file chatgpt-memories.txt   # anything pasted to a file</code></pre>
+
+        <h2 id="digest">Weekly Digest</h2>
         <p><code>lnk digest</code> is the reflection ritual: what you taught Link this week, what is aging out of its trust window, which memories are drifting into saying the same thing, and what is still waiting for review. Read-only and deterministic — it reuses the lifecycle, consolidation, and inbox engines rather than computing new truth. A quiet week says so.</p>
         <pre><code>lnk digest              # the last 7 days
 lnk digest --days 30    # a monthly look back

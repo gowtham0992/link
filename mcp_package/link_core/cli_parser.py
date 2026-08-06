@@ -17,7 +17,7 @@ CliHandler = Callable[..., int]
 
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Start here", (
-        "try", "setup", "onboard", "init", "demo", "proof", "welcome", "prompts",
+        "try", "setup", "onboard", "init", "demo", "proof", "welcome", "prompts", "import",
     )),
     ("Memory — the core loop", (
         "remember", "recall", "recipes", "query", "brief", "start",
@@ -107,6 +107,13 @@ def build_cli_parser(
     proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
     proof_cmd.add_argument("--port", type=int, default=3000)
     proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
+
+    import_cmd = sub.add_parser("import", help="bring memory home from other tools (claude-code, cursor, codex, or any text file) as reviewable proposals")
+    import_cmd.add_argument("import_source", metavar="source", choices=["claude-code", "cursor", "codex", "file"], help="where to import from")
+    import_cmd.add_argument("target", nargs="?", default=".")
+    import_cmd.add_argument("--file", default=None, dest="import_file", help="path to a text/markdown file (required for source 'file'; e.g. ChatGPT memories pasted into a file)")
+    import_cmd.add_argument("--project", default=None, help="project slug for the imported proposals")
+    import_cmd.add_argument("--json", action="store_true", help="print machine-readable import results")
 
     digest_cmd = sub.add_parser("digest", help="weekly reflection: what you taught Link, what is aging, what is drifting")
     digest_cmd.add_argument("target", nargs="?", default=".")
@@ -568,6 +575,11 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             serve=args.serve,
             port=args.port,
             json_output=args.json,
+        )
+    if command == "import":
+        return handlers["import"](
+            Path(args.target), source=args.import_source,
+            file_path=args.import_file, project=args.project, json_output=args.json,
         )
     if command == "digest":
         return handlers["digest"](Path(args.target), days=args.days, json_output=args.json)

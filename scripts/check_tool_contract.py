@@ -30,6 +30,7 @@ EXPECTED_CLI_COMMANDS = {
     "graph-summary",
     "health",
     "hook",
+    "import",
     "import-obsidian",
     "ingest-status",
     "init",

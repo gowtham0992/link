@@ -257,6 +257,9 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
     atomic_write_text as _core_atomic_write_text,
 )
+from link_core.importers import (
+    collect_import_units as _core_collect_import_units,
+)
 from link_core.agent_instructions import (
     instruction_file_status as _core_instruction_file_status,
     refresh_instruction_file as _core_refresh_instruction_file,
@@ -587,16 +590,12 @@ def _propose_memories_from_text(
     project: str | None = None,
     command_target: str | Path = ".",
     exclude_fingerprints: Collection[str] = (),
+    curated: bool = False,
 ) -> dict[str, object]:
     return _core_propose_memories_from_text(
-        text,
-        _memory_records(wiki_dir),
-        source=source,
-        limit=limit,
-        writes_memory=False,
-        project=project,
-        command_target=command_target,
-        exclude_fingerprints=exclude_fingerprints,
+        text, _memory_records(wiki_dir), source=source, limit=limit,
+        writes_memory=False, project=project, command_target=command_target,
+        exclude_fingerprints=exclude_fingerprints, curated=curated,
     )
 
 
@@ -1554,7 +1553,7 @@ def accept_capture(
             default_project=_default_project(root),
             # Exclude dismissed proposals exactly like inbox previews do, so
             # "accept proposal 1" targets the same item the user saw listed.
-            propose_memories=lambda notes, rel_path, proposal_limit, project_name: _propose_memories_from_text(
+            propose_memories=lambda notes, rel_path, proposal_limit, project_name, curated=False: _propose_memories_from_text(
                 wiki_dir,
                 notes,
                 source=rel_path,
@@ -1562,6 +1561,7 @@ def accept_capture(
                 project=project_name,
                 command_target=root,
                 exclude_fingerprints=set(_core_load_dismissed_fingerprints(root)),
+                curated=curated,
             ),
         )
     except ValueError as exc:
@@ -2952,6 +2952,85 @@ def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str
     return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
 
 
+def import_memory(
+    target: Path,
+    *,
+    source: str,
+    file_path: str | None = None,
+    project: str | None = None,
+    json_output: bool = False,
+) -> int:
+    """Bring memory home from another tool, as reviewable proposals."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    try:
+        units = _core_collect_import_units(
+            source, file_path=Path(file_path) if file_path else None,
+        )
+    except ValueError as exc:
+        print(f"Could not import: {exc}", file=sys.stderr)
+        return 1
+    if not units:
+        _print_text(
+            f"Nothing to import from {source}: no memory surface found for it on this machine."
+        )
+        return 0
+
+    records = _memory_records(wiki_dir)
+    exclude = set(_core_load_dismissed_fingerprints(root)) | set(_core_pending_proposal_fingerprints(root))
+    results: list[dict[str, object]] = []
+    total_proposals = 0
+    for unit in units:
+        preview = _core_propose_memories_from_text(
+            unit["text"], records, source=f"import:{source}", limit=50,
+            project=project, command_target=root,
+            exclude_fingerprints=exclude, curated=True,
+        )
+        proposals = preview.get("proposals") if isinstance(preview.get("proposals"), list) else []
+        if not proposals:
+            results.append({"label": unit["label"], "origin": unit["origin"], "proposals": 0, "capture": ""})
+            continue
+        capture = _core_write_session_capture(
+            root,
+            text=unit["text"],
+            source=f"import:{source} \u00b7 {unit['origin']}",
+            title=unit["label"],
+            project=project,
+            source_type="import",
+        )
+        total_proposals += len(proposals)
+        results.append({
+            "label": unit["label"], "origin": unit["origin"],
+            "proposals": len(proposals), "capture": str(capture.get("path") or ""),
+            "secret_warnings": capture.get("secret_warnings") or [],
+        })
+
+    if json_output:
+        print(json.dumps({
+            "source": source, "units": results, "total_proposals": total_proposals,
+        }, indent=2))
+        return 0
+
+    _print_text(f"Import from {source}: {len(units)} surface(s) scanned\n")
+    for item in results:
+        count = int(str(item["proposals"]))
+        if count:
+            _print_text(f"  + {item['label']}: {count} candidate memory(ies) -> {item['capture']}")
+        else:
+            _print_text(f"  \u00b7 {item['label']}: nothing new (all duplicates of what Link already has)")
+    if total_proposals:
+        _print_text(
+            f"\n{total_proposals} candidate(s) are waiting as proposals - nothing is saved yet."
+            f"\nReview them: {_display_command(['lnk', 'capture-inbox', str(root)])}"
+        )
+    else:
+        _print_text("\nNothing new to review - your Link memory already covers these files.")
+    return 0
+
+
 def digest(target: Path, days: int = 7, json_output: bool = False) -> int:
     """Weekly reflection: what changed, what is aging, what is drifting."""
     target = target.expanduser().resolve()
@@ -3704,7 +3783,7 @@ _WORKSPACE_COMMANDS = {
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
-    "semantic", "status", "sync", "digest", "health", "doctor", "validate", "operations",
+    "semantic", "status", "sync", "digest", "import", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
@@ -3787,6 +3866,7 @@ def main(argv: list[str] | None = None) -> int:
             "setup": setup,
             "sync": sync,
             "digest": digest,
+            "import": import_memory,
             "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,

@@ -48,6 +48,18 @@ before they travel.
   consolidation, and inbox engines rather than computing new truth. A
   quiet week says so plainly. `--days` widens the window, `--json` feeds
   dashboards and agents.
+- **`lnk import` — bring your scattered memory home.** Link's pitch is
+  memory that is not locked inside one vendor profile, and now there is a
+  door out of those profiles: `lnk import claude-code` (CLAUDE.md +
+  auto-memory files), `lnk import cursor` (rules), `lnk import codex`
+  (AGENTS.md minus Link's own section), and `lnk import file --file x.txt`
+  for memories copied out of ChatGPT or anywhere else. Curated files mine
+  in a dedicated mode — every deliberate line is a candidate, not just
+  chat-shaped ones — and every candidate lands as a proposal in the
+  capture inbox behind the same dedup, secret-scanning, and
+  injection-labeling gates as any capture. Nothing is auto-accepted;
+  re-import is a no-op for anything already pending, dismissed, or saved.
+  Day one stops being a cold start and becomes consolidation.
 - **`lnk setup` now heals stale agent instruction files.** Real-world
   failure that motivated this: a Kiro steering file written by a pre-2.0
   installer named MCP tools from the old full surface (`query_link`,

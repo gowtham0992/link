@@ -660,6 +660,7 @@ def _propose_memories_from_text(
     source: str = "mcp",
     limit: int = 10,
     project: str = "",
+    curated: bool = False,
 ) -> dict[str, object]:
     return _core_propose_memories_from_text(
         text,
@@ -668,6 +669,7 @@ def _propose_memories_from_text(
         limit=limit,
         writes_memory=False,
         project=_resolve_project(project),
+        curated=curated,
     )
 
 
@@ -775,11 +777,13 @@ def _accept_capture(
         project=_clean_text_input(project),
         default_project=_default_project(),
         max_capture_len=500,
-        propose_memories=lambda notes, rel_path, proposal_limit, project_name: _propose_memories_from_text(
+        # mypy cannot infer a default-arg lambda against the Callable alias
+        propose_memories=lambda notes, rel_path, proposal_limit, project_name, curated=False: _propose_memories_from_text(  # type: ignore[misc]
             notes,
             source=rel_path,
             limit=proposal_limit,
             project=project_name,
+            curated=curated,
         ),
     )
     rel_path = str(selection["capture"])

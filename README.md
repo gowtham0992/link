@@ -162,6 +162,13 @@ lnk proof     # see the promise (~1 second, no setup)
 lnk setup     # wire every agent you have — workspace, MCP, session hooks, one command
 ```
 
+Already have memory scattered across tools? Bring it home as reviewable
+proposals — nothing is auto-accepted:
+
+```bash
+lnk import claude-code   # or: cursor, codex, file --file chatgpt.txt
+```
+
 `lnk setup` detects the agents installed on your machine — Claude Code,
 Codex, Cursor, Windsurf, Zed, Kiro, Gemini CLI — and wires them all at
 once; Link is agent-agnostic by design (one MCP server, one workspace,
