@@ -693,6 +693,7 @@ def capture_records(
     commands_for: CaptureCommands | None = None,
     *,
     read_warnings: list[dict[str, str]] | None = None,
+    proposal_limit: int = 3,
 ) -> list[dict[str, object]]:
     root = root.expanduser().resolve()
     capture_dir = root / "raw" / "memory-captures"
@@ -729,13 +730,19 @@ def capture_records(
         # Dismissed proposals stay hidden here for the same reason: accept
         # excludes them, so showing them would desync preview from outcome.
         mining_text = capture_proposal_source(text) or notes
+        # Imported captures preview in curated mode, mirroring accept — a
+        # chat-mode preview of a curated file would hide most of what
+        # accept can actually save.
+        curated = str(meta.get("source_type") or "").strip().lower() == "import"
+        preview_cap = max(1, min(int(proposal_limit or 3), 50))
         mined = propose_memories_from_text(
-            mining_text, [], source=rel, limit=3, exclude_fingerprints=dismissed,
+            mining_text, [], source=rel, limit=preview_cap,
+            exclude_fingerprints=dismissed, curated=curated,
         )
         proposals_obj = mined.get("proposals")
         proposal_items: list[object] = proposals_obj if isinstance(proposals_obj, list) else []
         proposal_previews: list[dict[str, object]] = []
-        for proposal in proposal_items[:3]:
+        for proposal in proposal_items[:preview_cap]:
             if not isinstance(proposal, dict):
                 continue
             preview_text, _, _ = redact_secret_values(str(proposal.get("memory") or ""))
@@ -770,6 +777,8 @@ def capture_inbox(
     limit: int = 20,
     project: str | None = None,
     commands_for: CaptureCommands | None = None,
+    *,
+    proposal_limit: int = 3,
 ) -> dict[str, object]:
     project_name = normalize_project(project)
     read_warnings: list[dict[str, str]] = []
@@ -779,6 +788,7 @@ def capture_inbox(
         project=project_name,
         commands_for=commands_for,
         read_warnings=read_warnings,
+        proposal_limit=proposal_limit,
     )
     return {
         "count": len(captures),

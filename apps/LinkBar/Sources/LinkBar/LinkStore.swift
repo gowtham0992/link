@@ -121,7 +121,7 @@ final class LinkStore: ObservableObject {
         Task.detached(priority: .userInitiated) {
             let workspace = LinkCLI.workspace
             let inbox = try? LinkCLI.runJSON(MemoryInbox.self, ["memory-inbox", workspace, "--json"])
-            let captures = try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"])
+            let captures = try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json", "--proposals", "50"])
             let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
             let sessions = Self.scanAgentSessions()
@@ -313,8 +313,10 @@ final class LinkStore: ObservableObject {
                 if usage.neverRetrievedCount > 0 {
                     detail += " · \(usage.neverRetrievedCount) never used"
                 }
+                let top = (usage.topMemories ?? []).prefix(3).map { "\($0.memory) · \($0.times)\u{00D7}" }
                 rows.append(.init(icon: "waveform.path.ecg", name: "Memory in use",
-                                  level: usage.retrievals > 0 ? .ok : .warn, detail: detail))
+                                  level: usage.retrievals > 0 ? .ok : .warn, detail: detail,
+                                  sub: Array(top)))
             }
         }
 
@@ -693,10 +695,10 @@ final class LinkStore: ObservableObject {
     /// Open the full Memory Dashboard in the browser, starting the local
     /// viewer first if it is not already running (127.0.0.1 only — the
     /// viewer refuses to bind anywhere else by design).
-    func openDashboard() {
+    func openDashboard(path: String = "/memory") {
         busy = true
         Task.detached(priority: .userInitiated) {
-            let dashboard = URL(string: "http://127.0.0.1:3000/memory")!
+            let dashboard = URL(string: "http://127.0.0.1:3000\(path)")!
             if await Self.viewerResponds() {
                 await MainActor.run {
                     NSWorkspace.shared.open(dashboard)

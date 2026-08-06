@@ -310,6 +310,8 @@ struct SurfaceHealth: Identifiable {
     let name: String
     let level: Level
     let detail: String
+    /// Small-print lines under the detail (e.g. the top-used memories).
+    var sub: [String] = []
     var fix: Fix? = nil
 
     var id: String { name }
@@ -404,6 +406,10 @@ struct MemoryPage: Identifiable {
 /// `lnk digest --json`: the weekly reflection, including whether agents
 /// actually read memory back — the answer to "is Link even being used?"
 struct DigestPayload: Decodable {
+    struct TopMemory: Decodable {
+        let memory: String
+        let times: Int
+    }
     struct Usage: Decodable {
         let tracking: Bool
         let hasData: Bool
@@ -411,12 +417,14 @@ struct DigestPayload: Decodable {
         let briefs: Int
         let memoriesSurfaced: Int
         let neverRetrievedCount: Int
+        let topMemories: [TopMemory]?
 
         enum CodingKeys: String, CodingKey {
             case tracking, retrievals, briefs
             case hasData = "has_data"
             case memoriesSurfaced = "memories_surfaced"
             case neverRetrievedCount = "never_retrieved_count"
+            case topMemories = "top_memories"
         }
     }
     let windowDays: Int

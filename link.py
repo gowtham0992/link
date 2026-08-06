@@ -1491,6 +1491,7 @@ def capture_inbox(
     limit: int = 20,
     project: str | None = None,
     json_output: bool = False,
+    proposal_limit: int = 3,
 ) -> int:
     target = target.expanduser().resolve()
     root = _resolve_link_root(target)
@@ -1501,6 +1502,7 @@ def capture_inbox(
         root,
         limit=limit,
         project=project,
+        proposal_limit=max(1, min(proposal_limit, 50)),
         commands_for=lambda rel_path: _core_cli_capture_commands(rel_path, root),
     )
     if json_output:

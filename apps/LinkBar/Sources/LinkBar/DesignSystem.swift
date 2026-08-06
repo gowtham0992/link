@@ -154,6 +154,13 @@ struct StatusRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                ForEach(surface.sub, id: \.self) { line in
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             Spacer(minLength: 6)
             if let fix = surface.fix {
