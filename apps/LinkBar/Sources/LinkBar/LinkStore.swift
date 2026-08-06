@@ -121,7 +121,11 @@ final class LinkStore: ObservableObject {
         Task.detached(priority: .userInitiated) {
             let workspace = LinkCLI.workspace
             let inbox = try? LinkCLI.runJSON(MemoryInbox.self, ["memory-inbox", workspace, "--json"])
-            let captures = try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json", "--proposals", "50"])
+            // --proposals ships with lnk 2.2.1; against an older CLI the flag
+            // is an argparse error, so fall back to the capped preview rather
+            // than showing an empty inbox on version skew.
+            let captures = (try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json", "--proposals", "50"]))
+                ?? (try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"]))
             let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
             let sessions = Self.scanAgentSessions()

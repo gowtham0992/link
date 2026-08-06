@@ -6,6 +6,26 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-08-06
+
+### Fixed
+
+- **LinkBar: the review loop no longer hides the work.** The first hour
+  of real 2.2.0 usage found three frictions in the capture inbox: rows
+  looked clickable but did nothing, the Accept menu showed only 3 of an
+  import's proposals, and a no-op Clean up read as broken. Capture rows
+  now carry a chevron and expand on click with every proposal
+  individually acceptable; the inbox fetches up to 50 proposal previews;
+  a "Review all" button opens the viewer's full capture page (starting
+  the viewer if needed); and an empty Clean up now points at review
+  instead of shrugging. The Status tab's "Memory in use" row also gains
+  the answer to "which memories?": top-used sublines from the local
+  usage ledger.
+- **`lnk capture-inbox --proposals N`** (1-50, default 3): preview as
+  many proposals per capture as review needs — and imported captures now
+  preview in curated mining mode, matching what accept can actually
+  save. LinkBar 1.2.1 falls back gracefully against an older CLI.
+
 ## [2.2.0] - 2026-08-06
 
 Start of the 2.2 cycle: "your memory, everywhere" — git-based sync with no
