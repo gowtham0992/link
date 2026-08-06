@@ -38,7 +38,13 @@ as `zero-overlap` only if it provably shares no significant stemmed token
 with its target memory — pure paraphrases that token matching cannot reach.
 
 Full suite, Apple M4, macOS 26.5.1, Python 3.14, run 2026-07-08, Link
-`develop` (post-1.5.0).
+`develop` (post-1.5.0). Reconfirmed against shipped 2.2.1: the lexical
+column reproduces exactly. **The lexical column is what a default
+`pip install link-mcp` gives you**; the fast and quality columns each
+require an optional extra and a one-time local model download. CI runs
+this suite to gate dataset integrity (corpus size, authored-case count,
+and that the zero-overlap group stays genuinely hard for lexical
+matching) - it does not pin the hit@1 scores themselves.
 
 ### Token-overlap queries (800 cases)
 
@@ -403,6 +409,19 @@ quadrupling moves it 0.3%.** Packet size climbs while the budget's slots
 fill, then stops. Both properties are CI-enforced: every budget's worst
 packet must stay under its ceiling, and the last quadrupling of the store
 must not move the packet more than 5%.
+
+**The MCP session brief is a separate, once-per-session cost, and it is
+not small.** Link's first MCP tool response of a session carries a memory
+brief so that agents without session hooks still get memory pushed to
+them (see 2.2.0). The benchmark now measures it rather than averaging it
+away: on the 42-memory benchmark corpus the first recall of a session
+costs **11,269 tokens** against a steady state of **1,954**. On the
+smaller bundled demo wiki the same measurement is 4,657 vs 546. This is
+a deliberate trade - one brief per session buys memory for six of the
+nine supported agents - but it is the largest single packet Link sends,
+it scales with brief size rather than with the recall budget, and
+bounding it is tracked work. Per-recall figures above exclude it by
+design: it is paid once per session, not per recall.
 
 Honest notes: token counts use the 4-chars-per-token approximation Link
 uses for its own budget reporting — exact counts vary by tokenizer, so
