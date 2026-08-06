@@ -479,7 +479,15 @@ final class LinkStore: ObservableObject {
                 )
                 await MainActor.run {
                     if result.removed.isEmpty {
-                        self.showFlash("Nothing redundant — every capture offers something new.", tone: .info)
+                        // A full inbox with nothing redundant means the work
+                        // is review, not cleanup — say so instead of leaving
+                        // the user with a button that "did nothing".
+                        let waiting = self.captures?.count ?? 0
+                        if waiting > 0 {
+                            self.showFlash("Nothing redundant — these \(waiting) need review: expand a capture to accept or dismiss its proposals.", tone: .info)
+                        } else {
+                            self.showFlash("Inbox is clear.", tone: .success)
+                        }
                         self.busy = false
                     } else {
                         self.showFlash("Removed \(result.removed.count) redundant capture\(result.removed.count == 1 ? "" : "s").", tone: .success)
