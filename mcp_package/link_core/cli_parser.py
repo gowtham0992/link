@@ -17,14 +17,14 @@ CliHandler = Callable[..., int]
 
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Start here", (
-        "try", "setup", "onboard", "init", "demo", "proof", "welcome", "prompts",
+        "try", "setup", "onboard", "init", "demo", "proof", "welcome", "prompts", "import",
     )),
     ("Memory — the core loop", (
         "remember", "recall", "recipes", "query", "brief", "start",
         "session-end", "semantic",
     )),
     ("Review & governance", (
-        "memory-inbox", "review-memory", "explain-memory", "consolidate",
+        "memory-inbox", "review-memory", "explain-memory", "consolidate", "digest",
         "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
         "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
@@ -39,7 +39,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "import-obsidian",
     )),
     ("Sharing & viewing", (
-        "serve", "share", "snapshot", "graph-summary", "team-sync",
+        "sync", "serve", "share", "snapshot", "graph-summary", "team-sync",
         "compliance-export",
     )),
     ("Utilities", (
@@ -107,6 +107,25 @@ def build_cli_parser(
     proof_cmd.add_argument("--serve", action="store_true", help="start the local viewer after printing the proof")
     proof_cmd.add_argument("--port", type=int, default=3000)
     proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
+
+    import_cmd = sub.add_parser("import", help="bring memory home from other tools (claude-code, cursor, codex, or any text file) as reviewable proposals")
+    import_cmd.add_argument("import_source", metavar="source", choices=["claude-code", "cursor", "codex", "file"], help="where to import from")
+    import_cmd.add_argument("target", nargs="?", default=".")
+    import_cmd.add_argument("--file", default=None, dest="import_file", help="path to a text/markdown file (required for source 'file'; e.g. ChatGPT memories pasted into a file)")
+    import_cmd.add_argument("--project", default=None, help="project slug for the imported proposals")
+    import_cmd.add_argument("--json", action="store_true", help="print machine-readable import results")
+
+    digest_cmd = sub.add_parser("digest", help="weekly reflection: what you taught Link, what is aging, what is drifting")
+    digest_cmd.add_argument("target", nargs="?", default=".")
+    digest_cmd.add_argument("--days", type=int, default=7, help="look-back window in days (default 7)")
+    digest_cmd.add_argument("--json", action="store_true", help="print machine-readable digest")
+
+    sync_cmd = sub.add_parser("sync", help="sync memory between machines through your own git remote (no server)")
+    sync_cmd.add_argument("target", nargs="?", default=".")
+    sync_cmd.add_argument("--init", action="store_true", dest="sync_init", help="turn the workspace into a sync repo (idempotent)")
+    sync_cmd.add_argument("--remote", default=None, help="git remote URL to sync through (with --init)")
+    sync_cmd.add_argument("--status", action="store_true", dest="sync_status", help="show sync state without syncing")
+    sync_cmd.add_argument("--json", action="store_true", help="print machine-readable sync details")
 
     setup_cmd = sub.add_parser("setup", help="one command for install day and every upgrade: workspace + every detected agent, wired")
     setup_cmd.add_argument("target", nargs="?", default="~/link")
@@ -194,10 +213,12 @@ def build_cli_parser(
     compliance_cmd.add_argument("--limit", type=int, default=100, help="maximum memories/log entries to include")
     compliance_cmd.add_argument("--json", action="store_true", help="print machine-readable export status after writing --output")
 
-    team_sync_cmd = sub.add_parser("team-sync", help="print a safe Git plan for sharing reviewed Link memory")
+    team_sync_cmd = sub.add_parser("team-sync", help="share visibility:team memories with your team through a git remote (no server)")
     team_sync_cmd.add_argument("target", nargs="?", default=".")
-    team_sync_cmd.add_argument("--remote", default=None, help="optional Git remote URL to include in setup commands")
-    team_sync_cmd.add_argument("--json", action="store_true", help="print machine-readable team sync guidance")
+    team_sync_cmd.add_argument("--init", action="store_true", dest="team_init", help="set up the shared team workspace (idempotent)")
+    team_sync_cmd.add_argument("--remote", default=None, help="shared git remote URL (with --init)")
+    team_sync_cmd.add_argument("--dir", default=None, dest="team_dir", help="where the team workspace lives (default: sibling of the workspace)")
+    team_sync_cmd.add_argument("--json", action="store_true", help="print machine-readable team sync details")
 
     share_cmd = sub.add_parser("share", help="print a local viewer permalink for a page or memory")
     share_cmd.add_argument("identifier", help="page name, title, path, alias, or search query")
@@ -555,6 +576,21 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             port=args.port,
             json_output=args.json,
         )
+    if command == "import":
+        return handlers["import"](
+            Path(args.target), source=args.import_source,
+            file_path=args.import_file, project=args.project, json_output=args.json,
+        )
+    if command == "digest":
+        return handlers["digest"](Path(args.target), days=args.days, json_output=args.json)
+    if command == "sync":
+        return handlers["sync"](
+            Path(args.target),
+            init=args.sync_init,
+            remote=args.remote,
+            status=args.sync_status,
+            json_output=args.json,
+        )
     if command == "setup":
         return handlers["setup"](
             Path(args.target),
@@ -628,7 +664,10 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
         )
     if command == "team-sync":
-        return handlers["team-sync"](Path(args.target), remote=args.remote, json_output=args.json)
+        return handlers["team-sync"](
+            Path(args.target), remote=args.remote, init=args.team_init,
+            team_dir=args.team_dir, json_output=args.json,
+        )
     if command == "share":
         return handlers["share"](
             Path(args.target),

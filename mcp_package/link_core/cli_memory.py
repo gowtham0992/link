@@ -221,6 +221,7 @@ def render_recall_text(
     project: str | None = None,
     target: object = ".",
     miss_hint: str = "",
+    store_count: int = -1,
 ) -> tuple[int, str]:
     lines = [f"Link memory recall: {query}"]
     if project:
@@ -232,11 +233,21 @@ def render_recall_text(
         lines.append("No matching memories found.")
         if miss_hint:
             lines.extend(["", miss_hint])
-        lines.extend([
-            "",
-            "Next:",
-            f"  Add one: {_shell_words('python3', 'link.py', 'remember', 'Memory to keep', target)}",
-        ])
+        if store_count > 0:
+            # The store has memories; "add one" is the wrong advice - the
+            # query and the stored words just did not overlap.
+            lines.extend([
+                "",
+                "Next:",
+                "  Try different words - lexical recall matches the words you saved.",
+                f"  Or match by meaning: {_shell_words('python3', 'link.py', 'semantic', target, '--setup')}",
+            ])
+        else:
+            lines.extend([
+                "",
+                "Next:",
+                f"  Add one: {_shell_words('python3', 'link.py', 'remember', 'Memory to keep', target)}",
+            ])
         return 0, "\n".join(lines)
 
     lines.append(f"{len(results)} memor{'y' if len(results) == 1 else 'ies'}")

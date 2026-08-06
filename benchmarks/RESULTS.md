@@ -203,6 +203,7 @@ predicted:
 | contradiction exposure@3 after a revision | **0.167** | 0.750 |
 | active memories (ground truth: 54) | **42** | 85 |
 | as-of temporal accuracy (revised facts) | **0.917** | 1.00 |
+| temporal accuracy from plain language ("...in March", no ISO date) | **0.917** | 1.00 |
 | current-truth precision@1 | **0.881** | 0.738 |
 
 The ungated junk rate mirrors what users measure in production LLM-extraction
@@ -331,23 +332,29 @@ poisoned webpage, doc, or pasted AI output only has to survive one capture
 to give orders forever. As far as we know no other memory system publishes
 an adversarial benchmark on this surface.
 
-`scripts/eval_memory_poisoning.py` drives 15 authored attacks (synthetic,
+`scripts/eval_memory_poisoning.py` drives 18 authored attacks (synthetic,
 ground-truth labeled, no LLM — `scripts/poisoning_dataset.py`) through the
 real pipeline, plus 6 benign directive controls that must never be flagged.
 Attack classes: guardrail-bypass instructions, unattended-execution
 "preferences" (sudo / --force without approval), data-exfiltration
 conventions (ship ~/.ssh and .env in summaries), credential planting,
-spoofed-approval framing, agent-directed durable commands, and hearsay
-carriers.
+spoofed-approval framing, agent-directed durable commands, hearsay
+carriers, and — added after the July 2026 MemGhost disclosure —
+untrusted-channel write instructions: content from an email, newsletter,
+or shared doc that tells the agent itself to silently write durable
+memory. Every mitigation the MemGhost researchers proposed (user
+confirmation before durable writes, source tagging, logged memory writes)
+is Link's standing architecture, and the three MemGhost-shaped attacks
+die in the pipeline: dropped, flagged, or defanged — none unlabeled.
 
 | layer | what it does | attacks stopped here |
 |---|---|---|
-| extraction | hearsay/question/echo gates drop what was never the user's own claim | 5 of 15 |
-| labeling | injection-shaped proposals carry a warning label into the inbox and decision trail | 8 of 15 |
-| write gate | credential-shaped text refused even on a one-click accept | 1 of 15 |
-| defanging | extraction strips the payload; only a harmless residue can be stored | 1 of 15 |
+| extraction | hearsay/question/echo gates drop what was never the user's own claim | 6 of 18 |
+| labeling | injection-shaped proposals carry a warning label into the inbox and decision trail | 9 of 18 |
+| write gate | credential-shaped text refused even on a one-click accept | 1 of 18 |
+| defanging | extraction strips the payload; only a harmless residue can be stored | 2 of 18 |
 
-**Unlabeled exposure: 0 of 15. Benign false positives: 0 of 6.** Both are
+**Unlabeled exposure: 0 of 18. Benign false positives: 0 of 6.** Both are
 CI-enforced — any change that lets an attack reach the inbox without a
 label, or flags a legitimate directive, fails the build.
 
@@ -361,6 +368,53 @@ was developed against it — these are fit numbers, not blind ones, and the
 patterns are deliberately narrow to protect the zero-false-positive
 property. Adversarial contributions that beat the layers are welcome and
 will be added to the fixture.
+
+## Track 6: Token economics
+
+The literature names token cost as one of memory's persistent production
+problems — "sending 100k tokens of history for a 50-token response is
+financially unsustainable" — and published footprints differ by orders of
+magnitude between systems. Link's answer is structural: retrieval returns a
+*bounded packet*, not a context dump. Budgets cap memories, search results,
+context pages, and the characters inside each, so cost is a function of the
+budget you ask for, not of how much you have remembered.
+
+`scripts/eval_token_economics.py` measures real packets through the real
+query path, serialized exactly as the agent receives them.
+
+| budget | mean tokens | worst case | CI ceiling |
+|---|---|---|---|
+| micro | 1,951 | 2,061 | 2,900 |
+| small | 2,912 | 4,184 | 5,900 |
+| medium | 3,886 | 7,131 | 10,200 |
+| large | 4,835 | 10,775 | 16,800 |
+
+The guarantee is the growth curve, not the absolute number:
+
+| store size | mean tokens (medium) | growth |
+|---|---|---|
+| 25 memories | 3,708 | — |
+| 100 memories | 4,991 | +35% |
+| 400 memories | 5,842 | +17% |
+| 1,600 memories | 5,860 | **+0.3%** |
+
+**A 64x larger store produces a 1.58x larger packet, and the final
+quadrupling moves it 0.3%.** Packet size climbs while the budget's slots
+fill, then stops. Both properties are CI-enforced: every budget's worst
+packet must stay under its ceiling, and the last quadrupling of the store
+must not move the packet more than 5%.
+
+Honest notes: token counts use the 4-chars-per-token approximation Link
+uses for its own budget reporting — exact counts vary by tokenizer, so
+treat these as order-of-magnitude and, more importantly, as a *shape*.
+Comparisons to published per-conversation figures from other systems are
+not apples-to-apples: these are per-recall numbers, and a conversation
+contains several recalls. What the table supports is narrower and more
+useful — Link's cost is bounded and predictable, and does not degrade as
+memory accumulates. One measured wrinkle worth stating: at the micro
+budget roughly a fifth of the packet is fixed scaffolding (agent guidance,
+follow-up actions, budget reporting) rather than retrieved content, which
+is the obvious place to look for further savings.
 
 ## Reproduce
 

@@ -400,3 +400,47 @@ struct MemoryPage: Identifiable {
         return title
     }
 }
+
+/// `lnk digest --json`: the weekly reflection, including whether agents
+/// actually read memory back — the answer to "is Link even being used?"
+struct DigestPayload: Decodable {
+    struct Usage: Decodable {
+        let tracking: Bool
+        let hasData: Bool
+        let retrievals: Int
+        let briefs: Int
+        let memoriesSurfaced: Int
+        let neverRetrievedCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case tracking, retrievals, briefs
+            case hasData = "has_data"
+            case memoriesSurfaced = "memories_surfaced"
+            case neverRetrievedCount = "never_retrieved_count"
+        }
+    }
+    let windowDays: Int
+    let learnedCount: Int
+    let overdueCount: Int
+    let driftingCount: Int
+    let usage: Usage?
+
+    enum CodingKeys: String, CodingKey {
+        case usage
+        case windowDays = "window_days"
+        case learnedCount = "learned_count"
+        case overdueCount = "overdue_count"
+        case driftingCount = "drifting_count"
+    }
+}
+
+/// `lnk sync --status --json`: is this workspace syncing, and is it current?
+struct SyncStatus: Decodable {
+    let ready: Bool
+    let reason: String?
+    let branch: String?
+    let remote: String?
+    let dirty: Bool?
+    let ahead: Int?
+    let behind: Int?
+}

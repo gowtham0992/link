@@ -6,6 +6,158 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-06
+
+Start of the 2.2 cycle: "your memory, everywhere" — git-based sync with no
+server is the flagship; consolidation v2 lands first so stores are clean
+before they travel.
+
+### Added
+
+- **Memory pushes itself to every agent, not just the ones with hooks.**
+  Session hooks exist for three of the nine agents Link supports; for the
+  other six, nothing put memory in front of the agent unless it decided to
+  ask. Now the **first MCP tool response of a session carries the memory
+  brief** — whatever tool was called, even `status` — under
+  `link_session_brief`, with a note telling the agent to treat it as
+  context it already has. Once per session, skipped when there is nothing
+  to say, recorded as a retrieval so `lnk wins` can prove it happened, and
+  disabled with `LINK_MCP_AUTOBRIEF=off`. Push, through the one door every
+  agent already opens.
+- **Retrieval observability — proof your agents actually use memory.** Every
+  memory system can tell you what it stored; none could tell you whether an
+  agent ever read it back, which made "your agents have memory" a hope
+  rather than a measurement. Link now records retrievals locally: session
+  briefs (the automatic push path) and recalls (CLI and MCP), with the
+  memory names that came back. `lnk wins` drops its old hedge — *"Link does
+  not track whether an agent used a memory"* — and answers with facts:
+  *"agents read memory back 12 times (4 session briefs), surfacing 7
+  distinct memories."* `lnk digest` gains a "how memory got used" section
+  including the honest other half: **memories that have never been
+  retrieved**, which are candidates to archive.
+  Privacy is the point: the ledger records *that* a memory was used and
+  *which* one — never the query, the answer, the conversation, or anything
+  about the machine. It lives in `.link-usage.json`, is bounded to recent
+  events, never syncs (behavior is not memory), and switches off with
+  `LINK_USAGE=off`.
+- **`lnk digest` — the weekly reflection.** Consolidation answers "what
+  should I clean up?" when asked; the digest answers "is my memory
+  healthy?" without being asked. One bounded, read-only look back: what
+  you taught Link this week, what is aging out of its trust window
+  (overdue vs due soon), which memories are drifting into saying the same
+  thing, and what is still waiting for review — each with the exact
+  follow-up command. Deterministic and offline: it reuses the lifecycle,
+  consolidation, and inbox engines rather than computing new truth. A
+  quiet week says so plainly. `--days` widens the window, `--json` feeds
+  dashboards and agents.
+- **LinkBar: the digest delivers itself.** Once a week, when the digest
+  has something to say, one notification says it — "Your week with Link:
+  4 new · 2 aging · 1 saying the same thing twice · 3 never used". A
+  quiet week posts nothing: a reflection ritual that requires discipline
+  is not a ritual.
+- **`lnk import` — bring your scattered memory home.** Link's pitch is
+  memory that is not locked inside one vendor profile, and now there is a
+  door out of those profiles: `lnk import claude-code` (CLAUDE.md +
+  auto-memory files), `lnk import cursor` (rules), `lnk import codex`
+  (AGENTS.md minus Link's own section), and `lnk import file --file x.txt`
+  for memories copied out of ChatGPT or anywhere else. Curated files mine
+  in a dedicated mode — every deliberate line is a candidate, not just
+  chat-shaped ones — and every candidate lands as a proposal in the
+  capture inbox behind the same dedup, secret-scanning, and
+  injection-labeling gates as any capture. Nothing is auto-accepted;
+  re-import is a no-op for anything already pending, dismissed, or saved.
+  Day one stops being a cold start and becomes consolidation.
+- **`lnk setup` now heals stale agent instruction files.** Real-world
+  failure that motivated this: a Kiro steering file written by a pre-2.0
+  installer named MCP tools from the old full surface (`query_link`,
+  `memory_brief`), the configured slim server exposed none of them, and
+  Kiro fell back to grepping the wiki by hand — 4x the cost for the same
+  answer. Setup already refreshed MCP configs on every run; it now gives
+  Link-owned instruction sections the same idempotent treatment across
+  Kiro, Claude Code, Codex, Cursor, and Antigravity/Gemini. Strictly
+  refresh-only: a file is touched only when it carries Link's own section
+  marker and that section has drifted from the current template; user
+  content in shared files (your CLAUDE.md, your AGENTS.md) is preserved
+  byte for byte, and files Link never wrote are never created. `--preview`
+  lists what would be refreshed. On the machine that surfaced the bug,
+  setup found and healed three more stale files beyond Kiro's.
+- **Token-economics benchmark (Track 6).** The field's persistent
+  production complaint is cost — published footprints differ by orders of
+  magnitude between systems. Link's answer is structural: a recall returns
+  a *bounded packet*, and now that claim is measured, not asserted. Real
+  packets through the real query path: 1,951–4,835 tokens mean per recall
+  (micro→large budget), and the growth curve that matters — **a 64×
+  larger store produces a 1.58× larger packet, with the final quadrupling
+  (400→1,600 memories) moving it 0.3%**. Packet size climbs while the
+  budget's slots fill, then plateaus: cost tracks the budget you ask for,
+  not how much you have remembered. Both properties are CI-enforced
+  (per-budget worst-case ceilings + a deceleration gate), with the honest
+  caveats stated in RESULTS.md: 4-chars-per-token approximation, and
+  per-recall numbers are not comparable to other systems'
+  per-conversation figures.
+- **Temporal recall in plain language.** Ask what you believed *then*:
+  "where does local data live in March", "what did we decide last
+  quarter", "the plan 2 months ago", "what did I prefer back then". Link
+  resolves everyday time phrases to an exact date and reconstructs what
+  was active on it from the dated files themselves — archived memories,
+  supersede lineage, and expiry all participate — then ranks the topic
+  with the date words removed. Deterministic: a regex and a calendar, no
+  model. Event anchors ("before the migration") are reported honestly as
+  unresolved rather than guessed. `--as-of YYYY-MM-DD` still pins the
+  moment explicitly and always wins. Temporal reasoning is the open
+  problem in the published memory literature (a ~15-point spread between
+  architectures); the hygiene benchmark now measures it directly:
+  **0.917 point-in-time accuracy from plain language**, identical to
+  asking with an ISO date.
+- **`lnk sync` — your memory on every machine, no server.** Sync reviewed
+  memory between machines through a git remote you control (a private
+  repo, a homelab bare repo — anything git can push to). Three promises on
+  top of plain git: **secrets never leave** (every outgoing wiki change is
+  scanned with the memory gate's own detector before push; a
+  credential-shaped value blocks the push with the file named);
+  **conflicts become review items, never markers** (when two machines edit
+  the same memory, the remote version keeps its path and the local version
+  is preserved as a sibling memory — both recallable, paired by
+  `lnk consolidate` for the human to merge; git conflict markers never
+  touch wiki files); and **the log stays tamper-evident** (diverged logs
+  union entry-by-entry into a freshly rebuilt hash chain, with a
+  sync-merge entry declaring the re-anchor). `raw/` captures and the
+  runtime never sync — private stays local, each machine's installed Link
+  provides its own runtime. `lnk sync --init --remote <url>` once, then
+  `lnk sync` daily; `--status` shows ahead/behind. Verified end to end
+  against a local bare remote: round trip, conflict drill with a clean
+  chain, secret push-block.
+- **Team memory: a shared brain with no memory server.** `lnk team-sync`
+  graduates from printing git guidance to running the whole loop: your
+  active `visibility: team` memories are exported to a shared team
+  workspace, synced through a git remote the team controls, and
+  teammates' memories are imported into your wiki — recallable by your
+  agents like anything else. The team repo is itself a mini Link
+  workspace with its own tamper-evident log, so every sync guarantee
+  (secret push-gate, both-versions conflicts, chain-verified merges)
+  applies to the shared brain verbatim. Private and project memories
+  never leave your machine; when your copy and the team's differ, yours
+  wins locally and the difference is reported. Setup:
+  `lnk team-sync --init --remote <shared-git-url>`, then `lnk team-sync`
+  whenever. The `visibility: team` field finally does what its name
+  always promised.
+- **Consolidation v2: merge suggestions for accepted memories.** Write-time
+  duplicate refusal blocks strong duplicates at creation, but accepted
+  memories drift into overlap over months ("short PR descriptions" saved
+  twice with different wording a quarter apart). `lnk consolidate` now
+  pairs active memories that likely say the same thing — token overlap plus
+  the optional semantic tier — recommends a survivor (reviewed beats newer),
+  and prints copy-ready merge and archive commands. Suggestions only:
+  opposite-polarity pairs are contradictions (left to the conflict
+  detector), supersede-linked pairs are excluded, and nothing merges
+  without the human.
+
+### Fixed
+
+- `lnk review-memory --all <workspace>` treated the workspace argument as a
+  memory identifier and silently reviewed the default workspace instead
+  (found in dogfooding). With `--all`, a lone positional is the target.
+
 ## [2.1.0] - 2026-08-02
 
 The inbox-zero release. 2.0 put the review gate in your menu bar; this

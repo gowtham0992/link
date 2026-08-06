@@ -110,7 +110,8 @@ that have one everywhere:
 | **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
 | **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 36.5% |
-| **Memory poisoning** — 15 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
+| **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
+| **Token economics** — real recall packets, measured through the real query path | **1,951–4,835 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.58×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; both properties CI-enforced |
 | **Bundled 1,176-case recall benchmark** — deterministic, runs offline in CI | hit@1 **0.749**, +rerank **0.839** | gates every change; a regression fails the build |
 
 Every number ships with its config, judge model, caveats, and the
@@ -122,6 +123,35 @@ layer — that's what the 99.4% evidence-retrieval row above isolates.
 Full methodology and reproduction steps:
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
+## Memory You Can Take Anywhere — And Prove Is Working
+
+Three questions every memory system should answer, and how Link answers
+them with mechanisms instead of promises:
+
+**"Is it on all my machines?"** `lnk sync` moves reviewed memory through
+a git remote *you* control — a private GitHub repo, a homelab bare repo —
+with no server and no account. Secrets are scanned before anything
+leaves, conflicts become review items instead of git markers, and private
+captures never sync. `lnk team-sync` runs a shared team brain on the same
+rails.
+
+**"What did I believe back then?"** Ask in plain language: `lnk recall
+"where does local data live in March"` returns what was true *then*,
+reconstructed from the dated files and their supersede lineage — while
+the same question without the date returns today's truth. Deterministic:
+a regex and a calendar, no model. Point-in-time accuracy from plain
+language: 0.917, identical to asking with an ISO date.
+
+**"Is my agent actually using this?"** The question most memory systems
+cannot answer about themselves. Link records retrievals locally — session
+briefs pushed to agents, recalls they chose to make — and `lnk wins`
+answers with counts, while `lnk digest` reports the weekly story
+including memories that have *never* been retrieved. The ledger stores
+which memory was read and when, never what you asked; it never syncs, and
+`LINK_USAGE=off` disables it. And memory reaches every agent, not just
+the hooked ones: the first MCP tool response of a session carries the
+brief, whatever tool was called.
+
 ## Quick Start
 
 Two commands: see it work, then make it yours.
@@ -130,6 +160,13 @@ Two commands: see it work, then make it yours.
 brew install gowtham0992/link/link
 lnk proof     # see the promise (~1 second, no setup)
 lnk setup     # wire every agent you have — workspace, MCP, session hooks, one command
+```
+
+Already have memory scattered across tools? Bring it home as reviewable
+proposals — nothing is auto-accepted:
+
+```bash
+lnk import claude-code   # or: cursor, codex, file --file chatgpt.txt
 ```
 
 `lnk setup` detects the agents installed on your machine — Claude Code,

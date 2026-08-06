@@ -5,7 +5,7 @@ import fnmatch
 import re
 import urllib.parse
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .consolidate import memory_backlog_summary
@@ -2968,6 +2968,113 @@ def memory_conflict_candidates(
     return [candidate for _, candidate in candidates[:limit]]
 
 
+MERGE_TOKEN_JACCARD_THRESHOLD = 0.45
+MERGE_MIN_SHARED_TOKENS = 4
+MERGE_SEMANTIC_THRESHOLD = 0.70  # stricter than revisions: merging asserts sameness
+
+
+def memory_merge_candidates(
+    records: Iterable[Mapping[str, object]],
+    *,
+    limit: int = 10,
+    embedder: Callable[[list[str]], list[list[float]]] | None = None,
+) -> list[dict[str, object]]:
+    """Pairs of active memories that likely say the same thing.
+
+    Write-time duplicate refusal blocks strong duplicates at creation, but
+    accepted memories drift into overlap over months ("short PR
+    descriptions" saved twice with different wording a quarter apart).
+    Suggestions only — merging is always the human's call:
+
+    - same memory_type and scope only (cross-type overlap is the conflict
+      detector's business, not a merge)
+    - opposite polarity is excluded (that is a contradiction, not a merge)
+    - pairs already linked by supersede lineage are excluded
+    - survivor = the reviewed one, else the more recently captured one
+    """
+    active = [
+        record for record in records
+        if is_active_memory(record) and str(record.get("name") or "")
+    ]
+    token_sets = {
+        str(record.get("name")): stemmed_memory_tokens(
+            significant_memory_tokens(memory_claim_text(record))
+        )
+        for record in active
+    }
+    lineage: set[tuple[str, str]] = set()
+    for record in active:
+        name = str(record.get("name"))
+        for key in ("supersedes", "superseded_by"):
+            other = str(record.get(key) or "").strip()
+            if other:
+                lineage.add((name, other))
+                lineage.add((other, name))
+
+    pairs: list[tuple[float, Mapping[str, object], Mapping[str, object], str]] = []
+    semantic_pool: list[tuple[Mapping[str, object], Mapping[str, object]]] = []
+    for i, first in enumerate(active):
+        for second in active[i + 1:]:
+            if str(first.get("memory_type")) != str(second.get("memory_type")):
+                continue
+            if str(first.get("scope")) != str(second.get("scope")):
+                continue
+            name_a, name_b = str(first.get("name")), str(second.get("name"))
+            if (name_a, name_b) in lineage:
+                continue
+            claim_a = str(first.get("tldr") or "") or memory_claim_text(first)
+            claim_b = str(second.get("tldr") or "") or memory_claim_text(second)
+            if has_negation(claim_a) != has_negation(claim_b):
+                continue
+            tokens_a, tokens_b = token_sets[name_a], token_sets[name_b]
+            shared = tokens_a & tokens_b
+            union = tokens_a | tokens_b
+            jaccard = len(shared) / len(union) if union else 0.0
+            if len(shared) >= MERGE_MIN_SHARED_TOKENS and jaccard >= MERGE_TOKEN_JACCARD_THRESHOLD:
+                pairs.append((jaccard, first, second, "token_overlap"))
+            elif union:
+                semantic_pool.append((first, second))
+
+    if semantic_pool:
+        active_embedder = embedder if embedder is not None else _default_conflict_embedder()
+        if active_embedder is not None:
+            texts: list[str] = []
+            for first, second in semantic_pool:
+                texts.append(str(first.get("tldr") or "") or memory_claim_text(first))
+                texts.append(str(second.get("tldr") or "") or memory_claim_text(second))
+            try:
+                vectors = active_embedder(texts)
+            except Exception:
+                vectors = []
+            if len(vectors) == len(texts):
+                for index, (first, second) in enumerate(semantic_pool):
+                    similarity = _cosine_similarity(vectors[2 * index], vectors[2 * index + 1])
+                    if similarity >= MERGE_SEMANTIC_THRESHOLD:
+                        pairs.append((similarity, first, second, "semantic"))
+
+    def _reviewed(record: Mapping[str, object]) -> bool:
+        return str(record.get("review_status") or "") == "reviewed"
+
+    candidates: list[dict[str, object]] = []
+    for similarity, first, second, reason in sorted(pairs, key=lambda item: -item[0]):
+        survivor, absorbed = first, second
+        if _reviewed(second) and not _reviewed(first):
+            survivor, absorbed = second, first
+        elif _reviewed(first) == _reviewed(second):
+            if str(second.get("date_captured") or "") > str(first.get("date_captured") or ""):
+                survivor, absorbed = second, first
+        candidates.append({
+            "survivor": str(survivor.get("name")),
+            "survivor_title": str(survivor.get("title") or ""),
+            "absorbed": str(absorbed.get("name")),
+            "absorbed_title": str(absorbed.get("title") or ""),
+            "absorbed_claim": str(absorbed.get("tldr") or "")[:240],
+            "similarity": round(similarity, 3),
+            "reason": reason,
+        })
+    return candidates[:max(1, min(limit, 25))]
+
+
 def memory_proposal_segments(text: str) -> list[str]:
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     segments: list[str] = []
@@ -3397,6 +3504,63 @@ def memory_durability_rank(memory: str) -> int:
     return rank
 
 
+# ── Curated import: mining a file someone already wrote as instructions ──
+
+_CURATED_SKIP_PREFIXES = ("#", ">", "|", "```", "---", "<!--")
+
+
+def curated_candidate_lines(text: str) -> list[str]:
+    """Candidate statements from a curated instruction/memory file.
+
+    One candidate per bullet or line: markers stripped, headings, code
+    fences, tables, and questions skipped. Curated files earn line-level
+    trust — every surviving line still passes review before it is memory.
+    """
+    lines: list[str] = []
+    in_fence = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence or not line:
+            continue
+        if any(line.startswith(prefix) for prefix in _CURATED_SKIP_PREFIXES):
+            continue
+        line = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", line).strip()
+        line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+        if len(line) < 8 or len(line) > 400:
+            continue
+        if is_interrogative(line):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _curated_fallback_classification(segment: str) -> dict[str, object] | None:
+    """Classification for a curated line the conversational rules declined."""
+    lowered = segment.lower()
+    if re.match(r"^(always|never|don't|do not|use|prefer|avoid|run|keep|write|only)\b", lowered):
+        memory_type = "preference"
+    elif re.search(r"\b(?:is|are|lives?|runs? on|uses?)\b", lowered):
+        memory_type = "fact"
+    else:
+        memory_type = "note"
+    memory = normalize_proposed_memory(segment, memory_type)
+    if not memory:
+        return None
+    return {
+        "memory": memory,
+        "memory_type": memory_type,
+        "scope": "user",
+        "confidence_score": 70,
+        "reason": (
+            "Imported from a curated file: kept as a deliberate statement "
+            "even without conversational cues. Review before accepting."
+        ),
+    }
+
+
 def propose_memories_from_text(
     text: str,
     records: Iterable[Mapping[str, object]],
@@ -3406,6 +3570,7 @@ def propose_memories_from_text(
     project: str | None = None,
     command_target: str | Path = ".",
     exclude_fingerprints: Collection[str] = (),
+    curated: bool = False,
 ) -> dict[str, object]:
     record_list = [dict(record) for record in records]
     project_name = normalize_project(project)
@@ -3450,12 +3615,19 @@ def propose_memories_from_text(
         }
         proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
         proposals.append(proposal)
-    segments = memory_proposal_segments(text)
+    segments = curated_candidate_lines(text) if curated else memory_proposal_segments(text)
     for index, segment in enumerate(segments):
         classified = classify_memory_segment(segment)
         if not classified:
-            skipped += 1
-            continue
+            if curated:
+                # Curated sources (an instruction file, an exported memory
+                # list) carry deliberate statements, not chat — a line that
+                # lacks conversational cues is still a real candidate. The
+                # review gate stays; only the chat-junk heuristics relax.
+                classified = _curated_fallback_classification(segment)
+            if not classified:
+                skipped += 1
+                continue
         # Retrieval context: the neighboring sentences around the claim's
         # origin (the LoCoMo-measured +/-1 window). Helps recall find the
         # memory later; never part of the claim itself.
@@ -3463,7 +3635,7 @@ def propose_memories_from_text(
             segments[j] for j in (index - 1, index + 1) if 0 <= j < len(segments)
         ).strip()
         score = int(str(classified["confidence_score"]))
-        if score < MEMORY_PROPOSAL_MIN_SCORE:
+        if score < MEMORY_PROPOSAL_MIN_SCORE and not curated:
             skipped += 1
             continue
         memory = str(classified["memory"])
@@ -3530,4 +3702,126 @@ def propose_memories_from_text(
         "skipped_count": skipped,
         "proposals": proposals,
         "writes_memory": writes_memory,
+    }
+
+
+# ── Temporal recall: what did I believe *then*? ───────────────────────────
+# The field's open problem is temporal reasoning — published work measures a
+# ~15-point spread between architectures on time-scoped questions, and notes
+# that retrieval "underutilizes the semantic time encoded" in the store.
+# Link's advantage is structural, not clever: every memory is a dated file
+# with lifecycle fields, so point-in-time reconstruction is exact rather
+# than inferred. What was missing is the human phrasing — nobody types
+# 2026-03-31. This maps everyday time language onto the exact machinery.
+
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+_TIME_PHRASE_RE = re.compile(
+    r"(?i)\b("
+    r"as of \d{4}-\d{2}-\d{2}"
+    r"|back then|at the time|originally|initially"
+    r"|last (?:week|month|quarter|year)"
+    r"|this (?:week|month|quarter|year)"
+    r"|(?:a |one )?(?:week|month|quarter|year)s? ago"
+    r"|\d+ (?:days?|weeks?|months?|years?) ago"
+    r"|in (?:january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"|in \d{4}"
+    r"|before the [a-z0-9-]+|since the [a-z0-9-]+"
+    r")\b"
+)
+
+
+def _end_of_month(year: int, month: int) -> date:
+    if month == 12:
+        return date(year, 12, 31)
+    return date(year, month + 1, 1) - timedelta(days=1)
+
+
+def parse_time_expression(query: str, today: str | None = None) -> dict[str, object] | None:
+    """Map a natural time phrase in a query to an exact as-of date.
+
+    Returns the matched phrase, the resolved YYYY-MM-DD, and the residual
+    query with the phrase removed (so ranking scores the topic, not the
+    date words). Deterministic and offline — no model, no clock magic
+    beyond `today`. Unrecognized phrasing returns None and recall behaves
+    exactly as it always has.
+    """
+    text = str(query or "")
+    match = _TIME_PHRASE_RE.search(text)
+    if not match:
+        return None
+    phrase = match.group(1)
+    lower = phrase.lower()
+    now = _today(today)
+    resolved: date | None = None
+
+    if lower.startswith("as of "):
+        try:
+            resolved = date.fromisoformat(lower[len("as of "):].strip())
+        except ValueError:
+            return None
+    elif lower in {"back then", "at the time", "originally", "initially"}:
+        # Deliberately vague: the honest reading is "before recent changes",
+        # which we anchor a quarter back rather than pretending precision.
+        resolved = now - timedelta(days=90)
+    elif lower.startswith("last "):
+        unit = lower.split()[1]
+        resolved = {
+            "week": now - timedelta(days=7),
+            "month": now - timedelta(days=30),
+            "quarter": now - timedelta(days=90),
+            "year": now - timedelta(days=365),
+        }[unit]
+    elif lower.startswith("this "):
+        unit = lower.split()[1]
+        resolved = {
+            "week": now - timedelta(days=now.weekday()),
+            "month": now.replace(day=1),
+            "quarter": now.replace(month=((now.month - 1) // 3) * 3 + 1, day=1),
+            "year": now.replace(month=1, day=1),
+        }[unit]
+    elif lower.endswith(" ago"):
+        parts = lower[: -len(" ago")].split()
+        count_text, unit = (parts[0], parts[-1]) if len(parts) >= 2 else ("1", parts[0])
+        count = 1 if count_text in {"a", "one"} else int(count_text) if count_text.isdigit() else 1
+        days = {"day": 1, "days": 1, "week": 7, "weeks": 7, "month": 30,
+                "months": 30, "quarter": 90, "quarters": 90, "year": 365,
+                "years": 365}.get(unit)
+        if days is None:
+            return None
+        resolved = now - timedelta(days=count * days)
+    elif lower.startswith("in "):
+        token = lower[3:].strip()
+        if token.isdigit() and len(token) == 4:
+            year = int(token)
+            resolved = _end_of_month(year, 12) if year < now.year else now
+        elif token in _MONTHS:
+            month = _MONTHS[token]
+            year = now.year if month <= now.month else now.year - 1
+            resolved = min(_end_of_month(year, month), now)
+    elif lower.startswith("before the ") or lower.startswith("since the "):
+        # Event-anchored phrasing ("before the migration"): the event name is
+        # a topic, not a date. Keep the words in the query for ranking and
+        # report the phrase so surfaces can say the anchor was not resolved.
+        return {
+            "phrase": phrase,
+            "as_of": None,
+            "residual_query": text.strip(),
+            "unresolved_event": phrase,
+        }
+    if resolved is None:
+        return None
+    residual = (text[: match.start(1)] + text[match.end(1):]).strip()
+    residual = re.sub(r"\s{2,}", " ", residual).strip(" ,")
+    return {
+        "phrase": phrase,
+        "as_of": resolved.isoformat(),
+        "residual_query": residual or text.strip(),
+        "unresolved_event": "",
     }

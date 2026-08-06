@@ -63,7 +63,7 @@
         <p>The CLI is independent of the web viewer. Use <code>lnk start</code>, <code>lnk query</code>, <code>lnk brief</code>, <code>lnk session-end</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
         <p>Use <code>lnk try</code> when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command.</p>
         <p>Use <code>lnk proof</code> when you want to prove the cross-agent memory loop directly: one clean local workspace, one reviewed memory, and one bounded recall packet shared by CLI, skills, and MCP.</p>
-        <p>Use <code>lnk setup</code> for install day and every upgrade after it: it detects every agent installed on your machine and wires them all — workspace, MCP provisioning, session hooks — in one idempotent command. Use <code>lnk onboard</code> when you want the guided single-agent flow: safe repair, health check, optional first memory, optional project seed, first prompts, and optional agent MCP wiring. If the local viewer is running, <code>/onboard</code> mirrors that flow with copy buttons.</p>
+        <p>Use <code>lnk setup</code> for install day and every upgrade after it: it detects every agent installed on your machine and wires them all — workspace, MCP provisioning, session hooks, and a refresh of any stale Link-owned agent instruction files (a steering file from an older Link can name MCP tools the configured server no longer exposes, sending the agent back to file greps) — in one idempotent command. Use <code>lnk onboard</code> when you want the guided single-agent flow: safe repair, health check, optional first memory, optional project seed, first prompts, and optional agent MCP wiring. If the local viewer is running, <code>/onboard</code> mirrors that flow with copy buttons.</p>
         <p>Use <code>lnk seed . ~/link</code> from a project directory when you want Link to create a source-backed project page from existing repo context before the first real recall. It scans allowlisted docs/rule files, blocks secret-looking values, and does not create durable memories silently.</p>
 
         <h2 id="daily">Daily Loop</h2>
@@ -113,6 +113,32 @@ lnk accept-capture raw/memory-captures/&lt;capture&gt;.md --index 1
 lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
 lnk delete-capture raw/memory-captures/&lt;capture&gt;.md --confirm
 lnk dedup-captures            # collapse inbox captures that offer nothing new (--confirm applies)</code></pre>
+
+                <h2 id="import">Import Your Scattered Memory</h2>
+        <p>Your memory already exists — in <code>~/.claude/CLAUDE.md</code> and Claude Code's auto-memory, Cursor rules, a hand-tended <code>AGENTS.md</code>, or memories copied out of ChatGPT. <code>lnk import</code> reads those surfaces and turns each deliberate line into a reviewable proposal in the capture inbox — through the same dedup, secret-scanning, and injection-labeling gates as any capture. Nothing is ever auto-accepted, Link's own instruction sections are excluded, and re-running an import is a no-op for anything already pending, dismissed, or saved.</p>
+        <pre><code>lnk import claude-code    # CLAUDE.md + auto-memory
+lnk import cursor         # rules files
+lnk import codex          # AGENTS.md (minus Link's own section)
+lnk import file --file chatgpt-memories.txt   # anything pasted to a file</code></pre>
+
+        <h2 id="digest">Weekly Digest</h2>
+        <p><code>lnk digest</code> is the reflection ritual: what you taught Link this week, what is aging out of its trust window, which memories are drifting into saying the same thing, and what is still waiting for review. Read-only and deterministic — it reuses the lifecycle, consolidation, and inbox engines rather than computing new truth. A quiet week says so.</p>
+        <pre><code>lnk digest              # the last 7 days
+lnk digest --days 30    # a monthly look back
+lnk digest --json       # for dashboards and agents</code></pre>
+
+        <h2 id="temporal">Temporal Recall</h2>
+        <p>Ask what you believed <em>then</em>, in plain language. Link resolves everyday time phrases ("last quarter", "in March", "2 months ago", "back then") to an exact date and reconstructs what was active on it from the dated files themselves — archived memories, supersede lineage, and expiry all participate. No model, no clock magic. <code>--as-of YYYY-MM-DD</code> still pins the moment explicitly.</p>
+        <pre><code>lnk recall "where does local data live"              # today's truth
+lnk recall "where does local data live in March"     # what was true then
+lnk recall "what did we decide last quarter"
+lnk recall "deploy process" --as-of 2026-03-31</code></pre>
+
+<h2 id="sync">Sync Between Machines</h2>
+        <p><code>lnk sync</code> moves reviewed memory between your machines through a git remote you control (a private repo, a homelab bare repo) — no server, no service. Secrets are scanned before anything is pushed; conflicting memory edits are kept as both versions and surfaced by <code>lnk consolidate</code> for review (git conflict markers never touch wiki files); the tamper-evident log merges with a declared re-anchor. <code>raw/</code> captures and the runtime never sync.</p>
+        <pre><code>lnk sync --init --remote git@github.com:you/link-memory.git
+lnk sync                      # daily: commit, pull, resolve, gate secrets, push
+lnk sync --status</code></pre>
 
         <h2 id="maintenance">Maintenance</h2>
         <pre><code>lnk backup

@@ -48,6 +48,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from link_core.agent_hooks import LINK_ECHO_MARKERS  # noqa: E402
 from link_core.memory import (  # noqa: E402
     is_existing_memory_echo,
+    parse_time_expression,
     memory_records,
     propose_memories_from_text,
     recall_memories,
@@ -150,6 +151,8 @@ def measure(wiki: Path, state: dict[str, object]) -> dict[str, float]:
     precision_hits = 0
     exposure_hits = 0
     as_of_hits = 0
+    phrase_hits = 0
+    phrase_measured = 0
     measured = 0
     for intent, query in queries.items():
         if intent not in latest:
@@ -166,6 +169,18 @@ def measure(wiki: Path, state: dict[str, object]) -> dict[str, float]:
             historical = recall_memories(records, query, limit=1, as_of=fact_date)
             if historical and str(historical[0]["name"]) == outdated_name:
                 as_of_hits += 1
+            # Temporal track: the same point-in-time question asked the way a
+            # human asks it — plain language, no ISO date. Measures the
+            # parser and the reconstruction together, end to end.
+            phrase_measured += 1
+            parsed = parse_time_expression(f"{query} as of {fact_date}")
+            if parsed and parsed.get("as_of"):
+                phrased = recall_memories(
+                    records, str(parsed["residual_query"]), limit=1,
+                    as_of=str(parsed["as_of"]),
+                )
+                if phrased and str(phrased[0]["name"]) == outdated_name:
+                    phrase_hits += 1
 
     revised_measured = len([i for i in revised if i in latest]) or 1
     return {
@@ -177,6 +192,7 @@ def measure(wiki: Path, state: dict[str, object]) -> dict[str, float]:
         "current_truth_precision@1": round(precision_hits / measured, 4) if measured else 0.0,
         "contradiction_exposure@3": round(exposure_hits / revised_measured, 4),
         "as_of_accuracy": round(as_of_hits / revised_measured, 4),
+        "temporal_phrase_accuracy": round(phrase_hits / phrase_measured, 4) if phrase_measured else 0.0,
     }
 
 

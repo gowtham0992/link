@@ -149,7 +149,7 @@ class CaptureCoreTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        def propose(notes: str, source: str, limit: int, project: str) -> dict[str, object]:
+        def propose(notes: str, source: str, limit: int, project: str, curated: bool = False) -> dict[str, object]:
             return {
                 "count": 2,
                 "proposals": [
@@ -230,7 +230,7 @@ class CaptureCoreTests(unittest.TestCase):
         capture_dir.mkdir(parents=True)
         (capture_dir / "empty.md").write_text("", encoding="utf-8")
 
-        def propose(_notes: str, _source: str, _limit: int, _project: str) -> dict[str, object]:
+        def propose(_notes: str, _source: str, _limit: int, _project: str, _curated: bool = False) -> dict[str, object]:
             return {"proposals": []}
 
         with self.assertRaisesRegex(ValueError, "proposal index must be 1 or greater"):
@@ -603,7 +603,7 @@ class CaptureProvenanceTests(unittest.TestCase):
                 proposal_text="User: from now on I only push to develop.",
             )
 
-            def builder(notes, source, limit, project):
+            def builder(notes, source, limit, project, curated=False):
                 return propose_memories_from_text(notes, [], source=source, limit=limit)
 
             selection = capture_proposal_selection(

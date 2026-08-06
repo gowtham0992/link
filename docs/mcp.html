@@ -132,6 +132,7 @@ python3 -m link_mcp --semantic-setup --wiki ~/link/wiki</code></pre>
 }</code></pre>
 
         <h2 id="workflow">Predictable Agent Workflow</h2>
+        <p><strong>Memory arrives on its own.</strong> Only some agents support session hooks, so Link also pushes through the one channel every MCP agent shares: the <em>first tool response of a session</em> carries a compact memory brief under <code>link_session_brief</code>, whatever tool was called — even <code>status</code>. It happens once per session, is skipped when there is nothing to say, is recorded as a retrieval so <code>lnk wins</code> can prove it happened, and is disabled with <code>LINK_MCP_AUTOBRIEF=off</code>. Agents should treat it as context they already have.</p>
         <p>If Link session hooks are installed for the agent (<code>lnk connect &lt;agent&gt; --hooks --write</code>), the startup brief is injected automatically — agents should skip the manual brief call and go straight to bounded task recall. When a brief reports a memory backlog, <code>review(action="consolidate")</code> returns a read-only consolidation plan to walk through with the user.</p>
         <p>New MCP configs use the slim surface by default so agents see one obvious read tool and one obvious write tool instead of a long menu of overlapping helpers. The full compatibility surface remains available with <code>--surface full</code>.</p>
         <p>Slim agents should use Link in this order:</p>

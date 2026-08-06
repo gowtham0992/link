@@ -139,7 +139,9 @@ from link_core.memory import (
     memory_audit_report as _core_memory_audit_report,
     memory_audit_next_actions as _core_memory_audit_next_actions,
     memory_records as _core_memory_records,
+    memory_merge_candidates as _core_memory_merge_candidates,
     memory_review_issues as _core_memory_review_issues,
+    parse_time_expression as _core_parse_time_expression,
     proposal_fingerprint as _core_proposal_fingerprint,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memories,
@@ -255,6 +257,26 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
     atomic_write_text as _core_atomic_write_text,
 )
+from link_core.importers import (
+    collect_import_units as _core_collect_import_units,
+)
+from link_core.agent_instructions import (
+    instruction_file_status as _core_instruction_file_status,
+    refresh_instruction_file as _core_refresh_instruction_file,
+)
+from link_core.usage import (
+    record_retrieval as _core_record_retrieval,
+    usage_summary as _core_usage_summary,
+)
+from link_core.sync import (
+    SyncError as _core_sync_error,
+    sync_init as _core_sync_init,
+    sync_status as _core_sync_status,
+    sync_workspace as _core_sync_workspace,
+    team_config as _core_team_config,
+    team_init as _core_team_init,
+    team_sync_workspace as _core_team_sync_workspace,
+)
 from link_core.ingest import (
     collect_ingest_status as _core_collect_ingest_status,
     render_ingest_status_text as _core_render_ingest_status_text,
@@ -287,6 +309,8 @@ from link_core.agent_hooks import (
 )
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
+    build_digest as _core_build_digest,
+    render_digest_text as _core_render_digest_text,
     render_consolidate_text as _core_render_consolidate_text,
 )
 from link_core.semantic import (
@@ -566,16 +590,12 @@ def _propose_memories_from_text(
     project: str | None = None,
     command_target: str | Path = ".",
     exclude_fingerprints: Collection[str] = (),
+    curated: bool = False,
 ) -> dict[str, object]:
     return _core_propose_memories_from_text(
-        text,
-        _memory_records(wiki_dir),
-        source=source,
-        limit=limit,
-        writes_memory=False,
-        project=project,
-        command_target=command_target,
-        exclude_fingerprints=exclude_fingerprints,
+        text, _memory_records(wiki_dir), source=source, limit=limit,
+        writes_memory=False, project=project, command_target=command_target,
+        exclude_fingerprints=exclude_fingerprints, curated=curated,
     )
 
 
@@ -1007,14 +1027,77 @@ def compliance_export(
     return 0
 
 
-def team_sync(target: Path, remote: str | None = None, json_output: bool = False) -> int:
+def team_sync(
+    target: Path,
+    remote: str | None = None,
+    init: bool = False,
+    team_dir: str | None = None,
+    json_output: bool = False,
+) -> int:
     target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    try:
+        if init:
+            if not wiki_dir.exists():
+                return _missing_wiki_error(wiki_dir)
+            chosen = Path(team_dir).expanduser() if team_dir else root.parent / f"{root.name}-team"
+            payload: dict[str, object] = _core_team_init(root, chosen, remote=remote)
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            lines = [f"Team workspace ready: {payload.get('team_dir')}"]
+            if payload.get("remote"):
+                lines.append(f"Shared remote: {payload.get('remote')}")
+            else:
+                lines.append("Add the shared remote your team pushes to: "
+                             + _shell_words_for_target("team-sync", target, "--init", "--remote", "<git-url>"))
+            lines.append("Only memories you mark visibility: team are ever shared.")
+            lines.append(f"Daily: {_shell_words_for_target('team-sync', target)}")
+            _print_text("\n".join(lines))
+            return 0
+        if _core_team_config(root):
+            if not wiki_dir.exists():
+                return _missing_wiki_error(wiki_dir)
+            payload = _core_team_sync_workspace(
+                root, wiki_dir,
+                regenerate=lambda: (_core_rebuild_index(wiki_dir), _rebuild_backlinks_quiet(wiki_dir)),
+            )
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            exported_obj = payload.get("exported")
+            exported: list[object] = exported_obj if isinstance(exported_obj, list) else []
+            imported_obj = payload.get("imported")
+            imported: list[object] = imported_obj if isinstance(imported_obj, list) else []
+            conflicts_obj = payload.get("conflicts")
+            conflicts: list[object] = conflicts_obj if isinstance(conflicts_obj, list) else []
+            parts = []
+            if exported:
+                parts.append(f"shared {len(exported)}")
+            if imported:
+                parts.append(f"imported {len(imported)}")
+            _print_text("Team sync: " + (", ".join(parts) if parts else "already up to date"))
+            for name in imported:
+                _print_text(f"  new from the team: {name}")
+            if conflicts:
+                _print_text(f"  {len(conflicts)} memory(ies) differ from the team version — kept yours:")
+                for name in conflicts:
+                    _print_text(f"    {name} (edit and re-share, or adopt the team version deliberately)")
+            return 0
+    except _core_sync_error as exc:
+        print(f"Team sync failed: {exc}", file=sys.stderr)
+        return 1
+    # Unconfigured and not initializing: keep the read-only guidance plan.
     payload = _core_build_team_sync_payload(target, remote=remote)
     if json_output:
         print(json.dumps(payload, indent=2))
         return 0
     code, text = _core_render_team_sync_text(payload)
     _print_text(text)
+    if code == 0:
+        _print_text("\nOr let Link run the whole loop: "
+                    + _shell_words_for_target("team-sync", target, "--init", "--remote", "<git-url>"))
     return code
 
 
@@ -1470,7 +1553,7 @@ def accept_capture(
             default_project=_default_project(root),
             # Exclude dismissed proposals exactly like inbox previews do, so
             # "accept proposal 1" targets the same item the user saw listed.
-            propose_memories=lambda notes, rel_path, proposal_limit, project_name: _propose_memories_from_text(
+            propose_memories=lambda notes, rel_path, proposal_limit, project_name, curated=False: _propose_memories_from_text(
                 wiki_dir,
                 notes,
                 source=rel_path,
@@ -1478,6 +1561,7 @@ def accept_capture(
                 project=project_name,
                 command_target=root,
                 exclude_fingerprints=set(_core_load_dismissed_fingerprints(root)),
+                curated=curated,
             ),
         )
     except ValueError as exc:
@@ -1756,10 +1840,18 @@ def recall(
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     project_name = project or _default_project(target)
+    # Temporal recall in plain language: "what did we decide last quarter"
+    # resolves to the exact as-of date and the topic is ranked without the
+    # date words. An explicit --as-of always wins.
+    search_query = query
+    temporal = None if as_of else _core_parse_time_expression(query)
+    if temporal and temporal.get("as_of"):
+        as_of = str(temporal["as_of"])
+        search_query = str(temporal["residual_query"]) or query
     try:
         results = _recall_memories(
             wiki_dir,
-            query,
+            search_query,
             limit=limit,
             include_archived=include_archived,
             project=project_name,
@@ -1770,6 +1862,11 @@ def recall(
         print(f"Could not recall: {exc}", file=sys.stderr)
         return 1
 
+    _core_record_retrieval(
+        _resolve_link_root(target), "recall",
+        [str(item.get("name") or "") for item in results], project=project_name or "",
+    )
+
     if json_output:
         print(json.dumps({
             "query": query,
@@ -1777,10 +1874,22 @@ def recall(
             "include_archived": include_archived,
             "project": project_name,
             "as_of": as_of or "",
+            "temporal": temporal or {},
             "abstention": _core_recall_abstention(results),
             "memories": results,
         }, indent=2))
         return 0
+
+    if temporal and temporal.get("as_of"):
+        _print_text(
+            f"Temporal recall: \"{temporal['phrase']}\" -> as of {as_of} "
+            f"(what was active then, not what is true now)\n"
+        )
+    elif temporal and temporal.get("unresolved_event"):
+        _print_text(
+            f"Note: \"{temporal['unresolved_event']}\" names an event, not a date — "
+            f"searching by topic. Use --as-of YYYY-MM-DD to pin the moment.\n"
+        )
 
     code, text = _core_render_recall_text(
         query=query,
@@ -1788,6 +1897,7 @@ def recall(
         include_archived=include_archived,
         project=project_name,
         target=target,
+        store_count=len(_memory_records(wiki_dir)) if not results else -1,
     )
     _print_text(text)
     return code
@@ -1901,7 +2011,13 @@ def memory_wins(target: Path, limit: int = 6, project: str | None = None, json_o
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
-    payload = _core_memory_wins_payload(wiki_dir, limit=limit, project=project)
+    payload = _core_memory_wins_payload(
+        wiki_dir, limit=limit, project=project,
+        usage=_core_usage_summary(
+            _resolve_link_root(target), days=30,
+            records=[r for r in _memory_records(wiki_dir) if str(r.get("status") or "active") == "active"],
+        ),
+    )
     return _emit_json_or_text(
         payload,
         json_output,
@@ -2133,7 +2249,16 @@ def start(
         command_target=_resolve_link_root(target),
     )
     query_text = task or "your current task"
-    relevant_count = int(brief_payload.get("relevant_count") or len(brief_payload.get("relevant_memories") or []))
+    relevant_obj = brief_payload.get("relevant_memories")
+    relevant_list: list[object] = relevant_obj if isinstance(relevant_obj, list) else []
+    # The push path: memory reached the agent without it deciding anything.
+    # Recording it is what turns "your agents have memory" into a number.
+    _core_record_retrieval(
+        _resolve_link_root(target), "brief",
+        [str(item.get("name") or "") for item in relevant_list if isinstance(item, dict)],
+        project=project_name or "",
+    )
+    relevant_count = int(brief_payload.get("relevant_count") or len(relevant_list))
     project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
         status_payload.get("content_page_count") or 0
     )
@@ -2347,6 +2472,7 @@ def consolidate(target: Path, limit: int = 50, project: str | None = None, json_
         inbox_payload=inbox_payload,
         command_target=root,
         project=project,
+        merge_candidates=_core_memory_merge_candidates(_memory_records(wiki_dir)),
     )
     return _emit_json_or_text(payload, json_output, _core_render_consolidate_text)
 
@@ -2826,6 +2952,207 @@ def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str
     return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
 
 
+def import_memory(
+    target: Path,
+    *,
+    source: str,
+    file_path: str | None = None,
+    project: str | None = None,
+    json_output: bool = False,
+) -> int:
+    """Bring memory home from another tool, as reviewable proposals."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    try:
+        units = _core_collect_import_units(
+            source, file_path=Path(file_path) if file_path else None,
+        )
+    except ValueError as exc:
+        print(f"Could not import: {exc}", file=sys.stderr)
+        return 1
+    if not units:
+        _print_text(
+            f"Nothing to import from {source}: no memory surface found for it on this machine."
+        )
+        return 0
+
+    records = _memory_records(wiki_dir)
+    exclude = set(_core_load_dismissed_fingerprints(root)) | set(_core_pending_proposal_fingerprints(root))
+    results: list[dict[str, object]] = []
+    total_proposals = 0
+    for unit in units:
+        preview = _core_propose_memories_from_text(
+            unit["text"], records, source=f"import:{source}", limit=50,
+            project=project, command_target=root,
+            exclude_fingerprints=exclude, curated=True,
+        )
+        proposals = preview.get("proposals") if isinstance(preview.get("proposals"), list) else []
+        if not proposals:
+            results.append({"label": unit["label"], "origin": unit["origin"], "proposals": 0, "capture": ""})
+            continue
+        capture = _core_write_session_capture(
+            root,
+            text=unit["text"],
+            source=f"import:{source} \u00b7 {unit['origin']}",
+            title=unit["label"],
+            project=project,
+            source_type="import",
+        )
+        total_proposals += len(proposals)
+        results.append({
+            "label": unit["label"], "origin": unit["origin"],
+            "proposals": len(proposals), "capture": str(capture.get("path") or ""),
+            "secret_warnings": capture.get("secret_warnings") or [],
+        })
+
+    if json_output:
+        print(json.dumps({
+            "source": source, "units": results, "total_proposals": total_proposals,
+        }, indent=2))
+        return 0
+
+    _print_text(f"Import from {source}: {len(units)} surface(s) scanned\n")
+    for item in results:
+        count = int(str(item["proposals"]))
+        if count:
+            _print_text(f"  + {item['label']}: {count} candidate memory(ies) -> {item['capture']}")
+        else:
+            _print_text(f"  \u00b7 {item['label']}: nothing new (all duplicates of what Link already has)")
+    if total_proposals:
+        _print_text(
+            f"\n{total_proposals} candidate(s) are waiting as proposals - nothing is saved yet."
+            f"\nReview them: {_display_command(['lnk', 'capture-inbox', str(root)])}"
+        )
+    else:
+        _print_text("\nNothing new to review - your Link memory already covers these files.")
+    return 0
+
+
+def digest(target: Path, days: int = 7, json_output: bool = False) -> int:
+    """Weekly reflection: what changed, what is aging, what is drifting."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    records = _memory_records(wiki_dir)
+    captures = _core_capture_inbox(root, limit=50)
+    inbox = _memory_inbox(wiki_dir, limit=50)
+    inbox_items = inbox.get("items") if isinstance(inbox.get("items"), list) else []
+    payload = _core_build_digest(
+        records=records,
+        merge_candidates=_core_memory_merge_candidates(records),
+        capture_count=int(captures.get("count") or 0),
+        review_items=[item for item in inbox_items if isinstance(item, dict)],
+        usage=_core_usage_summary(
+            root, days=max(1, min(days, 365)),
+            records=[r for r in records if str(r.get("status") or "active") == "active"],
+        ),
+        days=max(1, min(days, 365)),
+        command_target=root,
+    )
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    _print_text(_core_render_digest_text(payload))
+    return 0
+
+
+def sync(
+    target: Path,
+    *,
+    init: bool = False,
+    remote: str | None = None,
+    status: bool = False,
+    json_output: bool = False,
+) -> int:
+    """Sync memory between machines through the user's own git remote."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    try:
+        if init:
+            payload: dict[str, object] = _core_sync_init(root, remote=remote)
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            lines = ["Sync repo ready" if payload.get("remote") else "Sync repo created (no remote yet)"]
+            lines.append(f"Branch: {payload.get('branch')}")
+            if payload.get("remote"):
+                lines.append(f"Remote: {payload.get('remote')}")
+            else:
+                lines.append("Add your private remote: " + _shell_words_for_target("sync", target, "--init", "--remote", "<git-url>"))
+            lines.append("raw/ captures and the runtime never sync; reviewed memory does.")
+            lines.append(f"Daily: {_shell_words_for_target('sync', target)}")
+            _print_text("\n".join(lines))
+            return 0
+        if status:
+            payload = _core_sync_status(root)
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 0
+            if not payload.get("ready"):
+                _print_text(f"Sync not ready: {payload.get('reason')}")
+                return 1
+            _print_text(
+                f"Branch {payload.get('branch')} -> {payload.get('remote')}\n"
+                f"Local changes: {'yes' if payload.get('dirty') else 'no'} · "
+                f"ahead {payload.get('ahead')} · behind {payload.get('behind')}"
+            )
+            return 0
+        payload = _core_sync_workspace(
+            root, wiki_dir,
+            regenerate=lambda: (_core_rebuild_index(wiki_dir), _rebuild_backlinks_quiet(wiki_dir)),
+        )
+        if json_output:
+            print(json.dumps(payload, indent=2))
+            return 0 if payload.get("synced") else 1
+        if not payload.get("synced"):
+            findings_obj = payload.get("secret_findings")
+            findings: list[object] = findings_obj if isinstance(findings_obj, list) else []
+            lines = ["Sync stopped before push — secrets never leave this machine."]
+            for finding in findings:
+                if isinstance(finding, dict):
+                    lines.append(f"  {finding.get('path')}: {finding.get('label')}")
+            lines.append(str(payload.get("message") or ""))
+            _print_text("\n".join(lines))
+            return 1
+        parts = []
+        if payload.get("committed"):
+            parts.append("committed local changes")
+        pulled = int(str(payload.get("pulled") or 0))
+        if pulled:
+            parts.append(f"pulled {pulled} commit(s)")
+        if payload.get("pushed"):
+            parts.append("pushed")
+        lines = ["Synced: " + (", ".join(parts) if parts else "already up to date")]
+        both_obj = payload.get("both_versions")
+        both: list[object] = both_obj if isinstance(both_obj, list) else []
+        if both:
+            lines.append(f"{len(both)} memory conflict(s) kept as both versions — review and merge:")
+            for item in both:
+                if isinstance(item, dict):
+                    lines.append(f"  {item.get('path')}  +  {item.get('local_copy')}")
+            lines.append(f"  {_shell_words_for_target('consolidate', target)}")
+        _print_text("\n".join(lines))
+        return 0
+    except _core_sync_error as exc:
+        print(f"Sync failed: {exc}", file=sys.stderr)
+        return 1
+
+
+def _rebuild_backlinks_quiet(wiki_dir: Path) -> None:
+    try:
+        _core_atomic_write_json(wiki_dir / "_backlinks.json", _build_backlinks(wiki_dir))
+    except OSError:
+        pass
+
+
 def setup(
     target: Path,
     *,
@@ -2860,6 +3187,29 @@ def setup(
         hooks=bool(hookable) and not preview,
         json_output=json_output,
     )
+    # Instruction files rot the same way MCP configs do — a steering file
+    # from an older Link can name tools the configured server no longer
+    # exposes, sending the agent back to grep. Same idempotent treatment:
+    # refresh any Link-owned section that no longer matches the template.
+    # Refresh-only: files Link never wrote are never created here.
+    refreshed_instructions: list[str] = []
+    stale_instructions: list[str] = []
+    if code == 0:
+        for agent in detected:
+            status = _core_instruction_file_status(agent)
+            if not status.get("present") or not status.get("stale"):
+                continue
+            if preview:
+                stale_instructions.append(str(status.get("path")))
+                continue
+            result = _core_refresh_instruction_file(agent)
+            if result.get("refreshed"):
+                refreshed_instructions.append(str(result.get("path")))
+    if not json_output:
+        for path in stale_instructions:
+            _print_text(f"Instruction file is stale (would refresh): {path}")
+        for path in refreshed_instructions:
+            _print_text(f"Refreshed Link instructions: {path}")
     if code == 0 and not json_output:
         extras: list[str] = []
         try:
@@ -3433,7 +3783,7 @@ _WORKSPACE_COMMANDS = {
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
-    "semantic", "status", "health", "doctor", "validate", "operations",
+    "semantic", "status", "sync", "digest", "import", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
@@ -3443,6 +3793,24 @@ _WORKSPACE_COMMANDS = {
 
 def _default_workspace() -> Path:
     return Path(os.environ.get("LINK_WORKSPACE") or (Path.home() / "link")).expanduser()
+
+
+def _normalize_review_all_args(args) -> None:
+    """With --all there is no identifier: a lone positional is the target.
+
+    `lnk review-memory --all ~/link` parsed the workspace as an identifier
+    and the command silently reviewed the default workspace instead (found
+    in dogfooding). Must run before the default-workspace fallback rewrites
+    the target.
+    """
+    if (
+        getattr(args, "command", "") == "review-memory"
+        and getattr(args, "review_all", False)
+        and getattr(args, "identifier", None)
+        and getattr(args, "target", ".") == "."
+    ):
+        args.target = args.identifier
+        args.identifier = None
 
 
 def _apply_default_workspace(args) -> None:
@@ -3484,6 +3852,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
     args = parser.parse_args(argv)
+    _normalize_review_all_args(args)
     _apply_default_workspace(args)
     _configure_link_command_display()
     try:
@@ -3495,6 +3864,9 @@ def main(argv: list[str] | None = None) -> int:
             "proof": proof,
             "onboard": onboard,
             "setup": setup,
+            "sync": sync,
+            "digest": digest,
+            "import": import_memory,
             "seed": seed_project,
             "welcome": welcome,
             "prompts": starter_prompts,

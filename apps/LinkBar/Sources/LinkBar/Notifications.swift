@@ -61,6 +61,35 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
         }
     }
 
+    /// The digest that delivers itself: once a week, when the digest has
+    /// something to say, one banner says it — "4 new · 2 aging · 1 saying
+    /// the same thing twice". A quiet week posts nothing; a reflection
+    /// ritual that requires discipline is not a ritual.
+    private let digestStampKey = "LinkBarLastDigestNotice"
+
+    func announceWeeklyDigest(_ digest: DigestPayload) {
+        guard authorized else { return }
+        let last = UserDefaults.standard.double(forKey: digestStampKey)
+        guard Date().timeIntervalSince1970 - last > 6.5 * 86_400 else { return }
+        var parts: [String] = []
+        if digest.learnedCount > 0 { parts.append("\(digest.learnedCount) new") }
+        if digest.overdueCount > 0 { parts.append("\(digest.overdueCount) aging") }
+        if digest.driftingCount > 0 { parts.append("\(digest.driftingCount) saying the same thing twice") }
+        if let never = digest.usage?.neverRetrievedCount, never > 0 {
+            parts.append("\(never) never used")
+        }
+        guard !parts.isEmpty else { return }
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: digestStampKey)
+
+        let content = UNMutableNotificationContent()
+        content.title = "Your week with Link"
+        content.body = parts.joined(separator: " · ")
+        content.sound = nil
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "link-weekly-digest", content: content, trigger: nil)
+        )
+    }
+
     private func post(for capture: CaptureItem) {
         let content = UNMutableNotificationContent()
         content.title = "Link captured a memory"
