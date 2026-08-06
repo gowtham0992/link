@@ -85,7 +85,15 @@ def _is_repo(root: Path) -> bool:
 
 
 def _current_branch(root: Path) -> str:
-    return _git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "main"
+    result = _git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False)
+    branch = result.stdout.strip()
+    if result.returncode == 0 and branch:
+        return branch
+    # Unborn branch (a clone of an empty remote, or a remote whose HEAD
+    # pointed at a branch nobody pushed): rev-parse has no commit to name,
+    # but the symbolic ref still says which branch we are on.
+    symbolic = _git(root, "symbolic-ref", "--short", "HEAD", check=False).stdout.strip()
+    return symbolic or "main"
 
 
 def _remote_url(root: Path) -> str | None:

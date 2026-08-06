@@ -58,7 +58,7 @@ class SyncRoundTripTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="link-sync-")
         base = Path(self.temp.name)
         self.remote = base / "remote.git"
-        subprocess.run(["git", "init", "--bare", str(self.remote)], capture_output=True)
+        subprocess.run(["git", "init", "--bare", "--initial-branch", "main", str(self.remote)], capture_output=True)
         self.machine_a = base / "machine-a"
         self.machine_a.mkdir()
         self.wiki_a = _make_workspace(self.machine_a)
@@ -164,7 +164,7 @@ class TeamMemoryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="link-team-")
         base = Path(self.temp.name)
         self.remote = base / "team-remote.git"
-        subprocess.run(["git", "init", "--bare", str(self.remote)], capture_output=True)
+        subprocess.run(["git", "init", "--bare", "--initial-branch", "main", str(self.remote)], capture_output=True)
         from link_core.sync import team_init
         self.alice = base / "alice"
         self.alice.mkdir()
