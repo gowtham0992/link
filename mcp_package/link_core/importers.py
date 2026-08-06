@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .agent_instructions import INSTRUCTION_MARKERS, _SECTION_PATTERN
+from .agent_instructions import _SECTION_PATTERN
 
 IMPORT_SOURCES = ("claude-code", "cursor", "codex", "file")
 

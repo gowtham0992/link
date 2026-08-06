@@ -107,6 +107,20 @@ def ensure_sync_gitignore(root: Path) -> bool:
     return True
 
 
+def _ensure_commit_identity(root: Path) -> None:
+    """Give the sync repo a local identity when the machine has none.
+
+    A fresh machine (or a CI runner) often has no global user.name/email,
+    and git refuses to commit without one — which would make lnk sync
+    crash on first run. The fallback is repo-local only: the user's global
+    config is never touched, and a configured identity always wins.
+    """
+    email = _git(root, "config", "user.email", check=False).stdout.strip()
+    if not email:
+        _git(root, "config", "user.name", "Link Sync", check=False)
+        _git(root, "config", "user.email", "link-sync@localhost", check=False)
+
+
 def sync_init(root: Path, remote: str | None = None) -> dict[str, object]:
     """Turn the workspace into a sync-ready git repo. Idempotent."""
     root = root.expanduser().resolve()
@@ -118,6 +132,7 @@ def sync_init(root: Path, remote: str | None = None) -> dict[str, object]:
         if not _is_repo(root):
             _git(root, "init")  # older git without --initial-branch
         created = True
+    _ensure_commit_identity(root)
     ignore_updated = ensure_sync_gitignore(root)
     _git(root, "add", "-A")
     dirty = bool(_git(root, "status", "--porcelain").stdout.strip())
@@ -257,6 +272,7 @@ def sync_workspace(
     if not remote:
         raise SyncError("no remote configured (run: lnk sync --init <remote-url>)")
 
+    _ensure_commit_identity(root)
     ensure_sync_gitignore(root)
     _git(root, "add", "-A")
     committed = False
