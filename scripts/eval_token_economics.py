@@ -94,7 +94,12 @@ def _populate(wiki: Path, count: int) -> None:
 
 
 def _packet_tokens(wiki: Path, query: str, budget: str, cache: object, records: object) -> int:
-    """One recall packet, exactly as an agent receives it.
+    """One recall packet as the query path produces it.
+
+    This is the per-recall cost. The MCP surface adds one more thing on the
+    *first* response of a session - the session brief - which is measured
+    separately by `measure_session_brief` rather than folded in here, because
+    it is a once-per-session cost, not a per-recall one.
 
     The cache and records are built once per workspace and reused, which is
     both how a real session works and what keeps this benchmark from
@@ -103,6 +108,41 @@ def _packet_tokens(wiki: Path, query: str, budget: str, cache: object, records: 
     payload = query_link(wiki, query, cache, records, budget=budget)
     chars = len(json.dumps(payload, ensure_ascii=False))
     return max(1, (chars + 3) // 4)
+
+
+def measure_session_brief(wiki: Path) -> dict[str, object]:
+    """What the MCP surface actually sends, first call vs steady state.
+
+    Link's first MCP tool response of a session carries a memory brief, so
+    the first recall costs materially more than every one after it. That is
+    a deliberate trade (memory reaches agents that have no session hooks),
+    but it must be measured and published, not hidden behind a per-recall
+    average.
+    """
+    import importlib
+    import sys
+
+    saved_argv = list(sys.argv)
+    sys.argv = ["link_mcp", "--wiki", str(wiki), "--surface", "slim"]
+    try:
+        import link_mcp.server as server
+        importlib.reload(server)
+        first = server.recall(query="how do we deploy", budget="micro")
+        second = server.recall(query="how do we deploy", budget="micro")
+    except Exception as exc:  # pragma: no cover - environment without the MCP SDK
+        return {"available": False, "reason": str(exc)[:200]}
+    finally:
+        sys.argv = saved_argv
+
+    def tokens(text: str) -> int:
+        return max(1, (len(text) + 3) // 4)
+
+    return {
+        "available": True,
+        "first_call_tokens": tokens(first),
+        "steady_state_tokens": tokens(second),
+        "brief_overhead_tokens": max(0, tokens(first) - tokens(second)),
+    }
 
 
 def measure_budgets(wiki: Path, queries: list[str]) -> dict[str, dict[str, float]]:
@@ -169,9 +209,15 @@ def main() -> int:
         if len(growth) > 1 and float(growth[-2]["mean_tokens"]) else 0.0
     )
 
+    with tempfile.TemporaryDirectory() as temp:
+        brief_wiki = _make_wiki(Path(temp))
+        _populate(brief_wiki, len(INTENTS))
+        session_brief = measure_session_brief(brief_wiki)
+
     report = {
         "budgets": budgets,
         "growth": growth,
+        "mcp_session_brief": session_brief,
         "store_growth_factor": round(float(last_store["memories"]) / float(first_store["memories"]), 1),
         "packet_growth_factor": round(growth_ratio, 3),
         "plateau_ratio": round(plateau_ratio, 3),
@@ -210,6 +256,9 @@ def main() -> int:
         print(f"\n{'store size':12} {'mean tokens (medium budget)':>30}")
         for row in growth:
             print(f"{row['memories']:<12} {row['mean_tokens']:>30}")
+        if session_brief.get("available"):
+            print(f"\nMCP surface: first recall of a session {session_brief['first_call_tokens']} tokens "
+                  f"(carries the session brief), steady state {session_brief['steady_state_tokens']} tokens")
         print(f"\nStore grew {report['store_growth_factor']}x; packet grew "
               f"{report['packet_growth_factor']}x, and the last quadrupling moved it "
               f"{report['plateau_ratio']}x — bounded packets plateau.")
