@@ -452,3 +452,28 @@ struct SyncStatus: Decodable {
     let ahead: Int?
     let behind: Int?
 }
+
+
+/// `lnk handoffs --json`: session handoffs waiting for the next session.
+struct HandoffsPayload: Decodable {
+    struct Handoff: Decodable, Identifiable {
+        let path: String
+        let title: String
+        let source: String
+        let createdAt: String
+        let body: String
+
+        var id: String { path }
+        var age: String {
+            Date.fromLinkStamp(createdAt)?.relativeLabel ?? ""
+        }
+        var file: String { (path as NSString).lastPathComponent }
+
+        enum CodingKeys: String, CodingKey {
+            case path, title, source, body
+            case createdAt = "created_at"
+        }
+    }
+    let count: Int
+    let handoffs: [Handoff]
+}

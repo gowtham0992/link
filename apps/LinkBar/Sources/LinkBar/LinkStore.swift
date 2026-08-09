@@ -25,6 +25,7 @@ final class LinkStore: ObservableObject {
     @Published var stats: StatusPayload?
     @Published var digest: DigestPayload?
     @Published var syncState: SyncStatus?
+    @Published var handoffsWaiting: [HandoffsPayload.Handoff] = []
     @Published var runtimeWarning: String?
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
@@ -85,6 +86,7 @@ final class LinkStore: ObservableObject {
         return [
             root,
             (root as NSString).appendingPathComponent("raw/memory-captures"),
+            (root as NSString).appendingPathComponent("raw/handoffs"),
             (root as NSString).appendingPathComponent("wiki/memories"),
             (root as NSString).appendingPathComponent("wiki"),
         ]
@@ -128,6 +130,7 @@ final class LinkStore: ObservableObject {
                 ?? (try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"]))
             let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
+            let handoffs = try? LinkCLI.runJSON(HandoffsPayload.self, ["handoffs", workspace, "--json"])
             let sessions = Self.scanAgentSessions()
             let memories = MemoryPage.load(from: workspace)
             await MainActor.run {
@@ -138,6 +141,7 @@ final class LinkStore: ObservableObject {
                 } else {
                     self.lastError = nil
                 }
+                self.handoffsWaiting = handoffs?.handoffs ?? self.handoffsWaiting
                 self.inbox = inbox ?? self.inbox
                 self.captures = captures ?? self.captures
                 self.activity = log.map { Array($0.entries.reversed()) } ?? self.activity
@@ -475,6 +479,18 @@ final class LinkStore: ObservableObject {
     /// Collapse inbox captures that offer nothing new (already pending in a
     /// newer capture, accepted as memory, or previously dismissed). Outcome
     /// comes from the command's own JSON, never assumed from exit 0.
+    /// The next session resumed the handoff; clear it from every surface.
+    func clearHandoff(_ handoff: HandoffsPayload.Handoff) {
+        busy = true
+        Task.detached(priority: .userInitiated) {
+            _ = try? LinkCLI.runRaw(["handoffs", LinkCLI.workspace, "--clear", handoff.file])
+            await MainActor.run {
+                self.showFlash("Handoff cleared.", tone: .success)
+                self.refresh()
+            }
+        }
+    }
+
     func dedupCaptures() {
         busy = true
         Task.detached(priority: .userInitiated) {
