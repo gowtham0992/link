@@ -185,6 +185,14 @@ def _instructions(surface: str) -> str:
 
 
 mcp = FastMCP("link", instructions=_instructions(MCP_SURFACE))
+# FastMCP has no version parameter, so without this the MCP handshake
+# reports the SDK's version as serverInfo.version. Agents and debuggers
+# should see Link's own version there. _mcp_server is a private SDK
+# surface, so probe rather than assume - a missing attribute must never
+# stop the server (worst case the handshake shows the SDK version again).
+_inner_server = getattr(mcp, "_mcp_server", None)
+if _inner_server is not None and hasattr(_inner_server, "version"):
+    _inner_server.version = LINK_VERSION
 
 
 # First-response brief: six of the nine agents Link supports have no
