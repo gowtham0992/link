@@ -8,6 +8,7 @@ MCP Registry.
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 import re
 from dataclasses import dataclass
@@ -171,21 +172,30 @@ def update_changelog(text: str, version: str, release_date: str) -> str:
 
 
 HOMEPAGE_BANNER_RE = re.compile(r"(New \\u00b7 Link )\d+\.\d+\.\d+( is out)")
+# The words after "is out" - the part of the banner a human must rewrite
+# every release, because the version stamps itself but "what is new"
+# does not.
+HOMEPAGE_BANNER_WORDS_RE = re.compile(r"( is out \\u2014 )([^<]*?)( <span)")
 HOMEPAGE_TAG_RE = re.compile(r"(releases\\u002Ftag\\u002Fv)\d+\.\d+\.\d+")
 
 
-def update_homepage(text: str, version: str) -> str:
+def update_homepage(text: str, version: str, banner: str | None = None) -> str:
     """Point the site's release banner at the version being released.
 
     The banner advertises a download, so a stale number sends visitors to a
     tag that does not exist yet — keep it in the release step, not in a
-    human's memory.
+    human's memory. The *words* after the version rot the same way (a 2.2
+    banner once described a 1.x release), so they are stamped here too when
+    --banner is given, and their absence is warned about loudly.
     """
     text = HOMEPAGE_BANNER_RE.sub(rf"\g<1>{version}\g<2>", text)
+    if banner:
+        safe = banner.replace("\\", "").strip()
+        text = HOMEPAGE_BANNER_WORDS_RE.sub(rf"\g<1>{safe}\g<3>", text, count=1)
     return HOMEPAGE_TAG_RE.sub(rf"\g<1>{version}", text)
 
 
-def prepare_release(root: Path, version: str, release_date: str, dry_run: bool = False) -> list[Path]:
+def prepare_release(root: Path, version: str, release_date: str, dry_run: bool = False, banner: str | None = None) -> list[Path]:
     files = release_files(root)
     version = normalize_version(version)
     release_date = normalize_date(release_date)
@@ -204,8 +214,15 @@ def prepare_release(root: Path, version: str, release_date: str, dry_run: bool =
     # present (the real repo), skip it in minimal trees/tests.
     if files.homepage.exists():
         updates[files.homepage] = update_homepage(
-            files.homepage.read_text(encoding="utf-8"), version
+            files.homepage.read_text(encoding="utf-8"), version, banner=banner
         )
+        if not banner:
+            print(
+                "WARNING: homepage banner words were NOT updated - the banner will "
+                "announce the new version with the previous release's feature words. "
+                "Pass --banner \"three highlights of this release\" to stamp them.",
+                file=sys.stderr,
+            )
 
     changed = [path for path, text in updates.items() if path.read_text(encoding="utf-8") != text]
     if not dry_run:
@@ -236,11 +253,12 @@ def main() -> int:
     parser.add_argument("version", help="new release version, e.g. 1.0.6")
     parser.add_argument("--date", default=date.today().isoformat(), help="release date in YYYY-MM-DD")
     parser.add_argument("--dry-run", action="store_true", help="validate and list files without writing")
+    parser.add_argument("--banner", default=None, help="the banner's feature words for this release (after 'is out'); omitting keeps the old words and warns")
     parser.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     try:
-        changed = prepare_release(args.root.resolve(), args.version, args.date, dry_run=args.dry_run)
+        changed = prepare_release(args.root.resolve(), args.version, args.date, dry_run=args.dry_run, banner=args.banner)
     except ValueError as exc:
         parser.exit(1, f"error: {exc}\n")
 
