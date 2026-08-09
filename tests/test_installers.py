@@ -191,3 +191,28 @@ class InstallerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PipCliPackagingTests(unittest.TestCase):
+    """pip install link-mcp must yield the full lnk CLI, not just the server."""
+
+    def test_wheel_declares_the_lnk_console_script(self):
+        pyproject = (ROOT / "mcp_package" / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('lnk = "link_cli:main"', pyproject)
+        for shipped in ('"../link.py" = "link_cli.py"', '"../serve.py" = "serve.py"',
+                        '"../LINK.md" = "LINK.md"'):
+            self.assertIn(shipped, pyproject)
+
+    def test_runtime_copy_falls_back_to_link_cli(self):
+        import tempfile
+        from pathlib import Path as P
+        from mcp_package.link_core.demo import copy_runtime_files
+        with tempfile.TemporaryDirectory() as temp:
+            source = P(temp) / "site-packages"
+            source.mkdir()
+            (source / "link_cli.py").write_text("# cli\n", encoding="utf-8")
+            (source / "LINK.md").write_text("# schema\n", encoding="utf-8")
+            target = P(temp) / "ws"
+            copy_runtime_files(source, target)
+            self.assertTrue((target / "link.py").exists(),
+                            "wheel installs must plant link.py from link_cli.py")

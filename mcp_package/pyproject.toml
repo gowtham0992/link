@@ -35,9 +35,21 @@ Repository = "https://github.com/gowtham0992/link"
 
 [project.scripts]
 link-mcp = "link_mcp.server:main"
+lnk = "link_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["link_mcp", "link_core"]
+
+# The full CLI for pip installs (including Windows, which has no brew):
+# the repo-root link.py ships twice on purpose - once as the importable
+# link_cli module behind the `lnk` console script, once as the plain
+# link.py data file that copy_runtime_files() plants into workspaces.
+# serve.py / LINK.md / .linkignore ride along for the same reason.
+[tool.hatch.build.targets.wheel.force-include]
+"../link.py" = "link_cli.py"
+"../serve.py" = "serve.py"
+"../LINK.md" = "LINK.md"
+"../.linkignore" = ".linkignore"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
