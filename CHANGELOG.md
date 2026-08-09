@@ -6,6 +6,19 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Changed
+
+- **The MCP session brief is now bounded.** The first tool response of a
+  session used to carry the full memory brief (~16.5k characters), making
+  the first recall of a session the largest packet Link sends - measured
+  and published as an honest asterisk in 2.2.1. It is now a compact
+  digest under a hard 4,000-character budget: typed memory claims
+  (trimmed), review counts, and a pointer to `recall` for everything
+  else. First-recall cost on the benchmark corpus drops from 11,269
+  tokens to 2,313 against a 1,954 steady state. The budget is enforced
+  in code and pinned by a test, and `eval_token_economics.py` measures
+  the real MCP surface on every run.
+
 ## [2.2.1] - 2026-08-06
 
 ### Fixed

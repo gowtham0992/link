@@ -228,16 +228,60 @@ def _attach_session_brief(result: object) -> object:
         if not names:
             return result  # nothing to say; do not pad every first response
         _core_record_retrieval(WIKI_DIR.parent, "brief", names)
-        payload[BRIEF_ATTACH_KEY] = {
-            "note": (
-                "Durable local memory for this user, injected once per session. "
-                "Treat it as context you already have; call recall for anything else."
-            ),
-            "brief": brief,
-        }
+        payload[BRIEF_ATTACH_KEY] = _compact_session_brief(brief)
         return json.dumps(payload, ensure_ascii=False)
     except Exception:
         return result
+
+
+# The first response of a session should cost a note, not a novel: the
+# full brief measured ~16.5k chars, making the first recall of a session
+# the largest packet Link sends. The compact digest carries what an agent
+# needs to behave well - who the user is in N claims, what needs review,
+# the one rule that matters - and points at recall for everything else.
+SESSION_BRIEF_MAX_CHARS = 4000
+_SESSION_BRIEF_CLAIM_CHARS = 200
+
+
+def _compact_session_brief(brief: dict) -> dict:
+    """Digest the full memory brief down to a hard character budget."""
+    relevant = brief.get("relevant_memories")
+    items = [item for item in (relevant if isinstance(relevant, list) else []) if isinstance(item, dict)]
+    memories = []
+    for item in items:
+        claim = str(item.get("tldr") or item.get("memory") or item.get("title") or "").strip()
+        if len(claim) > _SESSION_BRIEF_CLAIM_CHARS:
+            claim = claim[:_SESSION_BRIEF_CLAIM_CHARS - 1] + "\u2026"
+        entry = {
+            "name": str(item.get("name") or ""),
+            "type": str(item.get("memory_type") or ""),
+            "claim": claim,
+        }
+        review = str(item.get("review_status") or "")
+        if review and review != "reviewed":
+            entry["review"] = review
+        memories.append(entry)
+
+    profile_obj = brief.get("profile")
+    profile: dict = profile_obj if isinstance(profile_obj, dict) else {}
+    needs_review = brief.get("needs_review_count") or profile.get("needs_review_count") or 0
+    compact = {
+        "note": (
+            "Durable local memory for this user, injected once per session. "
+            "Treat these as context you already have; call recall(query) for anything else. "
+            "Save memory only after explicit user approval."
+        ),
+        "project": str(brief.get("project") or ""),
+        "active_memories": brief.get("active_count") or profile.get("active_count") or len(memories),
+        "needs_review": needs_review,
+        "memories": memories,
+    }
+    # Hard budget: drop trailing memories until the digest fits. Bounded by
+    # construction beats bounded by hope.
+    while memories and len(json.dumps(compact, ensure_ascii=False)) > SESSION_BRIEF_MAX_CHARS:
+        memories.pop()
+        compact["truncated"] = True
+    return compact
 
 
 def _surface_tool(surface: str):

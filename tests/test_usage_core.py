@@ -127,8 +127,16 @@ class FirstResponseBriefTests(unittest.TestCase):
             first = json.loads(server.status())
             self.assertIn("link_session_brief", first)
             attached = first["link_session_brief"]
-            self.assertIn("brief", attached)
             self.assertIn("memory", str(attached["note"]).lower())
+            memories = attached.get("memories")
+            self.assertTrue(memories, "digest must carry the memory claims")
+            self.assertIn("claim", memories[0])
+            # The public promise: the first response costs a note, not a
+            # novel. Hard budget, asserted here so it cannot regress.
+            self.assertLessEqual(
+                len(json.dumps(attached)), server.SESSION_BRIEF_MAX_CHARS,
+                "session brief digest exceeded its hard budget",
+            )
             second = json.loads(server.status())
             self.assertNotIn("link_session_brief", second)
 

@@ -410,18 +410,18 @@ fill, then stops. Both properties are CI-enforced: every budget's worst
 packet must stay under its ceiling, and the last quadrupling of the store
 must not move the packet more than 5%.
 
-**The MCP session brief is a separate, once-per-session cost, and it is
-not small.** Link's first MCP tool response of a session carries a memory
+**The MCP session brief is a separate, once-per-session cost - now
+bounded.** Link's first MCP tool response of a session carries a memory
 brief so that agents without session hooks still get memory pushed to
-them (see 2.2.0). The benchmark now measures it rather than averaging it
-away: on the 42-memory benchmark corpus the first recall of a session
-costs **11,269 tokens** against a steady state of **1,954**. On the
-smaller bundled demo wiki the same measurement is 4,657 vs 546. This is
-a deliberate trade - one brief per session buys memory for six of the
-nine supported agents - but it is the largest single packet Link sends,
-it scales with brief size rather than with the recall budget, and
-bounding it is tracked work. Per-recall figures above exclude it by
-design: it is paid once per session, not per recall.
+them (see 2.2.0). When first measured, the full brief made that first
+recall cost **11,269 tokens** against a steady state of **1,954** on the
+benchmark corpus - the largest single packet Link sent. It is now a
+compact digest under a hard 4,000-character budget (typed claims, review
+counts, a pointer to recall for everything else), enforced in code and
+pinned by a test: the same first recall measures **2,313 tokens**, a
+brief overhead of ~360 tokens. The benchmark measures it on every run.
+Per-recall figures above exclude it by design: it is paid once per
+session, not per recall.
 
 Honest notes: token counts use the 4-chars-per-token approximation Link
 uses for its own budget reporting — exact counts vary by tokenizer, so
