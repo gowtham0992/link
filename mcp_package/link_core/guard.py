@@ -22,6 +22,7 @@ import re
 from collections.abc import Iterable, Mapping
 
 from .memory import recall_memories
+from .usage import load_usage
 
 _CONSTRAINT_RE = re.compile(
     r"\b(?:never|always|only|avoid|do not|don\'t|must not|mustn\'t)\b", re.IGNORECASE
@@ -31,11 +32,39 @@ _CONSTRAINT_RE = re.compile(
 _STRONG_CONFIDENCE = {"high", "strong", "moderate"}
 _MIN_SCORE = 15
 _MIN_PROMPT_CHARS = 12
+# One reminder per memory per stretch of work: repeating the same
+# constraint every prompt is how a guard gets turned off.
+GUARD_COOLDOWN_MINUTES = 45
 
 
 def is_constraint_memory(record: Mapping[str, object]) -> bool:
     claim = str(record.get("tldr") or record.get("memory") or record.get("title") or "")
     return bool(_CONSTRAINT_RE.search(claim))
+
+
+def recently_guarded(root, name: str, *, now: str | None = None) -> bool:
+    """Did the guard already fire for this memory within the cooldown?"""
+    from datetime import datetime, timedelta, timezone
+
+    if now:
+        current = datetime.fromisoformat(now.replace("Z", "+00:00"))
+    else:
+        current = datetime.now(timezone.utc)
+    floor = current - timedelta(minutes=GUARD_COOLDOWN_MINUTES)
+    for event in reversed(load_usage(root)):
+        if str(event.get("kind")) != "guard":
+            continue
+        stamp = str(event.get("at") or "")
+        try:
+            at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if at < floor:
+            return False  # events are appended in order; older ones only get older
+        names = event.get("memories")
+        if isinstance(names, list) and name in [str(item) for item in names]:
+            return True
+    return False
 
 
 def guard_reminder(

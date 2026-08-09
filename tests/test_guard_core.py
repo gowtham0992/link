@@ -112,3 +112,20 @@ class SwitchIntentTests(unittest.TestCase):
     def test_nudge_names_the_command(self):
         from link_core.guard import render_switch_nudge
         self.assertIn("lnk handoff", render_switch_nudge())
+
+
+class GuardCooldownTests(unittest.TestCase):
+    """One reminder is a guard, ten is a nag."""
+
+    def test_same_memory_does_not_repeat_within_cooldown(self):
+        import tempfile
+        from pathlib import Path as P
+        from link_core.guard import recently_guarded
+        from link_core.usage import record_retrieval
+        with tempfile.TemporaryDirectory() as temp:
+            root = P(temp)
+            self.assertFalse(recently_guarded(root, "deploy-tuesdays"))
+            record_retrieval(root, "guard", ["deploy-tuesdays"])
+            self.assertTrue(recently_guarded(root, "deploy-tuesdays"))
+            # A different constraint is still allowed to fire.
+            self.assertFalse(recently_guarded(root, "no-force-push"))

@@ -260,6 +260,7 @@ from link_core.files import (
 from link_core.guard import (
     guard_reminder as _core_guard_reminder,
     render_guard_text as _core_render_guard_text,
+    recently_guarded as _core_recently_guarded,
     render_switch_nudge as _core_render_switch_nudge,
     switch_intent as _core_switch_intent,
 )
@@ -2823,8 +2824,13 @@ def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str
         _memory_records(wiki_dir), prompt, project=project_name,
     )
     if reminder is not None:
+        root = _resolve_link_root(target)
+        # Cooldown: the same constraint never repeats within a stretch of
+        # work - one reminder is a guard, ten is a nag.
+        if _core_recently_guarded(root, str(reminder.get("name") or "")):
+            return 0
         _core_record_retrieval(
-            _resolve_link_root(target), "guard", [str(reminder.get("name") or "")],
+            root, "guard", [str(reminder.get("name") or "")],
             project=project_name or "",
         )
         print(_core_render_guard_text(reminder))
