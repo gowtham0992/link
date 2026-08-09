@@ -77,3 +77,38 @@ class GuardHookWiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SwitchIntentTests(unittest.TestCase):
+    """The handoff must suggest itself at stop/switch moments - and only then."""
+
+    def test_fires_on_switch_and_stop_announcements(self):
+        from link_core.guard import switch_intent
+        for prompt in (
+            "im switching to codex for this",
+            "hit my rate limit again",
+            "lets continue this tomorrow",
+            "continue in cursor please",
+            "stopping here for today",
+            "calling it a night",
+            "out of tokens, wrapping up for now",
+            "resume next session",
+        ):
+            self.assertTrue(switch_intent(prompt), prompt)
+
+    def test_silent_on_ordinary_work_phrases(self):
+        from link_core.guard import switch_intent
+        for prompt in (
+            "switch the order of these functions",
+            "switching to a recursive approach",
+            "continue with the refactor",
+            "continue in the same file",
+            "stop the server",
+            "tomorrow is the deadline",
+            "the rate of failures is limited",
+        ):
+            self.assertFalse(switch_intent(prompt), prompt)
+
+    def test_nudge_names_the_command(self):
+        from link_core.guard import render_switch_nudge
+        self.assertIn("lnk handoff", render_switch_nudge())

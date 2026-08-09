@@ -34,6 +34,22 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   with no model load, and every firing is recorded in the local usage
   ledger as a "guard" event. Wired automatically by `lnk setup` /
   `lnk connect claude-code --hooks`.
+- **The handoff suggests itself at the right moment.** When a prompt
+  announces a stop or a tool switch ("switching to codex", "hit my rate
+  limit", "continue this tomorrow", "stopping here"), the per-prompt
+  hook nudges the agent to offer a handoff before the session ends.
+  Precision-gated like the guard: "continue with the refactor" and
+  "switching to a recursive approach" stay silent.
+- **Meaning-based recall is now set up by default.** `lnk setup`
+  provisions the fast semantic tier (one ~30 MB local model, ~0.1s
+  loads) when it can own the environment - the measured gap between the
+  lexical default (hit@1 0.589) and the fast tier (0.703) is the biggest
+  quality difference a new install feels. The download happens during
+  the explicit setup command with a clear message; recall itself still
+  never touches the network. `--no-semantic` opts out; the quality and
+  rerank tiers (~200 MB more) remain explicit opt-ins via
+  `lnk semantic --setup`; user-managed pythons keep the hint (Link never
+  pip-installs into an environment it does not own).
 - **Bulk review.** `lnk accept-capture FILE --all` accepts every
   proposal in a capture (duplicates and conflicts are skipped and
   reported, never forced); `lnk delete-capture TARGET --all --confirm`

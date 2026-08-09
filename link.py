@@ -260,6 +260,8 @@ from link_core.files import (
 from link_core.guard import (
     guard_reminder as _core_guard_reminder,
     render_guard_text as _core_render_guard_text,
+    render_switch_nudge as _core_render_switch_nudge,
+    switch_intent as _core_switch_intent,
 )
 from link_core.handoff import (
     clear_handoff as _core_clear_handoff,
@@ -2820,13 +2822,17 @@ def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str
     reminder = _core_guard_reminder(
         _memory_records(wiki_dir), prompt, project=project_name,
     )
-    if reminder is None:
+    if reminder is not None:
+        _core_record_retrieval(
+            _resolve_link_root(target), "guard", [str(reminder.get("name") or "")],
+            project=project_name or "",
+        )
+        print(_core_render_guard_text(reminder))
         return 0
-    _core_record_retrieval(
-        _resolve_link_root(target), "guard", [str(reminder.get("name") or "")],
-        project=project_name or "",
-    )
-    print(_core_render_guard_text(reminder))
+    # No constraint in play - but a stop/switch announcement is the moment
+    # the handoff should suggest itself.
+    if _core_switch_intent(prompt):
+        print(_core_render_switch_nudge())
     return 0
 
 
@@ -3375,6 +3381,7 @@ def setup(
     target: Path,
     *,
     preview: bool = False,
+    no_semantic: bool = False,
     json_output: bool = False,
 ) -> int:
     """One command for install day and every upgrade after it.
@@ -3428,6 +3435,47 @@ def setup(
             _print_text(f"Instruction file is stale (would refresh): {path}")
         for path in refreshed_instructions:
             _print_text(f"Refreshed Link instructions: {path}")
+    if code == 0 and not preview and not no_semantic:
+        # Meaning-based recall by default: the measured gap between the
+        # lexical default (hit@1 0.589) and the fast tier (0.703) is the
+        # single biggest quality difference a new install feels, and the
+        # cost is one ~30 MB local model fetched during this explicit
+        # command - recall itself never touches the network. Opt out with
+        # --no-semantic. Only the managed-venv path auto-installs; a
+        # user-managed python keeps the hint (we never pip-install into
+        # an environment we do not own).
+        try:
+            from link_core.semantic import model_available, provider_installed
+            if not (provider_installed() and model_available()):
+                venv_python = Path.home() / ".link-mcp-venv" / "bin" / "python"
+                if provider_installed() or venv_python.exists() or _core_python_is_externally_managed():
+                    if not json_output:
+                        _print_text(
+                            "\nSetting up meaning-based recall (fast tier, one-time ~30 MB "
+                            "local model download; recall never uses the network; skip with "
+                            "--no-semantic)..."
+                        )
+                    if provider_installed():
+                        semantic(target, setup=True, json_output=json_output)
+                    else:
+                        # Fast tier ONLY for the default path: the quality and
+                        # rerank tiers (~200 MB more) stay explicit opt-ins via
+                        # lnk semantic --setup.
+                        outcome = _core_provision_link_extras(
+                            sys.executable, LINK_VERSION, extras=("semantic",),
+                        )
+                        for note in outcome.get("notes", []):
+                            if not json_output:
+                                _print_text(f"  {note}")
+                        if outcome.get("ready"):
+                            subprocess.run(
+                                [str(outcome["python"]), str(ROOT / "link.py"),
+                                 "semantic", str(_resolve_link_root(target)), "--setup"],
+                                check=False,
+                            )
+        except Exception as exc:
+            if not json_output:
+                _print_text(f"  (meaning-based recall setup skipped: {exc})")
     if code == 0 and not json_output:
         extras: list[str] = []
         try:

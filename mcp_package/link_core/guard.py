@@ -77,3 +77,40 @@ def render_guard_text(reminder: Mapping[str, object]) -> str:
         "If the request conflicts with it, say so and confirm with the user "
         "before proceeding."
     )
+
+
+# ── Switch-intent nudge ──────────────────────────────────────────────────
+# The handoff should suggest itself at the moment it matters: the user
+# says they are switching tools, out of quota, or stopping for now. The
+# per-prompt hook sees that moment; a session-end hook cannot (its output
+# is invisible - the session is already over).
+
+# Tool names make "continue in X" a switch; "continue with the refactor"
+# is just work and must never trigger.
+_AGENT_NAMES = r"(?:codex|cursor|claude(?:\s+code)?|windsurf|zed|kiro|copilot|gemini|vs\s*code|antigravity|another\s+(?:tool|agent|machine|session))"
+
+_SWITCH_INTENT_RE = re.compile(
+    r"(?i)\b(?:"
+    r"switch(?:ing)?\s+(?:to|over to)\s+" + _AGENT_NAMES +
+    r"|continu(?:e|ing)\s+(?:this\s+|it\s+)?(?:in|on|with)\s+" + _AGENT_NAMES +
+    r"|(?:hit(?:ting)?|reached|out of)\s+(?:my\s+|the\s+)?(?:rate\s*limits?|usage\s*limits?|quota|tokens)"
+    r"|(?:continue|pick(?:ing)?\s+(?:this|it)\s+(?:back\s+)?up|resume)(?:\s+\w+){0,2}?\s+(?:tomorrow|later|tonight|in the morning|next (?:session|week))"
+    r"|stop(?:ping)?\s+(?:here|for\s+(?:now|today|tonight))"
+    r"|(?:call(?:ing)?\s+it\s+a\s+(?:day|night))"
+    r"|wrap(?:ping)?\s+(?:up|this up)\s+for\s+(?:now|today|tonight)"
+    r")\b"
+)
+
+
+def switch_intent(prompt: str) -> bool:
+    """Does this prompt announce a stop or a tool switch?"""
+    return bool(_SWITCH_INTENT_RE.search(prompt or ""))
+
+
+def render_switch_nudge() -> str:
+    return (
+        "Link: this sounds like a stop or a tool switch. Offer to write a "
+        "session handoff before ending, so the next session (any agent) "
+        "resumes without re-explaining: lnk handoff \"<where we left off>\" "
+        "--task \"<short title>\" --next \"<step>\". Keep it standalone."
+    )
