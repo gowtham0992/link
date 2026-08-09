@@ -29,6 +29,11 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   each request against constraint-shaped memories (never / always /
   only / do not) and speaks only on a strong overlap: one reminder
   naming the memory, with instructions to confirm before proceeding.
+  The guard also rides every MCP recall path, so all nine agents get
+  constraint protection whenever they recall - the query paraphrases
+  the request - with the cooldown shared through the usage ledger so no
+  surface nags twice, and a 45-minute per-memory cooldown keeps one
+  reminder from becoming ten.
   Precision-first by design - silence is the normal output (unrelated,
   short, and weak-overlap prompts stay untouched), it runs in ~80ms
   with no model load, and every firing is recorded in the local usage
