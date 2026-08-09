@@ -6,6 +6,31 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- **`lnk handoff` - switch agents mid-task and lose nothing.** The most
+  universal pain of multi-agent work is the switch: a rate limit hits,
+  the next step suits a different tool, and the first minutes of the new
+  session are spent re-explaining. `lnk handoff "where I left off"`
+  writes a standalone packet (task, state, explicit next steps), and the
+  next session on ANY connected agent opens with it - the session-start
+  hook and the MCP first response both push it, so delivery never
+  depends on the receiving agent thinking to ask. Handoffs chain
+  (breadcrumbs to the previous one), expire on their own (48h), are
+  secret-redacted at write time including the title and filename, and
+  never become durable memory unless promoted through normal review.
+  This is the community's hand-rolled HANDOFF.md pattern productized on
+  Link's rails - and unlike the vendor implementations, it crosses
+  vendors: Claude Code to Codex to Cursor is the point.
+- **Bulk review.** `lnk accept-capture FILE --all` accepts every
+  proposal in a capture (duplicates and conflicts are skipped and
+  reported, never forced); `lnk delete-capture TARGET --all --confirm`
+  clears the pending inbox with dismissals recorded. The review gate
+  stays - this is a faster hand, not a bypass. Fixed along the way:
+  `delete-capture <dir> --all` now always treats the positional as the
+  target directory (a parse ambiguity could previously point a bulk
+  delete at the default workspace).
+
 ### Changed
 
 - **The MCP session brief is now bounded.** The first tool response of a

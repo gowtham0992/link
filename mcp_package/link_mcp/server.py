@@ -233,9 +233,15 @@ def _attach_session_brief(result: object) -> object:
             for item in (relevant if isinstance(relevant, list) else [])
             if isinstance(item, dict)
         ]
-        if not names:
+        pending_handoff = []
+        try:
+            pending_handoff = _core_pending_handoffs(WIKI_DIR.parent)
+        except Exception:
+            pass
+        if not names and not pending_handoff:
             return result  # nothing to say; do not pad every first response
-        _core_record_retrieval(WIKI_DIR.parent, "brief", names)
+        if names:
+            _core_record_retrieval(WIKI_DIR.parent, "brief", names)
         payload[BRIEF_ATTACH_KEY] = _compact_session_brief(brief)
         return json.dumps(payload, ensure_ascii=False)
     except Exception:
@@ -273,17 +279,26 @@ def _compact_session_brief(brief: dict) -> dict:
     profile_obj = brief.get("profile")
     profile: dict = profile_obj if isinstance(profile_obj, dict) else {}
     needs_review = brief.get("needs_review_count") or profile.get("needs_review_count") or 0
+    # A waiting handoff outranks memory: put it first in the digest.
+    handoff_block = ""
+    try:
+        handoff_block = _core_handoff_brief_block(_core_pending_handoffs(WIKI_DIR.parent))
+    except Exception:
+        pass
     compact = {
         "note": (
             "Durable local memory for this user, injected once per session. "
             "Treat these as context you already have; call recall(query) for anything else. "
             "Save memory only after explicit user approval."
         ),
+        "handoff_waiting": handoff_block,
         "project": str(brief.get("project") or ""),
         "active_memories": brief.get("active_count") or profile.get("active_count") or len(memories),
         "needs_review": needs_review,
         "memories": memories,
     }
+    if not handoff_block:
+        compact.pop("handoff_waiting", None)
     # Hard budget: drop trailing memories until the digest fits. Bounded by
     # construction beats bounded by hope.
     while memories and len(json.dumps(compact, ensure_ascii=False)) > SESSION_BRIEF_MAX_CHARS:
@@ -367,6 +382,10 @@ from link_core.capture import (
     write_session_capture as _core_write_session_capture,
 )
 from link_core.usage import record_retrieval as _core_record_retrieval
+from link_core.handoff import (
+    handoff_brief_block as _core_handoff_brief_block,
+    pending_handoffs as _core_pending_handoffs,
+)
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
 )
