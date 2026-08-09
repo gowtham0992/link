@@ -22,6 +22,18 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   This is the community's hand-rolled HANDOFF.md pattern productized on
   Link's rails - and unlike the vendor implementations, it crosses
   vendors: Claude Code to Codex to Cursor is the point.
+- **Proactive guard - Link speaks up the moment a constraint matters.**
+  The session-start brief is a snapshot; forty minutes in, you type
+  "let's deploy payments on Friday" and the memory saying deploys happen
+  on Tuesdays sits unread. On Claude Code, a per-prompt hook now checks
+  each request against constraint-shaped memories (never / always /
+  only / do not) and speaks only on a strong overlap: one reminder
+  naming the memory, with instructions to confirm before proceeding.
+  Precision-first by design - silence is the normal output (unrelated,
+  short, and weak-overlap prompts stay untouched), it runs in ~80ms
+  with no model load, and every firing is recorded in the local usage
+  ledger as a "guard" event. Wired automatically by `lnk setup` /
+  `lnk connect claude-code --hooks`.
 - **Bulk review.** `lnk accept-capture FILE --all` accepts every
   proposal in a capture (duplicates and conflicts are skipped and
   reported, never forced); `lnk delete-capture TARGET --all --confirm`

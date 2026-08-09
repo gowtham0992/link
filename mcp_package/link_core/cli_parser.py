@@ -432,7 +432,7 @@ def build_cli_parser(
     start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
 
     hook_cmd = sub.add_parser("hook", help="run an agent session hook (invoked by installed agent hooks)")
-    hook_cmd.add_argument("event", choices=["session-start", "session-end"], help="agent session lifecycle event")
+    hook_cmd.add_argument("event", choices=["session-start", "session-end", "prompt-check"], help="agent session lifecycle event")
     hook_cmd.add_argument("target", nargs="?", default=".")
     hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
     hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")

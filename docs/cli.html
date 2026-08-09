@@ -114,7 +114,10 @@ lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
 lnk delete-capture raw/memory-captures/&lt;capture&gt;.md --confirm
 lnk dedup-captures            # collapse inbox captures that offer nothing new (--confirm applies)</code></pre>
 
-                <h2 id="handoff">Session Handoff</h2>
+                <h2 id="guard">Proactive Guard</h2>
+        <p>On Claude Code, Link checks each prompt against your constraint-shaped memories (never / always / only / do not) and interrupts exactly once when one strongly applies: <em>"let's deploy payments on Friday"</em> surfaces your deploys-on-Tuesdays memory before the agent acts. Silence is the normal output - unrelated and weak-overlap prompts pass untouched - and each firing is recorded locally as a <code>guard</code> event. Installed automatically with session hooks.</p>
+
+        <h2 id="handoff">Session Handoff</h2>
         <p>The most universal pain of multi-agent work: a rate limit hits mid-task, you switch tools, and the first ten minutes go to re-explaining. <code>lnk handoff</code> writes a standalone packet - task, state, next steps - and the next session on <em>any</em> connected agent opens with it: session-start hooks and the MCP first response both carry it, so delivery never depends on the agent thinking to ask. Handoffs expire on their own (48h), are secret-redacted at write time, and never become durable memory unless you promote them through normal review.</p>
         <pre><code>lnk handoff "Auth refactor: token validation moved, refresh test failing" --task "Auth refactor" --next "Fix refresh test"
 lnk handoffs               # list pending

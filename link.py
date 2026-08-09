@@ -257,6 +257,10 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
     atomic_write_text as _core_atomic_write_text,
 )
+from link_core.guard import (
+    guard_reminder as _core_guard_reminder,
+    render_guard_text as _core_render_guard_text,
+)
 from link_core.handoff import (
     clear_handoff as _core_clear_handoff,
     handoff_brief_block as _core_handoff_brief_block,
@@ -2802,6 +2806,30 @@ def _hook_session_end(
     return code
 
 
+
+def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str | None) -> int:
+    """Per-prompt guard: speak only when a saved constraint strongly
+    overlaps the request. Silence is the normal, correct output."""
+    prompt = str(hook_event.get("prompt") or hook_event.get("user_prompt") or "")
+    if not prompt.strip():
+        return 0
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return 0
+    project_name = project or _default_project(target)
+    reminder = _core_guard_reminder(
+        _memory_records(wiki_dir), prompt, project=project_name,
+    )
+    if reminder is None:
+        return 0
+    _core_record_retrieval(
+        _resolve_link_root(target), "guard", [str(reminder.get("name") or "")],
+        project=project_name or "",
+    )
+    print(_core_render_guard_text(reminder))
+    return 0
+
+
 def run_agent_hook(
     target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text",
     explain: bool = False,
@@ -2814,6 +2842,8 @@ def run_agent_hook(
             return _hook_session_start(target, hook_event, limit, project, emit)
         if event == "session-end":
             return _hook_session_end(target, hook_event, limit, project, explain=explain)
+        if event == "prompt-check":
+            return _hook_prompt_check(target, hook_event, project)
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
