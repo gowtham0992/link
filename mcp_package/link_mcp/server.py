@@ -386,6 +386,11 @@ from link_core.handoff import (
     handoff_brief_block as _core_handoff_brief_block,
     pending_handoffs as _core_pending_handoffs,
 )
+from link_core.guard import (
+    guard_reminder as _core_guard_reminder,
+    recently_guarded as _core_recently_guarded,
+    render_guard_text as _core_render_guard_text,
+)
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
 )
@@ -699,6 +704,29 @@ def _memory_audit(limit: int = 10, project: str = "") -> dict[str, object]:
         ),
         project=project_name,
     )
+
+
+
+def _guard_note_for(query: str, records: list[dict[str, object]] | None = None) -> str:
+    """Run the constraint guard on a recall query.
+
+    Hookless agents have no per-prompt hook, but their recall queries
+    paraphrase the user's request - so the guard rides the recall path and
+    every agent gets constraint protection whenever it recalls. Shares the
+    cooldown ledger with the prompt hook, so the two surfaces never nag in
+    stereo.
+    """
+    try:
+        reminder = _core_guard_reminder(records or _memory_records(), query)
+        if reminder is None:
+            return ""
+        name = str(reminder.get("name") or "")
+        if _core_recently_guarded(WIKI_DIR.parent, name):
+            return ""
+        _core_record_retrieval(WIKI_DIR.parent, "guard", [name])
+        return _core_render_guard_text(reminder)
+    except Exception:
+        return ""
 
 
 def _recall_memory_results(
@@ -1382,7 +1410,7 @@ def recall(
         memories = _recall_memory_results(
             clean_query, limit=parsed_limit, project=clean_project, context_path=context_path
         )
-        return json.dumps({
+        payload = {
             "surface": "slim",
             "tool": "recall",
             "mode": "memory",
@@ -1391,7 +1419,11 @@ def recall(
             "count": len(memories),
             "abstention": _core_recall_abstention(memories),
             "memories": memories,
-        }, ensure_ascii=False)
+        }
+        guard_note = _guard_note_for(clean_query)
+        if guard_note:
+            payload["guard"] = guard_note
+        return json.dumps(payload, ensure_ascii=False)
 
     if not clean_query:
         return json.dumps({"surface": "slim", "tool": "recall", "error": "query required"})
@@ -1399,6 +1431,9 @@ def recall(
     payload["surface"] = "slim"
     payload["tool"] = "recall"
     payload["mode"] = "query"
+    guard_note = _guard_note_for(clean_query)
+    if guard_note:
+        payload["guard"] = guard_note
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -1881,14 +1916,18 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
         WIKI_DIR.parent, "recall",
         [str(item.get("name") or "") for item in memories], project=project_name,
     )
-    return json.dumps({
+    payload = {
         "query": query,
         "count": len(memories),
         "include_archived": include_archived,
         "project": project_name,
         "abstention": _core_recall_abstention(memories),
         "memories": memories,
-    }, ensure_ascii=False)
+    }
+    guard_note = _guard_note_for(query)
+    if guard_note:
+        payload["guard"] = guard_note
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @_full_tool()

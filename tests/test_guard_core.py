@@ -129,3 +129,35 @@ class GuardCooldownTests(unittest.TestCase):
             self.assertTrue(recently_guarded(root, "deploy-tuesdays"))
             # A different constraint is still allowed to fire.
             self.assertFalse(recently_guarded(root, "no-force-push"))
+
+
+class McpGuardTests(unittest.TestCase):
+    """Every agent gets the guard through recall - not just the hooked one."""
+
+    def test_recall_packet_carries_guard_on_conflicting_query(self):
+        import importlib
+        import json
+        import tempfile
+        from pathlib import Path as P
+        from link_core.memory import write_memory_page
+        with tempfile.TemporaryDirectory() as temp:
+            root = P(temp)
+            wiki = root / "wiki"
+            (wiki / "memories").mkdir(parents=True)
+            (wiki / "index.md").write_text("# I\n", encoding="utf-8")
+            (wiki / "log.md").write_text("# L\n", encoding="utf-8")
+            write_memory_page(
+                wiki, "I only deploy the payments service on Tuesdays.",
+                title="Only deploy on Tuesdays", memory_type="preference",
+                scope="user", tags=None, source="t",
+                timestamp="2026-08-01T00:00:00Z",
+            )
+            sys.argv = ["link_mcp", "--wiki", str(wiki), "--surface", "slim"]
+            import link_mcp.server as server
+            importlib.reload(server)
+            first = json.loads(server.recall(query="deploy the payments service on friday", mode="query", budget="micro"))
+            self.assertIn("guard", first)
+            self.assertIn("Tuesdays", first["guard"])
+            # Cooldown shared through the ledger: second recall is quiet.
+            second = json.loads(server.recall(query="deploy payments friday", mode="query", budget="micro"))
+            self.assertNotIn("guard", second)
