@@ -6,6 +6,33 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Fixed
+
+- **LinkBar crashed at launch for everyone but the build host** (#58,
+  reported by @SparklesKitchen with a root cause and a verified fix).
+  SPM's generated `Bundle.module` accessor calls `fatalError()` when it
+  cannot find its resource bundle, and it only looks in two places: the
+  app root, and the absolute build directory of the machine that
+  compiled the binary. A packaged `.app` has neither - `bundle.sh` put
+  the bundle in `Contents/Resources/` - so every cask install since
+  1.0.0 died at launch, silently, because an `LSUIElement` app has no
+  window to show a crash. It only ever worked on the maintainer's
+  machine, where the compiled-in build path resolves. LinkBar no longer
+  touches `Bundle.module` at all: it searches the real locations
+  (`Bundle.main` first, then the SPM bundle in Resources, the app root,
+  and the executable's directory) and returns nil instead of dying. The
+  resource copy also lost its `2>/dev/null || true`, so a failed copy
+  now fails the build instead of shipping a broken app. Verified by
+  running the freshly bundled app with every build path hidden.
+- **`rebuild-backlinks` dropped links between pages sharing a filename
+  stem** (#59, same reporter). `build_wiki_cache` assigned
+  `raw_forward_links[stem]` per page, so a nested
+  `sources/vendor-docs/INDEX.md` erased the root `index.md`'s edges -
+  rebuild then wrote an incomplete `_backlinks.json` that `validate`
+  reported as stale, and the two commands disagreed permanently. The
+  cache now merges repeated stems the way `build_backlinks` and
+  validation already did.
+
 ### Added
 
 - **`lnk handoff` - switch agents mid-task and lose nothing.** The most

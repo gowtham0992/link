@@ -216,3 +216,28 @@ class PipCliPackagingTests(unittest.TestCase):
             copy_runtime_files(source, target)
             self.assertTrue((target / "link.py").exists(),
                             "wheel installs must plant link.py from link_cli.py")
+
+
+class LinkBarBundlingTests(unittest.TestCase):
+    """Issue #58: the shipped app crashed at launch everywhere but the build
+    host, because SPM's Bundle.module accessor fatalErrors when it cannot
+    find its resource bundle - and it only looks at the app root and the
+    build machine's absolute path."""
+
+    def test_no_source_touches_bundle_module(self):
+        for swift in (ROOT / "apps/LinkBar/Sources/LinkBar").glob("*.swift"):
+            for number, line in enumerate(swift.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.split("//", 1)[0]  # the explanation may name it
+                self.assertNotIn(
+                    "Bundle.module", code,
+                    f"{swift.name}:{number} touches Bundle.module, which "
+                    "fatalErrors in a packaged app (issue #58)",
+                )
+
+    def test_resource_copy_failure_fails_the_build(self):
+        script = (ROOT / "apps/LinkBar/Scripts/bundle.sh").read_text(encoding="utf-8")
+        line = next(
+            entry for entry in script.splitlines()
+            if "LinkBar_LinkBar.bundle" in entry and entry.strip().startswith("cp -R")
+        )
+        self.assertNotIn("|| true", line, "a failed resource copy must fail the build")
