@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-12
+
 ### Fixed
 
 - **LinkBar crashed at launch for everyone but the build host** (#58,

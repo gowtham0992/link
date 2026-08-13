@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-LINK_VERSION = "2.2.1"
+LINK_VERSION = "2.3.0"
 
 
 def workspace_runtime_version(root: Path) -> str | None:
