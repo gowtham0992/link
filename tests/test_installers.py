@@ -234,6 +234,21 @@ class LinkBarBundlingTests(unittest.TestCase):
                     "fatalErrors in a packaged app (issue #58)",
                 )
 
+    def test_packaged_launch_harness_exists_and_runs_in_ci(self):
+        """The static checks above cannot prove the packaged app launches.
+
+        Only running the artifact with the build environment hidden can,
+        so that harness must exist and must be wired into the macOS job -
+        the class of bug in #58 is invisible everywhere else.
+        """
+        smoke = ROOT / "scripts" / "smoke_linkbar_packaged.py"
+        self.assertTrue(smoke.is_file(), "packaged-launch smoke harness is missing")
+        body = smoke.read_text(encoding="utf-8")
+        self.assertIn("_LinkBar.bundle", body, "the harness must hide build resource bundles")
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("scripts/smoke_linkbar_packaged.py", workflow,
+                      "the harness must run in CI, not just exist")
+
     def test_resource_copy_failure_fails_the_build(self):
         script = (ROOT / "apps/LinkBar/Scripts/bundle.sh").read_text(encoding="utf-8")
         line = next(
