@@ -124,6 +124,7 @@ def measure_session_brief(wiki: Path) -> dict[str, object]:
 
     saved_argv = list(sys.argv)
     sys.argv = ["link_mcp", "--wiki", str(wiki), "--surface", "slim"]
+    server = None
     try:
         import link_mcp.server as server
         importlib.reload(server)
@@ -133,6 +134,14 @@ def measure_session_brief(wiki: Path) -> dict[str, object]:
         return {"available": False, "reason": str(exc)[:200]}
     finally:
         sys.argv = saved_argv
+        # A recall opens the persistent FTS index. POSIX lets you unlink an
+        # open file; Windows does not, so leaving it open makes the caller's
+        # TemporaryDirectory cleanup fail with WinError 32.
+        if server is not None:
+            try:
+                server._clear_cache()
+            except Exception:
+                pass
 
     def tokens(text: str) -> int:
         return max(1, (len(text) + 3) // 4)
