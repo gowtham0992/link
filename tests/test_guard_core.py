@@ -135,11 +135,11 @@ class McpGuardTests(unittest.TestCase):
     """Every agent gets the guard through recall - not just the hooked one."""
 
     def test_recall_packet_carries_guard_on_conflicting_query(self):
-        import importlib
         import json
         import tempfile
         from pathlib import Path as P
         from link_core.memory import write_memory_page
+        from mcp_harness import mcp_server
         with tempfile.TemporaryDirectory() as temp:
             root = P(temp)
             wiki = root / "wiki"
@@ -152,12 +152,12 @@ class McpGuardTests(unittest.TestCase):
                 scope="user", tags=None, source="t",
                 timestamp="2026-08-01T00:00:00Z",
             )
-            sys.argv = ["link_mcp", "--wiki", str(wiki), "--surface", "slim"]
-            import link_mcp.server as server
-            importlib.reload(server)
-            first = json.loads(server.recall(query="deploy the payments service on friday", mode="query", budget="micro"))
-            self.assertIn("guard", first)
-            self.assertIn("Tuesdays", first["guard"])
-            # Cooldown shared through the ledger: second recall is quiet.
-            second = json.loads(server.recall(query="deploy payments friday", mode="query", budget="micro"))
-            self.assertNotIn("guard", second)
+            with mcp_server(root) as server:
+                first = json.loads(server.recall(
+                    query="deploy the payments service on friday", mode="query", budget="micro"))
+                self.assertIn("guard", first)
+                self.assertIn("Tuesdays", first["guard"])
+                # Cooldown shared through the ledger: second recall is quiet.
+                second = json.loads(server.recall(
+                    query="deploy payments friday", mode="query", budget="micro"))
+                self.assertNotIn("guard", second)

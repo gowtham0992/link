@@ -82,16 +82,14 @@ class HandoffDeliveryTests(unittest.TestCase):
         return temp
 
     def test_mcp_first_response_carries_handoff_even_with_zero_memories(self):
-        import importlib
+        from mcp_harness import mcp_server
         with tempfile.TemporaryDirectory() as temp:
             root = self._workspace(Path(temp))
             write_handoff(root, "resume the migration", task="DB migration", source="codex")
-            sys.argv = ["link_mcp", "--wiki", str(root / "wiki"), "--surface", "slim"]
-            import link_mcp.server as server
-            importlib.reload(server)
-            first = json.loads(server.status())
-            self.assertIn("link_session_brief", first)
-            self.assertIn("HANDOFF WAITING", first["link_session_brief"].get("handoff_waiting", ""))
+            with mcp_server(root) as server:
+                first = json.loads(server.status())
+                self.assertIn("link_session_brief", first)
+                self.assertIn("HANDOFF WAITING", first["link_session_brief"].get("handoff_waiting", ""))
 
     def test_session_start_hook_opens_with_handoff(self):
         with tempfile.TemporaryDirectory() as temp:
