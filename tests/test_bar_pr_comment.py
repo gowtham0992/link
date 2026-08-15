@@ -426,23 +426,74 @@ def test_ambiguous_update_relists_before_retrying_the_same_comment():
     assert client.updated == [(42, new), (42, new)]
 
 
-def test_workflow_separates_read_only_collection_from_issue_comment_permissions():
+def test_workflow_separates_read_only_collection_from_pull_request_comment_permissions():
     workflow = (ROOT / ".github/workflows/bar-investigate.yml").read_text()
 
     investigate = workflow.split("  investigate:", 1)[1].split("  comment:", 1)[0]
     comment = workflow.split("  comment:", 1)[1]
-    assert "actions: read" in investigate
-    assert "contents: read" in investigate
-    assert "pull-requests: read" in investigate
-    assert "issues: write" not in investigate
-    assert "contents: read" in comment
-    assert "issues: write" in comment
-    assert "actions: read" not in comment
-    assert "pull-requests:" not in comment
+    investigate_permissions = investigate.split("    permissions:\n", 1)[1].split("    outputs:", 1)[0]
+    comment_permissions = comment.split("    permissions:\n", 1)[1].split("    steps:", 1)[0]
+    assert investigate_permissions == (
+        "      actions: read\n"
+        "      contents: read\n"
+        "      pull-requests: read\n"
+    )
+    assert comment_permissions == (
+        "      contents: read\n"
+        "      pull-requests: write\n"
+    )
     assert "BAR_ACCESS_CLIENT_ID" not in comment
     assert "BAR_ACCESS_CLIENT_SECRET" not in comment
     assert "ref: ${{ github.workflow_sha }}" in comment
     assert "persist-credentials: false" in comment
+
+
+def test_github_api_error_reports_only_safe_bounded_message_and_official_documentation_url():
+    client = comments.GitHubCommentsClient("token")
+    client.request = lambda *_args, **_kwargs: (
+        403,
+        {
+            "message": "Resource not accessible by integration",
+            "documentation_url": "https://docs.github.com/rest/issues/comments#create-an-issue-comment",
+            "sensitive_detail": "must not be logged",
+        },
+    )
+
+    with pytest.raises(comments.CommentIntegrationError) as caught:
+        client.create_comment(PR_NUMBER, comments.COMMENT_MARKER + "\nbody")
+
+    message = str(caught.value)
+    assert message == (
+        "GitHub comment create returned HTTP 403: "
+        "Resource not accessible by integration "
+        "(https://docs.github.com/rest/issues/comments#create-an-issue-comment)"
+    )
+    assert "sensitive_detail" not in message
+    assert "must not be logged" not in message
+
+
+def test_github_api_error_neutralizes_log_injection_and_rejects_external_documentation_urls():
+    client = comments.GitHubCommentsClient("token")
+    client.request = lambda *_args, **_kwargs: (
+        403,
+        {
+            "message": "denied\n::warning:: @team\u202e<script>" + "x" * 500,
+            "documentation_url": "https://attacker.example/collect?secret=value",
+        },
+    )
+
+    with pytest.raises(comments.CommentIntegrationError) as caught:
+        client.create_comment(PR_NUMBER, comments.COMMENT_MARKER + "\nbody")
+
+    message = str(caught.value)
+    assert message.startswith("GitHub comment create returned HTTP 403: denied warning team script")
+    assert "\n" not in message
+    assert "::" not in message
+    assert "@" not in message
+    assert "\u202e" not in message
+    assert "<" not in message and ">" not in message
+    assert "attacker.example" not in message
+    assert len(message) <= 260
 
 
 def test_comment_retry_path_has_no_bar_credentials_or_investigation_calls():
