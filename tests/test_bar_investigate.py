@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import email.utils
 import hashlib
+import http.client
 import json
+import socketserver
+import ssl
+import threading
 import urllib.error
 from pathlib import Path
 
@@ -272,6 +277,66 @@ class Response:
         chunk = self._body[:_limit]
         self._body = self._body[_limit:]
         return chunk
+
+
+class _WireServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+    def __init__(self, responses: list[bytes]):
+        self.responses = list(responses)
+        self.requests: list[bytes] = []
+        super().__init__(("127.0.0.1", 0), _WireHandler)
+
+
+class _WireHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        raw = b""
+        while b"\r\n\r\n" not in raw:
+            chunk = self.request.recv(4096)
+            if not chunk:
+                return
+            raw += chunk
+        headers, body = raw.split(b"\r\n\r\n", 1)
+        content_length = 0
+        for line in headers.split(b"\r\n")[1:]:
+            name, _, value = line.partition(b":")
+            if name.lower() == b"content-length":
+                content_length = int(value.strip())
+        while len(body) < content_length:
+            body += self.request.recv(content_length - len(body))
+        self.server.requests.append(headers + b"\r\n\r\n" + body)
+        self.request.sendall(self.server.responses.pop(0))
+
+
+@contextlib.contextmanager
+def wire_server(*responses: bytes):
+    server = _WireServer(list(responses))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def http_response(status: int, body: bytes = b"", **headers: str) -> bytes:
+    reason = {202: "Accepted", 302: "Found", 408: "Request Timeout", 429: "Too Many Requests", 503: "Service Unavailable"}.get(status, "Error")
+    response_headers = {"Content-Length": str(len(body)), "Connection": "close", **headers}
+    lines = [f"HTTP/1.1 {status} {reason}"] + [
+        f"{name}: {value}" for name, value in response_headers.items()
+    ]
+    return ("\r\n".join(lines) + "\r\n\r\n").encode() + body
+
+
+def connection_factory_for(server: _WireServer):
+    def factory(_host: str, _port: int, *, timeout: float):
+        return http.client.HTTPConnection(
+            server.server_address[0], server.server_address[1], timeout=timeout
+        )
+
+    return factory
 
 
 def capture_environment(**overrides: str) -> dict[str, str]:
@@ -620,114 +685,180 @@ def test_real_run_package_and_windows_packets_fit_bar_budgets_independently():
     assert "Build link-mcp" in package_text
 
 
-def test_retry_sends_identical_packet_and_idempotency_key(monkeypatch):
+def test_retry_sends_identical_packet_and_idempotency_key():
     packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
-    requests = []
-
-    def opener(request, timeout):
-        assert timeout == 30
-        requests.append(request)
-        if len(requests) == 1:
-            raise urllib.error.HTTPError(request.full_url, 503, "retry", {}, None)
-        return Response(
-            202,
-            json.dumps(
-                {
-                    "investigation": {
-                        "id": "e" * 64,
-                        "url": f"/private/investigations/{'e' * 64}",
-                    }
-                }
-            ).encode(),
-        )
+    success = json.dumps(
+        {
+            "investigation": {
+                "id": "e" * 64,
+                "url": f"/private/investigations/{'e' * 64}",
+            }
+        }
+    ).encode()
 
     sleeps = []
-    result = bar.send_packet(
-        packet,
-        endpoint=bar.DEFAULT_ENDPOINT,
-        client_id="client-id",
-        client_secret="client-secret",
-        opener=opener,
-        sleeper=sleeps.append,
-    )
+    with wire_server(http_response(503), http_response(202, success)) as server:
+        result = bar.send_packet(
+            packet,
+            endpoint=bar.DEFAULT_ENDPOINT,
+            client_id="client-id",
+            client_secret="client-secret",
+            connection_factory=connection_factory_for(server),
+            sleeper=sleeps.append,
+        )
 
     assert result["investigation"]["id"] == "e" * 64
-    assert len(requests) == 2
-    assert requests[0].data == requests[1].data == bar.canonical_json_bytes(packet)
-    assert requests[0].get_header("Idempotency-key") == "d" * 64
-    assert requests[0].get_header("Cf-access-client-id") == "client-id"
-    assert requests[0].get_header("Cf-access-client-secret") == "client-secret"
+    assert len(server.requests) == 2
+    first_body = server.requests[0].split(b"\r\n\r\n", 1)[1]
+    second_body = server.requests[1].split(b"\r\n\r\n", 1)[1]
+    assert first_body == second_body == bar.canonical_json_bytes(packet)
+    assert b"Idempotency-Key: " + b"d" * 64 + b"\r\n" in server.requests[0]
     assert sleeps == [1.0]
 
 
-def test_default_bar_transport_rejects_redirect_without_following_access_headers(
-    monkeypatch,
-):
+def test_bar_transport_preserves_exact_access_header_names_on_the_wire():
     packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
-    seen_requests = []
-    seen_handlers = []
 
-    class RedirectOpener:
-        def open(self, request, timeout):
-            seen_requests.append(request)
-            raise urllib.error.HTTPError(
-                request.full_url,
-                302,
-                "Found",
-                {"Location": "https://redirect.example.test/steal"},
-                None,
-            )
-
-    monkeypatch.setattr(
-        bar.urllib.request,
-        "build_opener",
-        lambda *handlers: seen_handlers.extend(handlers) or RedirectOpener(),
-    )
-
-    with pytest.raises(bar.IntegrationError, match="HTTP 302"):
+    with wire_server(http_response(202, b"{}")) as server:
         bar.send_packet(
             packet,
             endpoint=bar.DEFAULT_ENDPOINT,
             client_id="client-id",
             client_secret="client-secret",
-            opener=None,
+            connection_factory=connection_factory_for(server),
             sleeper=lambda _delay: None,
         )
 
-    assert len(seen_requests) == 1
-    assert seen_handlers == [bar._NoRedirect]
-    assert seen_requests[0].get_header("Cf-access-client-id") == "client-id"
-    assert seen_requests[0].get_header("Cf-access-client-secret") == "client-secret"
+    request_headers = server.requests[0].split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]
+    names = [line.split(b":", 1)[0] for line in request_headers]
+    assert b"CF-Access-Client-Id" in names
+    assert b"CF-Access-Client-Secret" in names
+    assert b"Cf-access-client-id" not in names
+    assert b"Cf-access-client-secret" not in names
+
+
+def test_bar_transport_names_the_collector_in_a_user_agent():
+    """http.client sends no User-Agent by default; an unnamed agent invites
+    edge bot rules to answer instead of Bar."""
+    packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
+
+    with wire_server(http_response(202, b"{}")) as server:
+        bar.send_packet(
+            packet,
+            endpoint=bar.DEFAULT_ENDPOINT,
+            client_id="client-id",
+            client_secret="client-secret",
+            connection_factory=connection_factory_for(server),
+            sleeper=lambda _delay: None,
+        )
+
+    assert b"User-Agent: link-bar-action/v1\r\n" in server.requests[0]
+
+
+def test_tls_certificate_failure_is_permanent_and_not_retried():
+    """A certificate that does not verify is a trust failure, not a blip.
+    Retrying it would bury an intercepted certificate under a generic
+    network error."""
+    packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
+    attempts = []
+    sleeps = []
+
+    def failing_factory(_host, _port, *, timeout):
+        attempts.append(timeout)
+        raise ssl.SSLCertVerificationError(
+            1, "certificate verify failed: self signed certificate"
+        )
+
+    with pytest.raises(bar.IntegrationError, match="TLS certificate verification failed"):
+        bar.send_packet(
+            packet,
+            endpoint=bar.DEFAULT_ENDPOINT,
+            client_id="client-id",
+            client_secret="client-secret",
+            connection_factory=failing_factory,
+            sleeper=sleeps.append,
+        )
+
+    assert len(attempts) == 1
+    assert sleeps == []
+
+
+def test_ordinary_socket_errors_are_still_retried():
+    """The TLS clause must not swallow genuinely transient failures, which
+    remain retryable even though SSLCertVerificationError is an OSError."""
+    packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
+    attempts = []
+    sleeps = []
+
+    def flaky_factory(_host, _port, *, timeout):
+        attempts.append(timeout)
+        raise ConnectionResetError("connection reset by peer")
+
+    with pytest.raises(bar.IntegrationError, match="failed after retries"):
+        bar.send_packet(
+            packet,
+            endpoint=bar.DEFAULT_ENDPOINT,
+            client_id="client-id",
+            client_secret="client-secret",
+            connection_factory=flaky_factory,
+            sleeper=sleeps.append,
+        )
+
+    assert len(attempts) == 3
+    assert sleeps == [1.0, 2.0]
+
+
+def test_bar_transport_rejects_non_https_endpoint_before_connecting():
+    def unexpected_connection(*_args, **_kwargs):
+        raise AssertionError("transport connected to a non-allowlisted endpoint")
+
+    with pytest.raises(bar.IntegrationError, match="endpoint is not allowlisted"):
+        bar.post_bar_bytes(
+            b"",
+            endpoint=bar.DEFAULT_ENDPOINT.replace("https://", "http://", 1),
+            client_id="client-id",
+            client_secret="client-secret",
+            idempotency_key="d" * 64,
+            connection_factory=unexpected_connection,
+        )
+
+
+def test_default_bar_transport_rejects_redirect_without_forwarding_credentials():
+    packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
+    with wire_server(http_response(404)) as credential_sink:
+        location = f"http://127.0.0.1:{credential_sink.server_address[1]}/steal"
+        with wire_server(http_response(302, Location=location)) as source:
+            with pytest.raises(bar.IntegrationError, match="HTTP 302"):
+                bar.send_packet(
+                    packet,
+                    endpoint=bar.DEFAULT_ENDPOINT,
+                    client_id="client-id",
+                    client_secret="client-secret",
+                    connection_factory=connection_factory_for(source),
+                    sleeper=lambda _delay: None,
+                )
+
+    assert len(source.requests) == 1
+    assert credential_sink.requests == []
 
 
 def test_rate_limit_retry_respects_retry_after_header():
     packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
-    calls = 0
-
-    def opener(request, timeout):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise urllib.error.HTTPError(
-                request.full_url,
-                429,
-                "rate limited",
-                {"Retry-After": "7"},
-                None,
-            )
-        return Response(202, b"{}")
 
     sleeps = []
-    bar.send_packet(
-        packet,
-        endpoint=bar.DEFAULT_ENDPOINT,
-        client_id="client-id",
-        client_secret="client-secret",
-        opener=opener,
-        sleeper=sleeps.append,
-    )
+    with wire_server(
+        http_response(429, **{"Retry-After": "7"}), http_response(202, b"{}")
+    ) as server:
+        bar.send_packet(
+            packet,
+            endpoint=bar.DEFAULT_ENDPOINT,
+            client_id="client-id",
+            client_secret="client-secret",
+            connection_factory=connection_factory_for(server),
+            sleeper=sleeps.append,
+        )
 
-    assert calls == 2
+    assert len(server.requests) == 2
     assert sleeps == [7.0]
 
 
@@ -739,26 +870,19 @@ def test_retry_after_supports_http_dates_and_rejects_invalid_values():
 
 def test_request_timeout_response_is_retried():
     packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
-    calls = 0
-
-    def opener(request, timeout):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise urllib.error.HTTPError(request.full_url, 408, "timeout", {}, None)
-        return Response(202, b"{}")
 
     sleeps = []
-    bar.send_packet(
-        packet,
-        endpoint=bar.DEFAULT_ENDPOINT,
-        client_id="client-id",
-        client_secret="client-secret",
-        opener=opener,
-        sleeper=sleeps.append,
-    )
+    with wire_server(http_response(408), http_response(202, b"{}")) as server:
+        bar.send_packet(
+            packet,
+            endpoint=bar.DEFAULT_ENDPOINT,
+            client_id="client-id",
+            client_secret="client-secret",
+            connection_factory=connection_factory_for(server),
+            sleeper=sleeps.append,
+        )
 
-    assert calls == 2
+    assert len(server.requests) == 2
     assert sleeps == [1.0]
 
 
@@ -766,15 +890,31 @@ def test_request_timeout_response_is_retried():
 def test_empty_or_malformed_bar_response_is_a_clean_integration_error(body):
     packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
 
-    with pytest.raises(bar.IntegrationError, match="invalid JSON"):
-        bar.send_packet(
-            packet,
-            endpoint=bar.DEFAULT_ENDPOINT,
-            client_id="client-id",
-            client_secret="client-secret",
-            opener=lambda *_args, **_kwargs: Response(202, body),
-            sleeper=lambda _delay: None,
-        )
+    with wire_server(http_response(202, body)) as server:
+        with pytest.raises(bar.IntegrationError, match="invalid JSON"):
+            bar.send_packet(
+                packet,
+                endpoint=bar.DEFAULT_ENDPOINT,
+                client_id="client-id",
+                client_secret="client-secret",
+                connection_factory=connection_factory_for(server),
+                sleeper=lambda _delay: None,
+            )
+
+
+def test_oversized_bar_response_is_read_only_to_the_limit():
+    packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
+
+    with wire_server(http_response(202, b"x" * (64 * 1024 + 100))) as server:
+        with pytest.raises(bar.IntegrationError, match="response exceeded"):
+            bar.send_packet(
+                packet,
+                endpoint=bar.DEFAULT_ENDPOINT,
+                client_id="client-id",
+                client_secret="client-secret",
+                connection_factory=connection_factory_for(server),
+                sleeper=lambda _delay: None,
+            )
 
 
 def test_main_reports_bad_bar_response_without_a_traceback(monkeypatch, capsys):
