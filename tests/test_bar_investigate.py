@@ -16,6 +16,36 @@ ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_SHA = "a" * 40
 HEAD_SHA = "b" * 40
 BASE_SHA = "c" * 40
+REAL_PACKAGE_JOB_ID = 94974815650
+REAL_WINDOWS_JOB_ID = 94974815637
+
+REAL_PACKAGE_FAILURE = "\n".join(
+    [
+        "2026-08-15T06:22:00Z Building source distribution",
+        "2026-08-15T06:22:01Z File <WORKSPACE>/mcp_package/pyproject.toml",
+        "2026-08-15T06:22:02Z FileNotFoundError: Forced include not found: "
+        "<TEMP>/link_mcp-2.3.0/.linkignore",
+        "2026-08-15T06:22:03Z ERROR Backend subprocess exited when trying to "
+        "invoke build_wheel",
+        "2026-08-15T06:22:04Z ##[error]Process completed with exit code 1.",
+    ]
+)
+REAL_WINDOWS_FAILURE = "\n".join(
+    [
+        "2026-08-15T06:22:00Z FAILED "
+        "tests/test_guard_core.py::McpGuardTests::"
+        "test_recall_packet_carries_guard_on_conflicting_query",
+        "2026-08-15T06:22:01Z FAILED "
+        "tests/test_token_economics.py::TokenEconomicsTests::"
+        "test_packets_stay_bounded_and_plateau",
+        "2026-08-15T06:22:02Z File <WORKSPACE>/scripts/eval_token_economics.py, "
+        "line 237, in main",
+        "2026-08-15T06:22:03Z PermissionError: [WinError 32] The process cannot "
+        "access the file because it is being used by another process: "
+        "<TEMP>/tmp73e1vwn6/.link-cache/page-fts-v1.sqlite",
+        "2026-08-15T06:22:04Z ##[error]Process completed with exit code 1.",
+    ]
+)
 
 
 def sample_run() -> dict:
@@ -88,6 +118,143 @@ class FakeClient:
         return bar.CollectedLog(
             "PermissionError: SQLite database file is still open", False, 0
         )
+
+
+def real_attempt_two_run() -> dict:
+    run = sample_run()
+    run["run_attempt"] = 2
+    run["updated_at"] = "2026-08-15T06:23:00Z"
+    return run
+
+
+def real_attempt_two_jobs() -> list[dict]:
+    return [
+        {
+            "id": REAL_WINDOWS_JOB_ID,
+            "name": "windows-smoke",
+            "conclusion": "failure",
+            "completed_at": "2026-08-15T06:23:00Z",
+            "steps": [
+                {"name": "Set up job", "conclusion": "success"},
+                {"name": "Run broad Windows tests", "conclusion": "failure"},
+            ],
+        },
+        {
+            "id": REAL_PACKAGE_JOB_ID,
+            "name": "package",
+            "conclusion": "failure",
+            "completed_at": "2026-08-15T06:18:20Z",
+            "steps": [
+                {"name": "Set up job", "conclusion": "success"},
+                {"name": "Build link-mcp", "conclusion": "failure"},
+            ],
+        },
+    ]
+
+
+def oversized_patch(header: str, useful_context: str) -> str:
+    lower_value_context = "\n".join(
+        f"+lower_value_context_{index} = true" for index in range(220)
+    )
+    return f"{header}\n{useful_context}\n{lower_value_context}"
+
+
+def real_failure_pull_files() -> list[dict]:
+    return [
+        {
+            "filename": "mcp_package/pyproject.toml",
+            "status": "modified",
+            "additions": 222,
+            "deletions": 0,
+            "patch": oversized_patch(
+                "@@ -24,1 +24,222 @@",
+                '+"../.linkignore" = ".linkignore"\n[tool.hatch.build.targets.sdist]',
+            ),
+        },
+        {
+            "filename": "scripts/eval_token_economics.py",
+            "status": "modified",
+            "additions": 222,
+            "deletions": 0,
+            "patch": oversized_patch(
+                "@@ -229,1 +229,222 @@",
+                "+with tempfile.TemporaryDirectory() as temp:",
+            ),
+        },
+        {
+            "filename": "tests/test_guard_core.py",
+            "status": "modified",
+            "additions": 222,
+            "deletions": 0,
+            "patch": oversized_patch(
+                "@@ -135,1 +135,222 @@",
+                "+def test_recall_packet_carries_guard_on_conflicting_query(self):",
+            ),
+        },
+        {
+            "filename": "tests/test_token_economics.py",
+            "status": "modified",
+            "additions": 222,
+            "deletions": 0,
+            "patch": oversized_patch(
+                "@@ -8,1 +8,222 @@",
+                "+def test_packets_stay_bounded_and_plateau(self):",
+            ),
+        },
+    ]
+
+
+class RealRunClient:
+    def get_log(self, job_id: int) -> bar.CollectedLog:
+        repeated_noise = "\n".join(
+            f"2026-08-15T06:20:{index:02d}Z build context line {index}"
+            for index in range(60)
+        )
+        if job_id == REAL_PACKAGE_JOB_ID:
+            return bar.CollectedLog(f"{repeated_noise}\n{REAL_PACKAGE_FAILURE}", False, 0)
+        if job_id == REAL_WINDOWS_JOB_ID:
+            return bar.CollectedLog(f"{repeated_noise}\n{REAL_WINDOWS_FAILURE}", False, 0)
+        raise AssertionError(f"unexpected job ID: {job_id}")
+
+    def get_json(self, path: str):
+        if path.endswith("/actions/runs/31668261705/attempts/2"):
+            return real_attempt_two_run()
+        if path.endswith("/actions/runs/31668261705/attempts/2/jobs?per_page=100"):
+            jobs = real_attempt_two_jobs()
+            return {"total_count": len(jobs), "jobs": jobs}
+        if path.endswith("/pulls/60"):
+            return sample_pull()
+        if path.endswith("/pulls/60/files?per_page=100"):
+            return real_failure_pull_files()
+        if "/contents/.github/workflows/ci.yml?ref=" in path:
+            workflow = "\n".join(
+                [
+                    "jobs:",
+                    "  windows-smoke:",
+                    "    steps:",
+                    "      - name: Run broad Windows tests",
+                    "        run: python -m pytest tests -q",
+                    "  package:",
+                    "    steps:",
+                    "      - name: Build link-mcp",
+                    "        working-directory: mcp_package",
+                    "        run: python -m build",
+                ]
+            )
+            return {
+                "encoding": "base64",
+                "content": base64.b64encode(workflow.encode()).decode(),
+            }
+        raise AssertionError(f"unexpected GitHub API path: {path}")
+
+
+def assert_bar_packet_limits(packet: dict) -> None:
+    evidence = packet["evidence"]
+    assert sum(len(item["content"].split("\n")) for item in evidence) <= 400
+    assert sum(len(item["content"].encode()) for item in evidence) <= 64 * 1024
+    assert all(len(item["content"].encode()) <= 12 * 1024 for item in evidence)
+    assert len(bar.canonical_json_bytes(packet)) <= 128 * 1024
+    assert [item["sequence"] for item in evidence] == list(range(1, len(evidence) + 1))
 
 
 class Response:
@@ -414,6 +581,45 @@ def test_truncated_log_is_marked_without_aborting_packet_creation(monkeypatch):
     assert any("retained the bounded final portion" in item for item in packet["missing_evidence"])
 
 
+def test_real_run_package_and_windows_packets_fit_bar_budgets_independently():
+    client = RealRunClient()
+
+    packets = bar.collect_packets(client, 31668261705, 2, CAPTURE_SHA)
+    repeated = bar.collect_packets(client, 31668261705, 2, CAPTURE_SHA)
+
+    assert packets == repeated
+    assert [packet["focus"]["job_name"] for packet in packets] == [
+        "windows-smoke",
+        "package",
+    ]
+    assert [packet["focus"]["job_id"] for packet in packets] == [
+        REAL_WINDOWS_JOB_ID,
+        REAL_PACKAGE_JOB_ID,
+    ]
+    for packet in packets:
+        assert_bar_packet_limits(packet)
+        assert packet["sanitization"]["truncated"] is True
+        assert any(
+            "deterministically truncated" in item
+            for item in packet["missing_evidence"]
+        )
+
+    windows_text = "\n".join(
+        item["content"] for item in packets[0]["evidence"]
+    )
+    package_text = "\n".join(
+        item["content"] for item in packets[1]["evidence"]
+    )
+    assert "WinError 32" in windows_text
+    assert "page-fts-v1.sqlite" in windows_text
+    assert "eval_token_economics.py" in windows_text
+    assert "Run broad Windows tests" in windows_text
+    assert "Forced include not found" in package_text
+    assert ".linkignore" in package_text
+    assert "pyproject.toml" in package_text
+    assert "Build link-mcp" in package_text
+
+
 def test_retry_sends_identical_packet_and_idempotency_key(monkeypatch):
     packet = {"delivery": {"id": "d" * 64}, "value": "safe"}
     requests = []
@@ -611,7 +817,7 @@ def test_bar_response_is_restricted_to_the_expected_private_page():
         bar.parse_bar_response(result)
 
 
-def test_evidence_builder_rejects_aggregate_line_limit():
+def test_evidence_builder_trims_lower_value_context_at_aggregate_limit():
     builder = bar.EvidenceBuilder.create()
     for index in range(14):
         builder.add(
@@ -626,5 +832,8 @@ def test_evidence_builder_rejects_aggregate_line_limit():
             line_end=30,
         )
 
-    with pytest.raises(bar.IntegrationError, match="400 lines"):
-        builder.validate_limits()
+    builder.validate_limits()
+    assert builder.truncated is True
+    assert builder.budget_truncated is True
+    assert sum(len(item["content"].splitlines()) for item in builder.items) <= 400
+    assert len(builder.items[-1]["content"].splitlines()) == 10
