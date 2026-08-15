@@ -13,6 +13,7 @@ import ssl
 import sys
 import unicodedata
 from typing import Any, Mapping, Protocol
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 
 REPOSITORY = "gowtham0992/link"
@@ -23,6 +24,8 @@ BAR_INVESTIGATION_ORIGIN = "https://bar-private.gowthamsarveswaran.com"
 MAX_ENCODED_OUTPUT_BYTES = 8 * 1024
 MAX_COMMENT_BYTES = 12 * 1024
 MAX_GITHUB_RESPONSE_BYTES = 1024 * 1024
+MAX_GITHUB_ERROR_MESSAGE = 160
+MAX_GITHUB_DOCUMENTATION_URL = 300
 MAX_CHECK_TEXT = 80
 MAX_DIAGNOSIS_TEXT = 200
 MAX_COMMENT_PAGES = 10
@@ -37,6 +40,7 @@ BARE_DOMAIN_RE = re.compile(
 )
 MARKDOWN_ESCAPE_RE = re.compile(r"([\\`*_{}\[\]()#+\-.!|>])")
 LINE_BREAK_RE = re.compile("[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]")
+SAFE_DOC_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*$")
 
 
 class CommentIntegrationError(RuntimeError):
@@ -225,6 +229,59 @@ def investigation_url(investigation_id: str) -> str:
     return f"{BAR_INVESTIGATION_ORIGIN}/private/investigations/{investigation_id}"
 
 
+def safe_github_error_message(value: Any) -> str | None:
+    """Project one untrusted GitHub error string into a safe Actions-log line."""
+    if not isinstance(value, str):
+        return None
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = LINE_BREAK_RE.sub(" ", normalized)
+    visible = "".join(
+        character for character in normalized if unicodedata.category(character) not in {"Cc", "Cf", "Cs"}
+    )
+    visible = URL_RE.sub(" URL removed ", visible)
+    visible = BARE_DOMAIN_RE.sub(" URL removed ", visible)
+    # Actions error output must stay plain text: remove mentions, HTML
+    # delimiters, and workflow-command punctuation rather than escaping it.
+    visible = re.sub(r"[@<>:&]", " ", visible)
+    visible = " ".join(visible.split())[:MAX_GITHUB_ERROR_MESSAGE].rstrip()
+    return visible or None
+
+
+def safe_github_documentation_url(value: Any) -> str | None:
+    """Allow only a bounded canonical HTTPS URL on GitHub's docs host."""
+    if not isinstance(value, str) or not 0 < len(value) <= MAX_GITHUB_DOCUMENTATION_URL:
+        return None
+    if any(ord(character) < 0x21 or ord(character) > 0x7E or character == "\\" for character in value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "docs.github.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or not parsed.path.startswith("/")
+        or not SAFE_DOC_COMPONENT_RE.fullmatch(f"{parsed.path}?{parsed.query}#{parsed.fragment}")
+    ):
+        return None
+    return urlunsplit(SplitResult("https", "docs.github.com", parsed.path, parsed.query, parsed.fragment))
+
+
+def github_api_error(operation: str, status: int, result: Any) -> str:
+    message = safe_github_error_message(result.get("message")) if isinstance(result, dict) else None
+    documentation_url = (
+        safe_github_documentation_url(result.get("documentation_url")) if isinstance(result, dict) else None
+    )
+    detail = f": {message}" if message else ""
+    if documentation_url:
+        detail += f" ({documentation_url})"
+    return f"GitHub comment {operation} returned HTTP {status}{detail}"
+
+
 def render_comment(payload: dict[str, Any]) -> str:
     lines = [
         COMMENT_MARKER,
@@ -323,7 +380,9 @@ class GitHubCommentsClient:
         for page in range(1, MAX_COMMENT_PAGES + 1):
             path = f"/repos/{REPOSITORY}/issues/{pull_request_number}/comments?per_page=100&page={page}"
             status, result = self.request("GET", path)
-            require(status == 200 and isinstance(result, list), f"GitHub comment lookup returned HTTP {status}")
+            if status != 200:
+                raise CommentIntegrationError(github_api_error("lookup", status, result))
+            require(isinstance(result, list), "GitHub comment lookup shape is invalid")
             require(all(isinstance(item, dict) for item in result), "GitHub comment lookup shape is invalid")
             comments.extend(result)
             if len(result) < 100:
@@ -334,16 +393,20 @@ class GitHubCommentsClient:
         path = f"/repos/{REPOSITORY}/issues/{positive_integer(pull_request_number, 'pull request number')}/comments"
         status, result = self.request("POST", path, {"body": body})
         if status in {408, 429, 500, 502, 503, 504}:
-            raise AmbiguousWriteError(f"GitHub comment create returned HTTP {status}")
-        require(status == 201 and isinstance(result, dict), f"GitHub comment create returned HTTP {status}")
+            raise AmbiguousWriteError(github_api_error("create", status, result))
+        if status != 201:
+            raise CommentIntegrationError(github_api_error("create", status, result))
+        require(isinstance(result, dict), "GitHub comment create response shape is invalid")
         return result
 
     def update_comment(self, comment_id: int, body: str) -> dict[str, Any]:
         path = f"/repos/{REPOSITORY}/issues/comments/{positive_integer(comment_id, 'comment ID')}"
         status, result = self.request("PATCH", path, {"body": body})
         if status in {408, 429, 500, 502, 503, 504}:
-            raise AmbiguousWriteError(f"GitHub comment update returned HTTP {status}")
-        require(status == 200 and isinstance(result, dict), f"GitHub comment update returned HTTP {status}")
+            raise AmbiguousWriteError(github_api_error("update", status, result))
+        if status != 200:
+            raise CommentIntegrationError(github_api_error("update", status, result))
+        require(isinstance(result, dict), "GitHub comment update response shape is invalid")
         return result
 
 
