@@ -199,8 +199,10 @@ class PipCliPackagingTests(unittest.TestCase):
     def test_wheel_declares_the_lnk_console_script(self):
         pyproject = (ROOT / "mcp_package" / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('lnk = "link_cli:main"', pyproject)
-        for shipped in ('"../link.py" = "link_cli.py"', '"../serve.py" = "serve.py"',
-                        '"../LINK.md" = "LINK.md"'):
+        # Staged locally by hatch_build.py: a "../" reference here fails
+        # when the wheel is built from an extracted sdist.
+        for shipped in ('"link_cli.py" = "link_cli.py"', '"serve.py" = "serve.py"',
+                        '"LINK.md" = "LINK.md"'):
             self.assertIn(shipped, pyproject)
 
     def test_runtime_copy_falls_back_to_link_cli(self):
@@ -256,3 +258,41 @@ class LinkBarBundlingTests(unittest.TestCase):
             if "LinkBar_LinkBar.bundle" in entry and entry.strip().startswith("cp -R")
         )
         self.assertNotIn("|| true", line, "a failed resource copy must fail the build")
+
+
+class SdistSelfContainedTests(unittest.TestCase):
+    """`python -m build` builds the wheel from the extracted sdist, where no
+    parent directory exists. Referencing ../link.py there broke CI, so the
+    staging hook must keep the sdist self-contained."""
+
+    def test_build_hook_stages_runtime_files_locally(self):
+        pyproject = (ROOT / "mcp_package" / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn("[tool.hatch.build.hooks.custom]", pyproject)
+        self.assertIn('path = "hatch_build.py"', pyproject)
+        force_include = pyproject.split("[tool.hatch.build.targets.wheel.force-include]", 1)[1]
+        force_include = force_include.split("[", 1)[0]
+        self.assertNotIn(
+            "../", force_include,
+            "force-include must not reach outside the package: it fails when "
+            "the wheel is built from an extracted sdist",
+        )
+
+    def test_hook_refuses_to_build_without_the_runtime_files(self):
+        import shutil
+        import sys as _sys
+        import tempfile
+        from pathlib import Path as P
+        _sys.path.insert(0, str(ROOT / "mcp_package"))
+        from hatch_build import STAGED_RUNTIME_FILES, StageRuntimeFilesHook
+        with tempfile.TemporaryDirectory() as temp:
+            package = P(temp) / "pkg"        # no parent runtime files, none staged
+            package.mkdir(parents=True)
+            hook = StageRuntimeFilesHook.__new__(StageRuntimeFilesHook)
+            hook.__dict__["root"] = str(package)
+            with self.assertRaises(FileNotFoundError):
+                hook.initialize("standard", {})
+            # With the files staged (the sdist case) it proceeds.
+            for staged in STAGED_RUNTIME_FILES.values():
+                (package / staged).write_text("x", encoding="utf-8")
+            hook.initialize("standard", {})
+            shutil.rmtree(package, ignore_errors=True)
