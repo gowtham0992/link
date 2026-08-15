@@ -17,10 +17,7 @@ on:
         default: "1"
         type: string
 
-permissions:
-  actions: read
-  contents: read
-  pull-requests: read
+permissions: {}
 
 concurrency:
   group: bar-investigate-${{ github.event.workflow_run.id || inputs.run_id }}-${{ github.event.workflow_run.run_attempt || inputs.run_attempt }}
@@ -35,6 +32,12 @@ jobs:
        github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      bar_comment_payload: ${{ steps.investigate.outputs.bar_comment_payload }}
     steps:
       - name: Check out the trusted collector revision
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -45,6 +48,7 @@ jobs:
           path: trusted
 
       - name: Collect, sanitize, and send failed CI evidence
+        id: investigate
         env:
           BAR_ACCESS_CLIENT_ID: ${{ secrets.BAR_ACCESS_CLIENT_ID }}
           BAR_ACCESS_CLIENT_SECRET: ${{ secrets.BAR_ACCESS_CLIENT_SECRET }}
@@ -57,3 +61,28 @@ jobs:
           BAR_WORKFLOW_REF: ${{ github.workflow_ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 trusted/scripts/bar_investigate.py
+
+  comment:
+    needs: investigate
+    if: >-
+      needs.investigate.result == 'success' &&
+      needs.investigate.outputs.bar_comment_payload != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the trusted comment revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: trusted
+
+      - name: Create or update the Bar pull request comment
+        env:
+          BAR_COMMENT_PAYLOAD: ${{ needs.investigate.outputs.bar_comment_payload }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 trusted/scripts/bar_pr_comment.py comment
