@@ -19,6 +19,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
 
+if __package__:
+    from scripts import bar_summary_poll
+else:
+    import bar_summary_poll
+
 
 REPOSITORY = "gowtham0992/link"
 CI_WORKFLOW_NAME = "CI"
@@ -1035,6 +1040,7 @@ def main() -> int:
         run_id, attempt, capture_sha = validate_capture_context(dict(os.environ))
         client = GitHubClient(os.environ.get("GITHUB_TOKEN", ""))
         packets = collect_packets(client, run_id, attempt, capture_sha)
+        investigation_ids = []
         for packet in packets:
             result = send_packet(
                 packet,
@@ -1043,11 +1049,41 @@ def main() -> int:
                 client_secret=os.environ.get("BAR_ACCESS_CLIENT_SECRET", ""),
             )
             investigation_id, url = parse_bar_response(result)
+            investigation_ids.append(investigation_id)
             print(f"Bar investigation {investigation_id}: {url}")
             summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
             if summary_path:
                 with open(summary_path, "a", encoding="utf-8") as summary:
                     summary.write(f"- [{investigation_id}]({url})\n")
+        # The comment destination comes from the pull request the collector
+        # already validated against GitHub - same repository, head SHA matching
+        # the run. Bar's own pull request number is only ever cross-checked
+        # against this one, never used to choose where to comment.
+        pull_numbers = {
+            packet["source"]["pull_request"]["number"]
+            for packet in packets
+            if packet["source"]["pull_request"]
+        }
+        if not pull_numbers:
+            print("No pull request for this run; skipping the Bar comment.")
+            return 0
+        require(len(pull_numbers) == 1, "packets disagree on the pull request")
+        try:
+            encoded = bar_summary_poll.poll_and_encode(
+                investigation_ids,
+                expected_run_id=run_id,
+                expected_run_attempt=attempt,
+                expected_pull_request_number=next(iter(pull_numbers)),
+                client_id=os.environ.get("BAR_ACCESS_CLIENT_ID", ""),
+                client_secret=os.environ.get("BAR_ACCESS_CLIENT_SECRET", ""),
+            )
+            bar_summary_poll.write_github_output(
+                os.environ.get("GITHUB_OUTPUT", ""),
+                "bar_comment_payload",
+                encoded,
+            )
+        except bar_summary_poll.SummaryIntegrationError as error:
+            raise IntegrationError(str(error)) from error
         return 0
     except IntegrationError as error:
         print(f"Bar collection failed: {error}", file=sys.stderr)

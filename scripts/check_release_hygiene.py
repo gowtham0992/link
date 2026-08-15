@@ -60,6 +60,10 @@ OUTBOUND_NETWORK_ALLOWLIST = {
     # Transport tests for that collector. They bind only loopback servers to
     # assert wire-level header spelling, and tests/ is not in the wheel either.
     Path("tests/test_bar_investigate.py"),
+    # Reads Bar's bounded machine summaries over GET, in CI only.
+    Path("scripts/bar_summary_poll.py"),
+    # Writes the one Bar result comment through the GitHub API, in CI only.
+    Path("scripts/bar_pr_comment.py"),
 }
 OUTBOUND_NETWORK_PATTERNS = (
     ("requests import", re.compile(r"^\s*(?:import\s+requests\b|from\s+requests\b)", re.MULTILINE)),
