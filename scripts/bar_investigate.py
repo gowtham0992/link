@@ -35,6 +35,13 @@ MAX_LOG_BYTES = 2 * 1024 * 1024
 MAX_EVIDENCE_ITEM_BYTES = 12 * 1024
 MAX_EVIDENCE_BYTES = 64 * 1024
 MAX_EVIDENCE_LINES = 400
+EVIDENCE_KIND_BUDGETS = {
+    "job_log": (56, 12 * 1024),
+    "workflow": (48, 8 * 1024),
+    "source_diff": (40, 5 * 1024),
+    "source": (40, 5 * 1024),
+    "check_annotation": (24, 4 * 1024),
+}
 MAX_FAILED_JOBS = 4
 MAX_JOBS = 50
 MAX_CHANGED_FILES = 100
@@ -521,6 +528,7 @@ class EvidenceBuilder:
     items: list[dict[str, Any]]
     totals: dict[str, int]
     truncated: bool = False
+    budget_truncated: bool = False
 
     @classmethod
     def create(cls) -> "EvidenceBuilder":
@@ -538,14 +546,28 @@ class EvidenceBuilder:
         sha_role: str | None,
         line_start: int,
         line_end: int,
-    ) -> None:
+    ) -> bool:
         clean, counts = sanitize_text(content)
-        encoded = clean.encode("utf-8")
-        if len(encoded) > MAX_EVIDENCE_ITEM_BYTES:
-            encoded = encoded[:MAX_EVIDENCE_ITEM_BYTES]
-            clean = encoded.decode("utf-8", errors="ignore")
+        original = clean
+        line_budget, byte_budget = EVIDENCE_KIND_BUDGETS.get(
+            kind, (40, 5 * 1024)
+        )
+        used_lines = sum(len(item["content"].splitlines()) for item in self.items)
+        used_bytes = sum(
+            len(item["content"].encode("utf-8")) for item in self.items
+        )
+        line_budget = min(line_budget, MAX_EVIDENCE_LINES - used_lines)
+        byte_budget = min(
+            byte_budget,
+            MAX_EVIDENCE_ITEM_BYTES,
+            MAX_EVIDENCE_BYTES - used_bytes,
+        )
+        clean = bounded_evidence_text(clean, line_budget, byte_budget)
+        if clean != original:
             self.truncated = True
-        require(clean.strip(), "sanitization removed an entire evidence item")
+            self.budget_truncated = True
+        if not clean.strip():
+            return False
         sequence = len(self.items) + 1
         item = {
             "id": f"E-LINK-{sequence:03d}",
@@ -568,6 +590,7 @@ class EvidenceBuilder:
         }
         self.items.append(item)
         add_counts(self.totals, counts)
+        return True
 
     def validate_limits(self) -> None:
         require(len(self.items) <= 20, "too many evidence items")
@@ -581,6 +604,26 @@ class EvidenceBuilder:
             <= MAX_EVIDENCE_LINES,
             "evidence exceeds 400 lines",
         )
+
+
+def bounded_evidence_text(content: str, maximum_lines: int, maximum_bytes: int) -> str:
+    """Keep a deterministic prefix that satisfies both Bar evidence limits."""
+    if maximum_lines <= 0 or maximum_bytes <= 0:
+        return ""
+    kept: list[str] = []
+    used_bytes = 0
+    for line in content.splitlines(keepends=True)[:maximum_lines]:
+        encoded = line.encode("utf-8")
+        if used_bytes + len(encoded) > maximum_bytes:
+            remaining = maximum_bytes - used_bytes
+            if remaining > 0:
+                prefix = encoded[:remaining].decode("utf-8", errors="ignore")
+                if prefix:
+                    kept.append(prefix)
+            break
+        kept.append(line)
+        used_bytes += len(encoded)
+    return "".join(kept).rstrip("\n")
 
 
 def fetch_pull_request(
@@ -715,6 +758,12 @@ def build_packet_for_job(
         )
     if pull and not relevant:
         missing.append("No changed-file patch matched the bounded failure evidence")
+
+    if builder.budget_truncated:
+        missing.append(
+            "Lower-value evidence context was deterministically truncated to Bar's "
+            "per-job line and byte budgets"
+        )
 
     builder.validate_limits()
     job_summary = build_job_summary(jobs)
