@@ -6,16 +6,18 @@ from __future__ import annotations
 import base64
 import email.utils
 import hashlib
+import http.client
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 
 REPOSITORY = "gowtham0992/link"
@@ -115,6 +117,13 @@ class CollectedLog:
     text: str
     truncated: bool
     line_offset: int
+
+
+@dataclass(frozen=True)
+class BarHttpResponse:
+    status: int
+    headers: Mapping[str, str]
+    body: bytes
 
 
 def require(condition: bool, message: str) -> None:
@@ -871,57 +880,105 @@ def retry_after_seconds(value: str | None, now: float) -> float | None:
     return min(delay, MAX_RETRY_AFTER_SECONDS)
 
 
+def post_bar_bytes(
+    body: bytes,
+    *,
+    endpoint: str,
+    client_id: str,
+    client_secret: str,
+    idempotency_key: str,
+    timeout: float = 30.0,
+    connection_factory: Callable[..., Any] = http.client.HTTPSConnection,
+) -> BarHttpResponse:
+    """POST one byte-identical body without redirecting or rewriting Access headers."""
+    require(endpoint == DEFAULT_ENDPOINT, "Bar endpoint is not allowlisted")
+    require(bool(client_id) and bool(client_secret), "Bar service credentials are not configured")
+    parsed = urllib.parse.urlsplit(endpoint)
+    require(
+        parsed.scheme == "https"
+        and parsed.hostname == "bar-private.gowthamsarveswaran.com"
+        and parsed.port in (None, 443)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.fragment,
+        "Bar endpoint must use the pinned HTTPS origin",
+    )
+    target = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+    connection = connection_factory(parsed.hostname, parsed.port or 443, timeout=timeout)
+    try:
+        connection.putrequest("POST", target)
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", str(len(body)))
+        # http.client sends no User-Agent of its own. An empty agent is a
+        # plausible trigger for edge bot rules, so name the collector here
+        # exactly as it names itself to GitHub.
+        connection.putheader("User-Agent", "link-bar-action/v1")
+        connection.putheader("Idempotency-Key", idempotency_key)
+        connection.putheader("CF-Access-Client-Id", client_id)
+        connection.putheader("CF-Access-Client-Secret", client_secret)
+        connection.endheaders(body)
+        response = connection.getresponse()
+        response_body = response.read(64 * 1024 + 1)
+        headers = {name: value for name, value in response.getheaders()}
+        return BarHttpResponse(response.status, headers, response_body)
+    finally:
+        connection.close()
+
+
 def send_packet(
     packet: dict[str, Any],
     *,
     endpoint: str,
     client_id: str,
     client_secret: str,
-    opener: Callable[..., Any] | None = None,
+    connection_factory: Callable[..., Any] = http.client.HTTPSConnection,
     sleeper: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
 ) -> dict[str, Any]:
-    require(endpoint == DEFAULT_ENDPOINT, "Bar endpoint is not allowlisted")
-    require(bool(client_id) and bool(client_secret), "Bar service credentials are not configured")
-    transport = opener or urllib.request.build_opener(_NoRedirect).open
     body = canonical_json_bytes(packet)
-    request = urllib.request.Request(
-        endpoint,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Idempotency-Key": packet["delivery"]["id"],
-            "CF-Access-Client-Id": client_id,
-            "CF-Access-Client-Secret": client_secret,
-        },
-    )
     for attempt in range(3):
         try:
-            with transport(request, timeout=30) as response:
-                status = response.status
-                response_body = response.read(64 * 1024 + 1)
+            response = post_bar_bytes(
+                body,
+                endpoint=endpoint,
+                client_id=client_id,
+                client_secret=client_secret,
+                idempotency_key=packet["delivery"]["id"],
+                connection_factory=connection_factory,
+            )
+            status = response.status
+            response_body = response.body
             require(len(response_body) <= 64 * 1024, "Bar response exceeded the limit")
-            require(status in (200, 202), f"Bar returned HTTP {status}")
+            if status not in (200, 202):
+                if status not in (408, 429, 500, 502, 503, 504) or attempt == 2:
+                    raise IntegrationError(f"Bar returned HTTP {status}")
+                delay = None
+                if status == 429:
+                    retry_after = next(
+                        (value for name, value in response.headers.items() if name.lower() == "retry-after"),
+                        None,
+                    )
+                    delay = retry_after_seconds(retry_after, clock())
+                sleeper(delay if delay is not None else float(2**attempt))
+                continue
             try:
                 result = json.loads(response_body)
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise IntegrationError("Bar returned invalid JSON") from error
             require(isinstance(result, dict), "Bar returned an invalid response")
             return result
-        except urllib.error.HTTPError as error:
-            if error.code not in (408, 429, 500, 502, 503, 504) or attempt == 2:
-                raise IntegrationError(f"Bar returned HTTP {error.code}") from error
-            delay = None
-            if error.code == 429:
-                headers = getattr(error, "headers", None)
-                retry_after = headers.get("Retry-After") if headers is not None else None
-                delay = retry_after_seconds(retry_after, clock())
-        except (urllib.error.URLError, TimeoutError) as error:
+        except ssl.SSLCertVerificationError as error:
+            # A certificate that does not verify is a permanent trust failure,
+            # not a blip. Retrying it would bury a misissued or intercepted
+            # certificate under a generic network error. Must precede the
+            # clause below: SSLCertVerificationError is an OSError.
+            raise IntegrationError(
+                "Bar TLS certificate verification failed"
+            ) from error
+        except (http.client.HTTPException, OSError, TimeoutError) as error:
             if attempt == 2:
                 raise IntegrationError("Bar request failed after retries") from error
-            delay = None
-        sleeper(delay if delay is not None else float(2**attempt))
+            sleeper(float(2**attempt))
     raise IntegrationError("Bar request failed after retries")
 
 

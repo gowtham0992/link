@@ -57,6 +57,9 @@ OUTBOUND_NETWORK_ALLOWLIST = {
     # is never shipped: the wheel packages only link_mcp and link_core, and the
     # sdist is rooted at mcp_package/, so scripts/ reaches no user machine.
     Path("scripts/bar_investigate.py"),
+    # Transport tests for that collector. They bind only loopback servers to
+    # assert wire-level header spelling, and tests/ is not in the wheel either.
+    Path("tests/test_bar_investigate.py"),
 }
 OUTBOUND_NETWORK_PATTERNS = (
     ("requests import", re.compile(r"^\s*(?:import\s+requests\b|from\s+requests\b)", re.MULTILINE)),
