@@ -68,6 +68,8 @@ After ingesting raw sources or making substantial wiki edits, use MCP `ingest` a
 
 When the user explicitly asks Link to remember something, use MCP `remember` when available. For uncertain or long-session memory, use MCP `admin` action `propose_memories` or `capture_session` first, then MCP `review` to inspect/approve.
 
+If a session brief opens with **HANDOFF WAITING**, that is the user's previous session (possibly on a different agent) handing you the task: read it first, resume that work before anything else, and after the user confirms the task is picked up, clear it with `lnk handoffs --clear <file>`. When the user says they are stopping, switching agents, or hitting a rate limit, offer to write a handoff for the next session: `lnk handoff "<where we left off>" --task "<short title>" --next "<step>"` (or describe it and let the user run it). Keep it standalone - the next session cannot ask this one what it meant.
+
 At the end of a meaningful work session, propose memory instead of silently saving it. Use MCP `admin` action `session_end` with concise session notes when available, or run `lnk session-end <notes-or-transcript>`. Show the returned proposals to the user and save durable memory only after approval.
 
 Use MCP `review` for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows. Use MCP `admin` only for less-common maintenance and compatibility actions.

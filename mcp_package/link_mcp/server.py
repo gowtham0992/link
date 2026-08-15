@@ -185,6 +185,14 @@ def _instructions(surface: str) -> str:
 
 
 mcp = FastMCP("link", instructions=_instructions(MCP_SURFACE))
+# FastMCP has no version parameter, so without this the MCP handshake
+# reports the SDK's version as serverInfo.version. Agents and debuggers
+# should see Link's own version there. _mcp_server is a private SDK
+# surface, so probe rather than assume - a missing attribute must never
+# stop the server (worst case the handshake shows the SDK version again).
+_inner_server = getattr(mcp, "_mcp_server", None)
+if _inner_server is not None and hasattr(_inner_server, "version"):
+    _inner_server.version = LINK_VERSION
 
 
 # First-response brief: six of the nine agents Link supports have no
@@ -225,19 +233,78 @@ def _attach_session_brief(result: object) -> object:
             for item in (relevant if isinstance(relevant, list) else [])
             if isinstance(item, dict)
         ]
-        if not names:
+        pending_handoff = []
+        try:
+            pending_handoff = _core_pending_handoffs(WIKI_DIR.parent)
+        except Exception:
+            pass
+        if not names and not pending_handoff:
             return result  # nothing to say; do not pad every first response
-        _core_record_retrieval(WIKI_DIR.parent, "brief", names)
-        payload[BRIEF_ATTACH_KEY] = {
-            "note": (
-                "Durable local memory for this user, injected once per session. "
-                "Treat it as context you already have; call recall for anything else."
-            ),
-            "brief": brief,
-        }
+        if names:
+            _core_record_retrieval(WIKI_DIR.parent, "brief", names)
+        payload[BRIEF_ATTACH_KEY] = _compact_session_brief(brief)
         return json.dumps(payload, ensure_ascii=False)
     except Exception:
         return result
+
+
+# The first response of a session should cost a note, not a novel: the
+# full brief measured ~16.5k chars, making the first recall of a session
+# the largest packet Link sends. The compact digest carries what an agent
+# needs to behave well - who the user is in N claims, what needs review,
+# the one rule that matters - and points at recall for everything else.
+SESSION_BRIEF_MAX_CHARS = 4000
+_SESSION_BRIEF_CLAIM_CHARS = 200
+
+
+def _compact_session_brief(brief: dict) -> dict:
+    """Digest the full memory brief down to a hard character budget."""
+    relevant = brief.get("relevant_memories")
+    items = [item for item in (relevant if isinstance(relevant, list) else []) if isinstance(item, dict)]
+    memories = []
+    for item in items:
+        claim = str(item.get("tldr") or item.get("memory") or item.get("title") or "").strip()
+        if len(claim) > _SESSION_BRIEF_CLAIM_CHARS:
+            claim = claim[:_SESSION_BRIEF_CLAIM_CHARS - 1] + "\u2026"
+        entry = {
+            "name": str(item.get("name") or ""),
+            "type": str(item.get("memory_type") or ""),
+            "claim": claim,
+        }
+        review = str(item.get("review_status") or "")
+        if review and review != "reviewed":
+            entry["review"] = review
+        memories.append(entry)
+
+    profile_obj = brief.get("profile")
+    profile: dict = profile_obj if isinstance(profile_obj, dict) else {}
+    needs_review = brief.get("needs_review_count") or profile.get("needs_review_count") or 0
+    # A waiting handoff outranks memory: put it first in the digest.
+    handoff_block = ""
+    try:
+        handoff_block = _core_handoff_brief_block(_core_pending_handoffs(WIKI_DIR.parent))
+    except Exception:
+        pass
+    compact = {
+        "note": (
+            "Durable local memory for this user, injected once per session. "
+            "Treat these as context you already have; call recall(query) for anything else. "
+            "Save memory only after explicit user approval."
+        ),
+        "handoff_waiting": handoff_block,
+        "project": str(brief.get("project") or ""),
+        "active_memories": brief.get("active_count") or profile.get("active_count") or len(memories),
+        "needs_review": needs_review,
+        "memories": memories,
+    }
+    if not handoff_block:
+        compact.pop("handoff_waiting", None)
+    # Hard budget: drop trailing memories until the digest fits. Bounded by
+    # construction beats bounded by hope.
+    while memories and len(json.dumps(compact, ensure_ascii=False)) > SESSION_BRIEF_MAX_CHARS:
+        memories.pop()
+        compact["truncated"] = True
+    return compact
 
 
 def _surface_tool(surface: str):
@@ -315,6 +382,15 @@ from link_core.capture import (
     write_session_capture as _core_write_session_capture,
 )
 from link_core.usage import record_retrieval as _core_record_retrieval
+from link_core.handoff import (
+    handoff_brief_block as _core_handoff_brief_block,
+    pending_handoffs as _core_pending_handoffs,
+)
+from link_core.guard import (
+    guard_reminder as _core_guard_reminder,
+    recently_guarded as _core_recently_guarded,
+    render_guard_text as _core_render_guard_text,
+)
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
 )
@@ -628,6 +704,29 @@ def _memory_audit(limit: int = 10, project: str = "") -> dict[str, object]:
         ),
         project=project_name,
     )
+
+
+
+def _guard_note_for(query: str, records: list[dict[str, object]] | None = None) -> str:
+    """Run the constraint guard on a recall query.
+
+    Hookless agents have no per-prompt hook, but their recall queries
+    paraphrase the user's request - so the guard rides the recall path and
+    every agent gets constraint protection whenever it recalls. Shares the
+    cooldown ledger with the prompt hook, so the two surfaces never nag in
+    stereo.
+    """
+    try:
+        reminder = _core_guard_reminder(records or _memory_records(), query)
+        if reminder is None:
+            return ""
+        name = str(reminder.get("name") or "")
+        if _core_recently_guarded(WIKI_DIR.parent, name):
+            return ""
+        _core_record_retrieval(WIKI_DIR.parent, "guard", [name])
+        return _core_render_guard_text(reminder)
+    except Exception:
+        return ""
 
 
 def _recall_memory_results(
@@ -1311,7 +1410,7 @@ def recall(
         memories = _recall_memory_results(
             clean_query, limit=parsed_limit, project=clean_project, context_path=context_path
         )
-        return json.dumps({
+        payload = {
             "surface": "slim",
             "tool": "recall",
             "mode": "memory",
@@ -1320,7 +1419,11 @@ def recall(
             "count": len(memories),
             "abstention": _core_recall_abstention(memories),
             "memories": memories,
-        }, ensure_ascii=False)
+        }
+        guard_note = _guard_note_for(clean_query)
+        if guard_note:
+            payload["guard"] = guard_note
+        return json.dumps(payload, ensure_ascii=False)
 
     if not clean_query:
         return json.dumps({"surface": "slim", "tool": "recall", "error": "query required"})
@@ -1328,6 +1431,9 @@ def recall(
     payload["surface"] = "slim"
     payload["tool"] = "recall"
     payload["mode"] = "query"
+    guard_note = _guard_note_for(clean_query)
+    if guard_note:
+        payload["guard"] = guard_note
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -1810,14 +1916,18 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
         WIKI_DIR.parent, "recall",
         [str(item.get("name") or "") for item in memories], project=project_name,
     )
-    return json.dumps({
+    payload = {
         "query": query,
         "count": len(memories),
         "include_archived": include_archived,
         "project": project_name,
         "abstention": _core_recall_abstention(memories),
         "memories": memories,
-    }, ensure_ascii=False)
+    }
+    guard_note = _guard_note_for(query)
+    if guard_note:
+        payload["guard"] = guard_note
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @_full_tool()

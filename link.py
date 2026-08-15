@@ -257,6 +257,19 @@ from link_core.files import (
     atomic_write_json as _core_atomic_write_json,
     atomic_write_text as _core_atomic_write_text,
 )
+from link_core.guard import (
+    guard_reminder as _core_guard_reminder,
+    render_guard_text as _core_render_guard_text,
+    recently_guarded as _core_recently_guarded,
+    render_switch_nudge as _core_render_switch_nudge,
+    switch_intent as _core_switch_intent,
+)
+from link_core.handoff import (
+    clear_handoff as _core_clear_handoff,
+    handoff_brief_block as _core_handoff_brief_block,
+    pending_handoffs as _core_pending_handoffs,
+    write_handoff as _core_write_handoff,
+)
 from link_core.importers import (
     collect_import_units as _core_collect_import_units,
 )
@@ -1527,6 +1540,81 @@ def _capture_review_summary(target: Path, project: str | None = None, limit: int
     return summary
 
 
+def _accept_capture_all(
+    target: Path, root: Path, wiki_dir: Path, capture: str,
+    *, project: str | None, json_output: bool,
+) -> int:
+    """Accept every proposal in one capture; duplicates and conflicts are
+    skipped and reported, never forced. The review gate stays - this is a
+    faster hand, not a bypass."""
+    try:
+        selection = _core_capture_proposal_selection(
+            root, capture, index=1, project=project,
+            default_project=_default_project(root),
+            propose_memories=lambda notes, rel_path, proposal_limit, project_name, curated=False: _propose_memories_from_text(
+                wiki_dir, notes, source=rel_path, limit=50,
+                project=project_name, command_target=root,
+                exclude_fingerprints=set(_core_load_dismissed_fingerprints(root)),
+                curated=curated,
+            ),
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    proposals_obj = selection.get("proposals")
+    items = proposals_obj.get("proposals") if isinstance(proposals_obj, dict) else []
+    items = [item for item in items if isinstance(item, dict)]
+    created, skipped = [], []
+    for position, proposal in enumerate(items, start=1):
+        pseudo = dict(selection)
+        pseudo["proposal"] = proposal
+        pseudo["proposal_index"] = position
+        args = _core_capture_accept_memory_args(pseudo)
+        result = _write_memory_page(
+            target, str(args["text"]), title=str(args["title"]),
+            memory_type=str(args["memory_type"]), scope=str(args["scope"]),
+            visibility=str(args["visibility"] or "") or None,
+            tags=args["tags"] if isinstance(args["tags"], str) else None,
+            source=str(args["source"]), allow_duplicate=False, allow_conflict=False,
+            project=str(args["project"]),
+            trigger=str(args.get("trigger") or "") or None,
+            context=str(args.get("context") or "") or None,
+        )
+        if result.get("created"):
+            created.append(str(result.get("name")))
+        else:
+            reason = "conflict" if result.get("conflict") else "duplicate"
+            skipped.append({"index": position, "title": str(args["title"]), "reason": reason})
+    cleared = False
+    if created and not skipped:
+        capture_path = selection.get("capture_path")
+        if isinstance(capture_path, Path) and capture_path.is_file():
+            capture_path.unlink()
+            cleared = True
+    if created:
+        _append_log(
+            wiki_dir, _core_utc_timestamp(), "accept-capture",
+            f"Accepted {len(created)} proposal(s) from {selection['capture']}",
+            [f"- {name}" for name in created],
+        )
+    if json_output:
+        print(json.dumps({
+            "accepted": created, "skipped": skipped, "capture_cleared": cleared,
+        }, indent=2))
+        return 0
+    _print_text(f"Accepted {len(created)} of {len(items)} proposal(s)")
+    for name in created:
+        _print_text(f"  + {name}")
+    for item in skipped:
+        _print_text(f"  \u00b7 skipped #{item['index']} ({item['reason']}): {item['title']}")
+    if skipped:
+        _print_text("\nSkipped items need a human call: accept individually with --index N"
+                    " (add --allow-duplicate/--allow-conflict only after checking).")
+    if cleared:
+        _print_text("Capture cleared - everything it offered is now memory.")
+    return 0
+
+
 def accept_capture(
     target: Path,
     capture: str,
@@ -1539,6 +1627,7 @@ def accept_capture(
     visibility: str | None = None,
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
+    accept_all: bool = False,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -1546,6 +1635,8 @@ def accept_capture(
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
+    if accept_all:
+        return _accept_capture_all(target, root, wiki_dir, capture, project=project, json_output=json_output)
     try:
         selection = _core_capture_proposal_selection(
             root,
@@ -1689,8 +1780,9 @@ def redact_capture(
 
 def delete_capture(
     target: Path,
-    capture: str,
+    capture: str | None,
     confirm: bool = False,
+    delete_all: bool = False,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
@@ -1698,6 +1790,33 @@ def delete_capture(
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
+    if delete_all:
+        records = _core_capture_records(root, limit=500)
+        if not records:
+            _print_text("No pending captures.")
+            return 0
+        if not confirm:
+            _print_text(
+                f"Would delete {len(records)} pending capture(s) from {root}, "
+                "recording their dismissals so the same proposals never return. "
+                "Re-run with --confirm."
+            )
+            return 0
+        deleted = []
+        for record in records:
+            try:
+                _core_delete_capture_file(root, str(record.get("path")), confirm=True)
+                deleted.append(str(record.get("path")))
+            except ValueError:
+                continue
+        if json_output:
+            print(json.dumps({"deleted": deleted, "count": len(deleted)}, indent=2))
+        else:
+            _print_text(f"Deleted {len(deleted)} capture(s); dismissals recorded.")
+        return 0
+    if not capture:
+        print("delete-capture needs a capture filename, or --all --confirm", file=sys.stderr)
+        return 1
     try:
         payload = _core_delete_capture_file(root, capture, confirm=confirm)
     except ValueError:
@@ -2528,6 +2647,12 @@ def _hook_session_start(
     project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
         status_payload.get("content_page_count") or 0
     )
+    # A waiting handoff outranks everything: it is the reason this session
+    # exists. Pushed at the very top, never behind a tool call.
+    handoff_block = _core_handoff_brief_block(
+        _core_pending_handoffs(_resolve_link_root(target), project=project_name),
+        clear_command=_display_command(["lnk", "handoffs", str(_resolve_link_root(target)), "--clear", "<file>"]),
+    )
     _, brief_text = _core_render_brief_text(brief_payload, query="", project=project_name)
     captures_payload = brief_payload.get("captures") if isinstance(brief_payload.get("captures"), dict) else {}
     _, text = _core_render_session_start_hook_text({
@@ -2539,6 +2664,8 @@ def _hook_session_start(
         "project_seed_recommended": project_seed_recommended,
         "backlog": brief_payload.get("backlog") or {},
     })
+    if handoff_block:
+        text = handoff_block + "\n\n" + text
     _emit_session_start(text, emit)
     return 0
 
@@ -2682,6 +2809,39 @@ def _hook_session_end(
     return code
 
 
+
+def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str | None) -> int:
+    """Per-prompt guard: speak only when a saved constraint strongly
+    overlaps the request. Silence is the normal, correct output."""
+    prompt = str(hook_event.get("prompt") or hook_event.get("user_prompt") or "")
+    if not prompt.strip():
+        return 0
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return 0
+    project_name = project or _default_project(target)
+    reminder = _core_guard_reminder(
+        _memory_records(wiki_dir), prompt, project=project_name,
+    )
+    if reminder is not None:
+        root = _resolve_link_root(target)
+        # Cooldown: the same constraint never repeats within a stretch of
+        # work - one reminder is a guard, ten is a nag.
+        if _core_recently_guarded(root, str(reminder.get("name") or "")):
+            return 0
+        _core_record_retrieval(
+            root, "guard", [str(reminder.get("name") or "")],
+            project=project_name or "",
+        )
+        print(_core_render_guard_text(reminder))
+        return 0
+    # No constraint in play - but a stop/switch announcement is the moment
+    # the handoff should suggest itself.
+    if _core_switch_intent(prompt):
+        print(_core_render_switch_nudge())
+    return 0
+
+
 def run_agent_hook(
     target: Path, event: str, limit: int = 5, project: str | None = None, emit: str = "text",
     explain: bool = False,
@@ -2694,6 +2854,8 @@ def run_agent_hook(
             return _hook_session_start(target, hook_event, limit, project, emit)
         if event == "session-end":
             return _hook_session_end(target, hook_event, limit, project, explain=explain)
+        if event == "prompt-check":
+            return _hook_prompt_check(target, hook_event, project)
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
@@ -3033,6 +3195,72 @@ def import_memory(
     return 0
 
 
+def handoff(
+    target: Path,
+    *,
+    note: str,
+    task: str | None = None,
+    next_steps: list[str] | None = None,
+    project: str | None = None,
+    source: str = "cli",
+    json_output: bool = False,
+) -> int:
+    """Write a session handoff packet for the next session, any agent."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    try:
+        record = _core_write_handoff(
+            root, note, task=task, next_steps=next_steps,
+            source=source, project=project or _default_project(target),
+        )
+    except ValueError as exc:
+        print(f"Could not write handoff: {exc}", file=sys.stderr)
+        return 1
+    if json_output:
+        print(json.dumps(record, indent=2))
+        return 0
+    _print_text(
+        f"Handoff written: {record['path']}\n"
+        f"Expires: {record['expires_at']}\n\n"
+        "The next session on ANY connected agent opens with it - session-start\n"
+        "hooks and the MCP first response both carry it. Nothing to remember."
+    )
+    return 0
+
+
+def handoffs(target: Path, *, clear: str | None = None, json_output: bool = False) -> int:
+    """List pending handoffs, or clear one after resuming it."""
+    target = target.expanduser().resolve()
+    root = _resolve_link_root(target)
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    if clear:
+        try:
+            result = _core_clear_handoff(root, clear)
+        except ValueError as exc:
+            print(f"Could not clear: {exc}", file=sys.stderr)
+            return 1
+        _print_text(f"Handoff cleared: {result['path']}")
+        return 0
+    pending = _core_pending_handoffs(root)
+    if json_output:
+        print(json.dumps({"count": len(pending), "handoffs": pending}, indent=2))
+        return 0
+    if not pending:
+        _print_text("No pending handoffs. Write one before switching agents: "
+                    + _display_command(["lnk", "handoff", "'where I left off'", str(root)]))
+        return 0
+    _print_text(f"Pending handoffs ({len(pending)}):\n")
+    for item in pending:
+        _print_text(f"  {item['path']}\n    {item['title']} \u00b7 from {item['source']} \u00b7 {item['created_at']}")
+    _print_text("\nClear after resuming: " + _display_command(["lnk", "handoffs", str(root), "--clear", "<file>"]))
+    return 0
+
+
 def digest(target: Path, days: int = 7, json_output: bool = False) -> int:
     """Weekly reflection: what changed, what is aging, what is drifting."""
     target = target.expanduser().resolve()
@@ -3159,6 +3387,7 @@ def setup(
     target: Path,
     *,
     preview: bool = False,
+    no_semantic: bool = False,
     json_output: bool = False,
 ) -> int:
     """One command for install day and every upgrade after it.
@@ -3212,6 +3441,47 @@ def setup(
             _print_text(f"Instruction file is stale (would refresh): {path}")
         for path in refreshed_instructions:
             _print_text(f"Refreshed Link instructions: {path}")
+    if code == 0 and not preview and not no_semantic:
+        # Meaning-based recall by default: the measured gap between the
+        # lexical default (hit@1 0.589) and the fast tier (0.703) is the
+        # single biggest quality difference a new install feels, and the
+        # cost is one ~30 MB local model fetched during this explicit
+        # command - recall itself never touches the network. Opt out with
+        # --no-semantic. Only the managed-venv path auto-installs; a
+        # user-managed python keeps the hint (we never pip-install into
+        # an environment we do not own).
+        try:
+            from link_core.semantic import model_available, provider_installed
+            if not (provider_installed() and model_available()):
+                venv_python = Path.home() / ".link-mcp-venv" / "bin" / "python"
+                if provider_installed() or venv_python.exists() or _core_python_is_externally_managed():
+                    if not json_output:
+                        _print_text(
+                            "\nSetting up meaning-based recall (fast tier, one-time ~30 MB "
+                            "local model download; recall never uses the network; skip with "
+                            "--no-semantic)..."
+                        )
+                    if provider_installed():
+                        semantic(target, setup=True, json_output=json_output)
+                    else:
+                        # Fast tier ONLY for the default path: the quality and
+                        # rerank tiers (~200 MB more) stay explicit opt-ins via
+                        # lnk semantic --setup.
+                        outcome = _core_provision_link_extras(
+                            sys.executable, LINK_VERSION, extras=("semantic",),
+                        )
+                        for note in outcome.get("notes", []):
+                            if not json_output:
+                                _print_text(f"  {note}")
+                        if outcome.get("ready"):
+                            subprocess.run(
+                                [str(outcome["python"]), str(ROOT / "link.py"),
+                                 "semantic", str(_resolve_link_root(target)), "--setup"],
+                                check=False,
+                            )
+        except Exception as exc:
+            if not json_output:
+                _print_text(f"  (meaning-based recall setup skipped: {exc})")
     if code == 0 and not json_output:
         extras: list[str] = []
         try:
@@ -3785,7 +4055,7 @@ _WORKSPACE_COMMANDS = {
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
-    "semantic", "status", "sync", "digest", "import", "health", "doctor", "validate", "operations",
+    "semantic", "status", "sync", "digest", "import", "handoff", "handoffs", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
@@ -3868,6 +4138,8 @@ def main(argv: list[str] | None = None) -> int:
             "setup": setup,
             "sync": sync,
             "digest": digest,
+            "handoff": handoff,
+            "handoffs": handoffs,
             "import": import_memory,
             "seed": seed_project,
             "welcome": welcome,

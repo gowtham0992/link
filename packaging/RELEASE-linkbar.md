@@ -1,44 +1,26 @@
-# LinkBar release checklist (rides the Link 2.0.0 release)
+# Releasing LinkBar
 
-1. `python3 scripts/prepare_release.py 2.0.0` on develop -> commit -> push
-2. PR develop -> main, wait for all 10 CI checks, merge (merge commit)
-3. `git switch main && git pull --ff-only && git tag -a v2.0.0 -m v2.0.0 && git push origin v2.0.0`
-4. PyPI + mcp-publisher (same as 1.7 runbook)
-5. Formula bump in the tap (url/sha for v2.0.0 tarball) AND replace the
-   caveats block with the version below — it is the only place a
-   `brew install` user learns LinkBar exists, and the MCP paragraph is
-   obsolete (1.7 self-provisions ~/.link-mcp-venv):
+The full, current release procedure lives as a Link procedure memory
+(`lnk recall "cutting a Link release"`) and is exercised every release.
+This file keeps only the LinkBar-specific mechanics:
 
-   ```ruby
-   def caveats
-     <<~EOS
-       Try Link:
-         lnk proof                 # prove cross-agent memory in ~1 second
-         lnk try                   # the full demo wiki
+1. Bump the version in `apps/LinkBar/Sources/LinkBar/DesignSystem.swift`
+   (`static let version`) and in `apps/LinkBar/Scripts/bundle.sh`
+   (both `CFBundleShortVersionString` and `CFBundleVersion`).
+2. Build the distributable zip:
 
-       Make it yours — one command wires every agent you have
-       (workspace, MCP, session hooks; re-run after any upgrade):
-         lnk setup
-
-       Optional, macOS: put the review gate in your menu bar —
-       notifications when memory is captured, a global palette (Opt-Cmd-M),
-       and a live view of every Link surface:
-         brew install --cask gowtham0992/link/linkbar
-
-       Optional: meaning-based recall (one-time local model download):
-         lnk semantic ~/link --setup
-     EOS
-   end
    ```
-6. **LinkBar zip**: `cd apps/LinkBar && bash Scripts/bundle.sh --release-zip`
-   - attach `.build/LinkBar-1.0.0.zip` to the v2.0.0 GitHub release
-7. **Cask**: copy `packaging/linkbar.rb` to the tap as `Casks/linkbar.rb`,
-   paste the sha256 from step 6, `git push` the tap
-8. Verify as user #1: `brew install --cask gowtham0992/link/linkbar`
-   -> app opens with no Gatekeeper dialog; menu icon appears
-9. Back-merge main -> develop
-10. QA before step 1, on the installed app:
-    - press ⌥⌘M anywhere -> palette appears, recall works, `+text` remembers
-    - end an agent session with a memorable line -> notification banner with
-      Accept appears; Accept works from the banner
-    - Status tab all green
+   bash apps/LinkBar/Scripts/bundle.sh --release-zip
+   ```
+
+   It prints the zip path and its sha256.
+3. Attach the zip to the GitHub release for the Link tag. The release
+   with the zip must exist before the tap push, because the cask
+   downloads from it.
+4. Update the tap cask (`gowtham0992/homebrew-link:Casks/linkbar.rb`):
+   version, sha256, and the release tag inside the url. Three lines
+   change, always three - check `git diff` before pushing.
+5. The cask clears macOS quarantine in a postflight because the app is
+   ad-hoc signed. If LinkBar is ever notarized, remove that postflight.
+
+Template: `packaging/linkbar.rb` (placeholders, mirrors the live cask).

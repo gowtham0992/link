@@ -114,12 +114,22 @@ lnk redact-capture raw/memory-captures/&lt;capture&gt;.md
 lnk delete-capture raw/memory-captures/&lt;capture&gt;.md --confirm
 lnk dedup-captures            # collapse inbox captures that offer nothing new (--confirm applies)</code></pre>
 
-                <h2 id="import">Import Your Scattered Memory</h2>
+                <h2 id="guard">Proactive Guard</h2>
+        <p>On Claude Code, Link checks each prompt against your constraint-shaped memories (never / always / only / do not) and interrupts exactly once when one strongly applies: <em>"let's deploy payments on Friday"</em> surfaces your deploys-on-Tuesdays memory before the agent acts. Silence is the normal output - unrelated and weak-overlap prompts pass untouched - and each firing is recorded locally as a <code>guard</code> event. Installed automatically with session hooks.</p>
+
+        <h2 id="handoff">Session Handoff</h2>
+        <p>The most universal pain of multi-agent work: a rate limit hits mid-task, you switch tools, and the first ten minutes go to re-explaining. <code>lnk handoff</code> writes a standalone packet - task, state, next steps - and the next session on <em>any</em> connected agent opens with it: session-start hooks and the MCP first response both carry it, so delivery never depends on the agent thinking to ask. Handoffs expire on their own (48h), are secret-redacted at write time, and never become durable memory unless you promote them through normal review.</p>
+        <pre><code>lnk handoff "Auth refactor: token validation moved, refresh test failing" --task "Auth refactor" --next "Fix refresh test"
+lnk handoffs               # list pending
+lnk handoffs --clear FILE  # after the next session picks it up</code></pre>
+
+        <h2 id="import">Import Your Scattered Memory</h2>
         <p>Your memory already exists — in <code>~/.claude/CLAUDE.md</code> and Claude Code's auto-memory, Cursor rules, a hand-tended <code>AGENTS.md</code>, or memories copied out of ChatGPT. <code>lnk import</code> reads those surfaces and turns each deliberate line into a reviewable proposal in the capture inbox — through the same dedup, secret-scanning, and injection-labeling gates as any capture. Nothing is ever auto-accepted, Link's own instruction sections are excluded, and re-running an import is a no-op for anything already pending, dismissed, or saved.</p>
         <pre><code>lnk import claude-code    # CLAUDE.md + auto-memory
 lnk import cursor         # rules files
 lnk import codex          # AGENTS.md (minus Link's own section)
 lnk import file --file chatgpt-memories.txt   # anything pasted to a file</code></pre>
+        <p>Review at bulk speed when a capture is trustworthy: <code>lnk accept-capture FILE --all</code> accepts every proposal (duplicates and conflicts are skipped and reported, never forced), and <code>lnk delete-capture TARGET --all --confirm</code> clears the whole inbox with dismissals recorded.</p>
 
         <h2 id="digest">Weekly Digest</h2>
         <p><code>lnk digest</code> is the reflection ritual: what you taught Link this week, what is aging out of its trust window, which memories are drifting into saying the same thing, and what is still waiting for review. Read-only and deterministic — it reuses the lifecycle, consolidation, and inbox engines rather than computing new truth. A quiet week says so.</p>

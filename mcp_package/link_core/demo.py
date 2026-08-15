@@ -48,6 +48,10 @@ def copy_runtime_files(source_root: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for name in RUNTIME_FILES:
         src = source_root / name
+        if name == "link.py" and not src.exists():
+            # pip wheels carry the CLI as link_cli.py (the `lnk` console
+            # script module); workspaces still receive it as link.py.
+            src = source_root / "link_cli.py"
         dst = target / name
         if src.exists() and src.resolve() != dst.resolve():
             shutil.copy2(src, dst)

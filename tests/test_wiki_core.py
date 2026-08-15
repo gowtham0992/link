@@ -526,3 +526,41 @@ class WikiCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateStemLinkTests(unittest.TestCase):
+    """Stems are not unique: wiki/index.md and sources/x/INDEX.md collide.
+
+    Reported as issue #59: assigning per-stem let the later page erase the
+    earlier page's forward links, so rebuild-backlinks dropped edges that
+    validate still expected and the two commands disagreed forever.
+    """
+
+    def test_pages_sharing_a_stem_merge_their_links(self):
+        import tempfile
+        from pathlib import Path as P
+        from mcp_package.link_core.wiki import (
+            build_backlinks_from_cache, build_wiki_cache, close_wiki_cache,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            wiki = P(temp) / "wiki"
+            (wiki / "concepts").mkdir(parents=True)
+            (wiki / "sources" / "vendor-docs").mkdir(parents=True)
+            (wiki / "index.md").write_text(
+                "---\ntype: index\ntitle: Index\n---\n\n# Index\n\nSee [[agent-memory]].\n",
+                encoding="utf-8")
+            (wiki / "sources" / "vendor-docs" / "INDEX.md").write_text(
+                "---\ntype: source\ntitle: Vendor\n---\n\n# Vendor\n\nNo links.\n",
+                encoding="utf-8")
+            (wiki / "concepts" / "agent-memory.md").write_text(
+                "---\ntype: concept\ntitle: AM\n---\n\n# AM\n\nBody.\n", encoding="utf-8")
+            cache = build_wiki_cache(wiki)
+            try:
+                self.assertIn("agent-memory", cache["raw_forward_links_index"].get("index", []))
+                backlinks = build_backlinks_from_cache(cache)
+                self.assertEqual(
+                    backlinks["backlinks"].get("agent-memory"), ["index"],
+                    "a nested INDEX.md must not erase the root index's edges",
+                )
+            finally:
+                close_wiki_cache(cache)

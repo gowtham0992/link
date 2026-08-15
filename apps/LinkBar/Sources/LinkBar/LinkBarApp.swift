@@ -111,9 +111,41 @@ struct LinkBarApp: App {
         }
     }
 
+    /// Find a bundled resource without ever touching `Bundle.module`.
+    ///
+    /// SPM's generated accessor calls fatalError() when it cannot find the
+    /// resource bundle, and it only looks in the app root and the absolute
+    /// build directory of the machine that compiled the binary. A packaged
+    /// .app has neither, so merely *reading* Bundle.module killed the app at
+    /// launch on every machine except the build host - invisibly, because
+    /// LSUIElement means there is no window to show a crash (issue #58).
+    /// This searches the real locations and returns nil instead of dying.
+    private static func resourceURL(_ name: String, _ ext: String) -> URL? {
+        if let url = Bundle.main.url(forResource: name, withExtension: ext) {
+            return url
+        }
+        let bundleName = "LinkBar_LinkBar.bundle"
+        var roots: [URL] = [
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources"),
+            Bundle.main.bundleURL,
+        ]
+        if let executable = Bundle.main.executableURL?.deletingLastPathComponent() {
+            roots.append(executable)                      // swift run / .build
+            roots.append(executable.deletingLastPathComponent())
+        }
+        for root in roots {
+            let candidate = root.appendingPathComponent(bundleName)
+            if let bundle = Bundle(url: candidate),
+               let url = bundle.url(forResource: name, withExtension: ext) {
+                return url
+            }
+        }
+        return nil
+    }
+
     /// The Link mark as a template image so it adapts to menu bar appearance.
     private static let menuIcon: NSImage? = {
-        guard let url = Bundle.module.url(forResource: "MenuIcon", withExtension: "png"),
+        guard let url = resourceURL("MenuIcon", "png"),
               let image = NSImage(contentsOf: url)
         else { return nil }
         image.isTemplate = true

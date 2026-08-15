@@ -6,6 +6,106 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-12
+
+### Fixed
+
+- **LinkBar crashed at launch for everyone but the build host** (#58,
+  reported by @SparklesKitchen with a root cause and a verified fix).
+  SPM's generated `Bundle.module` accessor calls `fatalError()` when it
+  cannot find its resource bundle, and it only looks in two places: the
+  app root, and the absolute build directory of the machine that
+  compiled the binary. A packaged `.app` has neither - `bundle.sh` put
+  the bundle in `Contents/Resources/` - so every cask install since
+  1.0.0 died at launch, silently, because an `LSUIElement` app has no
+  window to show a crash. It only ever worked on the maintainer's
+  machine, where the compiled-in build path resolves. LinkBar no longer
+  touches `Bundle.module` at all: it searches the real locations
+  (`Bundle.main` first, then the SPM bundle in Resources, the app root,
+  and the executable's directory) and returns nil instead of dying. The
+  resource copy also lost its `2>/dev/null || true`, so a failed copy
+  now fails the build instead of shipping a broken app. Verified by
+  running the freshly bundled app with every build path hidden.
+- **`rebuild-backlinks` dropped links between pages sharing a filename
+  stem** (#59, same reporter). `build_wiki_cache` assigned
+  `raw_forward_links[stem]` per page, so a nested
+  `sources/vendor-docs/INDEX.md` erased the root `index.md`'s edges -
+  rebuild then wrote an incomplete `_backlinks.json` that `validate`
+  reported as stale, and the two commands disagreed permanently. The
+  cache now merges repeated stems the way `build_backlinks` and
+  validation already did.
+
+### Added
+
+- **`lnk handoff` - switch agents mid-task and lose nothing.** The most
+  universal pain of multi-agent work is the switch: a rate limit hits,
+  the next step suits a different tool, and the first minutes of the new
+  session are spent re-explaining. `lnk handoff "where I left off"`
+  writes a standalone packet (task, state, explicit next steps), and the
+  next session on ANY connected agent opens with it - the session-start
+  hook and the MCP first response both push it, so delivery never
+  depends on the receiving agent thinking to ask. Handoffs chain
+  (breadcrumbs to the previous one), expire on their own (48h), are
+  secret-redacted at write time including the title and filename, and
+  never become durable memory unless promoted through normal review.
+  This is the community's hand-rolled HANDOFF.md pattern productized on
+  Link's rails - and unlike the vendor implementations, it crosses
+  vendors: Claude Code to Codex to Cursor is the point.
+- **Proactive guard - Link speaks up the moment a constraint matters.**
+  The session-start brief is a snapshot; forty minutes in, you type
+  "let's deploy payments on Friday" and the memory saying deploys happen
+  on Tuesdays sits unread. On Claude Code, a per-prompt hook now checks
+  each request against constraint-shaped memories (never / always /
+  only / do not) and speaks only on a strong overlap: one reminder
+  naming the memory, with instructions to confirm before proceeding.
+  The guard also rides every MCP recall path, so all nine agents get
+  constraint protection whenever they recall - the query paraphrases
+  the request - with the cooldown shared through the usage ledger so no
+  surface nags twice, and a 45-minute per-memory cooldown keeps one
+  reminder from becoming ten.
+  Precision-first by design - silence is the normal output (unrelated,
+  short, and weak-overlap prompts stay untouched), it runs in ~80ms
+  with no model load, and every firing is recorded in the local usage
+  ledger as a "guard" event. Wired automatically by `lnk setup` /
+  `lnk connect claude-code --hooks`.
+- **The handoff suggests itself at the right moment.** When a prompt
+  announces a stop or a tool switch ("switching to codex", "hit my rate
+  limit", "continue this tomorrow", "stopping here"), the per-prompt
+  hook nudges the agent to offer a handoff before the session ends.
+  Precision-gated like the guard: "continue with the refactor" and
+  "switching to a recursive approach" stay silent.
+- **Meaning-based recall is now set up by default.** `lnk setup`
+  provisions the fast semantic tier (one ~30 MB local model, ~0.1s
+  loads) when it can own the environment - the measured gap between the
+  lexical default (hit@1 0.589) and the fast tier (0.703) is the biggest
+  quality difference a new install feels. The download happens during
+  the explicit setup command with a clear message; recall itself still
+  never touches the network. `--no-semantic` opts out; the quality and
+  rerank tiers (~200 MB more) remain explicit opt-ins via
+  `lnk semantic --setup`; user-managed pythons keep the hint (Link never
+  pip-installs into an environment it does not own).
+- **Bulk review.** `lnk accept-capture FILE --all` accepts every
+  proposal in a capture (duplicates and conflicts are skipped and
+  reported, never forced); `lnk delete-capture TARGET --all --confirm`
+  clears the pending inbox with dismissals recorded. The review gate
+  stays - this is a faster hand, not a bypass. Fixed along the way:
+  `delete-capture <dir> --all` now always treats the positional as the
+  target directory (a parse ambiguity could previously point a bulk
+  delete at the default workspace).
+
+### Changed
+
+- **The MCP session brief is now bounded.** The first tool response of a
+  session used to carry the full memory brief (~16.5k characters), making
+  the first recall of a session the largest packet Link sends - measured
+  and published as an honest asterisk in 2.2.1. It is now a compact
+  digest under a hard 4,000-character budget: typed memory claims
+  (trimmed), review counts, and a pointer to `recall` for everything
+  else. First-recall cost on the benchmark corpus drops from 11,269
+  tokens to 2,313 against a 1,954 steady state. The budget is enforced
+  in code and pinned by a test, and `eval_token_economics.py` measures
+  the real MCP surface on every run.
+
 ## [2.2.1] - 2026-08-06
 
 ### Fixed

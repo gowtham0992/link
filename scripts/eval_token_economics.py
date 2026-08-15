@@ -154,6 +154,31 @@ def measure_session_brief(wiki: Path) -> dict[str, object]:
     }
 
 
+def measure_handoff_block(root: Path) -> dict[str, object]:
+    """What a delivered handoff costs the receiving session.
+
+    Honest scope: this measures Link's side of the trade - the tokens a
+    handoff block adds to the next session's opening context. The other
+    side (how many re-establishment tokens it saves) depends on agent
+    behavior and is community-reported at 20-40% of a session; measuring
+    that properly needs real-agent studies, not a synthetic proxy, so it
+    is deliberately NOT claimed here.
+    """
+    from link_core.handoff import handoff_brief_block, pending_handoffs, write_handoff
+
+    write_handoff(
+        root,
+        "Refactoring the auth middleware. Token validation moved to "
+        "middleware/token.py; the refresh-path test still fails. Decided "
+        "against JWT rotation for this release.",
+        task="Auth middleware refactor",
+        next_steps=["Fix the refresh-token test", "Run the linter before committing"],
+        source="benchmark",
+    )
+    block = handoff_brief_block(pending_handoffs(root))
+    return {"delivered_tokens": max(1, (len(block) + 3) // 4)}
+
+
 def measure_budgets(wiki: Path, queries: list[str]) -> dict[str, dict[str, float]]:
     report: dict[str, dict[str, float]] = {}
     cache = build_wiki_cache(wiki)
@@ -222,11 +247,13 @@ def main() -> int:
         brief_wiki = _make_wiki(Path(temp))
         _populate(brief_wiki, len(INTENTS))
         session_brief = measure_session_brief(brief_wiki)
+        handoff_cost = measure_handoff_block(brief_wiki.parent)
 
     report = {
         "budgets": budgets,
         "growth": growth,
         "mcp_session_brief": session_brief,
+        "handoff_block": handoff_cost,
         "store_growth_factor": round(float(last_store["memories"]) / float(first_store["memories"]), 1),
         "packet_growth_factor": round(growth_ratio, 3),
         "plateau_ratio": round(plateau_ratio, 3),
@@ -265,6 +292,8 @@ def main() -> int:
         print(f"\n{'store size':12} {'mean tokens (medium budget)':>30}")
         for row in growth:
             print(f"{row['memories']:<12} {row['mean_tokens']:>30}")
+        print(f"\nHandoff delivery cost: {handoff_cost['delivered_tokens']} tokens added to the "
+              "receiving session's opening context (savings side needs real-agent studies; not claimed)")
         if session_brief.get("available"):
             print(f"\nMCP surface: first recall of a session {session_brief['first_call_tokens']} tokens "
                   f"(carries the session brief), steady state {session_brief['steady_state_tokens']} tokens")

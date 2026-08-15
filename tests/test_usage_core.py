@@ -101,11 +101,15 @@ class FirstResponseBriefTests(unittest.TestCase):
     """Push memory to agents that have no session hooks, via MCP itself."""
 
     def _server(self, wiki_root: Path):
-        import importlib
-        sys.argv = ["link_mcp", "--wiki", str(wiki_root / "wiki"), "--surface", "slim"]
-        import link_mcp.server as server
-        importlib.reload(server)
-        return server
+        """The MCP server bound to this workspace, as a context manager.
+
+        Entering and exiting inside the caller's `with tempfile...` block
+        is deliberate: the server's FTS handle must close *before* the
+        temp directory is removed, or Windows fails cleanup with
+        WinError 32. See tests/mcp_harness.py.
+        """
+        from mcp_harness import mcp_server
+        return mcp_server(wiki_root)
 
     def _workspace(self, temp: Path) -> Path:
         from link_core.memory import write_memory_page
@@ -123,20 +127,28 @@ class FirstResponseBriefTests(unittest.TestCase):
     def test_first_response_carries_the_brief_and_only_the_first(self):
         with tempfile.TemporaryDirectory() as temp:
             root = self._workspace(Path(temp))
-            server = self._server(root)
-            first = json.loads(server.status())
-            self.assertIn("link_session_brief", first)
-            attached = first["link_session_brief"]
-            self.assertIn("brief", attached)
+            with self._server(root) as server:
+                first = json.loads(server.status())
+                self.assertIn("link_session_brief", first)
+                attached = first["link_session_brief"]
             self.assertIn("memory", str(attached["note"]).lower())
+            memories = attached.get("memories")
+            self.assertTrue(memories, "digest must carry the memory claims")
+            self.assertIn("claim", memories[0])
+            # The public promise: the first response costs a note, not a
+            # novel. Hard budget, asserted here so it cannot regress.
+            self.assertLessEqual(
+                len(json.dumps(attached)), server.SESSION_BRIEF_MAX_CHARS,
+                "session brief digest exceeded its hard budget",
+            )
             second = json.loads(server.status())
             self.assertNotIn("link_session_brief", second)
 
     def test_the_push_is_recorded_as_a_retrieval(self):
         with tempfile.TemporaryDirectory() as temp:
             root = self._workspace(Path(temp))
-            server = self._server(root)
-            server.status()
+            with self._server(root) as server:
+                server.status()
             events = load_usage(root)
             self.assertTrue(any(event["kind"] == "brief" for event in events), events)
 
@@ -146,8 +158,8 @@ class FirstResponseBriefTests(unittest.TestCase):
             root = self._workspace(Path(temp))
             os.environ["LINK_MCP_AUTOBRIEF"] = "off"
             try:
-                server = self._server(root)
-                self.assertNotIn("link_session_brief", json.loads(server.status()))
+                with self._server(root) as server:
+                    self.assertNotIn("link_session_brief", json.loads(server.status()))
             finally:
                 del os.environ["LINK_MCP_AUTOBRIEF"]
 
@@ -158,8 +170,8 @@ class FirstResponseBriefTests(unittest.TestCase):
             (wiki / "memories").mkdir(parents=True)
             (wiki / "index.md").write_text("# Index\n", encoding="utf-8")
             (wiki / "log.md").write_text("# Log\n", encoding="utf-8")
-            server = self._server(root)
-            self.assertNotIn("link_session_brief", json.loads(server.status()))
+            with self._server(root) as server:
+                self.assertNotIn("link_session_brief", json.loads(server.status()))
 
 
 class ColdWalkRegressionTests(unittest.TestCase):

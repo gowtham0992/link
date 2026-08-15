@@ -97,6 +97,9 @@ struct PopoverView: View {
 
     private var inboxTab: some View {
         VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
+            if let handoff = store.handoffsWaiting.first {
+                handoffBanner(handoff)
+            }
             if !store.activeSessions.isEmpty {
                 pulseRow
             }
@@ -120,6 +123,49 @@ struct PopoverView: View {
             }
         }
         .padding(LinkBrand.pad)
+    }
+
+
+    /// The reason this session exists: a previous session (possibly a
+    /// different agent) handed the task here. Outranks everything visually.
+    private func handoffBanner(_ handoff: HandoffsPayload.Handoff) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.right.circle.fill")
+                    .foregroundStyle(LinkBrand.rust)
+                Text("HANDOFF WAITING")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .kerning(0.8)
+                    .foregroundStyle(LinkBrand.rust)
+                Text("\(handoff.age) \u{00B7} from \(handoff.source)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear") { store.clearHandoff(handoff) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Clear after the task is picked up")
+            }
+            Text(handoff.title)
+                .font(.system(size: 12.5, weight: .semibold))
+            Text(handoff.body.replacingOccurrences(of: "## ", with: ""))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+            if store.handoffsWaiting.count > 1 {
+                Text("\(store.handoffsWaiting.count - 1) older handoff(s) also pending")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(LinkBrand.rust.opacity(0.10))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(LinkBrand.rust.opacity(0.35), lineWidth: 1))
+        )
     }
 
     /// Live agent pulse: which sessions are writing transcripts right now,

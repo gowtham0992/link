@@ -29,7 +29,7 @@ USAGE_FILE = ".link-usage.json"
 USAGE_DISABLE_ENV = "LINK_USAGE"
 MAX_EVENTS = 500
 # Surfaces that count as "an agent read memory back".
-RETRIEVAL_KINDS = ("brief", "recall", "query")
+RETRIEVAL_KINDS = ("brief", "recall", "query", "guard")
 
 
 def usage_disabled() -> bool:

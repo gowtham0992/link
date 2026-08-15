@@ -20,7 +20,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "try", "setup", "onboard", "init", "demo", "proof", "welcome", "prompts", "import",
     )),
     ("Memory — the core loop", (
-        "remember", "recall", "recipes", "query", "brief", "start",
+        "remember", "recall", "recipes", "query", "brief", "start", "handoff", "handoffs",
         "session-end", "semantic",
     )),
     ("Review & governance", (
@@ -115,6 +115,20 @@ def build_cli_parser(
     import_cmd.add_argument("--project", default=None, help="project slug for the imported proposals")
     import_cmd.add_argument("--json", action="store_true", help="print machine-readable import results")
 
+    handoff_cmd = sub.add_parser("handoff", help="write a session handoff so the next agent (any agent) resumes where you left off")
+    handoff_cmd.add_argument("note", help="where you left off - standalone, the next session cannot ask what you meant")
+    handoff_cmd.add_argument("target", nargs="?", default=".")
+    handoff_cmd.add_argument("--task", default=None, help="short task title for the handoff")
+    handoff_cmd.add_argument("--next", action="append", default=[], dest="next_steps", help="an explicit next step; repeatable")
+    handoff_cmd.add_argument("--project", default=None)
+    handoff_cmd.add_argument("--from", default="cli", dest="source", help="which agent/session is handing off")
+    handoff_cmd.add_argument("--json", action="store_true")
+
+    handoffs_cmd = sub.add_parser("handoffs", help="list pending session handoffs, or clear one")
+    handoffs_cmd.add_argument("target", nargs="?", default=".")
+    handoffs_cmd.add_argument("--clear", default=None, help="handoff filename to clear after resuming it")
+    handoffs_cmd.add_argument("--json", action="store_true")
+
     digest_cmd = sub.add_parser("digest", help="weekly reflection: what you taught Link, what is aging, what is drifting")
     digest_cmd.add_argument("target", nargs="?", default=".")
     digest_cmd.add_argument("--days", type=int, default=7, help="look-back window in days (default 7)")
@@ -130,6 +144,7 @@ def build_cli_parser(
     setup_cmd = sub.add_parser("setup", help="one command for install day and every upgrade: workspace + every detected agent, wired")
     setup_cmd.add_argument("target", nargs="?", default="~/link")
     setup_cmd.add_argument("--preview", action="store_true", help="show what would be configured without writing agent configs")
+    setup_cmd.add_argument("--no-semantic", action="store_true", dest="no_semantic", help="skip the default meaning-based recall setup (fast tier, one-time ~30 MB local model download)")
     setup_cmd.add_argument("--json", action="store_true", help="print machine-readable setup details")
 
     onboard_cmd = sub.add_parser("onboard", help="set up a real Link workspace and print the agent-first next steps")
@@ -327,6 +342,7 @@ def build_cli_parser(
     accept_capture_cmd.add_argument("capture", help="raw capture path or filename")
     accept_capture_cmd.add_argument("target", nargs="?", default=".")
     accept_capture_cmd.add_argument("--index", type=int, default=1, help="1-based proposal index to accept")
+    accept_capture_cmd.add_argument("--all", action="store_true", dest="accept_all", help="accept every proposal in this capture (duplicates and conflicts are skipped and reported)")
     accept_capture_cmd.add_argument("--title", default=None, help="override accepted memory title")
     accept_capture_cmd.add_argument("--type", dest="memory_type", choices=MEMORY_TYPES, default=None)
     accept_capture_cmd.add_argument("--scope", choices=MEMORY_SCOPES, default=None)
@@ -344,9 +360,10 @@ def build_cli_parser(
     redact_capture_cmd.add_argument("--json", action="store_true", help="print machine-readable redaction details")
 
     delete_capture_cmd = sub.add_parser("delete-capture", help="delete a raw session capture after explicit confirmation")
-    delete_capture_cmd.add_argument("capture", help="raw capture path or filename")
+    delete_capture_cmd.add_argument("capture", nargs="?", default=None, help="raw capture path or filename (omit with --all to clear every pending capture)")
     delete_capture_cmd.add_argument("target", nargs="?", default=".")
     delete_capture_cmd.add_argument("--confirm", action="store_true", help="required to delete the capture")
+    delete_capture_cmd.add_argument("--all", action="store_true", dest="delete_all", help="delete every pending capture (dismissals recorded, so their proposals never return)")
     delete_capture_cmd.add_argument("--json", action="store_true", help="print machine-readable deletion details")
 
     dedup_captures_cmd = sub.add_parser("dedup-captures", help="collapse review-inbox captures that offer nothing new")
@@ -416,7 +433,7 @@ def build_cli_parser(
     start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
 
     hook_cmd = sub.add_parser("hook", help="run an agent session hook (invoked by installed agent hooks)")
-    hook_cmd.add_argument("event", choices=["session-start", "session-end"], help="agent session lifecycle event")
+    hook_cmd.add_argument("event", choices=["session-start", "session-end", "prompt-check"], help="agent session lifecycle event")
     hook_cmd.add_argument("target", nargs="?", default=".")
     hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
     hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
@@ -583,6 +600,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             Path(args.target), source=args.import_source,
             file_path=args.import_file, project=args.project, json_output=args.json,
         )
+    if command == "handoff":
+        return handlers["handoff"](
+            Path(args.target), note=args.note, task=args.task,
+            next_steps=args.next_steps, project=args.project,
+            source=args.source, json_output=args.json,
+        )
+    if command == "handoffs":
+        return handlers["handoffs"](Path(args.target), clear=args.clear, json_output=args.json)
     if command == "digest":
         return handlers["digest"](Path(args.target), days=args.days, json_output=args.json)
     if command == "sync":
@@ -597,6 +622,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["setup"](
             Path(args.target),
             preview=args.preview,
+            no_semantic=args.no_semantic,
             json_output=args.json,
         )
     if command == "onboard":
@@ -775,6 +801,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             project=args.project,
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
+            accept_all=args.accept_all,
             json_output=args.json,
         )
     if command == "redact-capture":
@@ -785,10 +812,23 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
         )
     if command == "delete-capture":
+        # With --all the capture positional is meaningless, so a lone
+        # positional is the TARGET: `delete-capture w --all` must hit ./w,
+        # never fall back to the default workspace (that misparse pointed a
+        # destructive bulk delete at the real ~/link once - in a test, but
+        # once is the wrong number of times).
+        capture_arg = args.capture
+        target_arg = args.target
+        if args.delete_all and capture_arg:
+            # a capture name is meaningless with --all; the positional the
+            # user typed is the target, even if the workspace fallback
+            # already rewrote args.target behind our back
+            target_arg, capture_arg = capture_arg, None
         return handlers["delete-capture"](
-            Path(args.target),
-            args.capture,
+            Path(target_arg),
+            capture_arg,
             confirm=args.confirm,
+            delete_all=args.delete_all,
             json_output=args.json,
         )
     if command == "dedup-captures":

@@ -28,6 +28,8 @@ EXPECTED_CLI_COMMANDS = {
     "explain-memory",
     "forget-memory",
     "graph-summary",
+    "handoff",
+    "handoffs",
     "health",
     "hook",
     "import",

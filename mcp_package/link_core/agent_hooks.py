@@ -26,6 +26,8 @@ from .mcp_verify import display_command
 
 SESSION_START_TIMEOUT_SECONDS = 30
 SESSION_END_TIMEOUT_SECONDS = 60
+# The guard runs on every prompt: it must be fast or absent.
+GUARD_TIMEOUT_SECONDS = 10
 
 _HOOK_SCRIPT_MARKER = "link.py"
 
@@ -42,6 +44,9 @@ class AgentHookConfig:
     # Skip "resume": the resumed context already carries the earlier brief.
     start_matcher: str | None = "startup|clear|compact"
     start_emit: str = "text"  # "text" stdout-to-context, or "cursor" JSON envelope
+    # Per-prompt guard (constraint reminders). Only agents with a
+    # prompt-submit hook event support it.
+    guard_event: str | None = None
     restart_hint: str = "Restart the agent; new sessions will start with the Link memory brief."
 
 
@@ -51,6 +56,7 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         display_name="Claude Code",
         aliases=("claude-code", "claude", "claude-code-cli"),
         default_settings="~/.claude/settings.json",
+        guard_event="UserPromptSubmit",
     ),
     AgentHookConfig(
         name="codex",
@@ -215,6 +221,16 @@ def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, 
             "entry": make_entry(
                 _hook_command(python_cmd, runtime_script, "session-end", target),
                 SESSION_END_TIMEOUT_SECONDS,
+            ),
+        })
+    if config.guard_event:
+        plan.append({
+            "event_name": config.guard_event,
+            "event": "prompt-check",
+            "matcher": None,
+            "entry": make_entry(
+                _hook_command(python_cmd, runtime_script, "prompt-check", target),
+                GUARD_TIMEOUT_SECONDS,
             ),
         })
     return plan

@@ -8,7 +8,12 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/LinkBar "$APP/Contents/MacOS/LinkBar"
 cp Sources/LinkBar/Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-cp -R .build/release/LinkBar_LinkBar.bundle "$APP/Contents/Resources/" 2>/dev/null || true
+# The resource bundle is required at runtime. A silent failure here shipped
+# a launch-crashing app for months (issue #58), so this must be loud.
+cp -R .build/release/LinkBar_LinkBar.bundle "$APP/Contents/Resources/"
+# Also place the images directly in Contents/Resources so Bundle.main finds
+# them without any SPM bundle lookup at all.
+cp .build/release/LinkBar_LinkBar.bundle/MenuIcon*.png "$APP/Contents/Resources/" 2>/dev/null || true
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -19,7 +24,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>LinkBar</string>
     <key>CFBundleExecutable</key><string>LinkBar</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.2.1</string>
+    <key>CFBundleShortVersionString</key><string>1.3.0</string>
+    <key>CFBundleVersion</key><string>1.3.0</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>CFBundleIconFile</key><string>AppIcon</string>

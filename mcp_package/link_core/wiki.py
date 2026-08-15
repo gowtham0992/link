@@ -259,16 +259,23 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
         }
         pages.append(page)
         page_index[stem] = md
-        raw_forward_links[stem] = [
+        # Stems are not unique: wiki/index.md and
+        # wiki/sources/vendor-docs/INDEX.md share the stem "index". Assigning
+        # here let the later page erase the earlier page's edges, so
+        # rebuild-backlinks silently dropped links that validate still
+        # expected - the two commands then disagreed forever (issue #59).
+        # build_backlinks and validation already merge repeated stems; the
+        # cache must too.
+        raw_forward_links.setdefault(stem, []).extend(
             match.group(1).strip().lower()
             for match in WIKILINK_RE.finditer(body)
             if match.group(1).strip()
-        ]
-        raw_all_forward_links[stem] = [
+        )
+        raw_all_forward_links.setdefault(stem, []).extend(
             match.group(1).strip().lower()
             for match in WIKILINK_RE.finditer(text)
             if match.group(1).strip()
-        ]
+        )
         for alias in aliases:
             if alias not in page_index:
                 page_index[alias] = md
