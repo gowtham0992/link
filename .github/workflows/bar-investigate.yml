@@ -1,0 +1,59 @@
+name: Bar CI investigation
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Failed CI run ID
+        required: true
+        type: string
+      run_attempt:
+        description: Failed CI run attempt
+        required: true
+        default: "1"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: bar-investigate-${{ github.event.workflow_run.id || inputs.run_id }}-${{ github.event.workflow_run.run_attempt || inputs.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  investigate:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'failure') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the trusted collector revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: trusted
+
+      - name: Collect, sanitize, and send failed CI evidence
+        env:
+          BAR_ACCESS_CLIENT_ID: ${{ secrets.BAR_ACCESS_CLIENT_ID }}
+          BAR_ACCESS_CLIENT_SECRET: ${{ secrets.BAR_ACCESS_CLIENT_SECRET }}
+          BAR_CAPTURE_REF: refs/heads/main
+          BAR_CAPTURE_SHA: ${{ github.workflow_sha }}
+          BAR_ENDPOINT: https://bar-private.gowthamsarveswaran.com/api/v1/github/investigations
+          BAR_SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.run_attempt }}
+          BAR_SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          BAR_TRIGGER_EVENT: ${{ github.event_name }}
+          BAR_WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 trusted/scripts/bar_investigate.py

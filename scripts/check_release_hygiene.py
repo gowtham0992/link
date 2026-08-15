@@ -53,6 +53,10 @@ SECRET_VALUE_PATTERNS = (
 OUTBOUND_NETWORK_CODE_SUFFIXES = {".py", ".sh"}
 OUTBOUND_NETWORK_ALLOWLIST = {
     Path("scripts/smoke_http_viewer.py"),
+    # CI-only collector for Bar investigations. It runs in GitHub Actions and
+    # is never shipped: the wheel packages only link_mcp and link_core, and the
+    # sdist is rooted at mcp_package/, so scripts/ reaches no user machine.
+    Path("scripts/bar_investigate.py"),
 }
 OUTBOUND_NETWORK_PATTERNS = (
     ("requests import", re.compile(r"^\s*(?:import\s+requests\b|from\s+requests\b)", re.MULTILINE)),
