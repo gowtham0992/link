@@ -38,6 +38,25 @@
   </a>
 </p>
 
+## Quick start
+
+```bash
+brew install gowtham0992/link/link   # or: pip install link-mcp
+lnk setup                            # wires every agent you have
+```
+
+Then work normally. Tell an agent "remember that we deploy on Tuesdays",
+approve it once, and every other agent recalls it in a new session tomorrow.
+
+```bash
+lnk status                                   # is it wired up and being used?
+lnk import claude-code                       # bring existing memory in
+brew install --cask gowtham0992/link/linkbar # macOS menu bar app
+```
+
+Memory lives in plain Markdown you can open, and nothing becomes durable
+without your approval.
+
 ## What Is Link?
 
 Link is an open-source memory layer for local AI agents. Raw sources become an

@@ -6,6 +6,53 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- **Recall works outside English.** The tokenizer split on `[^a-z0-9]+`, so
+  every non-Latin script produced zero tokens: Japanese, Chinese, Korean,
+  Russian, Arabic, and Indic memories were unfindable, and nothing said so -
+  recall simply returned nothing. Accented Latin fared little better,
+  `über Größe Straße` became `{ber, stra}`, and `déploiement` could not be
+  found by typing `deploiement`. Scripts written without spaces are now cut
+  into character bigrams, Latin accents are folded (along with `ß`, `ø`, `ı`
+  and friends), and the three-character floor - an English heuristic that
+  erased shorter words wholesale - applies only to Latin text. Combining
+  marks in Indic scripts are vowels rather than accents and are kept:
+  stripping them turned `मंगलवार` into `गलव`. ASCII text keeps the original
+  path exactly, so no existing memory changes token and no existing ranking
+  moves; the LoCoMo track returns all nine published figures unchanged across
+  1,536 third-party queries, and the ASCII path is marginally faster than
+  before.
+- **`lnk stale` - notice when a memory outlived the code it describes.** The
+  most repeated complaint about agent memory is that nothing can tell when a
+  memory stopped being true: a note says a thing lives in `a/b.py`, the file
+  is renamed, and the memory keeps being retrieved and believed. Hosted
+  memory services cannot fix this because they never see the repository. Run
+  `lnk stale` from inside a repository and it lists memories naming files git
+  no longer has, with the successor path where git recorded a rename. A
+  memory is questioned only when it names a path that is missing now *and*
+  that git tracked before - without the second half, an unresolvable path is
+  just prose and flagging it is the noise that teaches people to ignore the
+  flag. The command changes nothing; findings go to the same review gate as
+  everything else. Precision is measured rather than asserted:
+  `scripts/eval_staleness.py` reports 0 false flags across 95 path references
+  in this repository's own documentation, detects every probed deletion, and
+  exits non-zero if either changes.
+
+### Changed
+
+- **The retrieval benchmark reports precision, not only recall.** Recall is
+  the number this category publishes, and it cannot separate a system that
+  retrieves cleanly from one that returns everything, because returning
+  everything scores 1.0 by construction. On the same 1,536 third-party LoCoMo
+  queries, a whole-store dump carries 0.26% signal while Link's top-1 packet
+  reaches 0.3086 precision on the fast tier - 117x - and pays a real recall
+  cost that is published in the same table. The track now also reports the
+  ceiling each cutoff allows (LoCoMo evidence sets average 1.53 turns, so
+  precision@10 cannot exceed 0.152 for anyone) and R-precision as the
+  k-independent figure to compare across systems.
+
+
 ## [2.3.0] - 2026-08-12
 
 ### Fixed
