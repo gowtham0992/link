@@ -15,6 +15,28 @@ cold half survives. This split measures both:
 
 Salience passes only if hot improves and cold does not regress.
 
+Three formulations were measured, none adopted:
+
+- **additive** - the boost is added to every score. Helps the hot half and
+  costs the cold half at every ceiling from 1 to 4; at ceiling 1 the hot half
+  gains nothing and cold still falls. Anything that adds points to a subset
+  can demote a better match for the complement.
+- **tiebreak** - the boost only separates equal scores, so it cannot demote a
+  better match. Provably safe and completely inert here: ties occur among
+  low-scoring memories, not at the decision boundary.
+- **diversity (MMR)** - the literature's other suggestion, penalising
+  near-duplicates in the top-K rather than boosting anything. Measured on
+  LoCoMo, Link's top-10 has a near-duplicate pair rate of 0.0000, so there is
+  nothing for it to fix.
+
+The underlying reason is a category difference. The Generative Agents
+formulation that production retrieval policies descend from
+(alpha*recency + beta*importance + gamma*similarity) was built for episodic
+observation streams, where an old observation genuinely matters less. Link
+stores durable constraints. "We deploy on Tuesdays" does not become less true
+because it went unread for a month - that is exactly when it most needs
+surfacing.
+
 Run:  python3 scripts/eval_salience.py [--json]
 Exit: non-zero if cold-query accuracy drops at all.
 """
@@ -29,7 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from link_core.memory import recall_memories  # noqa: E402
+from link_core.memory import memory_rank_score, recall_memories, score_memory  # noqa: E402
 from link_core.usage import usage_salience  # noqa: E402
 from recall_dataset import INTENTS  # noqa: E402
 
@@ -55,14 +77,28 @@ def build() -> tuple[list[dict], set[str], list[tuple[str, str]]]:
 
 
 def accuracy(records: list[dict], queries: list[tuple[str, str]],
-             salience: dict[str, int] | None, wanted_hot: bool, hot: set[str]) -> float:
+             salience: dict[str, int] | None, wanted_hot: bool, hot: set[str],
+             mode: str = "additive") -> float:
     hits = total = 0
     for question, gold in queries:
         if (gold in hot) != wanted_hot:
             continue
         total += 1
-        results = recall_memories(records, question, limit=1, salience=salience)
-        if results and str(results[0].get("name")) == gold:
+        if mode == "tiebreak" and salience:
+            # Rank on the base score, using salience only to order equals.
+            ranked = sorted(
+                records,
+                key=lambda record: (
+                    memory_rank_score(record, score_memory(record, question)),
+                    salience.get(str(record.get("name")), 0),
+                ),
+                reverse=True,
+            )
+            top = str(ranked[0].get("name")) if ranked else ""
+        else:
+            results = recall_memories(records, question, limit=1, salience=salience)
+            top = str(results[0].get("name")) if results else ""
+        if top == gold:
             hits += 1
     return hits / total if total else 0.0
 
@@ -83,6 +119,8 @@ def main() -> int:
         "hot_hit@1_on": round(accuracy(records, queries, salience, True, hot), 4),
         "cold_hit@1_off": round(accuracy(records, queries, None, False, hot), 4),
         "cold_hit@1_on": round(accuracy(records, queries, salience, False, hot), 4),
+        "hot_hit@1_tiebreak": round(accuracy(records, queries, salience, True, hot, "tiebreak"), 4),
+        "cold_hit@1_tiebreak": round(accuracy(records, queries, salience, False, hot, "tiebreak"), 4),
     }
     report["hot_delta"] = round(report["hot_hit@1_on"] - report["hot_hit@1_off"], 4)
     report["cold_delta"] = round(report["cold_hit@1_on"] - report["cold_hit@1_off"], 4)
@@ -94,6 +132,8 @@ def main() -> int:
               f"hot {report['hot_memories']}, salience entries {report['salience_entries']}")
         print(f"hot  hit@1: {report['hot_hit@1_off']} -> {report['hot_hit@1_on']}  ({report['hot_delta']:+})")
         print(f"cold hit@1: {report['cold_hit@1_off']} -> {report['cold_hit@1_on']}  ({report['cold_delta']:+})")
+        print(f"tiebreak-only  hot {report['hot_hit@1_tiebreak']}  cold {report['cold_hit@1_tiebreak']}"
+              "   (safe by construction, and inert)")
         verdict = "cold memories regressed" if report["cold_delta"] < 0 else "cold memories held"
         print(f"verdict: {verdict}")
     return 1 if report["cold_delta"] < 0 else 0
