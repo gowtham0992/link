@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import unicodedata
 import urllib.parse
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
@@ -170,12 +171,114 @@ def memory_title(text: str, explicit_title: str | None = None) -> str:
     return first_sentence[:67].rstrip() + "..."
 
 
+# Letters carrying no Unicode decomposition that still need a Latin
+# equivalent, so "Größe" and "grosse" reach the same token.
+_TOKEN_FOLD_PAIRS = {
+    "ß": "ss", "æ": "ae", "œ": "oe", "ø": "o",
+    "đ": "d", "ł": "l", "ð": "d", "þ": "th", "ı": "i",
+}
+_TOKEN_MARKS = {"Mn", "Mc"}
+_ASCII_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _token_unspaced(character: str) -> bool:
+    """Han and kana: scripts written without spaces between words."""
+    code = ord(character)
+    return (
+        0x3040 <= code <= 0x30FF
+        or 0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+    )
+
+
+def _compose(value: str) -> str:
+    """Recompose a token after NFKD.
+
+    NFKD splits Hangul syllables into conjoining jamo, so a Korean word would
+    be stored decomposed. Retrieval would still match, since queries decompose
+    the same way, but the tokens belong in the form a person would recognise.
+    """
+    return unicodedata.normalize("NFC", value)
+
+
+def _unicode_memory_tokens(value: str) -> set[str]:
+    """Tokenize text that is not plain ASCII.
+
+    Three things go wrong if this is skipped, and all three are invisible to
+    anyone working in English:
+
+    - Scripts without spaces (Han, kana) never split, so a whole sentence
+      becomes one token that no query can match. They are cut into character
+      bigrams instead, the approach SQLite FTS5's trigram tokenizer takes.
+    - Accents make a word unfindable by its unaccented spelling, so
+      "déploiement" and "deploiement" are different tokens. Latin accents are
+      folded away. Combining marks in Indic and other scripts are vowels, not
+      accents, and are kept - stripping them turns "मंगलवार" into "गलव".
+    - The three-character floor is an English heuristic. Other scripts pack a
+      word into one or two characters, so it would erase them wholesale.
+    """
+    lowered = value.lower()
+    for source, replacement in _TOKEN_FOLD_PAIRS.items():
+        if source in lowered:
+            lowered = lowered.replace(source, replacement)
+    tokens: set[str] = set()
+    buffer: list[str] = []
+    base_is_latin = False
+
+    def flush() -> None:
+        if not buffer:
+            return
+        run = "".join(buffer)
+        buffer.clear()
+        cursor = 0
+        while cursor < len(run):
+            if _token_unspaced(run[cursor]):
+                end = cursor
+                while end < len(run) and _token_unspaced(run[end]):
+                    end += 1
+                block = run[cursor:end]
+                if len(block) == 1:
+                    tokens.add(_compose(block))
+                else:
+                    tokens.update(
+                        _compose(block[index:index + 2]) for index in range(len(block) - 1)
+                    )
+                cursor = end
+                continue
+            end = cursor
+            while end < len(run) and not _token_unspaced(run[end]):
+                end += 1
+            chunk = _compose(run[cursor:end])
+            if len(chunk) >= (3 if chunk.isascii() else 2):
+                tokens.add(chunk)
+            cursor = end
+
+    for character in unicodedata.normalize("NFKD", lowered):
+        if unicodedata.category(character) in _TOKEN_MARKS:
+            if not base_is_latin:
+                buffer.append(character)
+            continue
+        if character.isalnum():
+            base_is_latin = character.isascii()
+            buffer.append(character)
+            continue
+        flush()
+        base_is_latin = False
+    flush()
+    return tokens
+
+
 def memory_tokens(value: str) -> set[str]:
-    return {
-        token
-        for token in re.split(r"[^a-z0-9]+", value.lower())
-        if len(token) >= 3
-    }
+    # ASCII text needs no folding, no mark handling, and no segmentation, so
+    # it keeps the original path: byte-identical tokens, no added cost.
+    if value.isascii():
+        return {
+            token
+            for token in _ASCII_TOKEN_SPLIT.split(value.lower())
+            if len(token) >= 3
+        }
+    return _unicode_memory_tokens(value)
 
 
 def compact_memory_text(value: str) -> str:

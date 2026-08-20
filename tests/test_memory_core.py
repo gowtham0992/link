@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import (  # noqa: E402
+    memory_tokens,
     slugify,
     add_capture_review_to_brief,
     default_project_for_target,
@@ -1928,3 +1929,57 @@ class TemporalExpressionTests(unittest.TestCase):
         self.assertFalse(memory_active_at(new, "2026-03-31"))
         self.assertFalse(memory_active_at(old, self.TODAY))
         self.assertTrue(memory_active_at(new, self.TODAY))
+
+
+class UnicodeTokenizerTests(unittest.TestCase):
+    """Recall must work outside English.
+
+    Before this, the tokenizer split on ``[^a-z0-9]+``, so every non-Latin
+    script produced zero tokens and its memories were unfindable with no error
+    to explain why. All fixtures here are synthetic.
+    """
+
+    def test_ascii_tokens_are_unchanged(self):
+        # The whole existing corpus is ASCII. If this moves, every current
+        # user's ranking moves with it.
+        for text, expected in [
+            ("We deploy on Tuesdays only", {"deploy", "tuesdays", "only"}),
+            ("snake_case name", {"snake", "case", "name"}),
+            ("hit@1 0.589 vs 0.703", {"hit", "589", "703"}),
+            ("rebuild-backlinks dropped links", {"rebuild", "backlinks", "dropped", "links"}),
+        ]:
+            self.assertEqual(memory_tokens(text), expected, text)
+
+    def test_scripts_without_spaces_are_segmented(self):
+        # Han and kana never split on whitespace, so the whole sentence used to
+        # collapse into a single unmatchable token.
+        japanese = memory_tokens("火曜日にのみデプロイします")
+        chinese = memory_tokens("我们只在星期二部署")
+        self.assertGreater(len(japanese), 5)
+        self.assertGreater(len(chinese), 4)
+        self.assertTrue(all(len(token) <= 2 for token in japanese))
+
+    def test_spaced_non_latin_scripts_keep_whole_words(self):
+        self.assertIn("вторникам", memory_tokens("мы развертываем по вторникам"))
+        self.assertIn("الثلاثاء", memory_tokens("ننشر يوم الثلاثاء فقط"))
+        self.assertIn("우리는", memory_tokens("우리는 화요일에만 배포합니다"))
+
+    def test_indic_vowel_marks_survive(self):
+        # These are combining marks but they are vowels, not accents. Stripping
+        # them the way Latin accents are stripped turns the word into rubble.
+        self.assertIn("मंगलवार", memory_tokens("हम केवल मंगलवार को तैनात"))
+        self.assertIn("நாங்கள்", memory_tokens("நாங்கள் செவ்வாய்"))
+
+    def test_latin_accents_fold_so_either_spelling_finds_the_memory(self):
+        for plain, accented in [
+            ("deploiement", "déploiement"),
+            ("implementacion", "implementación"),
+            ("uber", "über"),
+            ("grosse", "Größe"),
+            ("dagitim", "dağıtım"),
+        ]:
+            self.assertEqual(memory_tokens(plain), memory_tokens(accented), plain)
+
+    def test_non_latin_query_matches_its_memory(self):
+        for text in ["火曜日にのみデプロイします", "우리는 화요일에만 배포합니다", "мы развертываем по вторникам"]:
+            self.assertTrue(memory_tokens(text[:6]) & memory_tokens(text), text)
