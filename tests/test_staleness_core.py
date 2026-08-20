@@ -108,3 +108,41 @@ class StalenessFindingTests(unittest.TestCase):
 
         stale_findings(text, self.repo, runner=runner, limit=5)
         self.assertLessEqual(len(set(calls)), 5)
+
+
+class StaleCommandTests(unittest.TestCase):
+    """The command must stay quiet on a healthy workspace and never write."""
+
+    def test_command_is_registered_and_documented(self):
+        from scripts import check_tool_contract as contract  # noqa: PLC0415
+
+        self.assertIn("stale", contract.EXPECTED_CLI_COMMANDS)
+        self.assertEqual(contract.check_tool_contract(), [])
+
+    def test_reports_findings_without_modifying_any_memory(self):
+        import subprocess as sp  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as repo_dir:
+            repo = Path(repo_dir)
+            _git(repo, "init", "--initial-branch", "main")
+            (repo / "gone.py").write_text("x = 1\n", encoding="utf-8")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "seed")
+            _git(repo, "rm", "-q", "gone.py")
+            _git(repo, "commit", "-m", "remove")
+
+            env = {"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": workspace}
+            sp.run([sys.executable, str(ROOT / "link.py"), "demo", workspace, "--force"],
+                   check=True, capture_output=True, env=env)
+            sp.run([sys.executable, str(ROOT / "link.py"), "remember",
+                    "the parser lives in gone.py", workspace], check=True, capture_output=True, env=env)
+
+            pages = sorted((Path(workspace) / "wiki" / "memories").glob("*.md"))
+            before = {p: p.read_bytes() for p in pages}
+
+            result = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", str(repo)],
+                            capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("gone.py", result.stdout)
+            self.assertIn("Nothing was changed", result.stdout)
+            self.assertEqual({p: p.read_bytes() for p in pages}, before, "stale must not write")

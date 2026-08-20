@@ -1187,6 +1187,41 @@ def import_obsidian(
     return _emit_json_or_text(payload, json_output, _core_render_import_obsidian_text)
 
 
+def stale(target: Path, *, repo: Path = Path(".")) -> int:
+    """Report memories that name repository paths git no longer has.
+
+    Read-only by design. A memory that mentions something that moved is a
+    question for a person, not a rewrite to apply automatically, so findings
+    are printed and the review gate stays where it is.
+    """
+    from link_core.staleness import describe_findings, stale_findings
+
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    repo_dir = Path(repo).expanduser().resolve()
+    records = _core_memory_records(wiki_dir)
+    flagged = 0
+    for record in records:
+        text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
+        findings = stale_findings(text, repo_dir)
+        if not findings:
+            continue
+        flagged += 1
+        print(f"{record.get('name') or record.get('path')}")
+        for line in describe_findings(findings):
+            print(f"  {line}")
+    checked = len(records)
+    if not flagged:
+        print(f"No stale repository references in {checked} memories ({repo_dir}).")
+        return 0
+    print(
+        f"\n{flagged} of {checked} memories name paths that moved in {repo_dir}."
+        "\nNothing was changed. Review each one and update or archive it."
+    )
+    return 0
+
+
 def rebuild_backlinks(target: Path) -> int:
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
@@ -4058,7 +4093,7 @@ _WORKSPACE_COMMANDS = {
     "semantic", "status", "sync", "digest", "import", "handoff", "handoffs", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
-    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
+    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale",
     "verify-mcp", "connect",
 }
 
@@ -4191,6 +4226,7 @@ def main(argv: list[str] | None = None) -> int:
             "explain-memory": explain_memory,
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
+            "stale": stale,
             "verify-mcp": verify_mcp,
             "connect": connect_mcp,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,

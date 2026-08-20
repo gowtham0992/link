@@ -44,7 +44,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Utilities", (
         "version", "benchmark", "wins", "profile", "rebuild-index",
-        "rebuild-backlinks", "query-link",
+        "rebuild-backlinks", "query-link", "stale",
     )),
 )
 
@@ -534,6 +534,16 @@ def build_cli_parser(
     rebuild_cmd = sub.add_parser("rebuild-backlinks", help="rebuild wiki/_backlinks.json")
     rebuild_cmd.add_argument("target", nargs="?", default=".")
 
+    stale_cmd = sub.add_parser(
+        "stale",
+        help="list memories that name repository paths git no longer has",
+    )
+    stale_cmd.add_argument("target", nargs="?", default=".", help="Link workspace")
+    stale_cmd.add_argument(
+        "--repo", default=".",
+        help="repository to check the memories against (default: current directory)",
+    )
+
     verify_mcp_cmd = sub.add_parser(
         "verify-mcp",
         help="verify link-mcp import and print MCP config; pass an agent name to check what that agent is configured to run",
@@ -953,6 +963,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["rebuild-index"](Path(args.target))
     if command == "rebuild-backlinks":
         return handlers["rebuild-backlinks"](Path(args.target))
+    if command == "stale":
+        return handlers["stale"](Path(args.target), repo=Path(args.repo))
     if command == "verify-mcp":
         from .mcp_connect import agent_alias_matches
 

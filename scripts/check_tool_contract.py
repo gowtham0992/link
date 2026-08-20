@@ -52,6 +52,7 @@ EXPECTED_CLI_COMMANDS = {
     "query-link",
     "rebuild-index",
     "rebuild-backlinks",
+    "stale",
     "recall",
     "recipes",
     "redact-capture",
