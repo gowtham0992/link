@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Usage-aware ranking: does it help without burying the cold memories?
+
+Ranking by how often something is read is the oldest trick in retrieval and
+it has an equally old failure: the thing you reach for constantly crowds out
+the thing you need rarely and urgently. A memory system where the rarely-used
+memory becomes unreachable is worse than one that never learned usage at all,
+because the frequent memories were the ones you would have remembered anyway.
+
+So the question is not "does salience raise the average". It is whether the
+cold half survives. This split measures both:
+
+- **hot queries** - the answer is a memory with retrieval history
+- **cold queries** - the answer is a memory that has never been read
+
+Salience passes only if hot improves and cold does not regress.
+
+Run:  python3 scripts/eval_salience.py [--json]
+Exit: non-zero if cold-query accuracy drops at all.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "mcp_package"))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from link_core.memory import recall_memories  # noqa: E402
+from link_core.usage import usage_salience  # noqa: E402
+from recall_dataset import INTENTS  # noqa: E402
+
+HOT_SHARE = 0.3          # a realistic ledger is skewed: a few memories, many reads
+READS_FOR_HOT = 12
+
+
+def build() -> tuple[list[dict], set[str], list[tuple[str, str]]]:
+    records: list[dict] = []
+    queries: list[tuple[str, str]] = []
+    for name, _domain, title, tldr, body, intent_queries in INTENTS:
+        records.append({
+            "name": name, "title": title, "tldr": tldr, "body": body,
+            "memory_type": "preference", "scope": "user", "status": "active",
+            "review_status": "reviewed", "date_captured": "2026-05-01T00:00:00Z",
+            "context": "", "project": "",
+        })
+        for question in intent_queries:
+            queries.append((question, name))
+    hot_count = max(1, int(len(records) * HOT_SHARE))
+    hot = {str(record["name"]) for record in records[:hot_count]}
+    return records, hot, queries
+
+
+def accuracy(records: list[dict], queries: list[tuple[str, str]],
+             salience: dict[str, int] | None, wanted_hot: bool, hot: set[str]) -> float:
+    hits = total = 0
+    for question, gold in queries:
+        if (gold in hot) != wanted_hot:
+            continue
+        total += 1
+        results = recall_memories(records, question, limit=1, salience=salience)
+        if results and str(results[0].get("name")) == gold:
+            hits += 1
+    return hits / total if total else 0.0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Measure usage-aware ranking.")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    records, hot, queries = build()
+    events = [{"memories": [name]} for name in hot for _ in range(READS_FOR_HOT)]
+    salience = usage_salience(events)
+
+    report = {
+        "memories": len(records), "queries": len(queries),
+        "hot_memories": len(hot), "salience_entries": len(salience),
+        "hot_hit@1_off": round(accuracy(records, queries, None, True, hot), 4),
+        "hot_hit@1_on": round(accuracy(records, queries, salience, True, hot), 4),
+        "cold_hit@1_off": round(accuracy(records, queries, None, False, hot), 4),
+        "cold_hit@1_on": round(accuracy(records, queries, salience, False, hot), 4),
+    }
+    report["hot_delta"] = round(report["hot_hit@1_on"] - report["hot_hit@1_off"], 4)
+    report["cold_delta"] = round(report["cold_hit@1_on"] - report["cold_hit@1_off"], 4)
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"memories {report['memories']}, queries {report['queries']}, "
+              f"hot {report['hot_memories']}, salience entries {report['salience_entries']}")
+        print(f"hot  hit@1: {report['hot_hit@1_off']} -> {report['hot_hit@1_on']}  ({report['hot_delta']:+})")
+        print(f"cold hit@1: {report['cold_hit@1_off']} -> {report['cold_hit@1_on']}  ({report['cold_delta']:+})")
+        verdict = "cold memories regressed" if report["cold_delta"] < 0 else "cold memories held"
+        print(f"verdict: {verdict}")
+    return 1 if report["cold_delta"] < 0 else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

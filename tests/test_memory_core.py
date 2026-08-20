@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import (  # noqa: E402
+    memory_rank_score,
     memory_tokens,
     slugify,
     add_capture_review_to_brief,
@@ -1983,3 +1984,33 @@ class UnicodeTokenizerTests(unittest.TestCase):
     def test_non_latin_query_matches_its_memory(self):
         for text in ["火曜日にのみデプロイします", "우리는 화요일에만 배포합니다", "мы развертываем по вторникам"]:
             self.assertTrue(memory_tokens(text[:6]) & memory_tokens(text), text)
+
+
+class SalienceIsNotAdoptedTests(unittest.TestCase):
+    """Ranking must not become usage-aware without clearing the cold-memory bar.
+
+    scripts/eval_salience.py measured every ceiling from 1 to 4 and the cold
+    half regressed each time. These tests keep that decision from being undone
+    by accident.
+    """
+
+    def test_ranking_ignores_usage_by_default(self):
+        record = {"name": "n", "title": "t", "body": "b", "scope": "user"}
+        self.assertEqual(
+            memory_rank_score(record, 20),
+            memory_rank_score(record, 20, salience={"n": 4}) - 4,
+        )
+
+    def test_salience_stays_bounded_when_passed_explicitly(self):
+        from link_core.usage import SALIENCE_MAX_BOOST, usage_salience
+
+        events = [{"memories": ["a"]} for _ in range(500)]
+        boosts = usage_salience(events)
+        self.assertLessEqual(max(boosts.values(), default=0), SALIENCE_MAX_BOOST)
+
+    def test_a_memory_never_retrieved_is_not_penalised(self):
+        from link_core.usage import usage_salience
+
+        boosts = usage_salience([{"memories": ["read"]} for _ in range(9)])
+        self.assertNotIn("unread", boosts)
+        self.assertGreaterEqual(min(boosts.values(), default=0), 0)

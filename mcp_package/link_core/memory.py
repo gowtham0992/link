@@ -2480,7 +2480,12 @@ def memory_temporal_boost(record: Mapping[str, object]) -> int:
     return boost
 
 
-def memory_rank_score(record: Mapping[str, object], match_score: int, project: str | None = None) -> int:
+def memory_rank_score(
+    record: Mapping[str, object],
+    match_score: int,
+    project: str | None = None,
+    salience: Mapping[str, int] | None = None,
+) -> int:
     rank_score = match_score
     project_name = normalize_project(project)
     record_scope = str(record.get("scope") or "").lower()
@@ -2488,6 +2493,10 @@ def memory_rank_score(record: Mapping[str, object], match_score: int, project: s
     if project_name and record_scope == "project" and record_project == project_name:
         rank_score += 6
     rank_score += memory_temporal_boost(record)
+    if salience:
+        # Bounded on purpose: usage separates near-equals, it does not outrank
+        # a better match. See usage.usage_salience.
+        rank_score += salience.get(str(record.get("name") or ""), 0)
     return max(1, rank_score)
 
 
@@ -2540,6 +2549,7 @@ def recall_memories(
     include_archived: bool = False,
     project: str | None = None,
     semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
+    salience: Mapping[str, int] | None = None,
     context_path: str | None = None,
     as_of: str | None = None,
     memory_type: str | None = None,
@@ -2571,7 +2581,7 @@ def recall_memories(
         score = lexical_score + semantic_match_points(semantic_match)
         if score >= MEMORY_RECALL_MIN_SCORE:
             lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
-            rank_score = memory_rank_score(record, score, project=project_name)
+            rank_score = memory_rank_score(record, score, project=project_name, salience=salience)
             applicability = memory_applicability(
                 record, query=q, project=project_name, context_path=context_path
             )

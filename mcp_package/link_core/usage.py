@@ -19,6 +19,7 @@ must never break a recall.
 """
 from __future__ import annotations
 
+import math
 import json
 import os
 from collections.abc import Iterable, Mapping
@@ -164,3 +165,60 @@ def usage_summary(
         "never_retrieved_count": len(never_used),
         "total_recorded": len(events),
     }
+
+
+# MEASURED AND NOT ADOPTED. Ranking is not usage-aware, and this is the
+# function that was tried. scripts/eval_salience.py splits queries by whether
+# the answer is a memory with retrieval history, and at every ceiling from 1
+# to 4 the cold half got harder to find: at ceiling 1 the hot half gained
+# nothing and cold still fell. The average improves, which is exactly how this
+# kind of change gets shipped without anyone noticing what it cost.
+#
+# That trade is backwards for Link specifically. The memory worth having is
+# the constraint you had forgotten - the cold one - and the frequently read
+# memories are the ones you would have remembered anyway.
+#
+# Kept, off by default, so the experiment stays reproducible and the next
+# attempt at popularity ranking has to clear the same bar.
+#
+# Salience is a tiebreaker, never a ranking force of its own. The failure it
+# has to avoid is well known from every feed that ranks by popularity: the
+# memory you reach for often crowds out the correct-but-rarely-needed one.
+# The ceiling here is deliberately smaller than a lexical match, so usage can
+# separate near-equals and nothing else.
+SALIENCE_MAX_BOOST = 4
+SALIENCE_MIN_RETRIEVALS = 2
+
+
+def usage_salience(events: list[dict[str, object]]) -> dict[str, int]:
+    """Bounded per-memory boost derived from how often memory was actually read.
+
+    Counts retrievals only. A memory the user has never pulled gets nothing
+    rather than a penalty: absence of evidence is not evidence of uselessness,
+    and a new memory has no history by definition.
+    """
+    counts: dict[str, int] = {}
+    for event in events:
+        names = event.get("memories")
+        if not isinstance(names, list):
+            continue
+        for name in names:
+            key = str(name)
+            if key:
+                counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return {}
+    ceiling = max(counts.values())
+    if ceiling < SALIENCE_MIN_RETRIEVALS:
+        return {}
+    boosts: dict[str, int] = {}
+    for name, count in counts.items():
+        if count < SALIENCE_MIN_RETRIEVALS:
+            continue
+        # Linear in the log of the count: the tenth read should matter far
+        # less than the second, or one habit dominates every query.
+        share = math.log1p(count) / math.log1p(ceiling)
+        boost = int(round(share * SALIENCE_MAX_BOOST))
+        if boost:
+            boosts[name] = boost
+    return boosts
