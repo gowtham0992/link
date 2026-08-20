@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "mcp_package"))
+
+from link_core.staleness import (  # noqa: E402
+    describe_findings,
+    repo_path_references,
+    stale_findings,
+)
+
+
+def _git(root: Path, *arguments: str) -> None:
+    subprocess.run(
+        ["git", *arguments],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test",
+            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+        },
+    )
+
+
+class StalenessReferenceTests(unittest.TestCase):
+    def test_extracts_paths_and_bare_source_filenames(self):
+        refs = repo_path_references("see src/app/main.ts and also watch.sh for details")
+        self.assertIn("src/app/main.ts", refs)
+        self.assertIn("watch.sh", refs)
+
+    def test_ignores_prose_that_merely_contains_dots(self):
+        for text in ["we shipped 2.3.0 on Tuesday", "see e.g. the notes", "about 3.5 percent"]:
+            self.assertEqual(repo_path_references(text), [], text)
+
+    def test_ignores_the_memory_store_itself(self):
+        # Wiki pages move for their own reasons and are not code.
+        self.assertEqual(repo_path_references("wiki/memories/foo.md moved"), [])
+
+
+class StalenessFindingTests(unittest.TestCase):
+    """A memory is only questioned when git proves the path was real and is gone."""
+
+    def setUp(self) -> None:
+        self._temp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._temp.name)
+        _git(self.repo, "init", "--initial-branch", "main")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "old.py").write_text("x = 1\n", encoding="utf-8")
+        (self.repo / "src" / "kept.py").write_text("y = 2\n", encoding="utf-8")
+        (self.repo / "tool.sh").write_text("echo hi\n", encoding="utf-8")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-m", "seed")
+
+    def tearDown(self) -> None:
+        self._temp.cleanup()
+
+    def _delete(self, relative: str) -> None:
+        _git(self.repo, "rm", "-q", relative)
+        _git(self.repo, "commit", "-m", f"remove {relative}")
+
+    def test_silent_while_the_path_still_exists(self):
+        self.assertEqual(stale_findings("logic lives in src/kept.py", self.repo), [])
+
+    def test_flags_a_path_git_tracked_and_no_longer_has(self):
+        self._delete("src/old.py")
+        findings = stale_findings("the parser lives in src/old.py", self.repo)
+        self.assertEqual([f["path"] for f in findings], ["src/old.py"])
+        self.assertEqual(findings[0]["reason"], "removed")
+
+    def test_flags_a_removed_root_level_file(self):
+        self._delete("tool.sh")
+        self.assertEqual([f["path"] for f in stale_findings("run tool.sh first", self.repo)], ["tool.sh"])
+
+    def test_silent_for_a_path_the_repository_never_had(self):
+        # Prose, not a stale reference. Flagging this is the noise that makes
+        # people stop reading the flag.
+        self.assertEqual(stale_findings("put it in config/settings.py", self.repo), [])
+
+    def test_reports_the_successor_when_git_recorded_a_rename(self):
+        _git(self.repo, "mv", "src/old.py", "src/new.py")
+        _git(self.repo, "commit", "-m", "rename")
+        findings = stale_findings("the parser lives in src/old.py", self.repo)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["reason"], "renamed")
+        self.assertEqual(findings[0]["successor"], "src/new.py")
+        self.assertIn("renamed to src/new.py", describe_findings(findings)[0])
+
+    def test_degrades_silently_where_git_cannot_answer(self):
+        with tempfile.TemporaryDirectory() as plain:
+            self.assertEqual(stale_findings("src/old.py is gone", Path(plain)), [])
+
+    def test_lookups_are_capped(self):
+        text = " ".join(f"src/gone{index}.py" for index in range(40))
+        calls: list[str] = []
+
+        def runner(_root: Path, arguments: list[str]) -> str:
+            calls.append(arguments[-1])
+            return ""
+
+        stale_findings(text, self.repo, runner=runner, limit=5)
+        self.assertLessEqual(len(set(calls)), 5)
