@@ -23,9 +23,9 @@ Add a real `lnk ingest` interface for structured source exports while preserving
 
 - [x] Add unit and CLI tests for planning, applying, conflicts, updates, and validation.
 - [x] Run the repository release gate.
-- [ ] Open an upstream pull request.
-- [ ] Install the branch through Homebrew and re-ingest the live chezmoi export.
-- [ ] Verify the live runtime, provenance manifest, retrieval, and wiki validation.
+- [x] Open an upstream pull request.
+- [x] Install the branch through Homebrew and re-ingest the live chezmoi export.
+- [x] Verify the live runtime, provenance manifest, retrieval, and wiki validation.
 
 ## Automated verification
 
