@@ -79,6 +79,10 @@ lnk start ~/link --task "working on Link release"
 lnk session-end session-notes.md ~/link --limit 3
 lnk health
 lnk ingest-status
+
+# Supported structured exports: plan first, then apply
+lnk ingest raw/chezmoi-docs/export.jsonl ~/link --adapter chezmoi-docs-graph-v1
+lnk ingest raw/chezmoi-docs/export.jsonl ~/link --adapter chezmoi-docs-graph-v1 --apply
 lnk remember "User prefers feature branches for Link work." --type preference --scope project --project link --visibility project --review-after 2026-08-01
 lnk remember "Temporary launch branch is release/one-off." --type project --project link --expires-at 2026-09-01
 lnk remember "1. Bump version 2. Run tests 3. Tag and publish" --type procedure --trigger "cutting a release"
@@ -202,6 +206,7 @@ lnk compliance-export [dir] [--output audit.json] [--project slug]
 lnk team-sync [dir] [--remote git-url]
 lnk share &lt;page-or-memory&gt; [dir] [--port 3000]
 lnk snapshot [dir] [--output link-snapshot] [--include-memories] [--include-private-memories] [--force]
+lnk ingest &lt;raw-source&gt; [dir] --adapter chezmoi-docs-graph-v1 [--exclude "group"] [--apply] [--replace-unmanaged] [--prune]
 lnk ingest-status
 lnk import-obsidian &lt;vault&gt; [dir] [--dry-run] [--overwrite]
 lnk remember "text" [--type note|preference|decision|project|fact|procedure] [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD] [--trigger "..."] [--applies-when "..."] [--supersedes name-or-title]

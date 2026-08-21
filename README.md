@@ -533,6 +533,27 @@ If a raw file was already ingested and later edited, `lnk ingest-status` marks i
 as stale and tells your agent to refresh the existing source page instead of
 creating a duplicate.
 
+Structured exports with a supported schema can use deterministic ingestion.
+Planning is read-only; applying stages the complete result, rebuilds the graph,
+validates it, and records output ownership before changing the live wiki:
+
+```bash
+lnk ingest raw/chezmoi-docs/export.jsonl ~/link \
+  --adapter chezmoi-docs-graph-v1 \
+  --exclude "Reference / Release history"
+
+lnk ingest raw/chezmoi-docs/export.jsonl ~/link \
+  --adapter chezmoi-docs-graph-v1 \
+  --exclude "Reference / Release history" \
+  --apply
+```
+
+Later runs update only adapter-owned outputs. Manual edits become conflicts.
+`--replace-unmanaged` is required for a first migration over existing pages,
+and `--prune` is required to retire managed pages no longer in the plan.
+Arbitrary notes and articles continue through agent-authored ingest because
+their useful structure cannot be inferred safely from a file format alone.
+
 ## What Agents Get
 
 When an agent uses Link through the recommended MCP surface, it gets six
