@@ -3704,16 +3704,23 @@ def propose_memories_from_text(
 ) -> dict[str, object]:
     record_list = [dict(record) for record in records]
     project_name = normalize_project(project)
+    # Structured documentation is recognised by its shape, never by a substring.
+    # A text that merely *mentions* "source_type: documentation_export" - a note
+    # about configuring Link, an agent session discussing this feature - must
+    # still yield its proposals. So the guard fires only for an export file
+    # (first record is JSON carrying the export schema) or a rendered export
+    # page (frontmatter declares the source type). Both are position-free.
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    structured_documentation = "source_type: documentation_export" in text[:2000]
+    structured_documentation = False
     if first_line.startswith("{"):
         try:
             first_record = json.loads(first_line)
         except json.JSONDecodeError:
             first_record = {}
-        structured_documentation = structured_documentation or str(first_record.get("schema") or "").endswith(
-            "documentation-graph-export/v1"
-        )
+        structured_documentation = str(first_record.get("schema") or "").endswith("documentation-graph-export/v1")
+    elif text.lstrip().startswith("---"):
+        meta, _ = parse_frontmatter(text)
+        structured_documentation = str(meta.get("source_type") or "") == "documentation_export"
     if structured_documentation and not curated:
         return {
             "proposed": True,

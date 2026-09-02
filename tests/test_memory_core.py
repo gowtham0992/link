@@ -716,6 +716,33 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(payload["proposals"], [])
         self.assertIn("belongs in the wiki", payload["blocked_reason"])
 
+    def test_mentioning_documentation_export_does_not_block_a_capture(self):
+        # A capture about configuring Link is not a documentation export.
+        text = (
+            "We set source_type: documentation_export for the vendor docs bundle.\n"
+            "Also: from now on we always deploy on Tuesdays, never on Fridays."
+        )
+        payload = propose_memories_from_text(text, [], source="capture")
+        self.assertNotIn("blocked_reason", payload)
+        self.assertGreater(payload["count"], 0)
+
+    def test_the_guard_does_not_depend_on_where_the_phrase_falls(self):
+        # The old check looked at the first 2000 characters, so the same text
+        # blocked at position 1900 and passed at 2100.
+        for padding in (0, 130, 145):
+            text = ("I prefer tabs. " * padding) + "source_type: documentation_export"
+            payload = propose_memories_from_text(text, [], source="capture")
+            self.assertNotIn("blocked_reason", payload, f"padding={padding}")
+
+    def test_rendered_export_page_is_recognised_by_its_frontmatter(self):
+        page = (
+            "---\ntype: source\ntitle: \"Guide\"\nsource_type: documentation_export\n---\n\n"
+            "## Summary\n\nI like chezmoi. Always run apply first.\n"
+        )
+        payload = propose_memories_from_text(page, [], source="wiki/sources/guide.md")
+        self.assertEqual(payload["count"], 0)
+        self.assertIn("belongs in the wiki", payload["blocked_reason"])
+
     def test_curated_structured_documentation_can_propose_selected_claims(self):
         text = "source_type: documentation_export\n\n- We decided to keep Link local-first."
 
