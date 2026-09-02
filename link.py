@@ -560,6 +560,9 @@ def _query_link(wiki_dir: Path, query: str, budget: str = "medium", project: str
             budget=budget,
             project=project,
             review_command="review-memory",
+            # Flag recalled memories naming files this repository no longer
+            # has. Guarded inside: nothing happens unless cwd is a git repo.
+            repo_root=Path.cwd(),
         )
     finally:
         _core_close_wiki_cache(cache)

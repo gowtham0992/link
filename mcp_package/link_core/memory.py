@@ -278,6 +278,10 @@ def _unicode_memory_tokens(value: str) -> set[str]:
     return tokens
 
 
+# Shared with wiki full-text search, which must segment text the same way.
+unicode_memory_tokens = _unicode_memory_tokens
+
+
 def memory_tokens(value: str) -> set[str]:
     # ASCII text needs no folding, no mark handling, and no segmentation, so
     # it keeps the original path: byte-identical tokens, no added cost.

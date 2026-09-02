@@ -649,6 +649,7 @@ def _query_link(query: str, budget: str = "medium", project: str = "") -> dict[s
         budget=budget,
         project=project_name,
         review_command="review_memory",
+        repo_root=Path.cwd(),
     )
 
 

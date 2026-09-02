@@ -182,3 +182,45 @@ class StaleCommandTests(unittest.TestCase):
             self.assertNotIn("archived-note", result.stdout)
             self.assertIn("Nothing was changed", result.stdout)
             self.assertEqual({p: p.read_bytes() for p in pages}, before, "stale must not write")
+
+
+class RecallPacketMarkerTests(unittest.TestCase):
+    """Staleness reaches the agent in the recall packet, only when it applies."""
+
+    def _packet(self, repo_root):
+        from link_core.memory import memory_records, write_memory_page
+        from link_core.query import query_link
+        from link_core.wiki import build_wiki_cache
+
+        with tempfile.TemporaryDirectory() as t:
+            wiki = Path(t) / "wiki"
+            (wiki / "memories").mkdir(parents=True)
+            (wiki / "index.md").write_text("# Index\n")
+            (wiki / "log.md").write_text("# Log\n")
+            write_memory_page(wiki, "the parser lives in src/old.py", title="parser", memory_type="note",
+                              scope="user", tags=None, source="t", timestamp="2026-08-01T00:00:00Z",
+                              allow_duplicate=True, allow_conflict=True)
+            cache = build_wiki_cache(wiki)
+            return query_link(wiki, "parser", cache, memory_records(wiki), budget="micro", repo_root=repo_root)
+
+    def test_marks_a_memory_naming_a_removed_path(self):
+        with tempfile.TemporaryDirectory() as repo_dir:
+            repo = Path(repo_dir)
+            _git(repo, "init", "--initial-branch", "main")
+            (repo / "src").mkdir()
+            (repo / "src" / "old.py").write_text("x\n", encoding="utf-8")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "seed")
+            _git(repo, "rm", "-q", "src/old.py")
+            _git(repo, "commit", "-m", "rm")
+            packet = self._packet(repo)
+        memories = packet["memory"]["items"]
+        self.assertTrue(memories)
+        self.assertEqual([m["path"] for m in memories[0]["stale_paths"]], ["src/old.py"])
+
+    def test_no_marker_without_a_repository(self):
+        with tempfile.TemporaryDirectory() as plain:
+            packet = self._packet(Path(plain))          # exists, but no .git
+        self.assertNotIn("stale_paths", packet["memory"]["items"][0])
+        packet = self._packet(None)                    # opt-in not given
+        self.assertNotIn("stale_paths", packet["memory"]["items"][0])

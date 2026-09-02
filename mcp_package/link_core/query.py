@@ -130,6 +130,39 @@ def _page_provenance(page: Mapping[str, object]) -> dict[str, object]:
     })
 
 
+def _mark_stale_paths(
+    compact: list[dict[str, object]],
+    raw: Iterable[Mapping[str, object]],
+    repo_root: Path | None,
+) -> None:
+    """Flag recalled memories that name repository paths git no longer has.
+
+    This is where staleness earns its keep: the agent sees "this memory
+    refers to a file that moved" in the same packet as the memory, at the
+    moment it would otherwise act on it. Only the handful of returned
+    memories are checked, and git is consulted only for paths that do not
+    exist on disk, so the common case costs a few stat calls. Nothing is
+    added when there is nothing to say; an absent key is the normal packet.
+    """
+    if repo_root is None or not (Path(repo_root) / ".git").exists():
+        return
+    from .staleness import StalenessChecker
+
+    checker = StalenessChecker(repo_root)
+    by_name = {str(item.get("name") or ""): item for item in compact}
+    # Recall returns slimmed items without the body; read the full record.
+    for record in raw:
+        item = by_name.get(str(record.get("name") or ""))
+        if item is None:
+            continue
+        text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
+        findings = checker.findings(text)
+        if findings:
+            item["stale_paths"] = [
+                {"path": f["path"], "reason": f["reason"], "successor": f["successor"]} for f in findings
+            ]
+
+
 def _compact_memory(memory: Mapping[str, object]) -> dict[str, object]:
     item = {
         "kind": "memory",
@@ -396,6 +429,7 @@ def query_link(
     budget: str = "medium",
     project: str | None = None,
     review_command: str = "review-memory",
+    repo_root: Path | None = None,
 ) -> dict[str, object]:
     """Return a compact context packet for an agent query.
 
@@ -428,6 +462,7 @@ def query_link(
     )
     memory_has_more = len(raw_memories) > limits["memories"]
     memories = [_compact_memory(memory) for memory in raw_memories[: limits["memories"]]]
+    _mark_stale_paths(memories, record_list, repo_root)
     brief = memory_brief(
         record_list,
         query=q,

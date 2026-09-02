@@ -22,9 +22,14 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   path exactly, so no existing memory changes token and no existing ranking
   moves; the LoCoMo track returns all nine published figures unchanged across
   1,536 third-party queries, and the ASCII path is marginally faster than
-  before. Scope: this is memory recall. Wiki page full-text search still
-  uses SQLite's `unicode61` tokenizer, which folds accents but does not
-  segment CJK; that is 3.1 work behind an index version bump.
+  before. Wiki page full-text search had the same bug one layer down: its
+  query normalizer deleted every non-ASCII character before SQLite ever saw
+  it, so `lnk search` for any non-Latin query produced zero terms. Both the
+  index and the query side now segment text the same way recall does, and
+  the FTS cache moves to v2 so existing indexes rebuild. The fast semantic
+  tier's default model is English-trained; measured on a Japanese set it
+  neither helped nor hurt (6/6 with and without), so non-English recall is
+  lexical-quality for now.
 - **`lnk stale` - notice when a memory outlived the code it describes.** The
   most repeated complaint about agent memory is that nothing can tell when a
   memory stopped being true: a note says a thing lives in `a/b.py`, the file
