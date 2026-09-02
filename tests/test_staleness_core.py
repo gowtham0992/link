@@ -44,7 +44,7 @@ class StalenessReferenceTests(unittest.TestCase):
 
     def test_windows_separators_are_recognised(self):
         # A memory written on Windows must be checked like any other.
-        refs = repo_path_references("the parser lives in src\old.py and tool.sh")
+        refs = repo_path_references("the parser lives in src\\old.py and tool.sh")
         self.assertIn("src/old.py", refs)
         self.assertIn("tool.sh", refs)
 
@@ -196,7 +196,7 @@ class RecallPacketMarkerTests(unittest.TestCase):
     def _packet(self, repo_root):
         from link_core.memory import memory_records, write_memory_page
         from link_core.query import query_link
-        from link_core.wiki import build_wiki_cache
+        from link_core.wiki import build_wiki_cache, close_wiki_cache
 
         with tempfile.TemporaryDirectory() as t:
             wiki = Path(t) / "wiki"
@@ -206,8 +206,14 @@ class RecallPacketMarkerTests(unittest.TestCase):
             write_memory_page(wiki, "the parser lives in src/old.py", title="parser", memory_type="note",
                               scope="user", tags=None, source="t", timestamp="2026-08-01T00:00:00Z",
                               allow_duplicate=True, allow_conflict=True)
+            # The cache holds the FTS index's SQLite handle. POSIX unlinks open
+            # files; Windows refuses, and TemporaryDirectory teardown fails with
+            # WinError 32. Close it before the directory goes away.
             cache = build_wiki_cache(wiki)
-            return query_link(wiki, "parser", cache, memory_records(wiki), budget="micro", repo_root=repo_root)
+            try:
+                return query_link(wiki, "parser", cache, memory_records(wiki), budget="micro", repo_root=repo_root)
+            finally:
+                close_wiki_cache(cache)
 
     def test_marks_a_memory_naming_a_removed_path(self):
         with tempfile.TemporaryDirectory() as repo_dir:
