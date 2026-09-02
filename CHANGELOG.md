@@ -76,6 +76,24 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   `scripts/eval_salience.py` holds all four closed and fails on any
   regression, so the next attempt has to clear the same bar.
 
+### Fixed
+
+- **Memories with non-Latin titles no longer collide.** Page names came from a
+  `[^a-z0-9]` slug, so a Japanese, Hindi, Korean, Arabic or Cyrillic title
+  slugged to nothing and every such memory was filed as `memory.md`. The
+  second one then matched the duplicate gate's same-slug rule with a perfect
+  score and was refused, so a non-English user could save exactly one memory.
+  Titles now keep their own script (`東京のデプロイ曜日.md`, `डिप्लॉय-का-दिन.md`),
+  Latin accents fold so filenames stay typeable (`zurich-deploy-regel.md`),
+  the length cap counts bytes for multibyte scripts, and titles that slug to
+  nothing (emoji-only) no longer read as duplicates of each other. ASCII
+  titles keep their exact historical slugs; existing pages are untouched.
+  The recall packet's ranking key uses the same rules, so non-Latin wiki
+  pages no longer share one empty key.
+- **LinkBar 1.4.0: the memory filter matches the way Finder does.** Typing
+  `zurich` now finds `Zürich`; the filter was case-insensitive but
+  accent-sensitive.
+
 ### Removed
 
 - **The Bar CI investigation integration.** Its Cloudflare side is gone, so

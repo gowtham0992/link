@@ -122,14 +122,54 @@ BacklinkRebuilder = Callable[[], bool]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+def _slug_fold(value: str) -> str:
+    """Fold a title for use as a filename, keeping every script readable.
+
+    Same rules as the tokenizer: lowercase, Latin accents removed so "Zürich"
+    files as zurich, combining marks in Indic and other scripts kept because
+    they are vowels, everything that is not a letter, digit, or mark becomes a
+    separator. Han, kana, Hangul, Cyrillic, Arabic and the rest survive as
+    themselves; a Japanese title becomes a Japanese filename.
+    """
+    lowered = value.lower()
+    for source, replacement in _TOKEN_FOLD_PAIRS.items():
+        if source in lowered:
+            lowered = lowered.replace(source, replacement)
+    out: list[str] = []
+    base_is_latin = False
+    for character in unicodedata.normalize("NFKD", lowered):
+        if unicodedata.category(character) in _TOKEN_MARKS:
+            if not base_is_latin:
+                out.append(character)
+            continue
+        if character.isalnum():
+            base_is_latin = character.isascii()
+            out.append(character)
+            continue
+        base_is_latin = False
+        out.append("-")
+    return _compose("".join(out))
+
+
 def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    if len(slug) > max_len:
-        # Cap for filesystem limits (255-byte filenames); cut at a word
-        # boundary so truncated slugs stay readable.
-        head = slug[:max_len]
+    """Filename-safe name for a memory page.
+
+    ASCII titles keep their exact historical slugs. Titles in other scripts
+    used to slug to nothing and land on the bare fallback, so every non-Latin
+    memory was called memory.md and the second one was refused as a duplicate
+    of the first. They now keep their own script (accents folded for Latin).
+    """
+    if value.isascii():
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    else:
+        slug = re.sub(r"-+", "-", _slug_fold(value)).strip("-")
+    if len(slug.encode("utf-8")) > max_len:
+        # Cap in bytes for filesystem limits (255-byte filenames; a CJK
+        # character is three bytes); cut at a word boundary so truncated
+        # slugs stay readable.
+        head = slug.encode("utf-8")[:max_len].decode("utf-8", "ignore")
         slug = head.rsplit("-", 1)[0] if "-" in head else head
-    return slug or fallback
+    return slug.strip("-") or fallback
 
 
 def normalize_project(value: str | None) -> str:
@@ -2843,7 +2883,9 @@ def memory_duplicate_candidates(
     limit: int = 3,
 ) -> list[dict[str, object]]:
     title_value = memory_title(text, title)
-    new_slug = slugify(title_value)
+    # Empty fallback: a title that slugs to nothing (emoji-only, say) must not
+    # read as "the same slug" as every other such memory.
+    new_slug = slugify(title_value, fallback="")
     new_title = compact_memory_text(title_value)
     new_body = compact_memory_text(text)
     new_tokens = memory_tokens(f"{title_value} {text}")
@@ -2861,7 +2903,7 @@ def memory_duplicate_candidates(
         record_text = compact_memory_text(memory_claim_text(record))
         record_tokens = memory_tokens(record_text)
 
-        if str(record.get("name") or "") == new_slug:
+        if new_slug and str(record.get("name") or "") == new_slug:
             score = max(score, 100)
             reasons.append("same_slug")
         if new_title and record_title == new_title:

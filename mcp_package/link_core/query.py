@@ -7,7 +7,6 @@ agent can read before answering.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -15,6 +14,7 @@ from .memory import (
     memory_brief,
     normalize_project,
     recall_memories,
+    slugify,
 )
 from .semantic import semantic_memory_scores
 from .wiki import context_for_topic, search_pages
@@ -221,7 +221,9 @@ def _slug_key(value: object) -> str:
     if not text:
         return ""
     name = Path(text).stem if "/" in text or "\\" in text else text
-    return re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+    # Same slug rules as page names, so a non-Latin page keys to itself rather
+    # than to the empty string shared by every other non-Latin page.
+    return slugify(name, fallback="")
 
 
 def _memory_source_keys(memory: Mapping[str, object]) -> set[str]:

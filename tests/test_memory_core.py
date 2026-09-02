@@ -1,4 +1,5 @@
 import sys
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -1487,6 +1488,64 @@ class SlugifyBoundsTests(unittest.TestCase):
         self.assertFalse(slug.endswith("-"))
         # short slugs unchanged
         self.assertEqual(slugify("My Cool Title"), "my-cool-title")
+
+    def test_ascii_titles_keep_their_historical_slugs(self):
+        for title in ("My Cool Title", "don't ship on Friday!", "v2.3.0 -- notes_here", "  spaced  "):
+            self.assertEqual(slugify(title), re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-"))
+
+    def test_titles_in_other_scripts_keep_their_script(self):
+        # Before 3.0 every one of these slugged to the bare fallback "memory".
+        self.assertEqual(slugify("東京のデプロイ曜日"), "東京のデプロイ曜日")
+        self.assertEqual(slugify("서울 배포 규칙"), "서울-배포-규칙")
+        self.assertEqual(slugify("Правило деплоя"), "правило-деплоя")
+        self.assertEqual(slugify("قاعدة النشر"), "قاعدة-النشر")
+        # Indic combining marks are vowels and must survive.
+        self.assertEqual(slugify("डिप्लॉय का दिन"), "डिप्लॉय-का-दिन")
+
+    def test_latin_accents_fold_so_filenames_stay_typeable(self):
+        self.assertEqual(slugify("Zürich Deploy-Regel"), "zurich-deploy-regel")
+        self.assertEqual(slugify("Ünïcödé Café Straße"), "unicode-cafe-strasse")
+
+    def test_slug_cap_is_in_bytes_for_multibyte_scripts(self):
+        slug = slugify("東京" * 60)
+        self.assertLessEqual(len(slug.encode("utf-8")), 80)
+        self.assertTrue(slug)
+
+    def test_untitleable_text_still_falls_back(self):
+        self.assertEqual(slugify("🎉🎉"), "memory")
+        self.assertEqual(slugify("🎉🎉", fallback=""), "")
+
+
+class NonLatinMemoriesDoNotCollideTests(unittest.TestCase):
+    def test_second_non_latin_memory_is_saved_not_refused_as_duplicate(self):
+        # The old slug fallback made both of these "memory", and the duplicate
+        # gate's same_slug rule then refused the second with score 100.
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            (wiki / "memories").mkdir(parents=True)
+            common = dict(memory_type="decision", scope="user", tags=None, source="unit test",
+                          timestamp="2026-09-02T06:00:00Z", log_writer=lambda *a: None, rebuild_backlinks=lambda: True)
+            first = write_memory_page(wiki, "東京オフィスでは毎週火曜日にデプロイする", title="東京のデプロイ曜日", records=[], **common)
+            self.assertTrue(first.get("created"), first)
+            records = memory_records(wiki)
+            second = write_memory_page(wiki, "हम हर मंगलवार को डिप्लॉय करते हैं", title="डिप्लॉय का दिन", records=records, **common)
+            self.assertTrue(second.get("created"), second)
+            names = sorted(p.stem for p in (wiki / "memories").glob("*.md"))
+            self.assertEqual(names, ["डिप्लॉय-का-दिन", "東京のデプロイ曜日"])
+            hits = recall_memories(memory_records(wiki), "मंगलवार डिप्लॉय", limit=3)
+            self.assertEqual([h.get("title") for h in hits][:1], ["डिप्लॉय का दिन"])
+
+    def test_emoji_only_titles_do_not_read_as_the_same_slug(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            (wiki / "memories").mkdir(parents=True)
+            common = dict(memory_type="note", scope="user", tags=None, source="unit test",
+                          timestamp="2026-09-02T06:00:00Z", log_writer=lambda *a: None, rebuild_backlinks=lambda: True)
+            first = write_memory_page(wiki, "Ship the party feature before the offsite", title="🎉", records=[], **common)
+            self.assertTrue(first.get("created"), first)
+            second = write_memory_page(wiki, "Retire the legacy billing cron next quarter", title="🚀", records=memory_records(wiki), **common)
+            self.assertTrue(second.get("created"), second)
+            self.assertEqual(sorted(p.stem for p in (wiki / "memories").glob("*.md")), ["memory", "memory-2"])
 
 
 class ProposalDurabilityRankingTests(unittest.TestCase):
