@@ -506,6 +506,15 @@ def query_link(
     review = _compact_review(brief.get("review", {}), limit=limits["memories"])
     if review.get("count"):
         guidance.insert(2, "Some memories need review; treat provisional memories carefully.")
+    if any(memory.get("stale_paths") for memory in memories):
+        # A signal without an instruction is decoration. Same pattern as the
+        # constraint guard: say what was found and what to do about it.
+        guidance.insert(
+            1,
+            "A recalled memory names a repository file git no longer has "
+            "(see its stale_paths); verify the memory against the current code "
+            "before relying on it, and suggest the user review or update it.",
+        )
     if memories and all(str(memory.get("confidence") or "") == "weak" for memory in memories):
         guidance.insert(
             1,

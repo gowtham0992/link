@@ -217,10 +217,13 @@ class RecallPacketMarkerTests(unittest.TestCase):
         memories = packet["memory"]["items"]
         self.assertTrue(memories)
         self.assertEqual([m["path"] for m in memories[0]["stale_paths"]], ["src/old.py"])
+        # The marker must arrive with an instruction, or the agent has a flag and no idea what it means.
+        self.assertTrue(any("stale_paths" in line for line in packet["agent_guidance"]))
 
     def test_no_marker_without_a_repository(self):
         with tempfile.TemporaryDirectory() as plain:
             packet = self._packet(Path(plain))          # exists, but no .git
         self.assertNotIn("stale_paths", packet["memory"]["items"][0])
+        self.assertFalse(any("stale_paths" in line for line in packet["agent_guidance"]))
         packet = self._packet(None)                    # opt-in not given
         self.assertNotIn("stale_paths", packet["memory"]["items"][0])
