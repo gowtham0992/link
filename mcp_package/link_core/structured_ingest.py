@@ -370,6 +370,7 @@ def plan_structured_ingest(
         "options": {"exclude": sorted(set(excludes or [])), "prune": prune},
         "summary": adapter_summary,
         "outputs": outputs,
+        "output_count": len(outputs),
         "changes": changes,
         "conflicts": conflicts,
         "can_apply": not conflicts,
@@ -450,6 +451,7 @@ def apply_structured_ingest(plan: dict[str, Any]) -> dict[str, Any]:
             raise
     return {
         **{key: value for key, value in plan.items() if key != "outputs"},
+        "output_count": len(outputs),
         "applied": True,
         "changed_count": len(applied_paths),
         "validation": validation,
@@ -462,7 +464,9 @@ def render_structured_ingest_text(result: dict[str, Any]) -> tuple[int, str]:
         "",
         f"Source: {result['source']}",
         f"Source sha256: {result['source_sha256']}",
-        f"Outputs: {len(result.get('outputs') or result.get('summary', {}).get('group_count', 0))}",
+        # Plans carry the outputs dict; applies drop it and carry the count.
+        # Guessing from a summary field here is what crashed text-mode apply.
+        f"Outputs: {int(result.get('output_count') or len(result.get('outputs') or {}))}",
     ]
     counts = Counter(str(change.get("action")) for change in result.get("changes") or [])
     if counts:

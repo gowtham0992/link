@@ -13,6 +13,7 @@ from link_core.structured_ingest import (  # noqa: E402
     CHEZMOI_ADAPTER,
     StructuredIngestError,
     apply_structured_ingest,
+    render_structured_ingest_text,
     plan_structured_ingest,
 )
 from link_core.validation import validate_wiki  # noqa: E402
@@ -140,6 +141,17 @@ class StructuredIngestCoreTests(unittest.TestCase):
         self.assertEqual(len(manifest["outputs"]), 3)
         self.assertFalse((self.target / "wiki/sources/chezmoi-docs-reference-release-history.md").exists())
         self.assertTrue(validate_wiki(self.target / "wiki")["passed"])
+
+    def test_text_render_survives_an_applied_result(self):
+        # `lnk ingest --apply` renders its result in text mode by default. The
+        # apply result drops the outputs dict, and the renderer used to call
+        # len() on the summary's integer group count instead.
+        plan = plan_structured_ingest(self.target, Path("raw/chezmoi-docs/export.jsonl"), adapter=CHEZMOI_ADAPTER)
+        result = apply_structured_ingest(plan)
+        code, text = render_structured_ingest_text(result)
+        self.assertEqual(code, 0)
+        self.assertIn(f"Outputs: {plan['output_count']}", text)
+        self.assertEqual(plan["output_count"], len(plan["outputs"]))
 
     def test_manual_change_becomes_conflict(self):
         first = plan_structured_ingest(self.target, self.source, adapter=CHEZMOI_ADAPTER)
