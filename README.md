@@ -283,8 +283,10 @@ by accident.
 Link's memory, ambient. LinkBar puts the review gate in your menu bar: a
 global palette (⌥⌘M) to recall or remember from any app, native
 notifications with one-tap Accept when a session capture lands, a live
-pulse while agents are writing, and a browser over every memory file —
-all running on the same reviewed `lnk` commands as the CLI.
+pulse while agents are writing, a browser over every memory file, and a
+status dashboard that flags memories naming files your repository no
+longer has — all running on the same reviewed `lnk` commands as the CLI.
+Pick the workspace in Settings; it defaults to `~/link`.
 
 <p align="center">
   <img src="docs/assets/linkbar-tour.gif" alt="LinkBar cycling through its tabs: review inbox with live agent pulse and capture previews, memory browser, status dashboard, and settings" width="424">

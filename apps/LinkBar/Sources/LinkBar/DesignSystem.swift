@@ -14,6 +14,11 @@ enum LinkBrand {
             : NSColor(red: 0.66, green: 0.29, blue: 0.18, alpha: 1)   // #a8492f
     })
 
+    /// Attention colours, shared by the menu-bar dots, tab badges and the
+    /// status dashboard so "needs a look" is one amber everywhere.
+    static let amber = Color(red: 0.90, green: 0.62, blue: 0.20)
+    static let green = Color(red: 0.30, green: 0.72, blue: 0.42)
+
     /// Spacing scale (4/8 rhythm): tight within groups, generous between.
     static let inGroup: CGFloat = 6
     static let betweenSections: CGFloat = 16

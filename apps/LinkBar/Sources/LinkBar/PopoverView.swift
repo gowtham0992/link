@@ -12,10 +12,12 @@ struct PopoverView: View {
         ProcessInfo.processInfo.environment["LINKBAR_EXPLAIN"]
     @State private var memoryTypeFilter: String? = nil
     @State private var showArchived = false
+    @FocusState private var recallFocused: Bool
     // Snapshot aid: LINKBAR_TAB=status opens straight to the Status tab.
     @State private var tab: Tab =
         ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "status" ? .status
-        : ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "memory" ? .memory : .inbox
+        : ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "memory" ? .memory
+        : ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "settings" ? .settings : .inbox
 
     private var isFullyIdle: Bool {
         (store.inbox?.items.isEmpty ?? true)
@@ -51,6 +53,19 @@ struct PopoverView: View {
                 .padding(.bottom, LinkBrand.pad)
         }
         .frame(width: 380)
+        .onChange(of: store.requestedTab) { _, requested in
+            guard let requested else { return }
+            tab = requested
+            if requested == .status { store.refreshHealth() }
+            store.requestedTab = nil
+        }
+    }
+
+    /// The popover has to stay on screen on a 13" laptop. Anything longer
+    /// than this scrolls; anything shorter sizes to its content.
+    private static var contentCap: CGFloat {
+        let visible = NSScreen.main?.visibleFrame.height ?? 800
+        return min(640, max(360, visible - 200))
     }
 
     // MARK: tab bar
@@ -81,7 +96,7 @@ struct PopoverView: View {
                         .padding(.horizontal, 4).padding(.vertical, 1)
                         .background(LinkBrand.rust, in: Capsule())
                 } else if alert {
-                    Circle().fill(Color(red: 0.90, green: 0.62, blue: 0.20)).frame(width: 6, height: 6)
+                    Circle().fill(LinkBrand.amber).frame(width: 6, height: 6)
                 }
             }
             .foregroundStyle(active ? AnyShapeStyle(LinkBrand.rust) : AnyShapeStyle(.secondary))
@@ -96,33 +111,37 @@ struct PopoverView: View {
     // MARK: inbox tab (the original memory view)
 
     private var inboxTab: some View {
-        VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
-            if let handoff = store.handoffsWaiting.first {
-                handoffBanner(handoff)
-            }
-            if !store.activeSessions.isEmpty {
-                pulseRow
-            }
-            if let warning = store.runtimeWarning {
-                runtimeBanner(warning)
-            }
-            recallField
-            if store.searchedQuery != nil || !store.recallResults.isEmpty {
-                recallSection
-            }
-            if isFullyIdle {
-                idleState
-            } else {
-                inboxSection
-                if let captures = store.captures, !captures.captures.isEmpty {
-                    capturesSection(captures)
+        ScrollView {
+            VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
+                if let handoff = store.handoffsWaiting.first {
+                    handoffBanner(handoff)
+                }
+                if !store.activeSessions.isEmpty {
+                    pulseRow
+                }
+                if let warning = store.runtimeWarning {
+                    runtimeBanner(warning)
+                }
+                recallField
+                if store.searchedQuery != nil || !store.recallResults.isEmpty {
+                    recallSection
+                }
+                if isFullyIdle {
+                    idleState
+                } else {
+                    inboxSection
+                    if let captures = store.captures, !captures.captures.isEmpty {
+                        capturesSection(captures)
+                    }
+                }
+                if !store.activity.isEmpty && !isFullyIdle {
+                    activitySection
                 }
             }
-            if !store.activity.isEmpty && !isFullyIdle {
-                activitySection
-            }
+            .padding(LinkBrand.pad)
         }
-        .padding(LinkBrand.pad)
+        .frame(maxHeight: Self.contentCap)
+        .onAppear { recallFocused = true }
     }
 
 
@@ -198,8 +217,10 @@ struct PopoverView: View {
     // MARK: memory tab (browse every memory file)
 
     private var filteredMemories: [MemoryPage] {
-        store.memories.filter { page in
+        let staleNames = store.memoryFilterStale ? (store.stale?.names ?? []) : nil
+        return store.memories.filter { page in
             (showArchived || page.isActive)
+            && (staleNames == nil || staleNames!.contains(page.name))
             && (memoryTypeFilter == nil || page.memoryType == memoryTypeFilter)
             && (memoryQuery.isEmpty
                 || page.title.localizedStandardContains(memoryQuery)
@@ -227,6 +248,22 @@ struct PopoverView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
                     filterChip("all", nil)
+                    // The exceptional state goes first: a chip at the end of a
+                    // horizontally scrolling row is a chip nobody sees.
+                    if let stale = store.stale, stale.flagged > 0 {
+                        Button { store.memoryFilterStale.toggle() } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "clock.badge.exclamationmark").font(.system(size: 9))
+                                Text("stale \(stale.flagged)")
+                            }
+                            .font(.system(size: 10.5, weight: store.memoryFilterStale ? .semibold : .regular))
+                            .foregroundStyle(store.memoryFilterStale ? AnyShapeStyle(Color.white) : AnyShapeStyle(LinkBrand.amber))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(store.memoryFilterStale ? AnyShapeStyle(LinkBrand.amber) : AnyShapeStyle(LinkBrand.amber.opacity(0.14)), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Memories that name files \(stale.repoName) no longer has")
+                    }
                     ForEach(["preference", "decision", "note", "project", "procedure", "fact"], id: \.self) { t in
                         filterChip(t, t)
                     }
@@ -281,7 +318,11 @@ struct PopoverView: View {
                         .lineLimit(1)
                         .foregroundStyle(page.isActive ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     Spacer()
-                    if !page.supersededBy.isEmpty {
+                    if store.stale?.names.contains(page.name) == true {
+                        Text("stale")
+                            .font(.system(size: 9)).foregroundStyle(LinkBrand.amber)
+                            .help((store.stale?.memories.first { $0.name == page.name }?.lines ?? []).joined(separator: "\n"))
+                    } else if !page.supersededBy.isEmpty {
                         Text("superseded")
                             .font(.system(size: 9)).foregroundStyle(.orange)
                     } else if page.reviewStatus == "needs_review" {
@@ -302,7 +343,7 @@ struct PopoverView: View {
                     }
                     Spacer()
                     Image(systemName: expandedMemory == page.name ? "chevron.up" : "questionmark.circle")
-                        .font(.system(size: 9)).foregroundStyle(.quaternary)
+                        .font(.system(size: 9.5)).foregroundStyle(.tertiary)
                         .help("Why does Link believe this?")
                 }
                 if expandedMemory == page.name {
@@ -346,7 +387,7 @@ struct PopoverView: View {
                     HStack(spacing: 5) {
                         Circle()
                             .fill(recall.state == "ready" ? Color.green
-                                  : recall.state == "needs_review" ? Color(red: 0.90, green: 0.62, blue: 0.20)
+                                  : recall.state == "needs_review" ? LinkBrand.amber
                                   : Color.orange)
                             .frame(width: 5, height: 5)
                         Text(recall.reason)
@@ -405,8 +446,7 @@ struct PopoverView: View {
                 Spacer()
                 Text(store.anyUnhealthy ? "Needs attention" : "All systems go")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(store.anyUnhealthy
-                        ? Color(red: 0.90, green: 0.62, blue: 0.20) : .green)
+                    .foregroundStyle(store.anyUnhealthy ? LinkBrand.amber : LinkBrand.green)
             }
             ForEach(store.surfaces()) { surface in
                 StatusRow(surface: surface)
@@ -484,6 +524,7 @@ struct PopoverView: View {
                 TextField("Ask your memory — or type something to keep…", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5))
+                    .focused($recallFocused)
                     .onSubmit { store.recall(query) }
                 if !query.isEmpty || store.searchedQuery != nil {
                     Button {
@@ -535,13 +576,20 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
             }
-            ForEach(store.recallResults.prefix(4)) { memory in
+            ForEach(store.recallResults.prefix(5)) { memory in
                 HoverRow {
                     VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(memory.title)
                                 .font(.system(size: 12.5, weight: .medium))
                                 .lineLimit(1)
+                            if let gate = memory.recall, !gate.isReady {
+                                // Found, but default recall would hold it back
+                                // (needs review, expired…). Say so instead of
+                                // presenting it as something agents will use.
+                                Circle().fill(LinkBrand.amber).frame(width: 5, height: 5)
+                                    .help(gate.reason ?? "Held back from default recall")
+                            }
                             Spacer()
                             if let confidence = memory.confidence {
                                 confidenceChip(confidence)
@@ -560,6 +608,13 @@ struct PopoverView: View {
                     .onTapGesture(count: 2) { store.revealMemory(named: memory.name) }
                 }
                 .help("Double-click to open · right-click to copy")
+            }
+            if store.recallResults.count > 5 {
+                Button("\(store.recallResults.count - 5) more in the dashboard") {
+                    store.openDashboard(path: "/memory")
+                }
+                .buttonStyle(.borderless).font(.caption).foregroundStyle(LinkBrand.rust)
+                .padding(.horizontal, 8)
             }
         }
     }
@@ -590,7 +645,9 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
             }
-            ForEach(items.prefix(5)) { item in
+            // Every pending item is reachable: the tab scrolls, so a
+            // 12-item inbox no longer shows five and hides seven.
+            ForEach(items) { item in
                 HoverRow {
                     HStack(alignment: .center, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -658,16 +715,9 @@ struct PopoverView: View {
 
     @ViewBuilder
     private func captureRows(_ captures: CaptureInbox) -> some View {
-        if captures.captures.count > 4 {
-            ScrollView {
-                VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
-                    captureRowList(captures)
-                }
-            }
-            .frame(maxHeight: 300)
-        } else {
-            captureRowList(captures)
-        }
+        // The inbox tab itself scrolls now; a second scroll view nested in
+        // it would fight the outer one for the wheel.
+        captureRowList(captures)
     }
 
     /// Captures whose full proposal list is expanded (keyed by path).
@@ -886,11 +936,12 @@ struct PopoverView: View {
             }
             Divider()
             HStack {
-                Text(LinkCLI.workspace)
+                Text(LinkCLI.abbreviated(store.workspacePath))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.quaternary)
                     .lineLimit(1)
                     .truncationMode(.head)
+                    .help(store.workspacePath)
                 Spacer()
                 Text("LinkBar \(LinkBrand.version)" + (store.linkVersion.isEmpty ? "" : " · Link \(store.linkVersion)"))
                     .font(.system(size: 10.5))
@@ -940,15 +991,31 @@ struct SettingsPane: View {
             }
             .tint(LinkBrand.rust)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Workspace").font(.subheadline)
-                Text(LinkCLI.workspace)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                Text("Set LINK_WORKSPACE to point LinkBar at a different workspace.")
+                HStack(spacing: 8) {
+                    Text(LinkCLI.abbreviated(store.workspacePath))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    if LinkCLI.workspaceFromEnvironment == nil {
+                        Button("Choose\u{2026}") { store.chooseWorkspace() }
+                            .controlSize(.small)
+                        if LinkCLI.workspaceIsCustom {
+                            Button("Use ~/link") { store.setWorkspace(nil) }
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                Text(LinkCLI.workspaceFromEnvironment != nil
+                     ? "Set by LINK_WORKSPACE for this launch."
+                     : "The folder that contains wiki/. Every tab, the palette and notifications follow it.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 2) {

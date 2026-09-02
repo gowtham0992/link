@@ -90,9 +90,26 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   titles keep their exact historical slugs; existing pages are untouched.
   The recall packet's ranking key uses the same rules, so non-Latin wiki
   pages no longer share one empty key.
-- **LinkBar 1.4.0: the memory filter matches the way Finder does.** Typing
-  `zurich` now finds `Zürich`; the filter was case-insensitive but
-  accent-sensitive.
+- **LinkBar 1.4.0.** Fixes first: the health probes ran on the main
+  actor, so the popover froze for a second or two on every Status refresh;
+  they now run concurrently off it, and the five inbox reads run together
+  instead of one after another. The review inbox showed five items and
+  silently hid the rest; the tab now scrolls and stays on screen on a 13"
+  display. Approve, archive, accept and discard confirm what they did, and a
+  refused save reports the CLI's actual reason (duplicate, conflict, secret)
+  instead of a guess. The live-agent pulse names the repository from the
+  transcript's working directory, so `link-pr66` no longer reads as `pr66`.
+  `lnk` is found for pipx and venv installs, which a Finder-launched app's
+  minimal PATH used to miss. Then the two things people asked for: the
+  workspace is chosen in Settings and remembered (a Finder-launched app never
+  saw `LINK_WORKSPACE`), and the memory filter matches the way Finder does,
+  so typing `zurich` finds `Zürich`.
+- **LinkBar shows stale references.** A Status row runs `lnk stale` against
+  the repository your most recent agent session is working in and lists the
+  memories that name files it no longer has, with a one-click filter on the
+  Memory tab and an amber dot in the menu bar. On a CLI older than 3.0 the
+  row says so instead of checking forever. The palette gained ↑↓ selection,
+  and recall rows mark memories that default recall would hold back.
 
 ### Removed
 

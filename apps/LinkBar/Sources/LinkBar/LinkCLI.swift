@@ -9,27 +9,72 @@ enum LinkCLI {
         var description: String { message }
     }
 
-    /// Workspace the app operates on: LINK_WORKSPACE or ~/link,
-    /// mirroring the CLI's own pathless-command fallback.
+    /// Workspace the app operates on. Order: LINK_WORKSPACE (a launch-time
+    /// override, also what the snapshot harness uses), the workspace chosen
+    /// in Settings, then ~/link - the CLI's own pathless fallback. An app
+    /// launched from Finder or at login never sees shell exports, so the
+    /// Settings choice is the one that works for most people.
+    static let workspaceDefaultsKey = "LinkWorkspace"
+
     static var workspace: String {
-        if let env = ProcessInfo.processInfo.environment["LINK_WORKSPACE"], !env.isEmpty {
-            return (env as NSString).expandingTildeInPath
+        if let env = workspaceFromEnvironment { return env }
+        if let chosen = UserDefaults.standard.string(forKey: workspaceDefaultsKey), !chosen.isEmpty {
+            return (chosen as NSString).expandingTildeInPath
         }
-        return (NSHomeDirectory() as NSString).appendingPathComponent("link")
+        return defaultWorkspace
     }
 
-    /// Locate the lnk launcher. Order: LINK_CLI env, Homebrew paths, PATH.
+    static var workspaceFromEnvironment: String? {
+        guard let env = ProcessInfo.processInfo.environment["LINK_WORKSPACE"], !env.isEmpty else { return nil }
+        return (env as NSString).expandingTildeInPath
+    }
+
+    static var defaultWorkspace: String {
+        (NSHomeDirectory() as NSString).appendingPathComponent("link")
+    }
+
+    /// True when Settings, not the default, decides the workspace.
+    static var workspaceIsCustom: Bool {
+        !(UserDefaults.standard.string(forKey: workspaceDefaultsKey) ?? "").isEmpty
+    }
+
+    static func setWorkspace(_ path: String?) {
+        if let path, !path.isEmpty {
+            UserDefaults.standard.set(path, forKey: workspaceDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: workspaceDefaultsKey)
+        }
+    }
+
+    /// "~/link" instead of "/Users/you/link" wherever a path is shown.
+    static func abbreviated(_ path: String) -> String {
+        (path as NSString).abbreviatingWithTildeInPath
+    }
+
+    /// Locate the lnk launcher. Order: LINK_CLI env, the places installs
+    /// land (Homebrew, pipx, Link's own venv), then PATH. A GUI app inherits
+    /// a minimal PATH - /usr/bin:/bin - so `which` alone misses every
+    /// user-level install; the usual bin directories are added first.
     static func lnkPath() -> String? {
         if let env = ProcessInfo.processInfo.environment["LINK_CLI"], !env.isEmpty {
             return env
         }
-        let candidates = ["/opt/homebrew/bin/lnk", "/usr/local/bin/lnk"]
-        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
+        let home = NSHomeDirectory()
+        let userBins = [
+            "/opt/homebrew/bin", "/usr/local/bin",
+            (home as NSString).appendingPathComponent(".local/bin"),
+            (home as NSString).appendingPathComponent(".link-mcp-venv/bin"),
+        ]
+        for dir in userBins {
+            let candidate = (dir as NSString).appendingPathComponent("lnk")
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
         }
         let which = Process()
         which.executableURL = URL(fileURLWithPath: "/usr/bin/which")
         which.arguments = ["lnk"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = (userBins + [environment["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
+        which.environment = environment
         let pipe = Pipe()
         which.standardOutput = pipe
         which.standardError = Pipe()
