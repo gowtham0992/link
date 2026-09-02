@@ -35,6 +35,17 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   (`minishlab/potion-multilingual-128M`, 101 languages) is 512 MB against
   the default's ~30 MB, so it stays opt-in:
   `LINK_SEMANTIC_MODEL=minishlab/potion-multilingual-128M`.
+- **`lnk ingest` for structured exports** (#66, contributed by @jakobtfaber).
+  A plan-first importer for supported structured sources, starting with the
+  `chezmoi-docs-graph-v1` adapter: provenance manifests hashed per output,
+  staging through a temporary directory, validation before promotion, and
+  explicit `--replace-unmanaged` and `--prune` gates so nothing is
+  overwritten or deleted without being asked. Imported documentation lands in
+  the wiki, never in memory, and is kept out of automatic personal-memory
+  proposals. Review found two things, fixed before release: text-mode
+  `--apply` crashed after succeeding, and the proposal guard matched a
+  substring so a capture that merely mentioned the feature lost its
+  proposals; it now keys off the export's shape.
 - **`lnk stale` - notice when a memory outlived the code it describes.** The
   most repeated complaint about agent memory is that nothing can tell when a
   memory stopped being true: a note says a thing lives in `a/b.py`, the file
