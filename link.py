@@ -1234,7 +1234,7 @@ def import_obsidian(
     return _emit_json_or_text(payload, json_output, _core_render_import_obsidian_text)
 
 
-def stale(target: Path, *, repo: Path = Path(".")) -> int:
+def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) -> int:
     """Report memories that name repository paths git no longer has.
 
     Read-only by design. A memory that mentions something that moved is a
@@ -1251,22 +1251,43 @@ def stale(target: Path, *, repo: Path = Path(".")) -> int:
     # them would only add noise to a report that must stay quiet by default.
     records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
     checker = StalenessChecker(repo_dir)
-    flagged = 0
+    flagged: list[dict[str, object]] = []
     for record in records:
         text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
         findings = checker.findings(text)
         if not findings:
             continue
-        flagged += 1
-        print(f"{record.get('name') or record.get('path')}")
-        for line in describe_findings(findings):
-            print(f"  {line}")
+        flagged.append({
+            "name": str(record.get("name") or ""),
+            "title": str(record.get("title") or record.get("name") or ""),
+            "path": str(record.get("path") or ""),
+            "findings": [
+                {"path": finding.get("path", ""), "successor": finding.get("successor", "")}
+                for finding in findings
+            ],
+            "lines": describe_findings(findings),
+        })
     checked = len(records)
+    if json_output:
+        # Same facts as the text report, for surfaces such as LinkBar that
+        # show them without re-running git themselves.
+        print(json.dumps({
+            "repo": str(repo_dir),
+            "checked": checked,
+            "flagged": len(flagged),
+            "memories": flagged,
+            "changed": False,
+        }, indent=2, ensure_ascii=False))
+        return 0
+    for entry in flagged:
+        print(entry["name"] or entry["path"])
+        for line in entry["lines"]:  # type: ignore[union-attr]
+            print(f"  {line}")
     if not flagged:
         print(f"No stale repository references in {checked} active memories ({repo_dir}).")
         return 0
     print(
-        f"\n{flagged} of {checked} active memories name paths that moved in {repo_dir}."
+        f"\n{len(flagged)} of {checked} active memories name paths that moved in {repo_dir}."
         "\nNothing was changed. Review each one and update or archive it."
     )
     return 0

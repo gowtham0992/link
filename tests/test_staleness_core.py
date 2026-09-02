@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -188,6 +189,20 @@ class StaleCommandTests(unittest.TestCase):
             self.assertNotIn("archived-note", result.stdout)
             self.assertIn("Nothing was changed", result.stdout)
             self.assertEqual({p: p.read_bytes() for p in pages}, before, "stale must not write")
+
+            # The JSON view carries the same facts for LinkBar's status row.
+            as_json = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", str(repo), "--json"],
+                             capture_output=True, text=True, env=env)
+            self.assertEqual(as_json.returncode, 0, as_json.stderr)
+            report = json.loads(as_json.stdout)
+            self.assertEqual(report["flagged"], 1)
+            self.assertEqual(report["checked"], len([p for p in pages if p.name != "archived-note.md"]))
+            self.assertFalse(report["changed"])
+            (entry,) = report["memories"]
+            self.assertNotEqual(entry["name"], "archived-note")
+            self.assertEqual([f["path"] for f in entry["findings"]], ["gone.py"])
+            self.assertEqual(entry["lines"], ["gone.py is no longer in the repository"])
+            self.assertEqual({p: p.read_bytes() for p in pages}, before, "stale --json must not write")
 
 
 class RecallPacketMarkerTests(unittest.TestCase):

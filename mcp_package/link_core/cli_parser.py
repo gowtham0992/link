@@ -553,6 +553,7 @@ def build_cli_parser(
         "--repo", default=".",
         help="repository to check the memories against (default: current directory)",
     )
+    stale_cmd.add_argument("--json", action="store_true", help="machine-readable report")
 
     verify_mcp_cmd = sub.add_parser(
         "verify-mcp",
@@ -985,7 +986,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "rebuild-backlinks":
         return handlers["rebuild-backlinks"](Path(args.target))
     if command == "stale":
-        return handlers["stale"](Path(args.target), repo=Path(args.repo))
+        return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json))
     if command == "verify-mcp":
         from .mcp_connect import agent_alias_matches
 
