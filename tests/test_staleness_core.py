@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,11 +24,14 @@ def _git(root: Path, *arguments: str) -> None:
         cwd=str(root),
         check=True,
         capture_output=True,
+        # Inherit the real environment so git resolves on every platform; a
+        # hardcoded POSIX PATH silently found no git on Windows. Identity and
+        # config are pinned so the host's settings cannot leak in.
         env={
-            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            **os.environ,
             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test",
-            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
         },
     )
 
@@ -149,7 +153,10 @@ class StaleCommandTests(unittest.TestCase):
             _git(repo, "rm", "-q", "gone.py")
             _git(repo, "commit", "-m", "remove")
 
-            env = {"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": workspace}
+            # The child link.py must be able to spawn git itself. On Windows,
+            # CreateProcess searches the parent's PATH for the test's own git
+            # calls, which hid the fact that a POSIX-only PATH reached the child.
+            env = {**os.environ, "HOME": workspace, "USERPROFILE": workspace}
             sp.run([sys.executable, str(ROOT / "link.py"), "demo", workspace, "--force"],
                    check=True, capture_output=True, env=env)
             sp.run([sys.executable, str(ROOT / "link.py"), "remember",
