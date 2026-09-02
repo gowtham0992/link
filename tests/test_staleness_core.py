@@ -44,7 +44,7 @@ class StalenessReferenceTests(unittest.TestCase):
 
     def test_windows_separators_are_recognised(self):
         # A memory written on Windows must be checked like any other.
-        refs = repo_path_references(r"the parser lives in src\\old.py and tool.sh")
+        refs = repo_path_references("the parser lives in src\old.py and tool.sh")
         self.assertIn("src/old.py", refs)
         self.assertIn("tool.sh", refs)
 
