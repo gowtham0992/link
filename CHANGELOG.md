@@ -26,10 +26,15 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   query normalizer deleted every non-ASCII character before SQLite ever saw
   it, so `lnk search` for any non-Latin query produced zero terms. Both the
   index and the query side now segment text the same way recall does, and
-  the FTS cache moves to v2 so existing indexes rebuild. The fast semantic
-  tier's default model is English-trained; measured on a Japanese set it
-  neither helped nor hurt (6/6 with and without), so non-English recall is
-  lexical-quality for now.
+  the FTS cache moves to v2 so existing indexes rebuild - the first recall
+  after upgrading pays that rebuild once. Segmentation follows Lucene's
+  CJKAnalyzer: overlapping character bigrams, no dictionary. The fast
+  semantic tier's default model is English-trained; measured on a Japanese
+  set it neither helped nor hurt (6/6 with and without), so non-English
+  recall is lexical-quality by default. The multilingual static model
+  (`minishlab/potion-multilingual-128M`, 101 languages) is 512 MB against
+  the default's ~30 MB, so it stays opt-in:
+  `LINK_SEMANTIC_MODEL=minishlab/potion-multilingual-128M`.
 - **`lnk stale` - notice when a memory outlived the code it describes.** The
   most repeated complaint about agent memory is that nothing can tell when a
   memory stopped being true: a note says a thing lives in `a/b.py`, the file

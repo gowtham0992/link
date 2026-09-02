@@ -42,6 +42,12 @@ class StalenessReferenceTests(unittest.TestCase):
         self.assertIn("src/app/main.ts", refs)
         self.assertIn("watch.sh", refs)
 
+    def test_windows_separators_are_recognised(self):
+        # A memory written on Windows must be checked like any other.
+        refs = repo_path_references(r"the parser lives in src\\old.py and tool.sh")
+        self.assertIn("src/old.py", refs)
+        self.assertIn("tool.sh", refs)
+
     def test_ignores_prose_that_merely_contains_dots(self):
         for text in ["we shipped 2.3.0 on Tuesday", "see e.g. the notes", "about 3.5 percent"]:
             self.assertEqual(repo_path_references(text), [], text)

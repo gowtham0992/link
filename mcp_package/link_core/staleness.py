@@ -58,7 +58,11 @@ MAX_PATH_LOOKUPS = 12
 def repo_path_references(text: str) -> list[str]:
     """Repository-looking paths named by a memory, in first-seen order."""
     seen: list[str] = []
-    for match in _PATH_REFERENCE.finditer(text or ""):
+    # Memories written on Windows name paths with backslashes. Git and the
+    # repository itself use forward slashes, so normalise before matching -
+    # otherwise every Windows user's references would silently go unchecked.
+    normalised = (text or "").replace("\\", "/")
+    for match in _PATH_REFERENCE.finditer(normalised):
         candidate = match.group(1)
         if candidate.startswith(_IGNORED_PREFIXES) or candidate in seen:
             continue

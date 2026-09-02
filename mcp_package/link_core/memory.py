@@ -218,8 +218,11 @@ def _unicode_memory_tokens(value: str) -> set[str]:
     anyone working in English:
 
     - Scripts without spaces (Han, kana) never split, so a whole sentence
-      becomes one token that no query can match. They are cut into character
-      bigrams instead, the approach SQLite FTS5's trigram tokenizer takes.
+      becomes one token that no query can match. They are cut into overlapping
+      character bigrams instead - the dictionary-free approach Lucene's
+      CJKAnalyzer and Elasticsearch's built-in cjk analyzer take, so
+      "java C1C2C3C4" becomes java, C1C2, C2C3, C3C4. Hangul is left as whole
+      words since Korean is written with spaces.
     - Accents make a word unfindable by its unaccented spelling, so
       "déploiement" and "deploiement" are different tokens. Latin accents are
       folded away. Combining marks in Indic and other scripts are vowels, not
