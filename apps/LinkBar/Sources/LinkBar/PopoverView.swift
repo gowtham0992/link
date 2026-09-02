@@ -202,8 +202,8 @@ struct PopoverView: View {
             (showArchived || page.isActive)
             && (memoryTypeFilter == nil || page.memoryType == memoryTypeFilter)
             && (memoryQuery.isEmpty
-                || page.title.localizedCaseInsensitiveContains(memoryQuery)
-                || page.claim.localizedCaseInsensitiveContains(memoryQuery))
+                || page.title.localizedStandardContains(memoryQuery)
+                || page.claim.localizedStandardContains(memoryQuery))
         }
     }
 
