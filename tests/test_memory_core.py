@@ -704,6 +704,25 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(proposal["primary_action"]["arguments"]["context"], proposal["context"])
         self.assertNotIn("--context", proposal["primary_action"]["command"])
 
+    def test_structured_documentation_does_not_propose_personal_memory(self):
+        export = "\n".join([
+            '{"record_type":"manifest","schema":"chezmoi-documentation-graph-export/v1"}',
+            '{"record_type":"page","markdown":"I like chezmoi. You should run apply."}',
+        ])
+
+        payload = propose_memories_from_text(export, [], source="raw/docs.jsonl")
+
+        self.assertEqual(payload["count"], 0)
+        self.assertEqual(payload["proposals"], [])
+        self.assertIn("belongs in the wiki", payload["blocked_reason"])
+
+    def test_curated_structured_documentation_can_propose_selected_claims(self):
+        text = "source_type: documentation_export\n\n- We decided to keep Link local-first."
+
+        payload = propose_memories_from_text(text, [], source="selected.md", curated=True)
+
+        self.assertTrue(any(proposal["memory_type"] == "decision" for proposal in payload["proposals"]))
+
     def test_standing_rule_phrasings_propose_preferences(self):
         payload = propose_memories_from_text(
             "hey, before we start — from now on I only push to the develop "

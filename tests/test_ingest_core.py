@@ -210,6 +210,26 @@ class IngestCoreTests(unittest.TestCase):
         self.assertEqual(payload["completion"]["items"][0]["memory_prompt"], "propose memories from raw/source.md")
         self.assertEqual(payload["completion"]["next_prompt"], "start with Link before we continue")
 
+    def test_documentation_export_completion_omits_memory_prompt(self):
+        root = Path(tempfile.mkdtemp(prefix="link-ingest-core-"))
+        raw = root / "raw"
+        wiki = root / "wiki"
+        raw.mkdir()
+        (raw / "docs.jsonl").write_text('{"record_type":"manifest"}\n', encoding="utf-8")
+        write_page(wiki, "index.md", "# Index\n")
+        write_page(wiki, "log.md", "# Log\n")
+        write_page(
+            wiki,
+            "sources/docs.md",
+            "---\ntype: source\ntitle: Docs\nsource_type: documentation_export\n---\n\n"
+            "# Docs\n\n## Raw Source\n\n`raw/docs.jsonl`\n",
+        )
+        (wiki / "_backlinks.json").write_text(json.dumps(build_backlinks(wiki)), encoding="utf-8")
+
+        payload = collect_ingest_status(root)
+
+        self.assertEqual(payload["completion"]["items"][0]["memory_prompt"], "")
+
     def test_collect_ingest_status_reports_stale_represented_raw(self):
         root = Path(tempfile.mkdtemp(prefix="link-ingest-core-"))
         raw = root / "raw"

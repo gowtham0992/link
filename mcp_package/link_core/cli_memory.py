@@ -182,7 +182,8 @@ def render_propose_memories_text(result: Mapping[str, object]) -> tuple[int, str
         lines.append(f"Project: {result.get('project')}")
     lines.append(f"Count: {result.get('count', 0)}")
     if not proposals:
-        lines.append("No durable memory candidates found.")
+        reason = result.get("blocked_reason")
+        lines.append(f"No proposals: {reason}." if reason else "No durable memory candidates found.")
         return 0, "\n".join(lines)
 
     for index, proposal in enumerate(proposals, start=1):

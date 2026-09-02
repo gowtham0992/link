@@ -319,6 +319,17 @@ Rules:
 
 ### 2. Ingest
 
+Link has two ingest paths. Use `python3 link.py ingest <source> . --adapter <name>`
+for a supported structured export. The command plans by default and writes only
+with `--apply`; it stages and validates the whole generated wiki change, records
+source and output hashes under `.link-ingest/`, and refuses unmanaged or
+manually changed outputs. `--replace-unmanaged` authorizes first-run adoption,
+while `--prune` authorizes removal of obsolete adapter-owned outputs.
+
+Use the agent-authored path below for arbitrary notes, articles, conversations,
+images, and unsupported formats. `ingest-status` reports representation and
+staleness; it does not itself compile those sources into wiki pages.
+
 When the human adds a new source to `raw/` and asks you to process it:
 
 0. Run `python3 link.py ingest-status .` when `link.py` is available to see pending raw files, current graph state, and the suggested ingest workflow. If it reports `blocked_secrets` or secret warnings, stop and ask the human to redact the flagged raw file before reading or ingesting it.
@@ -333,6 +344,9 @@ When the human adds a new source to `raw/` and asks you to process it:
 7. Append an entry to `wiki/log.md`
 
 **Ingest rules:**
+- Structured documentation exports stay as wiki knowledge. Do not propose their
+  prose as personal memory unless the human explicitly curates individual
+  user- or project-specific claims.
 - Every claim must link back to its source page. No orphan claims.
 - Tag confidence on claims: `high` (explicitly stated), `medium` (reasonable inference), `low` (speculative)
 - Prefer updating existing pages over creating new ones. A concept page that grows from 3 sources is more valuable than 3 thin pages.

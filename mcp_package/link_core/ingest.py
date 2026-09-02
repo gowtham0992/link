@@ -83,6 +83,7 @@ def source_page_index(
             "name": page.stem,
             "path": f"wiki/{page.relative_to(wiki_dir).as_posix()}",
             "title": str(meta.get("title") or _heading_title(body) or page.stem),
+            "source_type": str(meta.get("source_type") or ""),
             "text": text,
             "mtime": page_mtime,
         }
@@ -450,6 +451,8 @@ def build_ingest_completion(status: dict[str, object], limit: int = 8) -> dict[s
         page_names = item.get("source_pages") if isinstance(item.get("source_pages"), list) else []
         page_paths = item.get("source_page_paths") if isinstance(item.get("source_page_paths"), list) else []
         page_titles = item.get("source_page_titles") if isinstance(item.get("source_page_titles"), list) else []
+        source_types = item.get("source_page_source_types") if isinstance(item.get("source_page_source_types"), list) else []
+        documentation_export = "documentation_export" in source_types
         pages: list[dict[str, str]] = []
         for index, page_name in enumerate(page_names):
             pages.append({
@@ -461,7 +464,7 @@ def build_ingest_completion(status: dict[str, object], limit: int = 8) -> dict[s
             "raw": raw_rel,
             "size_bytes": int(item.get("size_bytes") or 0),
             "source_pages": pages,
-            "memory_prompt": f"propose memories from {raw_rel}" if raw_rel else "",
+            "memory_prompt": "" if documentation_export else (f"propose memories from {raw_rel}" if raw_rel else ""),
             "query_prompt": f"query Link for {Path(raw_rel).stem.replace('-', ' ')}" if raw_rel else "",
             "secret_warnings": list(item.get("secret_warnings") or []),
             "scan_error": str(item.get("scan_error") or ""),
@@ -785,6 +788,7 @@ def collect_ingest_status(target: Path, skip_dirs: set[str] | None = None) -> di
             "source_pages": matches,
             "source_page_paths": [str(record.get("path") or "") for record in match_records],
             "source_page_titles": [str(record.get("title") or record.get("name") or "") for record in match_records],
+            "source_page_source_types": [str(record.get("source_type") or "") for record in match_records],
             "secret_warnings": warnings,
             "secret_warning_count": len(warnings),
             "readable": not bool(scan_error),

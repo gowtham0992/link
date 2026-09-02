@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
 import unicodedata
 import urllib.parse
@@ -3703,6 +3704,27 @@ def propose_memories_from_text(
 ) -> dict[str, object]:
     record_list = [dict(record) for record in records]
     project_name = normalize_project(project)
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    structured_documentation = "source_type: documentation_export" in text[:2000]
+    if first_line.startswith("{"):
+        try:
+            first_record = json.loads(first_line)
+        except json.JSONDecodeError:
+            first_record = {}
+        structured_documentation = structured_documentation or str(first_record.get("schema") or "").endswith(
+            "documentation-graph-export/v1"
+        )
+    if structured_documentation and not curated:
+        return {
+            "proposed": True,
+            "source": source,
+            "project": project_name,
+            "count": 0,
+            "skipped_count": 0,
+            "proposals": [],
+            "writes_memory": writes_memory,
+            "blocked_reason": "structured documentation belongs in the wiki; select or curate user-specific claims before proposing memory",
+        }
     excluded = set(exclude_fingerprints)
     proposals: list[dict[str, object]] = []
     seen: set[str] = set()

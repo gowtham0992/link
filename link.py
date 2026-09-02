@@ -23,6 +23,7 @@ Usage:
   python link.py doctor [target]
   python link.py migrate [target]
   python link.py validate [target]
+  python link.py ingest <source> [target] --adapter <name> [--apply]
   python link.py ingest-status [target]
   python link.py import-obsidian <vault> [target]
   python link.py remember "memory text" [target]
@@ -294,6 +295,12 @@ from link_core.sync import (
 from link_core.ingest import (
     collect_ingest_status as _core_collect_ingest_status,
     render_ingest_status_text as _core_render_ingest_status_text,
+)
+from link_core.structured_ingest import (
+    StructuredIngestError as _CoreStructuredIngestError,
+    apply_structured_ingest as _core_apply_structured_ingest,
+    plan_structured_ingest as _core_plan_structured_ingest,
+    render_structured_ingest_text as _core_render_structured_ingest_text,
 )
 from link_core.log import (
     append_log as _core_append_log,
@@ -1164,6 +1171,42 @@ def ingest_status(target: Path, json_output: bool = False) -> int:
 
     _print_text(_core_render_ingest_status_text(str(target), status))
     return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
+
+
+def structured_ingest(
+    target: Path,
+    source: Path,
+    *,
+    adapter: str,
+    excludes: list[str] | None = None,
+    apply: bool = False,
+    replace_unmanaged: bool = False,
+    prune: bool = False,
+    json_output: bool = False,
+) -> int:
+    try:
+        plan = _core_plan_structured_ingest(
+            target,
+            source,
+            adapter=adapter,
+            excludes=excludes,
+            replace_unmanaged=replace_unmanaged,
+            prune=prune,
+        )
+        result = _core_apply_structured_ingest(plan) if apply else plan
+    except (_CoreStructuredIngestError, OSError) as exc:
+        if json_output:
+            print(json.dumps({"applied": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"Structured ingest failed: {exc}", file=sys.stderr)
+        return 1
+    if json_output:
+        printable = {key: value for key, value in result.items() if key != "outputs"}
+        print(json.dumps(printable, indent=2))
+        return 0 if not result.get("conflicts") else 1
+    code, text = _core_render_structured_ingest_text(result)
+    _print_text(text)
+    return code
 
 
 def import_obsidian(
@@ -4198,6 +4241,7 @@ def main(argv: list[str] | None = None) -> int:
             "doctor": doctor,
             "migrate": migrate,
             "validate": validate,
+            "ingest": structured_ingest,
             "ingest-status": ingest_status,
             "import-obsidian": import_obsidian,
             "remember": remember,

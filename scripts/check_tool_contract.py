@@ -34,6 +34,7 @@ EXPECTED_CLI_COMMANDS = {
     "hook",
     "import",
     "import-obsidian",
+    "ingest",
     "ingest-status",
     "init",
     "memory-audit",
