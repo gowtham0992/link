@@ -98,10 +98,12 @@ def _render_navigation(nodes: list[dict[str, Any]], depth: int = 0) -> list[str]
         title = str(node.get("title") or "Untitled")
         prefix = "  " * depth
         if node.get("type") == "section":
-            index_page = node.get("index_page") if isinstance(node.get("index_page"), dict) else {}
+            raw_index = node.get("index_page")
+            index_page = raw_index if isinstance(raw_index, dict) else {}
             suffix = f" — index {index_page.get('page_id')}" if index_page.get("page_id") else ""
             lines.append(f"{prefix}- **{title}**{suffix}")
-            children = node.get("children") if isinstance(node.get("children"), list) else []
+            raw_children = node.get("children")
+            children = raw_children if isinstance(raw_children, list) else []
             lines.extend(_render_navigation(children, depth + 1))
         else:
             lines.append(f"{prefix}- {title} — {node.get('page_id', '')}")
@@ -256,7 +258,8 @@ def _render_chezmoi_pages(
     for group, slug, count, markdown_bytes in sorted(section_rows):
         overview.append(f"| {group} | {count} | {markdown_bytes:,} | [[{slug}]] |")
     overview.extend(["", "## Navigation tree", ""])
-    overview.extend(_render_navigation(navigation.get("tree") if isinstance(navigation.get("tree"), list) else []))
+    tree = navigation.get("tree")
+    overview.extend(_render_navigation(tree if isinstance(tree, list) else []))
     overview.extend(["", "## Connections", ""])
     for group, slug, count, _ in sorted(section_rows):
         overview.append(f"- Contains [[{slug}]] — {group} ({count} page{'s' if count != 1 else ''}).")
@@ -326,7 +329,8 @@ def plan_structured_ingest(
     )
     ingest_manifest_path = _manifest_path(target, adapter, source_rel)
     previous = _read_manifest(ingest_manifest_path)
-    previous_outputs = previous.get("outputs") if isinstance(previous.get("outputs"), dict) else {}
+    raw_previous_outputs = previous.get("outputs")
+    previous_outputs: dict[str, Any] = raw_previous_outputs if isinstance(raw_previous_outputs, dict) else {}
     changes: list[dict[str, str]] = []
     conflicts: list[dict[str, str]] = []
     for rel, text in sorted(outputs.items()):
@@ -384,7 +388,8 @@ def apply_structured_ingest(plan: dict[str, Any]) -> dict[str, Any]:
     wiki_dir = target / "wiki"
     if not wiki_dir.exists():
         raise StructuredIngestError(f"missing Link wiki: {wiki_dir}")
-    outputs = plan.get("outputs") if isinstance(plan.get("outputs"), dict) else {}
+    raw_outputs = plan.get("outputs")
+    outputs: dict[str, Any] = raw_outputs if isinstance(raw_outputs, dict) else {}
     with tempfile.TemporaryDirectory(prefix="link-structured-ingest-") as temp_dir:
         stage = Path(temp_dir) / "workspace"
         shutil.copytree(target, stage, ignore=shutil.ignore_patterns(".git", ".link-cache", ".link-ingest"))
