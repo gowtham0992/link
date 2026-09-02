@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.staleness import (  # noqa: E402
+    StalenessChecker,
     describe_findings,
     repo_path_references,
     stale_findings,
@@ -98,6 +99,23 @@ class StalenessFindingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as plain:
             self.assertEqual(stale_findings("src/old.py is gone", Path(plain)), [])
 
+    def test_checker_resolves_each_path_against_git_once(self):
+        # Fifty memories citing the same moved file must cost one lookup.
+        self._delete("src/old.py")
+        calls: list[str] = []
+
+        def runner(root: Path, arguments: list[str]) -> str:
+            calls.append(" ".join(arguments))
+            return "abc123 seed\n" if arguments[-1] == "src/old.py" and "log" in arguments and "-1" in arguments else ""
+
+        checker = StalenessChecker(self.repo, runner=runner)
+        for _ in range(50):
+            self.assertEqual([f["path"] for f in checker.findings("see src/old.py")], ["src/old.py"])
+        known_lookups = [c for c in calls if c.endswith("-- src/old.py")]
+        rename_scans = [c for c in calls if "--diff-filter=R" in c]
+        self.assertEqual(len(known_lookups), 1)
+        self.assertEqual(len(rename_scans), 1)
+
     def test_lookups_are_capped(self):
         text = " ".join(f"src/gone{index}.py" for index in range(40))
         calls: list[str] = []
@@ -140,9 +158,20 @@ class StaleCommandTests(unittest.TestCase):
             pages = sorted((Path(workspace) / "wiki" / "memories").glob("*.md"))
             before = {p: p.read_bytes() for p in pages}
 
+            # An archived memory naming the same gone path must not be reported.
+            archived = Path(workspace) / "wiki" / "memories" / "archived-note.md"
+            archived.write_text(
+                "---\ntype: memory\ntitle: \"old\"\nmemory_type: note\nscope: user\n"
+                "status: archived\ndate_captured: \"2026-01-01T00:00:00Z\"\nsource: \"t\"\n---\n\n"
+                "# old\n\nthe parser used to live in gone.py\n",
+                encoding="utf-8",
+            )
+            pages = sorted((Path(workspace) / "wiki" / "memories").glob("*.md"))
+            before = {p: p.read_bytes() for p in pages}
             result = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", str(repo)],
                             capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("gone.py", result.stdout)
+            self.assertNotIn("archived-note", result.stdout)
             self.assertIn("Nothing was changed", result.stdout)
             self.assertEqual({p: p.read_bytes() for p in pages}, before, "stale must not write")

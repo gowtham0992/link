@@ -182,13 +182,22 @@ _ASCII_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
 
 
 def _token_unspaced(character: str) -> bool:
-    """Han and kana: scripts written without spaces between words."""
+    """Scripts written without spaces between words.
+
+    Han and kana, plus Thai, Lao, Tibetan, Myanmar, and Khmer. A sentence in
+    any of these arrives as one run, so it is segmented into bigrams rather
+    than kept as a single token nothing could ever match.
+    """
     code = ord(character)
     return (
-        0x3040 <= code <= 0x30FF
-        or 0x3400 <= code <= 0x4DBF
-        or 0x4E00 <= code <= 0x9FFF
-        or 0xF900 <= code <= 0xFAFF
+        0x0E00 <= code <= 0x0EFF      # Thai, Lao
+        or 0x0F00 <= code <= 0x0FFF   # Tibetan
+        or 0x1000 <= code <= 0x109F   # Myanmar
+        or 0x1780 <= code <= 0x17FF   # Khmer
+        or 0x3040 <= code <= 0x30FF   # kana
+        or 0x3400 <= code <= 0x4DBF   # CJK ext A
+        or 0x4E00 <= code <= 0x9FFF   # CJK unified
+        or 0xF900 <= code <= 0xFAFF   # CJK compatibility
     )
 
 

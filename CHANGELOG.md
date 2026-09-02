@@ -22,7 +22,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   path exactly, so no existing memory changes token and no existing ranking
   moves; the LoCoMo track returns all nine published figures unchanged across
   1,536 third-party queries, and the ASCII path is marginally faster than
-  before.
+  before. Scope: this is memory recall. Wiki page full-text search still
+  uses SQLite's `unicode61` tokenizer, which folds accents but does not
+  segment CJK; that is 3.1 work behind an index version bump.
 - **`lnk stale` - notice when a memory outlived the code it describes.** The
   most repeated complaint about agent memory is that nothing can tell when a
   memory stopped being true: a note says a thing lives in `a/b.py`, the file
@@ -38,6 +40,27 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   `scripts/eval_staleness.py` reports 0 false flags across 95 path references
   in this repository's own documentation, detects every probed deletion, and
   exits non-zero if either changes.
+
+### Measured and declined
+
+- **Usage-aware ranking.** Four formulations were built and measured -
+  additive frequency, tiebreak-only, recency decay in the Generative Agents
+  form across the recommended 7-30 day half-life range, and an MMR diversity
+  penalty - and none ship. Every one either made memories that had gone
+  unread harder to find or did nothing; recency was worst, with the old half
+  losing 0.0510 while the fresh half gained 0.0204 at a 30-day half-life. The
+  reason is a category difference: those policies suit episodic observation
+  streams, and Link stores durable constraints, which do not become less true
+  for going unread - that is when they most need surfacing.
+  `scripts/eval_salience.py` holds all four closed and fails on any
+  regression, so the next attempt has to clear the same bar.
+
+### Removed
+
+- **The Bar CI investigation integration.** Its Cloudflare side is gone, so
+  the collector, summary poller, PR comment writer, their tests, and the
+  workflow that drove them come out. The release-hygiene network allowlist is
+  back to a single entry, the local viewer smoke test.
 
 ### Changed
 

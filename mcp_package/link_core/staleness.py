@@ -113,6 +113,53 @@ def rename_map(repo_root: Path, runner: Callable[..., object] | None = None) -> 
     return moves
 
 
+class StalenessChecker:
+    """Check many memories against one repository without repeating git work.
+
+    Each distinct path is resolved against git once, and the rename map is
+    read once, no matter how many memories mention them. Fifty memories that
+    all cite the same moved file cost one lookup, not fifty.
+    """
+
+    def __init__(self, repo_root: Path, *, runner: Callable[..., object] | None = None,
+                 limit: int = MAX_PATH_LOOKUPS) -> None:
+        self.root = Path(repo_root).expanduser()
+        self._runner = runner
+        self._limit = limit
+        self._known: dict[str, bool] = {}
+        self._moves: dict[str, str] | None = None
+
+    def _was_known(self, path: str) -> bool:
+        if path not in self._known:
+            self._known[path] = path_was_known(self.root, path, self._runner)
+        return self._known[path]
+
+    def _successor(self, path: str) -> str:
+        if self._moves is None:
+            self._moves = rename_map(self.root, self._runner)
+        return self._moves.get(path, "")
+
+    def findings(self, text: str) -> list[dict[str, str]]:
+        """Paths this text names that git once tracked and that are now gone.
+
+        An empty list is the expected result. A finding says only that the
+        text refers to something that moved; a person decides what to do.
+        """
+        results: list[dict[str, str]] = []
+        for candidate in repo_path_references(text)[: self._limit]:
+            if (self.root / candidate).exists():
+                continue
+            if not self._was_known(candidate):
+                continue  # never in the repository: prose, not a stale reference
+            successor = self._successor(candidate)
+            results.append({
+                "path": candidate,
+                "reason": "renamed" if successor else "removed",
+                "successor": successor,
+            })
+        return results
+
+
 def stale_findings(
     text: str,
     repo_root: Path,
@@ -120,31 +167,8 @@ def stale_findings(
     runner: Callable[..., object] | None = None,
     limit: int = MAX_PATH_LOOKUPS,
 ) -> list[dict[str, str]]:
-    """Paths this memory names that git once tracked and that are now gone.
-
-    An empty list is the expected result. A finding says only that the memory
-    refers to something that moved; a person decides what the memory should
-    say now.
-    """
-    root = Path(repo_root).expanduser()
-    findings: list[dict[str, str]] = []
-    moves: dict[str, str] | None = None   # built lazily; only a finding needs it
-    for candidate in repo_path_references(text)[:limit]:
-        if (root / candidate).exists():
-            continue
-        if not path_was_known(root, candidate, runner):
-            continue  # never in the repository: prose, not a stale reference
-        if moves is None:
-            moves = rename_map(root, runner)
-        successor = moves.get(candidate, "")
-        findings.append(
-            {
-                "path": candidate,
-                "reason": "renamed" if successor else "removed",
-                "successor": successor,
-            }
-        )
-    return findings
+    """One-off check of a single text. For many memories use StalenessChecker."""
+    return StalenessChecker(repo_root, runner=runner, limit=limit).findings(text)
 
 
 def describe_findings(findings: Iterable[dict[str, str]]) -> list[str]:

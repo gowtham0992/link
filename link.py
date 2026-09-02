@@ -139,6 +139,7 @@ from link_core.memory import (
     memory_audit_report as _core_memory_audit_report,
     memory_audit_next_actions as _core_memory_audit_next_actions,
     memory_records as _core_memory_records,
+    is_active_memory as _core_is_active_memory,
     memory_merge_candidates as _core_memory_merge_candidates,
     memory_review_issues as _core_memory_review_issues,
     parse_time_expression as _core_parse_time_expression,
@@ -1194,17 +1195,20 @@ def stale(target: Path, *, repo: Path = Path(".")) -> int:
     question for a person, not a rewrite to apply automatically, so findings
     are printed and the review gate stays where it is.
     """
-    from link_core.staleness import describe_findings, stale_findings
+    from link_core.staleness import StalenessChecker, describe_findings
 
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     repo_dir = Path(repo).expanduser().resolve()
-    records = _core_memory_records(wiki_dir)
+    # Archived and expired memories are already out of the way; questioning
+    # them would only add noise to a report that must stay quiet by default.
+    records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
+    checker = StalenessChecker(repo_dir)
     flagged = 0
     for record in records:
         text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
-        findings = stale_findings(text, repo_dir)
+        findings = checker.findings(text)
         if not findings:
             continue
         flagged += 1
@@ -1213,10 +1217,10 @@ def stale(target: Path, *, repo: Path = Path(".")) -> int:
             print(f"  {line}")
     checked = len(records)
     if not flagged:
-        print(f"No stale repository references in {checked} memories ({repo_dir}).")
+        print(f"No stale repository references in {checked} active memories ({repo_dir}).")
         return 0
     print(
-        f"\n{flagged} of {checked} memories name paths that moved in {repo_dir}."
+        f"\n{flagged} of {checked} active memories name paths that moved in {repo_dir}."
         "\nNothing was changed. Review each one and update or archive it."
     )
     return 0

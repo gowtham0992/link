@@ -1960,6 +1960,13 @@ class UnicodeTokenizerTests(unittest.TestCase):
         self.assertGreater(len(chinese), 4)
         self.assertTrue(all(len(token) <= 2 for token in japanese))
 
+    def test_southeast_asian_scripts_are_segmented_too(self):
+        # Thai, Lao, Khmer, and Myanmar also write without word spaces.
+        for text in ["เราปรับใช้เฉพาะวันอังคาร", "ພວກເຮົາໃຊ້ວັນອັງຄານ", "យើងដាក់ពង្រាយថ្ងៃអង្គារ", "ကျွန်ုပ်တို့အင်္ဂါနေ့"]:
+            tokens = memory_tokens(text)
+            self.assertGreater(len(tokens), 3, text)
+            self.assertTrue(all(len(token) <= 2 for token in tokens), text)
+
     def test_spaced_non_latin_scripts_keep_whole_words(self):
         self.assertIn("вторникам", memory_tokens("мы развертываем по вторникам"))
         self.assertIn("الثلاثاء", memory_tokens("ننشر يوم الثلاثاء فقط"))
