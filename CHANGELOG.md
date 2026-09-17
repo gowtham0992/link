@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-16
+
 ### Added
 
 - **Recall works outside English.** The tokenizer split on `[^a-z0-9]+`, so
@@ -130,7 +132,6 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   ceiling each cutoff allows (LoCoMo evidence sets average 1.53 turns, so
   precision@10 cannot exceed 0.152 for anyone) and R-precision as the
   k-independent figure to compare across systems.
-
 
 ## [2.3.0] - 2026-08-12
 
