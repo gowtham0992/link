@@ -91,7 +91,7 @@ def _persistent_cache_path(wiki_dir: Path) -> Path:
 
 
 def _persistent_fts_path(wiki_dir: Path) -> Path:
-    return wiki_dir.parent / ".link-cache" / "page-fts-v1.sqlite"
+    return wiki_dir.parent / ".link-cache" / "page-fts-v2.sqlite"
 
 
 def _page_signatures(wiki_dir: Path, page_paths: list[Path]) -> list[dict[str, Any]]:

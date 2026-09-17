@@ -35,7 +35,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Workspace & health", (
         "status", "health", "doctor", "validate", "migrate", "backup",
-        "restore-backup", "operations", "seed", "ingest-status",
+        "restore-backup", "operations", "seed", "ingest", "ingest-status",
         "import-obsidian",
     )),
     ("Sharing & viewing", (
@@ -44,7 +44,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Utilities", (
         "version", "benchmark", "wins", "profile", "rebuild-index",
-        "rebuild-backlinks", "query-link",
+        "rebuild-backlinks", "query-link", "stale",
     )),
 )
 
@@ -264,6 +264,16 @@ def build_cli_parser(
     validate_cmd.add_argument("target", nargs="?", default=".")
     validate_cmd.add_argument("--strict", action="store_true", help="fail on warnings as well as errors")
     validate_cmd.add_argument("--json", action="store_true", help="print machine-readable validation findings")
+
+    ingest_cmd = sub.add_parser("ingest", help="plan or apply deterministic ingestion for a supported structured source")
+    ingest_cmd.add_argument("source", help="source path under the Link workspace raw/ directory")
+    ingest_cmd.add_argument("target", nargs="?", default=".")
+    ingest_cmd.add_argument("--adapter", required=True, help="structured source adapter name")
+    ingest_cmd.add_argument("--exclude", action="append", default=[], help="adapter-specific group to exclude; repeatable")
+    ingest_cmd.add_argument("--apply", action="store_true", help="apply the plan after staging and validation")
+    ingest_cmd.add_argument("--replace-unmanaged", action="store_true", help="replace existing outputs not yet owned by this adapter")
+    ingest_cmd.add_argument("--prune", action="store_true", help="delete managed outputs no longer produced by the adapter")
+    ingest_cmd.add_argument("--json", action="store_true", help="print machine-readable plan or result")
 
     ingest_status_cmd = sub.add_parser("ingest-status", help="show raw files pending wiki ingestion")
     ingest_status_cmd.add_argument("target", nargs="?", default=".")
@@ -534,6 +544,17 @@ def build_cli_parser(
     rebuild_cmd = sub.add_parser("rebuild-backlinks", help="rebuild wiki/_backlinks.json")
     rebuild_cmd.add_argument("target", nargs="?", default=".")
 
+    stale_cmd = sub.add_parser(
+        "stale",
+        help="list memories that name repository paths git no longer has",
+    )
+    stale_cmd.add_argument("target", nargs="?", default=".", help="Link workspace")
+    stale_cmd.add_argument(
+        "--repo", default=".",
+        help="repository to check the memories against (default: current directory)",
+    )
+    stale_cmd.add_argument("--json", action="store_true", help="machine-readable report")
+
     verify_mcp_cmd = sub.add_parser(
         "verify-mcp",
         help="verify link-mcp import and print MCP config; pass an agent name to check what that agent is configured to run",
@@ -721,6 +742,17 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["migrate"](Path(args.target), json_output=args.json)
     if command == "validate":
         return handlers["validate"](Path(args.target), strict=args.strict, json_output=args.json)
+    if command == "ingest":
+        return handlers["ingest"](
+            Path(args.target),
+            Path(args.source),
+            adapter=args.adapter,
+            excludes=args.exclude,
+            apply=args.apply,
+            replace_unmanaged=args.replace_unmanaged,
+            prune=args.prune,
+            json_output=args.json,
+        )
     if command == "ingest-status":
         return handlers["ingest-status"](Path(args.target), json_output=args.json)
     if command == "import-obsidian":
@@ -953,6 +985,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["rebuild-index"](Path(args.target))
     if command == "rebuild-backlinks":
         return handlers["rebuild-backlinks"](Path(args.target))
+    if command == "stale":
+        return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json))
     if command == "verify-mcp":
         from .mcp_connect import agent_alias_matches
 

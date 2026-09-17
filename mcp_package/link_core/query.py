@@ -7,7 +7,6 @@ agent can read before answering.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -15,6 +14,7 @@ from .memory import (
     memory_brief,
     normalize_project,
     recall_memories,
+    slugify,
 )
 from .semantic import semantic_memory_scores
 from .wiki import context_for_topic, search_pages
@@ -130,6 +130,39 @@ def _page_provenance(page: Mapping[str, object]) -> dict[str, object]:
     })
 
 
+def _mark_stale_paths(
+    compact: list[dict[str, object]],
+    raw: Iterable[Mapping[str, object]],
+    repo_root: Path | None,
+) -> None:
+    """Flag recalled memories that name repository paths git no longer has.
+
+    This is where staleness earns its keep: the agent sees "this memory
+    refers to a file that moved" in the same packet as the memory, at the
+    moment it would otherwise act on it. Only the handful of returned
+    memories are checked, and git is consulted only for paths that do not
+    exist on disk, so the common case costs a few stat calls. Nothing is
+    added when there is nothing to say; an absent key is the normal packet.
+    """
+    if repo_root is None or not (Path(repo_root) / ".git").exists():
+        return
+    from .staleness import StalenessChecker
+
+    checker = StalenessChecker(repo_root)
+    by_name = {str(item.get("name") or ""): item for item in compact}
+    # Recall returns slimmed items without the body; read the full record.
+    for record in raw:
+        item = by_name.get(str(record.get("name") or ""))
+        if item is None:
+            continue
+        text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
+        findings = checker.findings(text)
+        if findings:
+            item["stale_paths"] = [
+                {"path": f["path"], "reason": f["reason"], "successor": f["successor"]} for f in findings
+            ]
+
+
 def _compact_memory(memory: Mapping[str, object]) -> dict[str, object]:
     item = {
         "kind": "memory",
@@ -188,7 +221,9 @@ def _slug_key(value: object) -> str:
     if not text:
         return ""
     name = Path(text).stem if "/" in text or "\\" in text else text
-    return re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+    # Same slug rules as page names, so a non-Latin page keys to itself rather
+    # than to the empty string shared by every other non-Latin page.
+    return slugify(name, fallback="")
 
 
 def _memory_source_keys(memory: Mapping[str, object]) -> set[str]:
@@ -396,6 +431,7 @@ def query_link(
     budget: str = "medium",
     project: str | None = None,
     review_command: str = "review-memory",
+    repo_root: Path | None = None,
 ) -> dict[str, object]:
     """Return a compact context packet for an agent query.
 
@@ -428,6 +464,7 @@ def query_link(
     )
     memory_has_more = len(raw_memories) > limits["memories"]
     memories = [_compact_memory(memory) for memory in raw_memories[: limits["memories"]]]
+    _mark_stale_paths(memories, record_list, repo_root)
     brief = memory_brief(
         record_list,
         query=q,
@@ -471,6 +508,15 @@ def query_link(
     review = _compact_review(brief.get("review", {}), limit=limits["memories"])
     if review.get("count"):
         guidance.insert(2, "Some memories need review; treat provisional memories carefully.")
+    if any(memory.get("stale_paths") for memory in memories):
+        # A signal without an instruction is decoration. Same pattern as the
+        # constraint guard: say what was found and what to do about it.
+        guidance.insert(
+            1,
+            "A recalled memory names a repository file git no longer has "
+            "(see its stale_paths); verify the memory against the current code "
+            "before relying on it, and suggest the user review or update it.",
+        )
     if memories and all(str(memory.get("confidence") or "") == "weak" for memory in memories):
         guidance.insert(
             1,

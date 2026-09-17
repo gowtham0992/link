@@ -53,17 +53,6 @@ SECRET_VALUE_PATTERNS = (
 OUTBOUND_NETWORK_CODE_SUFFIXES = {".py", ".sh"}
 OUTBOUND_NETWORK_ALLOWLIST = {
     Path("scripts/smoke_http_viewer.py"),
-    # CI-only collector for Bar investigations. It runs in GitHub Actions and
-    # is never shipped: the wheel packages only link_mcp and link_core, and the
-    # sdist is rooted at mcp_package/, so scripts/ reaches no user machine.
-    Path("scripts/bar_investigate.py"),
-    # Transport tests for that collector. They bind only loopback servers to
-    # assert wire-level header spelling, and tests/ is not in the wheel either.
-    Path("tests/test_bar_investigate.py"),
-    # Reads Bar's bounded machine summaries over GET, in CI only.
-    Path("scripts/bar_summary_poll.py"),
-    # Writes the one Bar result comment through the GitHub API, in CI only.
-    Path("scripts/bar_pr_comment.py"),
 }
 OUTBOUND_NETWORK_PATTERNS = (
     ("requests import", re.compile(r"^\s*(?:import\s+requests\b|from\s+requests\b)", re.MULTILINE)),

@@ -38,6 +38,25 @@
   </a>
 </p>
 
+## Quick start
+
+```bash
+brew install gowtham0992/link/link   # or: pip install link-mcp
+lnk setup                            # wires every agent you have
+```
+
+Then work normally. Tell an agent "remember that we deploy on Tuesdays",
+approve it once, and every other agent recalls it in a new session tomorrow.
+
+```bash
+lnk status                                   # is it wired up and being used?
+lnk import claude-code                       # bring existing memory in
+brew install --cask gowtham0992/link/linkbar # macOS menu bar app
+```
+
+Memory lives in plain Markdown you can open, and nothing becomes durable
+without your approval.
+
 ## What Is Link?
 
 Link is an open-source memory layer for local AI agents. Raw sources become an
@@ -264,8 +283,10 @@ by accident.
 Link's memory, ambient. LinkBar puts the review gate in your menu bar: a
 global palette (⌥⌘M) to recall or remember from any app, native
 notifications with one-tap Accept when a session capture lands, a live
-pulse while agents are writing, and a browser over every memory file —
-all running on the same reviewed `lnk` commands as the CLI.
+pulse while agents are writing, a browser over every memory file, and a
+status dashboard that flags memories naming files your repository no
+longer has — all running on the same reviewed `lnk` commands as the CLI.
+Pick the workspace in Settings; it defaults to `~/link`.
 
 <p align="center">
   <img src="docs/assets/linkbar-tour.gif" alt="LinkBar cycling through its tabs: review inbox with live agent pulse and capture previews, memory browser, status dashboard, and settings" width="424">
@@ -532,6 +553,27 @@ The storage model is plain and inspectable:
 If a raw file was already ingested and later edited, `lnk ingest-status` marks it
 as stale and tells your agent to refresh the existing source page instead of
 creating a duplicate.
+
+Structured exports with a supported schema can use deterministic ingestion.
+Planning is read-only; applying stages the complete result, rebuilds the graph,
+validates it, and records output ownership before changing the live wiki:
+
+```bash
+lnk ingest raw/chezmoi-docs/export.jsonl ~/link \
+  --adapter chezmoi-docs-graph-v1 \
+  --exclude "Reference / Release history"
+
+lnk ingest raw/chezmoi-docs/export.jsonl ~/link \
+  --adapter chezmoi-docs-graph-v1 \
+  --exclude "Reference / Release history" \
+  --apply
+```
+
+Later runs update only adapter-owned outputs. Manual edits become conflicts.
+`--replace-unmanaged` is required for a first migration over existing pages,
+and `--prune` is required to retire managed pages no longer in the plan.
+Arbitrary notes and articles continue through agent-authored ingest because
+their useful structure cannot be inferred safely from a file format alone.
 
 ## What Agents Get
 

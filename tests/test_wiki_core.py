@@ -171,7 +171,7 @@ class WikiCoreTests(unittest.TestCase):
         if first["search_backend"] == "sqlite-fts":
             self.assertTrue(first["fts_index_info"]["persistent"])
             self.assertFalse(first["fts_index_info"]["reused"])
-            self.assertTrue((wiki.parent / ".link-cache/page-fts-v1.sqlite").exists())
+            self.assertTrue((wiki.parent / ".link-cache/page-fts-v2.sqlite").exists())
         close_wiki_cache(first)
 
         original_read_text = Path.read_text
@@ -564,3 +564,47 @@ class DuplicateStemLinkTests(unittest.TestCase):
                 )
             finally:
                 close_wiki_cache(cache)
+
+
+class UnicodeSearchTests(unittest.TestCase):
+    """Wiki full-text search must work outside English, and English must not move."""
+
+    def test_ascii_normalization_is_byte_identical_to_the_old_rule(self):
+        import re as _re
+        from link_core.search import _search_terms, normalized_search_text, search_words
+
+        def old_norm(v): return _re.sub(r"\s+", " ", _re.sub(r"[^a-z0-9]+", " ", str(v).lower())).strip()
+        def old_terms(v):
+            seen, out = set(), []
+            for w in _re.split(r"\W+", old_norm(v)):
+                if len(w) < 3 or w in seen:
+                    continue
+                seen.add(w)
+                out.append(w)
+            return out
+        for text in ["We deploy on Tuesdays only", "rebuild-backlinks dropped links!",
+                     "hit@1 0.589 vs 0.703", "snake_case_name and CamelCase", "don't ship on Fridays"]:
+            self.assertEqual(normalized_search_text(text), old_norm(text), text)
+            self.assertEqual(_search_terms(text), old_terms(text), text)
+            self.assertEqual(search_words(text), set(old_terms(text)), text)
+
+    def test_non_latin_queries_produce_terms(self):
+        from link_core.search import _search_terms
+        self.assertTrue(_search_terms("火曜日 デプロイ"))
+        self.assertTrue(_search_terms("развертываем вторникам"))
+        self.assertIn("deploiement", _search_terms("déploiement"))
+
+    def test_fts_finds_japanese_and_still_finds_english(self):
+        import sqlite3
+        from link_core.search import _FtsIndex, _populate_fts
+        pages = [
+            {"name": "deploy-ja", "title": "デプロイ方針", "type": "note", "category": "", "tldr": "", "aliases": [], "tags": []},
+            {"name": "deploy-en", "title": "Deploy policy", "type": "note", "category": "", "tldr": "", "aliases": [], "tags": []},
+        ]
+        fulltext = {"deploy-ja": "私たちは火曜日にのみデプロイします", "deploy-en": "we deploy on tuesdays only"}
+        conn = sqlite3.connect(":memory:")
+        _populate_fts(conn, pages, fulltext)
+        index = _FtsIndex(conn)
+        self.assertEqual(index.search("火曜日", 5), ["deploy-ja"])
+        self.assertEqual(index.search("デプロイ", 5)[0], "deploy-ja")
+        self.assertEqual(index.search("tuesdays", 5), ["deploy-en"])

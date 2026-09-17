@@ -50,6 +50,13 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
         primed = true
     }
 
+    /// A workspace switch means a different inbox: forget what was announced
+    /// so the first refresh seeds again instead of firing a banner per file.
+    func reprime() {
+        primed = false
+        announced = []
+    }
+
     /// Called on each refresh with the current inbox; notifies once per new
     /// capture path.
     func announceNewCaptures(_ captures: [CaptureItem]) {

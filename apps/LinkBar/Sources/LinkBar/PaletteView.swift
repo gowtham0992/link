@@ -18,6 +18,8 @@ struct PaletteView: View {
     /// overwrite the results of a newer one.
     @State private var recallGeneration = 0
     @State private var pendingDismiss: DispatchWorkItem?
+    /// Keyboard selection among the results; ↩ acts on this row.
+    @State private var selected = 0
 
     private var isRemember: Bool { text.hasPrefix("+") }
     private var payload: String {
@@ -58,6 +60,8 @@ struct PaletteView: View {
                 .font(.system(size: 17))
                 .focused($focused)
                 .onSubmit(commit)
+                .onKeyPress(.upArrow) { move(-1); return .handled }
+                .onKeyPress(.downArrow) { move(1); return .handled }
                 .onChange(of: text) { _, _ in
                     // Typing again revokes a scheduled auto-dismiss: the user
                     // has started a new query and the panel must stay open.
@@ -69,7 +73,7 @@ struct PaletteView: View {
             if searching {
                 ProgressView().controlSize(.small)
             }
-            Text(isRemember ? "return to save" : (results.isEmpty ? "" : "return to copy"))
+            Text(isRemember ? "return to save" : (results.isEmpty ? "" : "\u{2191}\u{2193} choose \u{00B7} return to copy"))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.tertiary)
         }
@@ -87,9 +91,9 @@ struct PaletteView: View {
                     confirm("Copied to clipboard")
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(index == 0 ? "\u{21A9}" : "\u{00B7}")
+                        Text(index == selected ? "\u{21A9}" : "\u{00B7}")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(index == 0 ? AnyShapeStyle(LinkBrand.rust) : AnyShapeStyle(.tertiary))
+                            .foregroundStyle(index == selected ? AnyShapeStyle(LinkBrand.rust) : AnyShapeStyle(.tertiary))
                             .frame(width: 12)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(memory.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
@@ -102,11 +106,18 @@ struct PaletteView: View {
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     .contentShape(Rectangle())
+                    .background(index == selected ? AnyShapeStyle(.quaternary.opacity(0.45)) : AnyShapeStyle(.clear))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.bottom, 6)
+    }
+
+    private func move(_ delta: Int) {
+        let count = min(results.count, 5)
+        guard count > 0 else { return }
+        selected = (selected + delta + count) % count
     }
 
     private var rememberHint: some View {
@@ -157,7 +168,7 @@ struct PaletteView: View {
         let work = DispatchWorkItem {
             store.paletteRecall(query) { mems, abst in
                 guard generation == recallGeneration else { return }  // stale response
-                results = mems; abstention = abst; searching = false
+                results = mems; abstention = abst; searching = false; selected = 0
             }
         }
         debounce = work
@@ -176,14 +187,13 @@ struct PaletteView: View {
                 }
                 if result.created == true {
                     confirm("Saved — pending your review")
-                } else if result.secret == true {
-                    confirm("Not saved — looks like a secret. Use a password manager.")
                 } else {
-                    confirm("Not saved — a similar or conflicting memory exists.")
+                    confirm(result.refusal)
                 }
             }
-        } else if let top = results.first {
-            store.copyText(top.tldr ?? top.title)
+        } else if !results.isEmpty {
+            let chosen = results[min(selected, results.count - 1)]
+            store.copyText(chosen.tldr ?? chosen.title)
             confirm("Copied to clipboard")
         }
     }

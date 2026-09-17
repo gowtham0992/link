@@ -130,18 +130,29 @@ struct Abstention: Decodable {
     let reason: String?
 }
 
+/// Whether default recall will hand this memory to an agent, and why not.
+struct RecallGate: Decodable {
+    let state: String
+    let reason: String?
+
+    var isReady: Bool { state == "ready" }
+}
+
 struct RecalledMemory: Decodable, Identifiable {
     let name: String
     let title: String
     let memoryType: String?
     let confidence: String?
     let tldr: String?
+    let reviewStatus: String?
+    let recall: RecallGate?
 
     var id: String { name }
 
     enum CodingKeys: String, CodingKey {
-        case name, title, confidence, tldr
+        case name, title, confidence, tldr, recall
         case memoryType = "memory_type"
+        case reviewStatus = "review_status"
     }
 }
 
@@ -170,7 +181,40 @@ struct StatusPayload: Decodable {
 struct RememberResult: Decodable {
     let created: Bool
     let secret: Bool?
+    let duplicate: Bool?
+    let conflict: Bool?
     let message: String?
+
+    /// Why nothing was saved, in the CLI's own terms rather than a guess.
+    var refusal: String {
+        if secret == true { return "Not saved \u{2014} that looks like a secret. Use a password manager." }
+        if conflict == true { return "Not saved \u{2014} it contradicts an existing memory. Review that one first." }
+        if duplicate == true { return "Not saved \u{2014} a similar memory already exists." }
+        return message.map { "Not saved \u{2014} \($0)" } ?? "Not saved."
+    }
+}
+
+/// `lnk stale --repo <dir> --json`: active memories that name files the
+/// repository no longer has. Read-only; the report is a question for you.
+struct StaleReport: Decodable {
+    struct Finding: Decodable {
+        let path: String
+        let successor: String?
+    }
+    struct Memory: Decodable, Identifiable {
+        let name: String
+        let title: String
+        let findings: [Finding]
+        let lines: [String]
+        var id: String { name }
+    }
+    let repo: String
+    let checked: Int
+    let flagged: Int
+    let memories: [Memory]
+
+    var repoName: String { (repo as NSString).lastPathComponent }
+    var names: Set<String> { Set(memories.map(\.name)) }
 }
 
 /// `lnk explain-memory --json`: why Link believes a memory — provenance,
@@ -321,6 +365,8 @@ struct SurfaceHealth: Identifiable {
 struct AgentSession: Identifiable {
     let project: String
     let lastActive: Date
+    /// The repository the agent is working in, when the transcript says.
+    let cwd: String?
 
     var id: String { project }
     var minutesAgo: Int { max(0, Int(Date().timeIntervalSince(lastActive) / 60)) }
@@ -362,7 +408,8 @@ struct MemoryPage: Identifiable {
                     let key = line[..<colon].trimmingCharacters(in: .whitespaces)
                     var value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
                     value = value.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                    meta[key] = value
+                    // YAML-quoted titles escape inner quotes; show them plain.
+                    meta[key] = value.replacingOccurrences(of: "\\\"", with: "\"")
                 }
                 body = parts.dropFirst().joined(separator: "\n---")
                     .trimmingCharacters(in: .whitespacesAndNewlines)

@@ -10,6 +10,17 @@ uses only its third-party ground truth — no LLM, no judging, no generation:
 - we measure whether Link's ranking returns the annotated evidence turns
   (any-evidence hit@k and evidence recall@k), lexical vs hybrid.
 
+Both precision and recall are reported, because recall alone cannot tell a
+system that retrieves cleanly from one that returns everything. A store dump
+scores 1.0 recall by construction while carrying almost pure noise, so this
+track prints that strategy's precision next to Link's as the reference point
+(see arXiv 2605.11325 on answer-quality benchmarks concealing precision).
+
+Raw precision@k is uninterpretable without its ceiling: LoCoMo's evidence sets
+average ~1.5 turns, so precision@10 cannot exceed ~0.15 for any system. The
+ceiling is reported alongside. R-precision (precision at k = |gold|) is the
+figure to compare across systems, since it does not depend on a chosen k.
+
 This is NOT the LoCoMo QA task (no answers are generated or scored), so the
 numbers are not comparable to end-to-end LLM QA scores quoted elsewhere; it
 isolates the retrieval stage with third-party queries and third-party gold
@@ -133,6 +144,13 @@ def main() -> int:
     any_hits = {1: 0, 5: 0, k: 0}
     evidence_recall: list[float] = []
     latencies: list[float] = []
+    # Precision track. Recall alone cannot separate a system that retrieves
+    # cleanly from one that returns everything, so both are reported together.
+    precision: dict[int, list[float]] = {1: [], 5: [], k: []}
+    precision_ceiling: dict[int, list[float]] = {1: [], 5: [], k: []}
+    r_precision: list[float] = []
+    dump_precision: list[float] = []
+    gold_sizes: list[int] = []
 
     with tempfile.TemporaryDirectory() as temp:
         for index, sample in enumerate(samples):
@@ -155,6 +173,22 @@ def main() -> int:
                     if gold & set(names[:cutoff]):
                         any_hits[cutoff] += 1
                 evidence_recall.append(len(gold & set(names[:k])) / len(gold))
+                for cutoff in precision:
+                    window = names[:cutoff]
+                    precision[cutoff].append(len(gold & set(window)) / cutoff)
+                    # The best precision@cutoff any system could reach on this
+                    # query: gold sets smaller than the cutoff cap it below 1.
+                    precision_ceiling[cutoff].append(min(len(gold), cutoff) / cutoff)
+                # R-precision: precision at cutoff = |gold|, comparable across
+                # systems because it does not depend on a chosen k. Taking the
+                # prefix of the ranked list is exact here - a top-n request
+                # returns the same prefix - so it costs no extra retrieval.
+                r_precision.append(len(gold & set(names[:len(gold)])) / len(gold))
+                # The strategy answer-quality benchmarks reward: return the
+                # whole store. Recall is 1.0 by construction; this is what it
+                # costs in precision.
+                dump_precision.append(len(gold) / max(1, len(records)))
+                gold_sizes.append(len(gold))
                 total_queries += 1
 
     report = {
@@ -167,6 +201,16 @@ def main() -> int:
         "any_evidence_hit@5": round(any_hits[5] / total_queries, 4),
         f"any_evidence_hit@{k}": round(any_hits[k] / total_queries, 4),
         f"evidence_recall@{k}": round(statistics.fmean(evidence_recall), 4),
+        "precision@1": round(statistics.fmean(precision[1]), 4),
+        "precision@5": round(statistics.fmean(precision[5]), 4),
+        f"precision@{k}": round(statistics.fmean(precision[k]), 4),
+        "precision_ceiling@1": round(statistics.fmean(precision_ceiling[1]), 4),
+        "precision_ceiling@5": round(statistics.fmean(precision_ceiling[5]), 4),
+        f"precision_ceiling@{k}": round(statistics.fmean(precision_ceiling[k]), 4),
+        "r_precision": round(statistics.fmean(r_precision), 4),
+        "mean_gold_size": round(statistics.fmean(gold_sizes), 4),
+        "dump_everything_precision": round(statistics.fmean(dump_precision), 6),
+        "dump_everything_recall": 1.0,
         "latency_ms_p50": round(statistics.median(latencies), 2),
         "latency_ms_mean": round(statistics.fmean(latencies), 2),
     }

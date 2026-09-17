@@ -6,7 +6,7 @@ that leaves the cache open still cleans up locally - on Windows the same
 test fails at `TemporaryDirectory` teardown with
 
     PermissionError: [WinError 32] The process cannot access the file
-    because it is being used by another process: ...page-fts-v1.sqlite
+    because it is being used by another process: ...page-fts-v2.sqlite
 
 which is a platform-only failure invisible to everyone developing on
 macOS or Linux. Using this context manager makes the close automatic, so

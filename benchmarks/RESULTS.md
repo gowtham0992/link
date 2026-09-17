@@ -118,6 +118,43 @@ third-party queries and third-party gold labels.
 | evidence recall@10 | 0.560 | **0.660** |
 | latency p50 / mean | 28 ms | 58 ms / 75 ms |
 
+### Precision: what recall alone cannot show
+
+Recall is the number this category publishes. It cannot separate a system that
+retrieves cleanly from one that returns everything, because returning
+everything scores 1.0 by construction. Measured on the same 1,536 third-party
+queries:
+
+| strategy | precision | evidence recall |
+|---|---|---|
+| return the whole store (588 turn-memories) | 0.0026 | **1.0000** |
+| Link, lexical, top-1 | **0.2663** | 0.2394 |
+| Link, fast tier, top-1 | **0.3086** | 0.2672 |
+
+A store dump wins recall outright and carries 0.26% signal. Link's top-1 packet
+carries ~117x that precision on the fast tier, and takes a real recall loss for
+it. Both halves belong in the table.
+
+Raw precision@k needs its ceiling to be readable: LoCoMo evidence sets average
+1.53 turns, so no system can exceed precision@10 of 0.152.
+
+| metric | lexical | fast tier | ceiling |
+|---|---|---|---|
+| precision@1 | 0.2663 | **0.3086** | 1.0000 |
+| precision@5 | 0.1141 | **0.1207** | 0.2958 |
+| precision@10 | 0.0683 | **0.0757** | 0.1521 |
+| % of ceiling @10 | 44.9% | **49.8%** | - |
+| R-precision | 0.2598 | **0.2855** | 1.0000 |
+
+R-precision (precision at k = |gold|) is the figure to compare across systems:
+it does not depend on a chosen k. The quality tier is not measured here yet -
+its model is a separate opt-in download.
+
+Method note: this reports the retrieval stage only, with no LLM and no judging,
+which is what makes precision measurable at all. Answer-quality benchmarks
+cannot expose this gap, since a noisy candidate set still lets the model
+recover the answer (arXiv 2605.11325).
+
 **Context-window records.** Each turn record carries its ±1 dialogue
 neighbors in the record's `context` field — retrieval text that is not part
 of the memory's claim (echo/duplicate/conflict checks and recall output

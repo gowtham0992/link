@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
+import unicodedata
 import urllib.parse
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
@@ -120,14 +122,54 @@ BacklinkRebuilder = Callable[[], bool]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+def _slug_fold(value: str) -> str:
+    """Fold a title for use as a filename, keeping every script readable.
+
+    Same rules as the tokenizer: lowercase, Latin accents removed so "Zürich"
+    files as zurich, combining marks in Indic and other scripts kept because
+    they are vowels, everything that is not a letter, digit, or mark becomes a
+    separator. Han, kana, Hangul, Cyrillic, Arabic and the rest survive as
+    themselves; a Japanese title becomes a Japanese filename.
+    """
+    lowered = value.lower()
+    for source, replacement in _TOKEN_FOLD_PAIRS.items():
+        if source in lowered:
+            lowered = lowered.replace(source, replacement)
+    out: list[str] = []
+    base_is_latin = False
+    for character in unicodedata.normalize("NFKD", lowered):
+        if unicodedata.category(character) in _TOKEN_MARKS:
+            if not base_is_latin:
+                out.append(character)
+            continue
+        if character.isalnum():
+            base_is_latin = character.isascii()
+            out.append(character)
+            continue
+        base_is_latin = False
+        out.append("-")
+    return _compose("".join(out))
+
+
 def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    if len(slug) > max_len:
-        # Cap for filesystem limits (255-byte filenames); cut at a word
-        # boundary so truncated slugs stay readable.
-        head = slug[:max_len]
+    """Filename-safe name for a memory page.
+
+    ASCII titles keep their exact historical slugs. Titles in other scripts
+    used to slug to nothing and land on the bare fallback, so every non-Latin
+    memory was called memory.md and the second one was refused as a duplicate
+    of the first. They now keep their own script (accents folded for Latin).
+    """
+    if value.isascii():
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    else:
+        slug = re.sub(r"-+", "-", _slug_fold(value)).strip("-")
+    if len(slug.encode("utf-8")) > max_len:
+        # Cap in bytes for filesystem limits (255-byte filenames; a CJK
+        # character is three bytes); cut at a word boundary so truncated
+        # slugs stay readable.
+        head = slug.encode("utf-8")[:max_len].decode("utf-8", "ignore")
         slug = head.rsplit("-", 1)[0] if "-" in head else head
-    return slug or fallback
+    return slug.strip("-") or fallback
 
 
 def normalize_project(value: str | None) -> str:
@@ -170,12 +212,130 @@ def memory_title(text: str, explicit_title: str | None = None) -> str:
     return first_sentence[:67].rstrip() + "..."
 
 
+# Letters carrying no Unicode decomposition that still need a Latin
+# equivalent, so "Größe" and "grosse" reach the same token.
+_TOKEN_FOLD_PAIRS = {
+    "ß": "ss", "æ": "ae", "œ": "oe", "ø": "o",
+    "đ": "d", "ł": "l", "ð": "d", "þ": "th", "ı": "i",
+}
+_TOKEN_MARKS = {"Mn", "Mc"}
+_ASCII_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _token_unspaced(character: str) -> bool:
+    """Scripts written without spaces between words.
+
+    Han and kana, plus Thai, Lao, Tibetan, Myanmar, and Khmer. A sentence in
+    any of these arrives as one run, so it is segmented into bigrams rather
+    than kept as a single token nothing could ever match.
+    """
+    code = ord(character)
+    return (
+        0x0E00 <= code <= 0x0EFF      # Thai, Lao
+        or 0x0F00 <= code <= 0x0FFF   # Tibetan
+        or 0x1000 <= code <= 0x109F   # Myanmar
+        or 0x1780 <= code <= 0x17FF   # Khmer
+        or 0x3040 <= code <= 0x30FF   # kana
+        or 0x3400 <= code <= 0x4DBF   # CJK ext A
+        or 0x4E00 <= code <= 0x9FFF   # CJK unified
+        or 0xF900 <= code <= 0xFAFF   # CJK compatibility
+    )
+
+
+def _compose(value: str) -> str:
+    """Recompose a token after NFKD.
+
+    NFKD splits Hangul syllables into conjoining jamo, so a Korean word would
+    be stored decomposed. Retrieval would still match, since queries decompose
+    the same way, but the tokens belong in the form a person would recognise.
+    """
+    return unicodedata.normalize("NFC", value)
+
+
+def _unicode_memory_tokens(value: str) -> set[str]:
+    """Tokenize text that is not plain ASCII.
+
+    Three things go wrong if this is skipped, and all three are invisible to
+    anyone working in English:
+
+    - Scripts without spaces (Han, kana) never split, so a whole sentence
+      becomes one token that no query can match. They are cut into overlapping
+      character bigrams instead - the dictionary-free approach Lucene's
+      CJKAnalyzer and Elasticsearch's built-in cjk analyzer take, so
+      "java C1C2C3C4" becomes java, C1C2, C2C3, C3C4. Hangul is left as whole
+      words since Korean is written with spaces.
+    - Accents make a word unfindable by its unaccented spelling, so
+      "déploiement" and "deploiement" are different tokens. Latin accents are
+      folded away. Combining marks in Indic and other scripts are vowels, not
+      accents, and are kept - stripping them turns "मंगलवार" into "गलव".
+    - The three-character floor is an English heuristic. Other scripts pack a
+      word into one or two characters, so it would erase them wholesale.
+    """
+    lowered = value.lower()
+    for source, replacement in _TOKEN_FOLD_PAIRS.items():
+        if source in lowered:
+            lowered = lowered.replace(source, replacement)
+    tokens: set[str] = set()
+    buffer: list[str] = []
+    base_is_latin = False
+
+    def flush() -> None:
+        if not buffer:
+            return
+        run = "".join(buffer)
+        buffer.clear()
+        cursor = 0
+        while cursor < len(run):
+            if _token_unspaced(run[cursor]):
+                end = cursor
+                while end < len(run) and _token_unspaced(run[end]):
+                    end += 1
+                block = run[cursor:end]
+                if len(block) == 1:
+                    tokens.add(_compose(block))
+                else:
+                    tokens.update(
+                        _compose(block[index:index + 2]) for index in range(len(block) - 1)
+                    )
+                cursor = end
+                continue
+            end = cursor
+            while end < len(run) and not _token_unspaced(run[end]):
+                end += 1
+            chunk = _compose(run[cursor:end])
+            if len(chunk) >= (3 if chunk.isascii() else 2):
+                tokens.add(chunk)
+            cursor = end
+
+    for character in unicodedata.normalize("NFKD", lowered):
+        if unicodedata.category(character) in _TOKEN_MARKS:
+            if not base_is_latin:
+                buffer.append(character)
+            continue
+        if character.isalnum():
+            base_is_latin = character.isascii()
+            buffer.append(character)
+            continue
+        flush()
+        base_is_latin = False
+    flush()
+    return tokens
+
+
+# Shared with wiki full-text search, which must segment text the same way.
+unicode_memory_tokens = _unicode_memory_tokens
+
+
 def memory_tokens(value: str) -> set[str]:
-    return {
-        token
-        for token in re.split(r"[^a-z0-9]+", value.lower())
-        if len(token) >= 3
-    }
+    # ASCII text needs no folding, no mark handling, and no segmentation, so
+    # it keeps the original path: byte-identical tokens, no added cost.
+    if value.isascii():
+        return {
+            token
+            for token in _ASCII_TOKEN_SPLIT.split(value.lower())
+            if len(token) >= 3
+        }
+    return _unicode_memory_tokens(value)
 
 
 def compact_memory_text(value: str) -> str:
@@ -2377,7 +2537,12 @@ def memory_temporal_boost(record: Mapping[str, object]) -> int:
     return boost
 
 
-def memory_rank_score(record: Mapping[str, object], match_score: int, project: str | None = None) -> int:
+def memory_rank_score(
+    record: Mapping[str, object],
+    match_score: int,
+    project: str | None = None,
+    salience: Mapping[str, int] | None = None,
+) -> int:
     rank_score = match_score
     project_name = normalize_project(project)
     record_scope = str(record.get("scope") or "").lower()
@@ -2385,6 +2550,10 @@ def memory_rank_score(record: Mapping[str, object], match_score: int, project: s
     if project_name and record_scope == "project" and record_project == project_name:
         rank_score += 6
     rank_score += memory_temporal_boost(record)
+    if salience:
+        # Bounded on purpose: usage separates near-equals, it does not outrank
+        # a better match. See usage.usage_salience.
+        rank_score += salience.get(str(record.get("name") or ""), 0)
     return max(1, rank_score)
 
 
@@ -2437,6 +2606,7 @@ def recall_memories(
     include_archived: bool = False,
     project: str | None = None,
     semantic_scores: Mapping[str, Mapping[str, float]] | None = None,
+    salience: Mapping[str, int] | None = None,
     context_path: str | None = None,
     as_of: str | None = None,
     memory_type: str | None = None,
@@ -2468,7 +2638,7 @@ def recall_memories(
         score = lexical_score + semantic_match_points(semantic_match)
         if score >= MEMORY_RECALL_MIN_SCORE:
             lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
-            rank_score = memory_rank_score(record, score, project=project_name)
+            rank_score = memory_rank_score(record, score, project=project_name, salience=salience)
             applicability = memory_applicability(
                 record, query=q, project=project_name, context_path=context_path
             )
@@ -2713,7 +2883,9 @@ def memory_duplicate_candidates(
     limit: int = 3,
 ) -> list[dict[str, object]]:
     title_value = memory_title(text, title)
-    new_slug = slugify(title_value)
+    # Empty fallback: a title that slugs to nothing (emoji-only, say) must not
+    # read as "the same slug" as every other such memory.
+    new_slug = slugify(title_value, fallback="")
     new_title = compact_memory_text(title_value)
     new_body = compact_memory_text(text)
     new_tokens = memory_tokens(f"{title_value} {text}")
@@ -2731,7 +2903,7 @@ def memory_duplicate_candidates(
         record_text = compact_memory_text(memory_claim_text(record))
         record_tokens = memory_tokens(record_text)
 
-        if str(record.get("name") or "") == new_slug:
+        if new_slug and str(record.get("name") or "") == new_slug:
             score = max(score, 100)
             reasons.append("same_slug")
         if new_title and record_title == new_title:
@@ -3574,6 +3746,34 @@ def propose_memories_from_text(
 ) -> dict[str, object]:
     record_list = [dict(record) for record in records]
     project_name = normalize_project(project)
+    # Structured documentation is recognised by its shape, never by a substring.
+    # A text that merely *mentions* "source_type: documentation_export" - a note
+    # about configuring Link, an agent session discussing this feature - must
+    # still yield its proposals. So the guard fires only for an export file
+    # (first record is JSON carrying the export schema) or a rendered export
+    # page (frontmatter declares the source type). Both are position-free.
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    structured_documentation = False
+    if first_line.startswith("{"):
+        try:
+            first_record = json.loads(first_line)
+        except json.JSONDecodeError:
+            first_record = {}
+        structured_documentation = str(first_record.get("schema") or "").endswith("documentation-graph-export/v1")
+    elif text.lstrip().startswith("---"):
+        meta, _ = parse_frontmatter(text)
+        structured_documentation = str(meta.get("source_type") or "") == "documentation_export"
+    if structured_documentation and not curated:
+        return {
+            "proposed": True,
+            "source": source,
+            "project": project_name,
+            "count": 0,
+            "skipped_count": 0,
+            "proposals": [],
+            "writes_memory": writes_memory,
+            "blocked_reason": "structured documentation belongs in the wiki; select or curate user-specific claims before proposing memory",
+        }
     excluded = set(exclude_fingerprints)
     proposals: list[dict[str, object]] = []
     seen: set[str] = set()

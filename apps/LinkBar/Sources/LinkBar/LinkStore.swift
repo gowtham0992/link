@@ -38,7 +38,19 @@ final class LinkStore: ObservableObject {
     @Published var memories: [MemoryPage] = []
     /// explain-memory payloads keyed by memory name, fetched on row expand.
     @Published var explanations: [String: MemoryExplanation] = [:]
+    /// Memories naming files the agent's repository no longer has (lnk stale).
+    @Published var stale: StaleReport?
+    /// The stale probe ran against a live CLI and got nothing back: that CLI
+    /// predates `lnk stale` (3.0). Say so instead of "checking…" forever.
+    @Published var staleUnsupported = false
+    /// Set by a status-row Fix to steer the popover (e.g. to the stale filter).
+    @Published var requestedTab: PopoverView.Tab?
+    @Published var memoryFilterStale = false
+    /// Published copy of LinkCLI.workspace so Settings and the footer update
+    /// the moment the workspace changes.
+    @Published var workspacePath: String = LinkCLI.workspace
     private var lastHealthAt = Date.distantPast
+    private let staleRepoKey = "LinkStaleRepo"
 
     var pendingCount: Int {
         (inbox?.reviewCount ?? 0) + (captures?.count ?? 0)
@@ -118,23 +130,43 @@ final class LinkStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 
+    /// One CLI read off the main actor; nil on any failure (missing lnk,
+    /// version skew, bad JSON) so a single broken surface never blanks the rest.
+    nonisolated private static func fetch<T: Decodable>(_ type: T.Type, _ args: [String]) async -> T? {
+        await Task.detached(priority: .userInitiated) { try? LinkCLI.runJSON(type, args) }.value
+    }
+
+    /// --proposals ships with lnk 2.2.1; against an older CLI the flag is an
+    /// argparse error, so fall back to the capped preview rather than showing
+    /// an empty inbox on version skew.
+    nonisolated private static func fetchCaptures(_ workspace: String) async -> CaptureInbox? {
+        if let full = await fetch(CaptureInbox.self, ["capture-inbox", workspace, "--json", "--proposals", "50"]) {
+            return full
+        }
+        return await fetch(CaptureInbox.self, ["capture-inbox", workspace, "--json"])
+    }
+
     func refresh() {
         busy = true
+        let workspace = LinkCLI.workspace
         Task.detached(priority: .userInitiated) {
-            let workspace = LinkCLI.workspace
-            let inbox = try? LinkCLI.runJSON(MemoryInbox.self, ["memory-inbox", workspace, "--json"])
-            // --proposals ships with lnk 2.2.1; against an older CLI the flag
-            // is an argparse error, so fall back to the capped preview rather
-            // than showing an empty inbox on version skew.
-            let captures = (try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json", "--proposals", "50"]))
-                ?? (try? LinkCLI.runJSON(CaptureInbox.self, ["capture-inbox", workspace, "--json"]))
-            let log = try? LinkCLI.runJSON(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
-            let status = try? LinkCLI.runJSON(StatusPayload.self, ["status", workspace, "--json"])
-            let handoffs = try? LinkCLI.runJSON(HandoffsPayload.self, ["handoffs", workspace, "--json"])
+            // Every lnk call is a Python start-up. Run one after another, the
+            // five reads made each refresh a second or more of spinner; run
+            // together they cost about one call.
+            async let inboxRead = Self.fetch(MemoryInbox.self, ["memory-inbox", workspace, "--json"])
+            async let capturesRead = Self.fetchCaptures(workspace)
+            async let logRead = Self.fetch(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
+            async let statusRead = Self.fetch(StatusPayload.self, ["status", workspace, "--json"])
+            async let handoffsRead = Self.fetch(HandoffsPayload.self, ["handoffs", workspace, "--json"])
             let sessions = Self.scanAgentSessions()
             let memories = MemoryPage.load(from: workspace)
+            let (inbox, captures, log, status, handoffs) = await (inboxRead, capturesRead, logRead, statusRead, handoffsRead)
             await MainActor.run {
+                // A refresh that began before a workspace switch must not
+                // paint the old workspace over the new one.
+                guard workspace == LinkCLI.workspace else { return }
                 self.activeSessions = sessions
+                self.rememberStaleRepo(from: sessions)
                 self.memories = memories
                 if inbox == nil && captures == nil {
                     self.lastError = "Could not reach lnk — is Link installed? (brew install gowtham0992/link/link)"
@@ -176,24 +208,84 @@ final class LinkStore: ObservableObject {
         if due { await fetchHealth() }
     }
 
+    private struct HealthSnapshot {
+        var mcp: MCPVerify?
+        var semantic: SemanticStatus?
+        var hooks: Bool
+        var viewer: Bool
+        var digest: DigestPayload?
+        var sync: SyncStatus?
+        var stale: StaleReport?
+    }
+
+    /// Every health probe, concurrently and off the main actor. This used to
+    /// run inside the @MainActor class, so each Python probe blocked the UI
+    /// for its full duration - the popover froze for a second or two on
+    /// every Status refresh.
+    nonisolated private static func probeHealth(workspace: String, staleRepo: String?) async -> HealthSnapshot {
+        async let mcp = fetch(MCPVerify.self, ["verify-mcp", workspace, "--json"])
+        async let semantic = fetch(SemanticStatus.self, ["semantic", workspace, "--json"])
+        async let digest = fetch(DigestPayload.self, ["digest", workspace, "--json"])
+        async let sync = fetch(SyncStatus.self, ["sync", workspace, "--status", "--json"])
+        async let stale = fetchStale(workspace, repo: staleRepo)
+        let hooks = claudeHooksAreWired()
+        let viewer = await viewerResponds()
+        return await HealthSnapshot(mcp: mcp, semantic: semantic, hooks: hooks, viewer: viewer,
+                                    digest: digest, sync: sync, stale: stale)
+    }
+
+    nonisolated private static func fetchStale(_ workspace: String, repo: String?) async -> StaleReport? {
+        guard let repo else { return nil }
+        return await fetch(StaleReport.self, ["stale", workspace, "--repo", repo, "--json"])
+    }
+
     private func fetchHealth() async {
         let workspace = LinkCLI.workspace
-        let mcp = try? LinkCLI.runJSON(MCPVerify.self, ["verify-mcp", workspace, "--json"])
-        let semantic = try? LinkCLI.runJSON(SemanticStatus.self, ["semantic", workspace, "--json"])
-        let hooks = Self.claudeHooksAreWired()
-        let viewer = await Self.viewerResponds()
-        let digest = try? LinkCLI.runJSON(DigestPayload.self, ["digest", workspace, "--json"])
-        let syncState = try? LinkCLI.runJSON(SyncStatus.self, ["sync", workspace, "--status", "--json"])
-        await MainActor.run {
-            self.mcp = mcp ?? self.mcp
-            self.semantic = semantic ?? self.semantic
-            self.digest = digest ?? self.digest
-            self.syncState = syncState ?? self.syncState
-            if let digest { NotificationManager.shared.announceWeeklyDigest(digest) }
-            self.claudeHooksWired = hooks
-            self.viewerRunning = viewer
-            self.lastHealthAt = Date()
+        let repo = staleRepo
+        let snapshot = await Self.probeHealth(workspace: workspace, staleRepo: repo)
+        guard workspace == LinkCLI.workspace else { return }
+        mcp = snapshot.mcp ?? mcp
+        semantic = snapshot.semantic ?? semantic
+        digest = snapshot.digest ?? digest
+        syncState = snapshot.sync ?? syncState
+        stale = repo == nil ? nil : (snapshot.stale ?? stale)
+        staleUnsupported = repo != nil && snapshot.stale == nil && stale == nil && snapshot.semantic != nil
+        if let digest = snapshot.digest { NotificationManager.shared.announceWeeklyDigest(digest) }
+        claudeHooksWired = snapshot.hooks
+        viewerRunning = snapshot.viewer
+        lastHealthAt = Date()
+    }
+
+    // MARK: stale references (lnk stale)
+
+    /// The repository to check memories against: the one the most recent
+    /// live agent session is working in. Remembered so the check keeps
+    /// running after the session ends, and only when it is a git checkout -
+    /// lnk stale is inert anywhere else.
+    private var staleRepo: String? {
+        // Snapshot aid: LINKBAR_STALE_REPO pins the repository so the warn
+        // state can be rendered without a live agent session steering it.
+        if let pinned = ProcessInfo.processInfo.environment["LINKBAR_STALE_REPO"], !pinned.isEmpty {
+            return pinned
         }
+        return UserDefaults.standard.string(forKey: staleRepoKey)
+    }
+
+    private func rememberStaleRepo(from sessions: [AgentSession]) {
+        guard ProcessInfo.processInfo.environment["LINKBAR_STALE_REPO"] == nil,
+              let cwd = sessions.first?.cwd,
+              FileManager.default.fileExists(atPath: (cwd as NSString).appendingPathComponent(".git"))
+        else { return }
+        if cwd != staleRepo {
+            UserDefaults.standard.set(cwd, forKey: staleRepoKey)
+            lastHealthAt = .distantPast   // re-probe against the new repo soon
+        }
+    }
+
+    /// Steer the popover to the Memory tab, filtered to the stale memories.
+    func showStaleMemories() {
+        memoryFilterStale = true
+        requestedTab = .memory
     }
 
     /// Detect live agent sessions: a Claude Code project whose newest
@@ -210,19 +302,39 @@ final class LinkStore: ObservableObject {
             let dir = (root as NSString).appendingPathComponent(slug)
             guard let files = try? fm.contentsOfDirectory(atPath: dir) else { continue }
             var newest = Date.distantPast
+            var newestPath: String?
             for f in files where f.hasSuffix(".jsonl") {
                 let path = (dir as NSString).appendingPathComponent(f)
                 if let m = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date, m > newest {
                     newest = m
+                    newestPath = path
                 }
             }
             if now.timeIntervalSince(newest) < activeWindow {
-                // Slug is the full path with dashes; the tail is the repo name.
-                let project = slug.split(separator: "-").last.map(String.init) ?? slug
-                found.append(AgentSession(project: project, lastActive: newest))
+                // The transcript records the real working directory. The
+                // folder slug is the fallback: it is the path with every
+                // separator turned into a dash, so a repo called link-pr66
+                // would read as "pr66".
+                let cwd = newestPath.flatMap(transcriptCwd)
+                let project = cwd.map { ($0 as NSString).lastPathComponent }
+                    ?? slug.split(separator: "-").last.map(String.init) ?? slug
+                found.append(AgentSession(project: project, lastActive: newest, cwd: cwd))
             }
         }
         return found.sorted { $0.lastActive > $1.lastActive }
+    }
+
+    /// Claude Code writes `"cwd":"…"` on every turn; the first 64 KB of a
+    /// transcript is enough to find it without reading the whole file.
+    nonisolated private static func transcriptCwd(_ path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        let head = String(decoding: handle.readData(ofLength: 65_536), as: UTF8.self)
+        guard let start = head.range(of: "\"cwd\":\"") else { return nil }
+        let rest = head[start.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else { return nil }
+        let cwd = String(rest[..<end])
+        return cwd.hasPrefix("/") ? cwd : nil
     }
 
     /// Read Claude Code's settings.json directly to see whether Link's
@@ -305,6 +417,26 @@ final class LinkStore: ObservableObject {
                               fix: .init(label: "Wire") { [weak self] in self?.wireClaudeHooks() }))
         case .none:
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .info, detail: "checking…"))
+        }
+
+        // Stale references — memories that name files the repo no longer has.
+        // Shown once a repository is known; nothing to say before that.
+        if staleRepo != nil {
+            if let stale, stale.flagged > 0 {
+                let noun = stale.flagged == 1 ? "memory names" : "memories name"
+                rows.append(.init(icon: "clock.badge.exclamationmark", name: "Stale references", level: .warn,
+                                  detail: "\(stale.flagged) \(noun) files that moved in \(stale.repoName)",
+                                  sub: Array(stale.memories.prefix(3).map { "\($0.title) \u{00B7} \($0.lines.first ?? "")" }),
+                                  fix: .init(label: "Show") { [weak self] in self?.showStaleMemories() }))
+            } else if let stale {
+                rows.append(.init(icon: "clock.badge.checkmark", name: "Stale references", level: .ok,
+                                  detail: "none \u{00B7} \(stale.checked) memories checked against \(stale.repoName)"))
+            } else if staleUnsupported {
+                rows.append(.init(icon: "clock.badge.questionmark", name: "Stale references", level: .info,
+                                  detail: "needs Link 3.0 \u{00B7} lnk \(linkVersion.isEmpty ? "?" : linkVersion) has no stale check"))
+            } else {
+                rows.append(.init(icon: "clock.badge.checkmark", name: "Stale references", level: .info, detail: "checking\u{2026}"))
+            }
         }
 
         // Memory in use — the honest answer to "are my agents reading this?"
@@ -429,17 +561,19 @@ final class LinkStore: ObservableObject {
 
     /// Approve: mark the memory reviewed. The gate, one click.
     func markReviewed(_ item: InboxItem) {
-        act(["review-memory", item.name, LinkCLI.workspace])
+        act(["review-memory", item.name, LinkCLI.workspace], success: "Marked reviewed.")
     }
 
     /// Reject: archive the memory (never silent deletion).
     func archive(_ item: InboxItem) {
-        act(["archive-memory", item.name, LinkCLI.workspace])
+        act(["archive-memory", item.name, LinkCLI.workspace],
+            success: "Archived \u{2014} restore any time from the Memory tab.")
     }
 
     /// Accept a session capture proposal into the reviewed memory flow.
     func acceptCapture(_ capture: CaptureItem, index: Int = 1) {
-        act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "\(index)"])
+        act(["accept-capture", capture.path, LinkCLI.workspace, "--index", "\(index)"],
+            success: "Accepted \u{2014} now pending your review.")
     }
 
     /// Why does Link believe this? Lazily fetched per memory when the row
@@ -459,21 +593,21 @@ final class LinkStore: ObservableObject {
 
     /// Archive/restore straight from the memory browser.
     func archiveMemory(named name: String) {
-        act(["archive-memory", name, LinkCLI.workspace])
+        act(["archive-memory", name, LinkCLI.workspace], success: "Archived.")
     }
 
     func restoreMemory(named name: String) {
-        act(["restore-memory", name, LinkCLI.workspace])
+        act(["restore-memory", name, LinkCLI.workspace], success: "Restored to active memory.")
     }
 
     /// Accept a capture from a notification banner (path only, first proposal).
     func acceptCaptureByPath(_ path: String) {
-        act(["accept-capture", path, LinkCLI.workspace, "--index", "1"])
-        showFlash("Accepted from notification.", tone: .success)
+        act(["accept-capture", path, LinkCLI.workspace, "--index", "1"], success: "Accepted from notification.")
     }
 
     func deleteCapture(_ capture: CaptureItem) {
-        act(["delete-capture", capture.path, LinkCLI.workspace, "--confirm"])
+        act(["delete-capture", capture.path, LinkCLI.workspace, "--confirm"],
+            success: "Capture discarded \u{2014} Link won't propose it again.")
     }
 
     /// Collapse inbox captures that offer nothing new (already pending in a
@@ -543,11 +677,8 @@ final class LinkStore: ObservableObject {
                 await MainActor.run {
                     if result.created {
                         self.showFlash("Saved — pending your review.", tone: .success)
-                    } else if result.secret == true {
-                        self.showFlash("Not saved — that looks like a secret. Use a password manager.", tone: .info)
-                        self.busy = false
                     } else {
-                        self.showFlash("Not saved — a similar or conflicting memory exists.", tone: .info)
+                        self.showFlash(result.refusal, tone: .info)
                         self.busy = false
                     }
                     self.refresh()
@@ -712,6 +843,48 @@ final class LinkStore: ObservableObject {
         NSWorkspace.shared.open(URL(fileURLWithPath: LinkCLI.workspace))
     }
 
+    // MARK: workspace selection
+
+    /// Settings → Choose…: pick the Link workspace with a folder panel.
+    func chooseWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use this workspace"
+        panel.message = "Pick a Link workspace \u{2014} the folder that contains wiki/."
+        panel.directoryURL = URL(fileURLWithPath: LinkCLI.workspace)
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setWorkspace(url.path)
+    }
+
+    /// Switch workspaces (nil returns to ~/link). Validated first: a folder
+    /// without wiki/ is not a Link workspace, and pointing every read at it
+    /// would only produce an inbox full of "could not reach lnk".
+    func setWorkspace(_ path: String?) {
+        if let path {
+            let wiki = (path as NSString).appendingPathComponent("wiki")
+            guard FileManager.default.fileExists(atPath: wiki) else {
+                showFlash("Not a Link workspace \u{2014} no wiki/ folder in \(LinkCLI.abbreviated(path)).", tone: .info)
+                return
+            }
+        }
+        LinkCLI.setWorkspace(path)
+        workspacePath = LinkCLI.workspace
+        inbox = nil; captures = nil; activity = []; memories = []; explanations = [:]
+        recallResults = []; searchedQuery = nil; abstention = nil
+        stats = nil; digest = nil; syncState = nil; handoffsWaiting = []; runtimeWarning = nil
+        mcp = nil; semantic = nil; stale = nil; staleUnsupported = false; lastError = nil
+        memoryFilterStale = false
+        lastHealthAt = .distantPast
+        NotificationManager.shared.reprime()
+        watchers = []
+        startWatching()
+        refresh()
+        showFlash("Now watching \(LinkCLI.abbreviated(LinkCLI.workspace)).", tone: .success)
+    }
+
     /// Open the full Memory Dashboard in the browser, starting the local
     /// viewer first if it is not already running (127.0.0.1 only — the
     /// viewer refuses to bind anywhere else by design).
@@ -767,12 +940,17 @@ final class LinkStore: ObservableObject {
         }
     }
 
-    private func act(_ args: [String]) {
+    /// Run a mutating command, then say what happened. A row that simply
+    /// vanishes after a click leaves the user guessing whether it worked.
+    private func act(_ args: [String], success: String? = nil) {
         busy = true
         Task.detached(priority: .userInitiated) {
             do {
                 _ = try LinkCLI.run(args)
-                await MainActor.run { self.refresh() }
+                await MainActor.run {
+                    if let success { self.showFlash(success, tone: .success) }
+                    self.refresh()
+                }
             } catch {
                 await MainActor.run {
                     self.lastError = String(describing: error)

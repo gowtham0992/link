@@ -1,4 +1,5 @@
 import sys
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import (  # noqa: E402
+    memory_rank_score,
+    memory_tokens,
     slugify,
     add_capture_review_to_brief,
     default_project_for_target,
@@ -701,6 +704,52 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertNotIn("release script", proposal["context"])
         self.assertEqual(proposal["primary_action"]["arguments"]["context"], proposal["context"])
         self.assertNotIn("--context", proposal["primary_action"]["command"])
+
+    def test_structured_documentation_does_not_propose_personal_memory(self):
+        export = "\n".join([
+            '{"record_type":"manifest","schema":"chezmoi-documentation-graph-export/v1"}',
+            '{"record_type":"page","markdown":"I like chezmoi. You should run apply."}',
+        ])
+
+        payload = propose_memories_from_text(export, [], source="raw/docs.jsonl")
+
+        self.assertEqual(payload["count"], 0)
+        self.assertEqual(payload["proposals"], [])
+        self.assertIn("belongs in the wiki", payload["blocked_reason"])
+
+    def test_mentioning_documentation_export_does_not_block_a_capture(self):
+        # A capture about configuring Link is not a documentation export.
+        text = (
+            "We set source_type: documentation_export for the vendor docs bundle.\n"
+            "Also: from now on we always deploy on Tuesdays, never on Fridays."
+        )
+        payload = propose_memories_from_text(text, [], source="capture")
+        self.assertNotIn("blocked_reason", payload)
+        self.assertGreater(payload["count"], 0)
+
+    def test_the_guard_does_not_depend_on_where_the_phrase_falls(self):
+        # The old check looked at the first 2000 characters, so the same text
+        # blocked at position 1900 and passed at 2100.
+        for padding in (0, 130, 145):
+            text = ("I prefer tabs. " * padding) + "source_type: documentation_export"
+            payload = propose_memories_from_text(text, [], source="capture")
+            self.assertNotIn("blocked_reason", payload, f"padding={padding}")
+
+    def test_rendered_export_page_is_recognised_by_its_frontmatter(self):
+        page = (
+            "---\ntype: source\ntitle: \"Guide\"\nsource_type: documentation_export\n---\n\n"
+            "## Summary\n\nI like chezmoi. Always run apply first.\n"
+        )
+        payload = propose_memories_from_text(page, [], source="wiki/sources/guide.md")
+        self.assertEqual(payload["count"], 0)
+        self.assertIn("belongs in the wiki", payload["blocked_reason"])
+
+    def test_curated_structured_documentation_can_propose_selected_claims(self):
+        text = "source_type: documentation_export\n\n- We decided to keep Link local-first."
+
+        payload = propose_memories_from_text(text, [], source="selected.md", curated=True)
+
+        self.assertTrue(any(proposal["memory_type"] == "decision" for proposal in payload["proposals"]))
 
     def test_standing_rule_phrasings_propose_preferences(self):
         payload = propose_memories_from_text(
@@ -1440,6 +1489,64 @@ class SlugifyBoundsTests(unittest.TestCase):
         # short slugs unchanged
         self.assertEqual(slugify("My Cool Title"), "my-cool-title")
 
+    def test_ascii_titles_keep_their_historical_slugs(self):
+        for title in ("My Cool Title", "don't ship on Friday!", "v2.3.0 -- notes_here", "  spaced  "):
+            self.assertEqual(slugify(title), re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-"))
+
+    def test_titles_in_other_scripts_keep_their_script(self):
+        # Before 3.0 every one of these slugged to the bare fallback "memory".
+        self.assertEqual(slugify("東京のデプロイ曜日"), "東京のデプロイ曜日")
+        self.assertEqual(slugify("서울 배포 규칙"), "서울-배포-규칙")
+        self.assertEqual(slugify("Правило деплоя"), "правило-деплоя")
+        self.assertEqual(slugify("قاعدة النشر"), "قاعدة-النشر")
+        # Indic combining marks are vowels and must survive.
+        self.assertEqual(slugify("डिप्लॉय का दिन"), "डिप्लॉय-का-दिन")
+
+    def test_latin_accents_fold_so_filenames_stay_typeable(self):
+        self.assertEqual(slugify("Zürich Deploy-Regel"), "zurich-deploy-regel")
+        self.assertEqual(slugify("Ünïcödé Café Straße"), "unicode-cafe-strasse")
+
+    def test_slug_cap_is_in_bytes_for_multibyte_scripts(self):
+        slug = slugify("東京" * 60)
+        self.assertLessEqual(len(slug.encode("utf-8")), 80)
+        self.assertTrue(slug)
+
+    def test_untitleable_text_still_falls_back(self):
+        self.assertEqual(slugify("🎉🎉"), "memory")
+        self.assertEqual(slugify("🎉🎉", fallback=""), "")
+
+
+class NonLatinMemoriesDoNotCollideTests(unittest.TestCase):
+    def test_second_non_latin_memory_is_saved_not_refused_as_duplicate(self):
+        # The old slug fallback made both of these "memory", and the duplicate
+        # gate's same_slug rule then refused the second with score 100.
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            (wiki / "memories").mkdir(parents=True)
+            common = dict(memory_type="decision", scope="user", tags=None, source="unit test",
+                          timestamp="2026-09-02T06:00:00Z", log_writer=lambda *a: None, rebuild_backlinks=lambda: True)
+            first = write_memory_page(wiki, "東京オフィスでは毎週火曜日にデプロイする", title="東京のデプロイ曜日", records=[], **common)
+            self.assertTrue(first.get("created"), first)
+            records = memory_records(wiki)
+            second = write_memory_page(wiki, "हम हर मंगलवार को डिप्लॉय करते हैं", title="डिप्लॉय का दिन", records=records, **common)
+            self.assertTrue(second.get("created"), second)
+            names = sorted(p.stem for p in (wiki / "memories").glob("*.md"))
+            self.assertEqual(names, ["डिप्लॉय-का-दिन", "東京のデプロイ曜日"])
+            hits = recall_memories(memory_records(wiki), "मंगलवार डिप्लॉय", limit=3)
+            self.assertEqual([h.get("title") for h in hits][:1], ["डिप्लॉय का दिन"])
+
+    def test_emoji_only_titles_do_not_read_as_the_same_slug(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            (wiki / "memories").mkdir(parents=True)
+            common = dict(memory_type="note", scope="user", tags=None, source="unit test",
+                          timestamp="2026-09-02T06:00:00Z", log_writer=lambda *a: None, rebuild_backlinks=lambda: True)
+            first = write_memory_page(wiki, "Ship the party feature before the offsite", title="🎉", records=[], **common)
+            self.assertTrue(first.get("created"), first)
+            second = write_memory_page(wiki, "Retire the legacy billing cron next quarter", title="🚀", records=memory_records(wiki), **common)
+            self.assertTrue(second.get("created"), second)
+            self.assertEqual(sorted(p.stem for p in (wiki / "memories").glob("*.md")), ["memory", "memory-2"])
+
 
 class ProposalDurabilityRankingTests(unittest.TestCase):
     def test_concrete_rule_outranks_meta_preamble(self):
@@ -1928,3 +2035,94 @@ class TemporalExpressionTests(unittest.TestCase):
         self.assertFalse(memory_active_at(new, "2026-03-31"))
         self.assertFalse(memory_active_at(old, self.TODAY))
         self.assertTrue(memory_active_at(new, self.TODAY))
+
+
+class UnicodeTokenizerTests(unittest.TestCase):
+    """Recall must work outside English.
+
+    Before this, the tokenizer split on ``[^a-z0-9]+``, so every non-Latin
+    script produced zero tokens and its memories were unfindable with no error
+    to explain why. All fixtures here are synthetic.
+    """
+
+    def test_ascii_tokens_are_unchanged(self):
+        # The whole existing corpus is ASCII. If this moves, every current
+        # user's ranking moves with it.
+        for text, expected in [
+            ("We deploy on Tuesdays only", {"deploy", "tuesdays", "only"}),
+            ("snake_case name", {"snake", "case", "name"}),
+            ("hit@1 0.589 vs 0.703", {"hit", "589", "703"}),
+            ("rebuild-backlinks dropped links", {"rebuild", "backlinks", "dropped", "links"}),
+        ]:
+            self.assertEqual(memory_tokens(text), expected, text)
+
+    def test_scripts_without_spaces_are_segmented(self):
+        # Han and kana never split on whitespace, so the whole sentence used to
+        # collapse into a single unmatchable token.
+        japanese = memory_tokens("火曜日にのみデプロイします")
+        chinese = memory_tokens("我们只在星期二部署")
+        self.assertGreater(len(japanese), 5)
+        self.assertGreater(len(chinese), 4)
+        self.assertTrue(all(len(token) <= 2 for token in japanese))
+
+    def test_southeast_asian_scripts_are_segmented_too(self):
+        # Thai, Lao, Khmer, and Myanmar also write without word spaces.
+        for text in ["เราปรับใช้เฉพาะวันอังคาร", "ພວກເຮົາໃຊ້ວັນອັງຄານ", "យើងដាក់ពង្រាយថ្ងៃអង្គារ", "ကျွန်ုပ်တို့အင်္ဂါနေ့"]:
+            tokens = memory_tokens(text)
+            self.assertGreater(len(tokens), 3, text)
+            self.assertTrue(all(len(token) <= 2 for token in tokens), text)
+
+    def test_spaced_non_latin_scripts_keep_whole_words(self):
+        self.assertIn("вторникам", memory_tokens("мы развертываем по вторникам"))
+        self.assertIn("الثلاثاء", memory_tokens("ننشر يوم الثلاثاء فقط"))
+        self.assertIn("우리는", memory_tokens("우리는 화요일에만 배포합니다"))
+
+    def test_indic_vowel_marks_survive(self):
+        # These are combining marks but they are vowels, not accents. Stripping
+        # them the way Latin accents are stripped turns the word into rubble.
+        self.assertIn("मंगलवार", memory_tokens("हम केवल मंगलवार को तैनात"))
+        self.assertIn("நாங்கள்", memory_tokens("நாங்கள் செவ்வாய்"))
+
+    def test_latin_accents_fold_so_either_spelling_finds_the_memory(self):
+        for plain, accented in [
+            ("deploiement", "déploiement"),
+            ("implementacion", "implementación"),
+            ("uber", "über"),
+            ("grosse", "Größe"),
+            ("dagitim", "dağıtım"),
+        ]:
+            self.assertEqual(memory_tokens(plain), memory_tokens(accented), plain)
+
+    def test_non_latin_query_matches_its_memory(self):
+        for text in ["火曜日にのみデプロイします", "우리는 화요일에만 배포합니다", "мы развертываем по вторникам"]:
+            self.assertTrue(memory_tokens(text[:6]) & memory_tokens(text), text)
+
+
+class SalienceIsNotAdoptedTests(unittest.TestCase):
+    """Ranking must not become usage-aware without clearing the cold-memory bar.
+
+    scripts/eval_salience.py measured every ceiling from 1 to 4 and the cold
+    half regressed each time. These tests keep that decision from being undone
+    by accident.
+    """
+
+    def test_ranking_ignores_usage_by_default(self):
+        record = {"name": "n", "title": "t", "body": "b", "scope": "user"}
+        self.assertEqual(
+            memory_rank_score(record, 20),
+            memory_rank_score(record, 20, salience={"n": 4}) - 4,
+        )
+
+    def test_salience_stays_bounded_when_passed_explicitly(self):
+        from link_core.usage import SALIENCE_MAX_BOOST, usage_salience
+
+        events = [{"memories": ["a"]} for _ in range(500)]
+        boosts = usage_salience(events)
+        self.assertLessEqual(max(boosts.values(), default=0), SALIENCE_MAX_BOOST)
+
+    def test_a_memory_never_retrieved_is_not_penalised(self):
+        from link_core.usage import usage_salience
+
+        boosts = usage_salience([{"memories": ["read"]} for _ in range(9)])
+        self.assertNotIn("unread", boosts)
+        self.assertGreaterEqual(min(boosts.values(), default=0), 0)

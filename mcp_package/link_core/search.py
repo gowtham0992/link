@@ -12,22 +12,58 @@ except Exception:  # pragma: no cover - depends on the host Python build
 from typing import Any
 
 
+def _segment_non_ascii(text: str, ascii_transform) -> str:
+    """Apply `ascii_transform` to ASCII words; segment every other word.
+
+    Words are split on whitespace and handled whole. A word with any
+    non-ASCII character goes through the same tokenizer memory recall uses,
+    so "déploiement" folds to "deploiement" intact and a Japanese sentence
+    (one "word", since it has no spaces) becomes space-separated bigrams.
+    SQLite's unicode61 tokenizer then sees ordinary words and can match
+    them. Splitting on the ASCII boundary instead would cut "déploiement"
+    into d / é / ploiement and lose the word.
+    """
+    from .memory import unicode_memory_tokens
+
+    pieces: list[str] = []
+    for word in text.split():
+        if word.isascii():
+            pieces.append(ascii_transform(word))
+        else:
+            pieces.append(" ".join(sorted(unicode_memory_tokens(word))))
+    return " ".join(piece for piece in pieces if piece)
+
+
+def fts_index_text(value: object) -> str:
+    """Text as stored in the FTS index. ASCII pages are unchanged."""
+    text = str(value)
+    return text if text.isascii() else _segment_non_ascii(text, lambda run: run)
+
+
 def normalized_search_text(value: object) -> str:
     """Normalize punctuation differences so natural queries match page slugs."""
     text = str(value).lower()
-    text = re.sub(r"[^a-z0-9]+", " ", text)
+    if text.isascii():
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+    else:
+        text = _segment_non_ascii(text, lambda run: re.sub(r"[^a-z0-9]+", " ", run))
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _term_floor(word: str) -> int:
+    # Three characters is an English heuristic; a CJK bigram is a whole word.
+    return 3 if word.isascii() else 2
+
+
 def search_words(value: object) -> set[str]:
-    return {word for word in re.split(r"\W+", normalized_search_text(value)) if len(word) >= 3}
+    return {word for word in normalized_search_text(value).split() if len(word) >= _term_floor(word)}
 
 
 def _search_terms(value: object) -> list[str]:
     seen: set[str] = set()
     terms: list[str] = []
-    for word in re.split(r"\W+", normalized_search_text(value)):
-        if len(word) < 3 or word in seen:
+    for word in normalized_search_text(value).split():
+        if len(word) < _term_floor(word) or word in seen:
             continue
         seen.add(word)
         terms.append(word)
@@ -47,7 +83,12 @@ def _populate_fts(conn: Any, pages: list[dict[str, Any]], fulltext: dict[str, st
             " ".join(str(alias) for alias in page.get("aliases", [])),
             " ".join(str(tag) for tag in page.get("tags", [])),
         ])
-        rows.append((stem, str(page.get("title") or ""), metadata, fulltext.get(stem, "")))
+        rows.append((
+            stem,
+            fts_index_text(page.get("title") or ""),
+            fts_index_text(metadata),
+            fts_index_text(fulltext.get(stem, "")),
+        ))
     conn.executemany("INSERT INTO page_fts(name, title, metadata, body) VALUES (?, ?, ?, ?)", rows)
 
 

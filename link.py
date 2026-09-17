@@ -23,6 +23,7 @@ Usage:
   python link.py doctor [target]
   python link.py migrate [target]
   python link.py validate [target]
+  python link.py ingest <source> [target] --adapter <name> [--apply]
   python link.py ingest-status [target]
   python link.py import-obsidian <vault> [target]
   python link.py remember "memory text" [target]
@@ -139,6 +140,7 @@ from link_core.memory import (
     memory_audit_report as _core_memory_audit_report,
     memory_audit_next_actions as _core_memory_audit_next_actions,
     memory_records as _core_memory_records,
+    is_active_memory as _core_is_active_memory,
     memory_merge_candidates as _core_memory_merge_candidates,
     memory_review_issues as _core_memory_review_issues,
     parse_time_expression as _core_parse_time_expression,
@@ -293,6 +295,12 @@ from link_core.sync import (
 from link_core.ingest import (
     collect_ingest_status as _core_collect_ingest_status,
     render_ingest_status_text as _core_render_ingest_status_text,
+)
+from link_core.structured_ingest import (
+    StructuredIngestError as _CoreStructuredIngestError,
+    apply_structured_ingest as _core_apply_structured_ingest,
+    plan_structured_ingest as _core_plan_structured_ingest,
+    render_structured_ingest_text as _core_render_structured_ingest_text,
 )
 from link_core.log import (
     append_log as _core_append_log,
@@ -559,6 +567,9 @@ def _query_link(wiki_dir: Path, query: str, budget: str = "medium", project: str
             budget=budget,
             project=project,
             review_command="review-memory",
+            # Flag recalled memories naming files this repository no longer
+            # has. Guarded inside: nothing happens unless cwd is a git repo.
+            repo_root=Path.cwd(),
         )
     finally:
         _core_close_wiki_cache(cache)
@@ -1162,6 +1173,42 @@ def ingest_status(target: Path, json_output: bool = False) -> int:
     return 0 if status["has_raw_dir"] and status["has_wiki_dir"] else 1
 
 
+def structured_ingest(
+    target: Path,
+    source: Path,
+    *,
+    adapter: str,
+    excludes: list[str] | None = None,
+    apply: bool = False,
+    replace_unmanaged: bool = False,
+    prune: bool = False,
+    json_output: bool = False,
+) -> int:
+    try:
+        plan = _core_plan_structured_ingest(
+            target,
+            source,
+            adapter=adapter,
+            excludes=excludes,
+            replace_unmanaged=replace_unmanaged,
+            prune=prune,
+        )
+        result = _core_apply_structured_ingest(plan) if apply else plan
+    except (_CoreStructuredIngestError, OSError) as exc:
+        if json_output:
+            print(json.dumps({"applied": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"Structured ingest failed: {exc}", file=sys.stderr)
+        return 1
+    if json_output:
+        printable = {key: value for key, value in result.items() if key != "outputs"}
+        print(json.dumps(printable, indent=2))
+        return 0 if not result.get("conflicts") else 1
+    code, text = _core_render_structured_ingest_text(result)
+    _print_text(text)
+    return code
+
+
 def import_obsidian(
     target: Path,
     vault: Path,
@@ -1185,6 +1232,65 @@ def import_obsidian(
             print(f"Could not import Obsidian vault: {exc}", file=sys.stderr)
         return 1
     return _emit_json_or_text(payload, json_output, _core_render_import_obsidian_text)
+
+
+def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) -> int:
+    """Report memories that name repository paths git no longer has.
+
+    Read-only by design. A memory that mentions something that moved is a
+    question for a person, not a rewrite to apply automatically, so findings
+    are printed and the review gate stays where it is.
+    """
+    from link_core.staleness import StalenessChecker, describe_findings
+
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    repo_dir = Path(repo).expanduser().resolve()
+    # Archived and expired memories are already out of the way; questioning
+    # them would only add noise to a report that must stay quiet by default.
+    records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
+    checker = StalenessChecker(repo_dir)
+    flagged: list[dict[str, object]] = []
+    for record in records:
+        text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
+        findings = checker.findings(text)
+        if not findings:
+            continue
+        flagged.append({
+            "name": str(record.get("name") or ""),
+            "title": str(record.get("title") or record.get("name") or ""),
+            "path": str(record.get("path") or ""),
+            "findings": [
+                {"path": finding.get("path", ""), "successor": finding.get("successor", "")}
+                for finding in findings
+            ],
+            "lines": describe_findings(findings),
+        })
+    checked = len(records)
+    if json_output:
+        # Same facts as the text report, for surfaces such as LinkBar that
+        # show them without re-running git themselves.
+        print(json.dumps({
+            "repo": str(repo_dir),
+            "checked": checked,
+            "flagged": len(flagged),
+            "memories": flagged,
+            "changed": False,
+        }, indent=2, ensure_ascii=False))
+        return 0
+    for entry in flagged:
+        print(entry["name"] or entry["path"])
+        for line in entry["lines"]:  # type: ignore[union-attr]
+            print(f"  {line}")
+    if not flagged:
+        print(f"No stale repository references in {checked} active memories ({repo_dir}).")
+        return 0
+    print(
+        f"\n{len(flagged)} of {checked} active memories name paths that moved in {repo_dir}."
+        "\nNothing was changed. Review each one and update or archive it."
+    )
+    return 0
 
 
 def rebuild_backlinks(target: Path) -> int:
@@ -4058,7 +4164,7 @@ _WORKSPACE_COMMANDS = {
     "semantic", "status", "sync", "digest", "import", "handoff", "handoffs", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
-    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks",
+    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale",
     "verify-mcp", "connect",
 }
 
@@ -4156,6 +4262,7 @@ def main(argv: list[str] | None = None) -> int:
             "doctor": doctor,
             "migrate": migrate,
             "validate": validate,
+            "ingest": structured_ingest,
             "ingest-status": ingest_status,
             "import-obsidian": import_obsidian,
             "remember": remember,
@@ -4191,6 +4298,7 @@ def main(argv: list[str] | None = None) -> int:
             "explain-memory": explain_memory,
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
+            "stale": stale,
             "verify-mcp": verify_mcp,
             "connect": connect_mcp,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,

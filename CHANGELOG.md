@@ -6,6 +6,132 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- **Recall works outside English.** The tokenizer split on `[^a-z0-9]+`, so
+  every non-Latin script produced zero tokens: Japanese, Chinese, Korean,
+  Russian, Arabic, and Indic memories were unfindable, and nothing said so -
+  recall simply returned nothing. Accented Latin fared little better,
+  `über Größe Straße` became `{ber, stra}`, and `déploiement` could not be
+  found by typing `deploiement`. Scripts written without spaces are now cut
+  into character bigrams, Latin accents are folded (along with `ß`, `ø`, `ı`
+  and friends), and the three-character floor - an English heuristic that
+  erased shorter words wholesale - applies only to Latin text. Combining
+  marks in Indic scripts are vowels rather than accents and are kept:
+  stripping them turned `मंगलवार` into `गलव`. ASCII text keeps the original
+  path exactly, so no existing memory changes token and no existing ranking
+  moves; the LoCoMo track returns all nine published figures unchanged across
+  1,536 third-party queries, and the ASCII path is marginally faster than
+  before. Wiki page full-text search had the same bug one layer down: its
+  query normalizer deleted every non-ASCII character before SQLite ever saw
+  it, so `lnk search` for any non-Latin query produced zero terms. Both the
+  index and the query side now segment text the same way recall does, and
+  the FTS cache moves to v2 so existing indexes rebuild - the first recall
+  after upgrading pays that rebuild once. Segmentation follows Lucene's
+  CJKAnalyzer: overlapping character bigrams, no dictionary. The fast
+  semantic tier's default model is English-trained; measured on a Japanese
+  set it neither helped nor hurt (6/6 with and without), so non-English
+  recall is lexical-quality by default. The multilingual static model
+  (`minishlab/potion-multilingual-128M`, 101 languages) is 512 MB against
+  the default's ~30 MB, so it stays opt-in:
+  `LINK_SEMANTIC_MODEL=minishlab/potion-multilingual-128M`.
+- **`lnk ingest` for structured exports** (#66, contributed by @jakobtfaber).
+  A plan-first importer for supported structured sources, starting with the
+  `chezmoi-docs-graph-v1` adapter: provenance manifests hashed per output,
+  staging through a temporary directory, validation before promotion, and
+  explicit `--replace-unmanaged` and `--prune` gates so nothing is
+  overwritten or deleted without being asked. Imported documentation lands in
+  the wiki, never in memory, and is kept out of automatic personal-memory
+  proposals. Review found two things, fixed before release: text-mode
+  `--apply` crashed after succeeding, and the proposal guard matched a
+  substring so a capture that merely mentioned the feature lost its
+  proposals; it now keys off the export's shape.
+- **`lnk stale` - notice when a memory outlived the code it describes.** The
+  most repeated complaint about agent memory is that nothing can tell when a
+  memory stopped being true: a note says a thing lives in `a/b.py`, the file
+  is renamed, and the memory keeps being retrieved and believed. Hosted
+  memory services cannot fix this because they never see the repository. Run
+  `lnk stale` from inside a repository and it lists memories naming files git
+  no longer has, with the successor path where git recorded a rename. A
+  memory is questioned only when it names a path that is missing now *and*
+  that git tracked before - without the second half, an unresolvable path is
+  just prose and flagging it is the noise that teaches people to ignore the
+  flag. The command changes nothing; findings go to the same review gate as
+  everything else. Precision is measured rather than asserted:
+  `scripts/eval_staleness.py` reports 0 false flags across 95 path references
+  in this repository's own documentation, detects every probed deletion, and
+  exits non-zero if either changes.
+
+### Measured and declined
+
+- **Usage-aware ranking.** Four formulations were built and measured -
+  additive frequency, tiebreak-only, recency decay in the Generative Agents
+  form across the recommended 7-30 day half-life range, and an MMR diversity
+  penalty - and none ship. Every one either made memories that had gone
+  unread harder to find or did nothing; recency was worst, with the old half
+  losing 0.0510 while the fresh half gained 0.0204 at a 30-day half-life. The
+  reason is a category difference: those policies suit episodic observation
+  streams, and Link stores durable constraints, which do not become less true
+  for going unread - that is when they most need surfacing.
+  `scripts/eval_salience.py` holds all four closed and fails on any
+  regression, so the next attempt has to clear the same bar.
+
+### Fixed
+
+- **Memories with non-Latin titles no longer collide.** Page names came from a
+  `[^a-z0-9]` slug, so a Japanese, Hindi, Korean, Arabic or Cyrillic title
+  slugged to nothing and every such memory was filed as `memory.md`. The
+  second one then matched the duplicate gate's same-slug rule with a perfect
+  score and was refused, so a non-English user could save exactly one memory.
+  Titles now keep their own script (`東京のデプロイ曜日.md`, `डिप्लॉय-का-दिन.md`),
+  Latin accents fold so filenames stay typeable (`zurich-deploy-regel.md`),
+  the length cap counts bytes for multibyte scripts, and titles that slug to
+  nothing (emoji-only) no longer read as duplicates of each other. ASCII
+  titles keep their exact historical slugs; existing pages are untouched.
+  The recall packet's ranking key uses the same rules, so non-Latin wiki
+  pages no longer share one empty key.
+- **LinkBar 1.4.0.** Fixes first: the health probes ran on the main
+  actor, so the popover froze for a second or two on every Status refresh;
+  they now run concurrently off it, and the five inbox reads run together
+  instead of one after another. The review inbox showed five items and
+  silently hid the rest; the tab now scrolls and stays on screen on a 13"
+  display. Approve, archive, accept and discard confirm what they did, and a
+  refused save reports the CLI's actual reason (duplicate, conflict, secret)
+  instead of a guess. The live-agent pulse names the repository from the
+  transcript's working directory, so `link-pr66` no longer reads as `pr66`.
+  `lnk` is found for pipx and venv installs, which a Finder-launched app's
+  minimal PATH used to miss. Then the two things people asked for: the
+  workspace is chosen in Settings and remembered (a Finder-launched app never
+  saw `LINK_WORKSPACE`), and the memory filter matches the way Finder does,
+  so typing `zurich` finds `Zürich`.
+- **LinkBar shows stale references.** A Status row runs `lnk stale` against
+  the repository your most recent agent session is working in and lists the
+  memories that name files it no longer has, with a one-click filter on the
+  Memory tab and an amber dot in the menu bar. On a CLI older than 3.0 the
+  row says so instead of checking forever. The palette gained ↑↓ selection,
+  and recall rows mark memories that default recall would hold back.
+
+### Removed
+
+- **The Bar CI investigation integration.** Its Cloudflare side is gone, so
+  the collector, summary poller, PR comment writer, their tests, and the
+  workflow that drove them come out. The release-hygiene network allowlist is
+  back to a single entry, the local viewer smoke test.
+
+### Changed
+
+- **The retrieval benchmark reports precision, not only recall.** Recall is
+  the number this category publishes, and it cannot separate a system that
+  retrieves cleanly from one that returns everything, because returning
+  everything scores 1.0 by construction. On the same 1,536 third-party LoCoMo
+  queries, a whole-store dump carries 0.26% signal while Link's top-1 packet
+  reaches 0.3086 precision on the fast tier - 117x - and pays a real recall
+  cost that is published in the same table. The track now also reports the
+  ceiling each cutoff allows (LoCoMo evidence sets average 1.53 turns, so
+  precision@10 cannot exceed 0.152 for anyone) and R-precision as the
+  k-independent figure to compare across systems.
+
+
 ## [2.3.0] - 2026-08-12
 
 ### Fixed
