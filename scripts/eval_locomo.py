@@ -50,7 +50,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import recall_memories  # noqa: E402
-from link_core.semantic import load_embedder, semantic_memory_scores  # noqa: E402
+from link_core.semantic import (  # noqa: E402
+    RERANK_CANDIDATES,
+    load_embedder,
+    load_reranker,
+    rerank_blend,
+    semantic_memory_scores,
+)
 
 ADVERSARIAL_CATEGORY = 5
 
@@ -113,6 +119,9 @@ def main() -> int:
     parser.add_argument("--mode", choices=["off", "real"], default="off")
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--rerank", action="store_true",
+                        help="apply the optional cross-encoder rerank tier the way recall does "
+                             f"(fetch {RERANK_CANDIDATES}, blend); needs the quality tier set up with `lnk semantic --setup`")
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset).expanduser()
@@ -135,6 +144,13 @@ def main() -> int:
                 "`lnk semantic --setup` (or `python3 -m link_mcp --semantic-setup`) first.",
                 file=sys.stderr,
             )
+            return 2
+
+    reranker = None
+    if args.rerank:
+        reranker = load_reranker(allow_download=False)
+        if reranker is None:
+            print("Rerank model unavailable offline. Install the quality tier and run `lnk semantic --setup` first.", file=sys.stderr)
             return 2
 
     samples = json.loads(dataset_path.read_text(encoding="utf-8"))
@@ -165,7 +181,10 @@ def main() -> int:
                     if embedder is not None
                     else None
                 )
-                results = recall_memories(records, query["question"], limit=k, semantic_scores=scores)
+                fetch = max(k, RERANK_CANDIDATES) if reranker is not None else k
+                results = recall_memories(records, query["question"], limit=fetch, semantic_scores=scores)
+                if reranker is not None:
+                    results = rerank_blend(query["question"], results, limit=k, reranker=reranker)
                 latencies.append((time.perf_counter() - started) * 1000)
                 names = [str(item["name"]) for item in results]
                 gold = set(query["evidence"])
@@ -194,6 +213,7 @@ def main() -> int:
     report = {
         "dataset": "LoCoMo locomo10.json (CC BY-NC 4.0, Snap Inc.) — retrieval stage only",
         "mode": args.mode,
+        "rerank": reranker is not None,
         "conversations": len(samples),
         "turn_memories": total_turns,
         "queries": total_queries,

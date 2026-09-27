@@ -359,10 +359,15 @@ _KNOWN_ACRONYMS = frozenset({
 })
 
 
+_ACRONYM_WORD_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
 def _acronym_tokens(value: str) -> set[str]:
     found = {match.lower() for match in _ACRONYM_RE.findall(value)}
-    lowered = value.lower()
-    found |= {word for word in _KNOWN_ACRONYMS if re.search(rf"(?<![a-z0-9]){word}(?![a-z0-9])", lowered)}
+    # One split and a set intersection: the same [a-z0-9] word boundaries as
+    # a per-acronym regex search, which cost 17 searches per field and was
+    # most of a cold recall on a large store.
+    found |= _KNOWN_ACRONYMS.intersection(_ACRONYM_WORD_SPLIT.split(value.lower()))
     return found
 
 
@@ -370,14 +375,13 @@ def memory_tokens(value: str) -> set[str]:
     # ASCII text needs no folding, no mark handling, and no segmentation, so
     # it keeps the original path: byte-identical tokens, no added cost.
     if value.isascii():
-        tokens = {
-            token
-            for token in _ASCII_TOKEN_SPLIT.split(value.lower())
-            if len(token) >= 3
-        }
-    else:
-        tokens = _unicode_memory_tokens(value)
-    return tokens | _acronym_tokens(value)
+        words = _ASCII_TOKEN_SPLIT.split(value.lower())
+        tokens = {token for token in words if len(token) >= 3}
+        # The acronym split is this same split; reuse it.
+        tokens |= _KNOWN_ACRONYMS.intersection(words)
+        tokens |= {match.lower() for match in _ACRONYM_RE.findall(value)}
+        return tokens
+    return _unicode_memory_tokens(value) | _acronym_tokens(value)
 
 
 def compact_memory_text(value: str) -> str:
@@ -2916,15 +2920,22 @@ def _record_tags(record: Mapping[str, object]) -> list[object]:
     return list(tags) if isinstance(tags, (list, tuple, set)) else []
 
 
+_WORD_SET_FIELDS = ("title", "tldr", "trigger", "body", "context")
+
+
 def _record_word_set(record: Mapping[str, object]) -> frozenset[str]:
+    # Keyed on the field text itself, so an edited memory gets a new entry
+    # and recall does not rebuild the same union for every record twice.
+    key = tuple(str(record.get(field) or "") for field in _WORD_SET_FIELDS)
+    return _word_set_of(key + (" ".join(str(tag) for tag in _record_tags(record)),))
+
+
+@functools.lru_cache(maxsize=131_072)
+def _word_set_of(fields: tuple[str, ...]) -> frozenset[str]:
     tokens: frozenset[str] = frozenset()
-    for field in ("title", "tldr", "trigger", "body", "context"):
-        value = record.get(field)
+    for value in fields:
         if value:
-            tokens |= cached_field_tokens(str(value))
-    tag_text = " ".join(str(tag) for tag in _record_tags(record))
-    if tag_text:
-        tokens |= cached_field_tokens(tag_text)
+            tokens |= cached_field_tokens(value)
     return tokens | cached_stems(tokens)
 
 
@@ -3157,6 +3168,50 @@ def render_recipes_text(recipes: Sequence[Mapping[str, object]], target: object 
     return 0, "\n".join(lines)
 
 
+def _annotate_recall_hit(
+    record: Mapping[str, object],
+    lexical_score: int,
+    semantic_match: Mapping[str, float] | None,
+    applicability: str,
+    *,
+    rank_score: int,
+    score: int,
+    query: str,
+    severity_rank: Mapping[str, int],
+) -> dict[str, object]:
+    lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
+    issues = memory_review_issues(record)
+    slim = slim_memory(record)
+    slim["score"] = score
+    slim["rank_score"] = rank_score
+    if applicability != "unconditional":
+        slim["applicability"] = applicability
+    slim["match"] = (
+        "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
+    )
+    if semantic_match:
+        slim["semantic_similarity"] = float(semantic_match.get("cosine") or 0.0)
+    # A match with no lexical evidence is honest about its basis: a
+    # close paraphrase is at most moderate confidence, never strong.
+    slim["confidence"] = (
+        memory_recall_confidence(record, query) if lexical_hit else semantic_confidence_cap(semantic_match)
+    )
+    if str(record.get("memory_type") or "") == "procedure":
+        # The steps are the value of a recipe; carry a bounded excerpt
+        # so agents can follow it without another file read.
+        slim["steps"] = procedure_steps_excerpt(str(record.get("body") or ""))
+    slim["recall"] = recall_state(record, issues)
+    slim["review_issue_count"] = len(issues)
+    slim["highest_review_severity"] = (
+        "none" if not issues else
+        min(
+            (str(issue.get("severity") or "low") for issue in issues),
+            key=lambda severity: severity_rank.get(severity, 9),
+        )
+    )
+    return slim
+
+
 def recall_memories(
     records: Iterable[Mapping[str, object]],
     query: str,
@@ -3175,7 +3230,7 @@ def recall_memories(
     if as_of:
         _parse_date_field(as_of, "as_of")
     project_name = normalize_project(project)
-    scored: list[tuple[int, int, str, dict[str, object]]] = []
+    candidates: list[tuple[int, int, str, str, tuple]] = []
     severity_rank = {"high": 0, "medium": 1, "low": 2}
     records_by_name: dict[str, Mapping[str, object]] = {}
     record_list = list(records)
@@ -3206,7 +3261,6 @@ def recall_memories(
         lexical_score = score_memory(record, q, word_weights)
         score = lexical_score + semantic_match_points(semantic_match)
         if score >= MEMORY_RECALL_MIN_SCORE:
-            lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
             rank_score = memory_rank_score(record, score, project=project_name, salience=salience, as_of=as_of)
             applicability = memory_applicability(
                 record, query=q, project=project_name, context_path=context_path
@@ -3217,41 +3271,20 @@ def recall_memories(
                 # Conditional memory outside its context: still findable,
                 # but demoted and labeled so agents do not apply it blindly.
                 rank_score = max(1, rank_score - 10)
-            issues = memory_review_issues(record)
-            slim = slim_memory(record)
-            slim["score"] = score
-            slim["rank_score"] = rank_score
-            if applicability != "unconditional":
-                slim["applicability"] = applicability
-            slim["match"] = (
-                "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
-            )
-            if semantic_match:
-                slim["semantic_similarity"] = float(semantic_match.get("cosine") or 0.0)
-            # A match with no lexical evidence is honest about its basis: a
-            # close paraphrase is at most moderate confidence, never strong.
-            slim["confidence"] = (
-                memory_recall_confidence(record, q) if lexical_hit else semantic_confidence_cap(semantic_match)
-            )
-            if str(record.get("memory_type") or "") == "procedure":
-                # The steps are the value of a recipe; carry a bounded excerpt
-                # so agents can follow it without another file read.
-                slim["steps"] = procedure_steps_excerpt(str(record.get("body") or ""))
-            slim["recall"] = recall_state(record, issues)
-            slim["review_issue_count"] = len(issues)
-            slim["highest_review_severity"] = (
-                "none" if not issues else
-                min(
-                    (str(issue.get("severity") or "low") for issue in issues),
-                    key=lambda severity: severity_rank.get(severity, 9),
-                )
-            )
             recency = str(record.get("updated_at") or record.get("date_captured") or "")
-            scored.append((rank_score, score, recency, slim))
-    scored.sort(key=lambda item: str(item[3]["title"]).lower())
-    scored.sort(key=lambda item: item[2], reverse=True)
-    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    ranked = [record for _, _, _, record in scored]
+            candidates.append((rank_score, score, recency, str(record.get("title")).lower(),
+                               (record, lexical_score, semantic_match, applicability)))
+    candidates.sort(key=lambda item: item[3])
+    candidates.sort(key=lambda item: item[2], reverse=True)
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    # Only what can be returned is annotated: confidence, review issues and
+    # the slim copy cost more than scoring, and a large store has thousands
+    # of candidates for a common word. The contradiction check reads the
+    # head, so the head is always annotated too.
+    ranked = [
+        _annotate_recall_hit(*detail, rank_score=rank_score, score=score, query=q, severity_rank=severity_rank)
+        for rank_score, score, _recency, _title, detail in candidates[:max(limit, CONTRADICTION_RERANK_DEPTH)]
+    ]
     if not as_of and not include_archived:
         ranked = _demote_contradicted(ranked, records_by_name)
     return ranked[:limit]
