@@ -56,6 +56,11 @@ struct PopoverView: View {
         .onChange(of: store.requestedTab) { _, requested in
             guard let requested else { return }
             tab = requested
+            if requested == .memory, let title = store.focusMemoryTitle {
+                memoryQuery = title
+                expandedMemory = store.memories.first { $0.title == title }?.name
+                store.focusMemoryTitle = nil
+            }
             if requested == .status { store.refreshHealth() }
             store.requestedTab = nil
         }
@@ -133,6 +138,9 @@ struct PopoverView: View {
                     if let captures = store.captures, !captures.captures.isEmpty {
                         capturesSection(captures)
                     }
+                }
+                if let session = store.receipt?.last, !session.memoriesUsed.isEmpty || session.recalls > 0 {
+                    receiptSection(session)
                 }
                 if !store.activity.isEmpty && !isFullyIdle {
                     activitySection
@@ -848,6 +856,101 @@ struct PopoverView: View {
                 }
             }
         }
+
+    // MARK: memory receipt (lnk receipt)
+
+    /// What the agent was actually handed last session - the answer to "is
+    /// my agent even using this?" without opening a terminal.
+    private func receiptSection(_ session: MemoryReceipt.Session) -> some View {
+        VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionHeader(title: "Last session")
+                if let when = Date.fromLinkStamp(session.ended)?.relativeLabel {
+                    Text(when)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize()
+                }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(receiptHeadline(session))
+                    .font(.system(size: 12.5, weight: .medium))
+                let details = [session.surfaceLabel, session.tokenLabel].compactMap { $0 }
+                if !details.isEmpty {
+                    Text(details.joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if session.anythingTruncated == true {
+                    Label("A budget cut some context", systemImage: "scissors")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(LinkBrand.amber)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(LinkBrand.amber.opacity(0.14), in: Capsule())
+                        .padding(.top, 2)
+                        .help("A brief or recall hit its size budget, so some memories were left out")
+                }
+            }
+            .padding(.horizontal, 8)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(session.memoriesUsed.prefix(4)) { used in
+                    receiptRow(used)
+                }
+            }
+            if session.memoriesUsed.count > 4 {
+                Text("+\(session.memoriesUsed.count - 4) more · lnk receipt")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 8)
+                    .textSelection(.enabled)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Last session: \(receiptHeadline(session))"))
+    }
+
+    private func receiptHeadline(_ session: MemoryReceipt.Session) -> String {
+        let count = session.memoriesUsed.count
+        let memories = count == 1 ? "1 memory" : "\(count) memories"
+        let recalls = session.recalls == 1 ? "1 recall" : "\(session.recalls) recalls"
+        switch (count, session.recalls) {
+        case (0, _): return "No memories given · \(recalls)"
+        case (_, 0): return "Your agent was given \(memories)"
+        default: return "Your agent was given \(memories) · \(recalls)"
+        }
+    }
+
+    private func receiptRow(_ used: MemoryReceipt.Used) -> some View {
+        let gone = used.exists == false
+        return HoverRow {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(gone ? AnyShapeStyle(.quaternary) : AnyShapeStyle(LinkBrand.rust.opacity(0.7)))
+                    .frame(width: 5, height: 5)
+                Text(used.title.isEmpty ? used.name : used.title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(gone ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .strikethrough(gone)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                if used.times > 1 {
+                    Text("×\(used.times)")
+                        .font(.system(size: 10.5).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                if !gone {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.quaternary)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { if !gone { store.showMemory(titled: used.title) } }
+        }
+        .help(gone ? "This memory has since been deleted" : "Show this memory and why Link believes it")
+        .accessibilityAddTraits(gone ? [] : .isButton)
+    }
 
     // MARK: activity, idle, footer
 

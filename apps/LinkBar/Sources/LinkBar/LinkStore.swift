@@ -14,6 +14,10 @@ final class LinkStore: ObservableObject {
     @Published var inbox: MemoryInbox?
     @Published var captures: CaptureInbox?
     @Published var activity: [LogEntry] = []
+    /// The last sessions' memory receipt (lnk receipt), newest first.
+    @Published var receipt: MemoryReceipt?
+    /// Set by a receipt row: open the Memory tab filtered to this memory.
+    @Published var focusMemoryTitle: String?
     @Published var recallResults: [RecalledMemory] = []
     @Published var searchedQuery: String?
     @Published var abstention: Abstention?
@@ -175,9 +179,11 @@ final class LinkStore: ObservableObject {
             async let logRead = Self.fetch(MemoryLog.self, ["memory-log", workspace, "--json", "--limit", "200"])
             async let statusRead = Self.fetch(StatusPayload.self, ["status", workspace, "--json"])
             async let handoffsRead = Self.fetch(HandoffsPayload.self, ["handoffs", workspace, "--json"])
+            async let receiptRead = Self.fetch(MemoryReceipt.self, ["receipt", workspace, "--sessions", "1", "--json"])
             let sessions = Self.scanAgentSessions()
             let memories = MemoryPage.load(from: workspace)
             let (inbox, captures, log, status, handoffs) = await (inboxRead, capturesRead, logRead, statusRead, handoffsRead)
+            let receipt = await receiptRead
             // Only when both inbox reads failed: say why, instead of always
             // blaming a missing install.
             let failure = (inbox == nil && captures == nil) ? LinkCLI.diagnose(workspace) : nil
@@ -193,6 +199,7 @@ final class LinkStore: ObservableObject {
                 self.memories = memories
                 self.lastError = failure
                 self.handoffsWaiting = handoffs?.handoffs ?? self.handoffsWaiting
+                self.receipt = receipt ?? self.receipt
                 self.inbox = inbox ?? self.inbox
                 self.captures = captures ?? self.captures
                 self.activity = log.map { Array($0.entries.reversed()) } ?? self.activity
@@ -321,6 +328,13 @@ final class LinkStore: ObservableObject {
             UserDefaults.standard.set(cwd, forKey: staleRepoKey)
             lastHealthAt = .distantPast   // re-probe against the new repo soon
         }
+    }
+
+    /// Steer the popover to the Memory tab, showing one memory from the receipt.
+    func showMemory(titled title: String) {
+        memoryFilterStale = false
+        focusMemoryTitle = title
+        requestedTab = .memory
     }
 
     /// Steer the popover to the Memory tab, filtered to the stale memories.
@@ -951,7 +965,7 @@ final class LinkStore: ObservableObject {
         }
         LinkCLI.setWorkspace(path)
         workspacePath = LinkCLI.workspace
-        inbox = nil; captures = nil; activity = []; memories = []; explanations = [:]
+        inbox = nil; captures = nil; activity = []; memories = []; explanations = [:]; receipt = nil
         recallResults = []; searchedQuery = nil; abstention = nil
         stats = nil; digest = nil; syncState = nil; handoffsWaiting = []; runtimeWarning = nil
         mcp = nil; semantic = nil; stale = nil; staleUnsupported = false; staleFailed = false; lastError = nil

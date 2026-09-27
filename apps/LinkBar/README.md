@@ -10,6 +10,9 @@ instead of a chore.
   memory has nothing reliable, it says so
 - Status dashboard: every Link surface's health, including memories that
   name files your repository no longer has (`lnk stale`, Link 3.0+)
+- Last session: what your agent was actually given (memories, how often,
+  roughly how many tokens, and whether a budget cut anything), from
+  `lnk receipt` (Link 4.0+). Click a memory to see why Link believes it
 - Backend: the `lnk` CLI's `--json` output. No server, no sockets, no new
   API surface. Workspace: chosen in Settings, or `LINK_WORKSPACE` for a
   launch, defaulting to `~/link`.

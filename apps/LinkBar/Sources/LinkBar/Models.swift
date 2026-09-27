@@ -524,3 +524,62 @@ struct HandoffsPayload: Decodable {
     let count: Int
     let handoffs: [Handoff]
 }
+
+/// `lnk receipt --json` (Link 4.0): what each recent session's agent was
+/// actually given - briefs, recalls, the memories in them, and whether a
+/// budget cut anything. Older CLIs lack the command; the card then hides.
+struct MemoryReceipt: Decodable {
+    struct Brief: Decodable {
+        let memories: Int
+        let tokens: Int?
+        let truncated: Bool?
+    }
+    struct Used: Decodable, Identifiable {
+        let name: String
+        let title: String
+        let times: Int
+        let exists: Bool?
+        var id: String { name }
+    }
+    struct Session: Decodable {
+        let started: String
+        let ended: String
+        let project: String?
+        let surfaces: [String]
+        let briefs: [Brief]
+        let recalls: Int
+        let memoriesUsed: [Used]
+        let estimatedTokens: Int?
+        let anythingTruncated: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case started, ended, project, surfaces, briefs, recalls
+            case memoriesUsed = "memories_used"
+            case estimatedTokens = "estimated_tokens"
+            case anythingTruncated = "anything_truncated"
+        }
+
+        /// "session hook · MCP", or nil when older events never said.
+        var surfaceLabel: String? {
+            let names = surfaces.map { surface -> String in
+                switch surface {
+                case "hook": return "session hook"
+                case "mcp": return "MCP"
+                case "cli": return "CLI"
+                default: return surface
+                }
+            }
+            return names.isEmpty ? nil : names.joined(separator: " · ")
+        }
+
+        /// Zero means "not recorded" (events from before 4.0), not "free".
+        var tokenLabel: String? {
+            guard let tokens = estimatedTokens, tokens > 0 else { return nil }
+            return tokens >= 1000 ? String(format: "~%.1fk tokens", Double(tokens) / 1000) : "~\(tokens) tokens"
+        }
+    }
+    let recording: Bool
+    let sessions: [Session]
+
+    var last: Session? { sessions.first }
+}
