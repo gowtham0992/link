@@ -24,6 +24,15 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   evidence ("package.json no longer defines scripts.deploy:staging").
   Memories also get a per-memory verdict against the checkout -
   `verified`, `stale`, or `unverifiable` when there is nothing to check.
+- **A claim-shaped recall slice.** `scripts/eval_claim_updates.py` asks the
+  question fact-update benchmarks ask and LoCoMo does not: when a fact
+  changed two or three times (a rate limit, a port, a database, a deploy
+  day, a preference), does recall return the current value? Sixteen
+  subjects, each queried in its own words and as a paraphrase, in a store
+  where updates carry `supersedes` lineage and in one where they do not,
+  plus point-in-time recall between versions. It was written after the
+  ranking changes it measures and is gated as a floor, not tuned against;
+  with lineage a superseded value must never come back first.
 - **A with/without behavioral A/B.** `scripts/eval_behavior_ab.py` asks
   whether an agent with Link does the right thing more often than one
   without it, on twelve scenarios whose answer depends on an earlier
