@@ -6,6 +6,7 @@ import fnmatch
 import json
 import re
 import subprocess
+import tarfile
 from pathlib import Path
 
 
@@ -37,6 +38,11 @@ BUILD_ARTIFACT_PATTERNS = (
     "*.egg-info",
     "*.egg-info/*",
 )
+
+# Test fixtures that must stay archives (a frozen workspace from an old Link
+# release). Allowed only here, and never skipped: every member is opened and
+# secret-scanned like a tracked file, and links or device files fail.
+FIXTURE_ARCHIVE_PATTERNS = ("tests/fixtures/*.tar.gz",)
 
 SECRET_VALUE_PATTERNS = (
     ("Anthropic API key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
@@ -227,6 +233,9 @@ def check_agent_contract(
 def check_tracked_path_hygiene(findings: list[str], path: Path) -> bool:
     """Check release-blocking tracked path patterns. Return true when caller should skip content scan."""
     rel = path.as_posix()
+    if any(fnmatch.fnmatch(rel, pattern) for pattern in FIXTURE_ARCHIVE_PATTERNS):
+        check_fixture_archive(findings, path)
+        return True
     if any(fnmatch.fnmatch(rel, pattern) for pattern in BUILD_ARTIFACT_PATTERNS):
         findings.append(f"build artifact should not be tracked: {rel}")
         return True
@@ -237,6 +246,31 @@ def check_tracked_path_hygiene(findings: list[str], path: Path) -> bool:
         return True
 
     return False
+
+
+def check_fixture_archive(findings: list[str], path: Path) -> None:
+    rel = path.as_posix()
+    try:
+        with tarfile.open(path, "r:gz") as archive:
+            for member in archive.getmembers():
+                where = f"{rel}!{member.name}"
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    findings.append(f"fixture archive member is not a regular file: {where}")
+                    continue
+                name = Path(member.name).name
+                if any(fnmatch.fnmatch(name, pattern) for pattern in SECRET_NAME_PATTERNS):
+                    findings.append(f"sensitive-looking file in fixture archive: {where}")
+                    continue
+                handle = archive.extractfile(member)
+                text = handle.read().decode("utf-8", errors="replace") if handle else ""
+                for label, pattern in SECRET_VALUE_PATTERNS:
+                    if pattern.search(text):
+                        findings.append(f"sensitive-looking content in {where}: {label}")
+                        break
+    except (OSError, tarfile.TarError) as exc:
+        findings.append(f"could not read fixture archive {rel}: {exc}")
 
 
 def check_outbound_network_hygiene(findings: list[str], path: Path, text: str) -> None:

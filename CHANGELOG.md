@@ -53,6 +53,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   preference the session brief does not carry). A live mode pipes each
   prompt to an agent command you choose; Link makes no network calls, and
   nothing runs without `--yes`.
+- **Upgrading from 2.x is tested, not assumed.** A workspace written by
+  Link 2.3.0 itself (memories, a pending capture, its search cache and log)
+  is now part of the test suite. Every run drives it through today's
+  `migrate`, `status`, `validate`, `recall`, `query` and `capture-inbox`
+  and checks the details. Memory counts stay the same and review state
+  carries over. The search cache is rebuilt in the current format, and the
+  old log verifies and gets its first anchor on the next write.
 
 ### Fixed
 

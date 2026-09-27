@@ -1,4 +1,7 @@
 import importlib.util
+import io
+import os
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -167,6 +170,49 @@ class ReleaseHygieneTests(unittest.TestCase):
             findings,
         )
         self.assertIn("sensitive-looking tracked filename: .pypirc", findings)
+
+    def test_fixture_archives_are_allowed_but_every_member_is_scanned(self):
+        tmp = Path(tempfile.mkdtemp(prefix="link-hygiene-fixture-"))
+        (tmp / "tests/fixtures").mkdir(parents=True)
+        (tmp / "dist").mkdir()
+
+        def archive(rel: str, members: dict[str, str], link: str = "") -> Path:
+            with tarfile.open(tmp / rel, "w:gz") as out:
+                for name, text in members.items():
+                    data = text.encode("utf-8")
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    out.addfile(info, io.BytesIO(data))
+                if link:
+                    info = tarfile.TarInfo(link)
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = "/etc/passwd"
+                    out.addfile(info)
+            return Path(rel)
+
+        clean = archive("tests/fixtures/clean.tar.gz", {"wiki/memories/a.md": "Deploy on Tuesdays.\n"})
+        leaky = archive("tests/fixtures/leaky.tar.gz", {"raw/notes.md": "key " + "ghp_" + "a" * 30 + "\n"})
+        named = archive("tests/fixtures/named.tar.gz", {"ws/.pypirc": "[pypi]\n"})
+        linked = archive("tests/fixtures/linked.tar.gz", {"wiki/index.md": "# Index\n"}, link="wiki/escape")
+        elsewhere = archive("dist/workspace.tar.gz", {"a.md": "fine\n"})
+
+        cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            clean_findings: list[str] = []
+            self.assertTrue(release_hygiene.check_tracked_path_hygiene(clean_findings, clean))
+            self.assertEqual(clean_findings, [])
+
+            findings: list[str] = []
+            for path in (leaky, named, linked, elsewhere):
+                release_hygiene.check_tracked_path_hygiene(findings, path)
+        finally:
+            os.chdir(cwd)
+
+        self.assertIn("sensitive-looking content in tests/fixtures/leaky.tar.gz!raw/notes.md: GitHub token", findings)
+        self.assertIn("sensitive-looking file in fixture archive: tests/fixtures/named.tar.gz!ws/.pypirc", findings)
+        self.assertIn("fixture archive member is not a regular file: tests/fixtures/linked.tar.gz!wiki/escape", findings)
+        self.assertIn("build artifact should not be tracked: dist/workspace.tar.gz", findings)
 
     def test_release_hygiene_formats_windows_paths_as_posix(self):
         findings: list[str] = []
