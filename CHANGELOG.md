@@ -22,18 +22,33 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   repositories, every real deletion caught, and every one of seven removal
   kinds caught in the eval's scratch repository. Findings carry the
   evidence ("package.json no longer defines scripts.deploy:staging").
+  It reads every tracked manifest (workspace `package.json`s,
+  `requirements/*.txt`), compares package names the way package managers
+  do (pyyaml is PyYAML), understands PEP 440 `~=` and wildcards and the
+  go.mod `go` directive as a minimum, finds make and just targets on
+  multi-target lines, in `@recipes`, recipes with parameters and included
+  files, and checks only endpoint URLs (localhost, private hosts, explicit
+  ports), never links to public docs. History and prohibitions are not
+  current claims: "we upgraded from Node 16", "we dropped Python 3.9" and
+  "do not use npm; we use pnpm" are left alone.
   Memories also get a per-memory verdict against the checkout -
-  `verified`, `stale`, or `unverifiable` when there is nothing to check.
+  `verified` only when something the memory names was found in place and
+  nothing it names is gone, `stale`, or `unverifiable` when there is
+  nothing to check or the checks did not finish.
 - **Memories about code are anchored to the lines they describe.** When a
   memory is written or updated inside a git checkout and it names a
   repository file together with a symbol in that file ("`parse_config` in
   src/app.py must stay side-effect free"), Link records `path:line symbol`
   in the memory's `anchors` frontmatter - found by reading the file, not by
   a model. The staleness verdict re-reads those lines: an anchor holds,
-  has moved (with the new line), or is gone because the symbol or the file
-  disappeared. This catches what path checks cannot: a function deleted or
-  renamed while its file stayed. Ordinary memories never get anchors, and
-  `LINK_ANCHORS=off` turns them off.
+  has moved (with the new line, which is not stale), or is gone because the
+  symbol or the file disappeared. This catches what path checks cannot: a
+  function deleted or renamed while its file stayed. Each anchor records
+  the repository's root commit (`path:line symbol @root`) and is checked
+  only in that repository, so a user-wide memory is never judged against
+  whatever repo you happen to be in; anchor paths cannot leave the
+  checkout. Ordinary memories never get anchors, and `LINK_ANCHORS=off`
+  turns them off.
 - **A claim-shaped recall slice.** `scripts/eval_claim_updates.py` asks the
   question fact-update benchmarks ask and LoCoMo does not: when a fact
   changed two or three times (a rate limit, a port, a database, a deploy
@@ -73,10 +88,12 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   `lnk recall`, `lnk query` and `lnk brief` are recorded under their own
   surface, so a CLI-only session has a receipt too.
 - **Recalled memories say whether they still hold.** When recall runs in a
-  repository, each returned memory carries `verified` (every file, script,
-  dependency, setting and code anchor it names still holds, with the
-  commit it was checked at) or `stale_paths` (what moved or disappeared,
-  with evidence). Memories that name nothing checkable carry neither.
+  repository, each returned memory carries `verified` (something it names
+  was found in place and nothing it names is gone, with the commit it was
+  checked at) or `stale_paths` (what disappeared, with evidence). Memories
+  that name nothing checkable carry neither. The checks on the recall path
+  run under a 1.5 s budget with a per-commit cache in `.link-cache`, and a
+  check that did not finish never yields `verified`.
 - **Optional contradiction flags from a local NLI model.** `lnk semantic
   <dir> --setup --nli` adds an ~87 MB int8 model (onnxruntime and
   tokenizers, already in the rerank extra). When a memory is written it is
@@ -87,7 +104,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   unrelated pairs that share a subject word: the word rules catch 17 with 0
   false alarms; the model alone raises 107 false alarms; as shipped, with a
   30% subject-overlap gate, it raises 0 and adds 1 revision the rules miss.
-  A small gain, which is why the tier is opt-in.
+  A small gain, which is why the tier is opt-in. A running MCP server
+  picks the model up within a minute of setup, without a restart.
 - **Point-in-time and typed recall over MCP.** The `recall` tool takes
   `as_of` and `memory_type`, and a time phrase in the query ("in March",
   "last quarter") resolves to a date, as `lnk recall` always did.
@@ -125,8 +143,10 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   on the date asked about. When two top results contradict each other the
   older one is labelled `contradicted_by` and read second, and revisions
   that name what they replaced ("moved from 8080 to 8443", "Buildkite
-  replaced Jenkins") are recognised. `lnk recall` prints the dispute
-  under the older result. In the hygiene benchmark, contradiction exposure
+  replaced Jenkins") are recognised. A value change counts only for one
+  subject: "Node 20 runs the api" and "Node 18 runs the worker" are two
+  facts, not a revision, and "copy the database from staging to prod"
+  replaces nothing. `lnk recall` prints the dispute under the older result. In the hygiene benchmark, contradiction exposure
   after a revision falls from 0.167 to 0 and point-in-time accuracy rises
   from 0.917 to 1.00.
 - **Standing preferences reach every session.** A preference about how the
@@ -154,7 +174,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   the conversation, throwaways, hypotheticals, someone else's habits,
   anything tied to today and Link's own brief lines are no longer proposed
   as memory; numbered prompt lists are not recipes. On 12 real developer
-  sessions: 58 proposals to 6, both genuine keepers kept.
+  sessions: 58 proposals to 6, both genuine keepers kept. These filters
+  apply to proposals only: a sentence you save yourself with `remember`
+  keeps its type, so "Do not use tabs in YAML files" is a rule, not a note.
 
 ### Fixed
 
@@ -203,18 +225,25 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   missing" into the model's context. `lnk disconnect` previews, and with
   `--write` removes, exactly Link's entries - other servers, other hooks and
   comments are left alone - and every `integrations/*/uninstall.sh` now calls
-  it.
+  it. For Codex it removes the `[mcp_servers.link]` table with every
+  subtable, and checks the result parses before writing it; a truncated
+  config is a clear error and is left untouched.
 - **Editor configs with comments.** VS Code and Zed settings are JSON with
   comments and trailing commas; `lnk connect --write` failed on them with a
   JSON parse error. Link now edits those files in place, inserting or
   replacing only its own entry and keeping every comment, and re-reads the
-  result before writing it.
+  result before writing it. Files with a UTF-8 BOM or CRLF line endings
+  are read correctly and keep both.
 - **The integration scripts use `lnk connect`.** Each installer only
   registered MCP when the agent's config file already existed, and Kiro's
   project mode never registered at all. The installers now delegate to
   `lnk connect --write` (with `--hooks` for Claude Code, Codex and Cursor),
   which creates the config, verifies the runtime and installs hooks; the old
   inline registration remains as the fallback when no Link CLI is found.
+  A `--project` install leaves global state alone: session hooks come only
+  from global installs, Kiro's project mode prints the connect command
+  instead of rewriting `~/.kiro/settings/mcp.json`, and Antigravity writes
+  `~/.gemini` only in global mode.
 
 - **Releases follow a written procedure.** `packaging/RELEASE.md` holds the
   whole release in order; it used to live in a maintainer's private memory.
@@ -230,11 +259,16 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   detection, which still compacted non-Latin text to nothing: three
   distinct Japanese proposals collapsed into one and unrelated claims
   shared a fingerprint. Every path now keeps every script (ASCII
-  fingerprints unchanged), negation is recognised in major languages, and
-  voiced kana are no longer split mid-character.
+  fingerprints unchanged), negation is recognised in major languages
+  without mistaking everyday words for it (特别, 危ない, 不具合), and voiced
+  kana are no longer split mid-character. Recall matches Han, kana and
+  Korean words inside running text ("배포" finds "배포는", one kanji finds
+  its memory), and a Latin word inside Japanese text is a whole word.
 - **An update changes what recall shows.** `update-memory` appended the
   new claim but left the summary and a claim-shaped title on the old one,
-  so agents kept reading "Python 3.11" after the update to 3.12.
+  so agents kept reading "Python 3.11" after the update to 3.12. A
+  revision now moves the summary and a claim-shaped title; an addition
+  ("also pin pip to 24.0") is appended and leaves the claim as it was.
 - **Contradiction detection sees value changes and more.** Version, port
   and count changes were invisible (short tokens were dropped), facts were
   never checked, "Never use Ruff" did not meet "Use Ruff for linting",
@@ -244,16 +278,32 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   (`recall.state` "quarantined"); memories flagged stale are inactive on
   every past date too.
 - **CLI.** Help says `lnk` on installs (it said `usage: link.py`);
-  `--project` implies project scope instead of being dropped; `lnk stale`
+  a `--project` you name implies project scope instead of being dropped
+  (the default project never does, so user-wide memories stay user-wide); `lnk stale`
   exits 1 when something is flagged and 2 when `--repo` is not a git
   repository (it reported "no stale references" about any folder); and an
   installed-but-unfetched reranker no longer prints errors and a download
   bar on every recall.
 - **MCP.** The first response reported `needs_review: 0` always; brief
   guidance named tools the default surface does not have; follow-up
-  suggestions were admin calls in a shape the tool rejected.
+  suggestions were admin calls in a shape the tool rejected. `recall`
+  rejects an unknown `memory_type` instead of returning nothing, and a year
+  or month in a question ("in 2017") falls back to the full packet when no
+  memory holds that date, instead of hiding the wiki.
 - **Old full-text index files are removed** after an upgrade instead of
   staying in `.link-cache`.
+- **The viewer stops crashing after every change.** Each Mark reviewed,
+  Archive or Save wrote its change and then dropped the connection
+  (ERR_EMPTY_RESPONSE): the search index connection was opened on one
+  request thread and closed from another. The same check made viewer
+  search fall back to the slow path silently. The connection is now shared
+  safely across request threads. Present since 3.0.
+- **Inbox Save sends only what changed**, so changing a memory's
+  visibility no longer appends a copy of its claim as an "update".
+- **pip installs suggest next steps that run.** The CLI's suggested
+  commands named a `link.py` that pip installs do not ship, even when the
+  venv's `lnk` was first on PATH. They now say `lnk`, or name the file that
+  is actually running. Present since 3.0.
 
 ### Security
 
@@ -265,26 +315,41 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   with `imported_from: team`; pages that are not `visibility: team`, not
   active, symlinks, or carry a secret-shaped value or injection-shaped
   instruction are rejected and reported. A team memory you forgot or
-  archived is no longer resurrected by the next sync. Export never writes
-  through a symlinked file in the team repo.
+  archived is no longer resurrected by the next sync, and an imported copy
+  is never exported back, so a teammate's deletion sticks. Until you
+  review it, an import stays out of wiki search, topic context and
+  `index.md` as well as memory recall; once reviewed and edited, it is
+  yours. Team sync refuses a shared repo or incoming change that contains
+  a symlink anywhere, before merging, so a committed `wiki/log.md ->
+  ~/.zshrc` can never be written through.
 - **`lnk sync` scans everything it pushes.** The secret gate only looked at
   `wiki/`, while sync staged the whole workspace, and `raw/` was not in its
   ignore list - so a workspace whose `.gitignore` predated Link pushed raw
-  captures unscanned. Every outgoing file is scanned now; `raw/`, ingest
-  staging, operation snapshots, backups and caches are ignored, and if an
-  older setup tracked them, sync untracks them and says so. `--init`
-  refuses to re-point a workspace that already has a different `origin`.
+  captures unscanned. Changes are scanned before they are committed, and
+  every commit a push would carry is scanned before pushing, so a secret
+  redacted since an earlier commit cannot reach the remote inside it; the
+  refusal names the commit and how to drop it, and Link never rewrites
+  history for you. File names are read unquoted, so `café notes.md` is
+  scanned too, and a merge that would leave conflict markers is refused.
+  `raw/`, ingest staging, operation snapshots, backups and caches are
+  ignored and never staged; if an older setup tracked them, sync says how
+  to untrack them rather than doing it, because the untracking commit
+  would delete those files on machines still running 3.x. `--init`
+  refuses to re-point a workspace that already has a different `origin`
+  before it changes anything.
 - **Only your own words become proposals.** Claude Code writes subagent
   reports, slash-command expansions, local command output, interruption
   markers and compaction summaries into the transcript with the user's
   role. Session-end mined them as "your own turns", so a subagent's report
   saying "always run migrations with --force" became a high-confidence
   preference attributed to you. Those entries are dropped by origin label
-  and by tag, and system reminders appended to a real prompt are removed.
+  and by tag in every text block of a message, and system reminders
+  appended to a real prompt are removed.
   The decision trail reports how many were dropped.
 - **Captures no longer keep the secrets they warn about.** `session-end`
   warned about a key and then wrote it verbatim into the capture file. The
-  notes, title and source are redacted before the file is written; the
+  notes, title, source, proposal source and decision trail are redacted
+  before the file is written, including passwords written in prose; the
   inbox still names what was redacted so you know to rotate it.
 - **Handoffs are labelled.** A handoff reaches every next session on any
   agent, which made it the strongest write in Link that skips review. It
@@ -300,24 +365,29 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   previous hash was read outside the lock that guarded the append, so
   concurrent hooks and MCP writes chained onto the same parent and forked
   the log; verification then failed on honest entries. A newline in a title
-  or reason split an entry and broke its own hash. Deleting the first or
+  or reason split an entry and broke its own hash (so did U+2028 and other
+  line separators). Deleting the first or
   last entries verified clean. Now the read and append share one lock,
   headings and details are single-line by construction, the first entry
   must start the chain or continue the newest rotated file, and a
   machine-local anchor (`.link-cache/log-anchor.json`) records the newest
   entry so a cut-off tail is reported. Sync and restore accept the new head
-  explicitly. Forgetting a memory now redacts rotated log files too (they
-  kept the title forever), atomically and under the log's lock.
+  explicitly. Rotated log files are verified as part of the chain.
+  Forgetting a memory now redacts rotated log files too (they kept the
+  title forever), atomically and under the log's lock, and keeps lines it
+  does not recognise.
 - **Backups and restores cannot leave you with nothing.** A backup is
   written to a hidden partial file and renamed into place, so a killed
   backup no longer leaves a truncated archive that looks valid; a damaged
   archive is a clear error instead of a traceback; and restore moves the
   current tree aside before moving the restored one in, putting it back if
-  anything fails, instead of deleting `wiki/` first.
+  anything fails or is interrupted, instead of deleting `wiki/` first. An
+  archive whose `wiki` or `raw` is a plain file is rejected.
 - **`lnk snapshot --force` only replaces a previous snapshot.** It deleted
   any non-empty output directory; `lnk snapshot ~ --force` would have
   removed your home folder. It now requires the directory to contain a Link
-  `snapshot.json`.
+  `snapshot.json`, and deletes it only after the new snapshot passes the
+  secret check.
 - **Sync stops cleanly when a merge fails for a reason other than a
   conflict**, instead of committing and pushing on top of a half-merge, and
   a clean pull regenerates the index and backlinks.
@@ -334,17 +404,21 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   `'unsafe-inline'` into the policy, so a single escaping slip anywhere would
   have been executable. The assets are now served as content-hashed files
   (cached for good, a new build is a new URL), the one page-specific
-  inline script - the graph - carries a fresh nonce per response, and the
-  policy allows only same-origin scripts and styles plus that nonce.
+  inline script - the graph - carries a fresh nonce per response, handed to
+  that script alone, and the policy allows only same-origin scripts and
+  styles plus that nonce.
 - **A web page can no longer lock you out of your own viewer.** The
   mutation rate limit counted every POST before checking where it came
   from, so any site you visited could send 180 blind form posts to
   localhost and disable Mark reviewed, Archive and Save for a minute, over
   and over. Only requests that prove they come from the viewer are
-  counted now, and the Origin/Referer check also requires the viewer's own
-  port instead of accepting any localhost origin.
-- **Capture commands refuse symlinks**, so `delete-capture` can no longer be
-  pointed at a memory page through a link in `raw/`, and capture
+  counted now, and the Origin/Referer check also requires the port the
+  viewer was reached on instead of accepting any localhost origin, so it
+  still works through an SSH or editor port forward.
+- **Capture commands only touch captures.** `delete-capture`, accept and
+  redact take only a capture file inside the real `raw/memory-captures`
+  with no symlink on the way, so they can no longer be pointed at a memory
+  page by path or through a link, and capture
   de-duplication sees all of a capture's proposals rather than the first
   ten (a capture whose first ten were covered was deleted as a duplicate
   even when later proposals were new).
