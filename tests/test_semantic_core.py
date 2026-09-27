@@ -304,3 +304,19 @@ class SemanticStatusCountTests(unittest.TestCase):
         src = link_py.read_text(encoding="utf-8")
         self.assertIn("memory_count=total_count", src)
         self.assertNotIn("memory_count=active_count", src)
+
+
+class MissingModelRetryTests(unittest.TestCase):
+    """A running server must notice a model fetched after it started."""
+
+    def test_a_missing_model_is_retried_after_the_window(self):
+        from unittest import mock
+        from link_core import semantic
+        key = "model2vec:test-missing-model"
+        semantic._mark_missing(key)
+        self.assertTrue(semantic._known_missing(key))
+        with mock.patch.object(semantic, "MISSING_MODEL_RETRY_SECONDS", 0.0):
+            self.assertFalse(semantic._known_missing(key))
+        semantic._MODEL_CACHE.pop(key, None)
+        semantic._MISSING_AT.pop(key, None)
+

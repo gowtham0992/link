@@ -28,6 +28,8 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from .files import atomic_write_text_unlocked, file_lock
+
 USAGE_FILE = ".link-usage.json"
 USAGE_DISABLE_ENV = "LINK_USAGE"
 MAX_EVENTS = 500
@@ -81,7 +83,6 @@ def record_retrieval(
         return False
     names = [str(name).strip() for name in memories if str(name).strip()][:20]
     try:
-        events = load_usage(root)
         event: dict[str, object] = {
             "at": _utc_now(),
             "kind": clean_kind,
@@ -95,13 +96,17 @@ def record_retrieval(
             event["tokens"] = int(tokens)
         if truncated:
             event["truncated"] = True
-        events.append(event)
         path = usage_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"schema": "link-usage-v1", "events": events[-MAX_EVENTS:]}, indent=1) + "\n",
-            encoding="utf-8",
-        )
+        # Read, append and replace under one lock: a hook, an MCP server and
+        # the CLI record at the same moment, and an unlocked read-modify-write
+        # kept only the last writer's events.
+        with file_lock(path):
+            events = load_usage(root)
+            events.append(event)
+            atomic_write_text_unlocked(
+                path, json.dumps({"schema": "link-usage-v1", "events": events[-MAX_EVENTS:]}, indent=1) + "\n",
+            )
         return True
     except (OSError, ValueError, TypeError):
         return False

@@ -31,6 +31,31 @@ def create_demo_quiet(target: Path, force: bool = False) -> None:
 
 
 class LinkCliTests(unittest.TestCase):
+    def test_semantic_setup_keeps_nli_when_it_moves_to_the_managed_venv(self):
+        # Homebrew pythons are externally managed: setup provisions a venv
+        # and re-runs itself there. --nli used to be dropped on that re-run,
+        # so the contradiction model never downloaded on Homebrew installs.
+        tmp = Path(tempfile.mkdtemp(prefix="link-nli-rerun-"))
+        create_demo_quiet(tmp / "demo")
+        calls: list[list[str]] = []
+
+        def fake_run(command, *args, **kwargs):
+            calls.append([str(part) for part in command])
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.object(link_cli, "_core_load_semantic_embedder", return_value=None), \
+                patch.object(link_cli, "_core_python_is_externally_managed", return_value=True), \
+                patch.object(link_cli, "_core_provision_link_extras",
+                             return_value={"ready": True, "python": "/venv/bin/python", "notes": []}), \
+                patch.object(link_cli.subprocess, "run", side_effect=fake_run), \
+                redirect_stdout(StringIO()):
+            code = link_cli.semantic(tmp / "demo", setup=True, nli=True)
+        self.assertEqual(code, 0)
+        rerun = [call for call in calls if call[:1] == ["/venv/bin/python"]]
+        self.assertEqual(len(rerun), 1)
+        self.assertIn("--setup", rerun[0])
+        self.assertIn("--nli", rerun[0])
+
     def test_init_creates_empty_wiki(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-init-test-"))
         target = tmp / "my-link"

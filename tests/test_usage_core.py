@@ -35,6 +35,22 @@ class UsageLedgerTests(unittest.TestCase):
         raw = usage_path(self.root).read_text(encoding="utf-8")
         self.assertNotIn("query", raw)
 
+    def test_concurrent_writers_lose_no_events(self):
+        # A hook, an MCP server and the CLI record at the same moment. The
+        # unlocked read-modify-write kept 26 of 240 events.
+        import subprocess
+        script = (
+            "import sys; sys.path.insert(0, sys.argv[1]);"
+            "from pathlib import Path; from link_core.usage import record_retrieval;"
+            "[record_retrieval(Path(sys.argv[2]), 'recall', ['m']) for _ in range(30)]"
+        )
+        workers = [subprocess.Popen([sys.executable, "-c", script, str(ROOT / "mcp_package"), str(self.root)],
+                                    stdin=subprocess.DEVNULL)
+                   for _ in range(8)]
+        for worker in workers:
+            self.assertEqual(worker.wait(timeout=120), 0)
+        self.assertEqual(len(load_usage(self.root)), 240)
+
     def test_unknown_kinds_are_ignored(self):
         self.assertFalse(record_retrieval(self.root, "remember", ["a"]))
         self.assertEqual(load_usage(self.root), [])

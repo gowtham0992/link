@@ -24,6 +24,7 @@ import hashlib
 import json
 import math
 import os
+import time
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
@@ -141,8 +142,23 @@ def _set_offline_guard(allow_download: bool) -> None:
 
 
 # Remembers a model that could not be loaded offline, so a missing optional
-# model costs one attempt per process instead of one per recall.
+# model costs one attempt a minute instead of one per recall. It expires
+# rather than lasting for the process: a long-running MCP server must pick
+# up a model that `lnk semantic --setup` fetched after it started.
 _MISSING_MODEL = object()
+_MISSING_AT: dict[str, float] = {}
+MISSING_MODEL_RETRY_SECONDS = 60.0
+
+
+def _known_missing(cache_key: str) -> bool:
+    if _MODEL_CACHE.get(cache_key) is not _MISSING_MODEL:
+        return False
+    return time.monotonic() - _MISSING_AT.get(cache_key, 0.0) < MISSING_MODEL_RETRY_SECONDS
+
+
+def _mark_missing(cache_key: str) -> None:
+    _MODEL_CACHE[cache_key] = _MISSING_MODEL
+    _MISSING_AT[cache_key] = time.monotonic()
 
 
 def _quiet_load(factory, allow_download: bool):
@@ -180,7 +196,7 @@ def _load_model(allow_download: bool = False):
     model_name = semantic_model_name()
     cache_key = f"{provider}:{model_name}"
     cached = _MODEL_CACHE.get(cache_key)
-    if cached is _MISSING_MODEL and not allow_download:
+    if not allow_download and _known_missing(cache_key):
         raise RuntimeError(f"{model_name} is not available offline")
     if cached is not None and cached is not _MISSING_MODEL:
         return cached
@@ -196,7 +212,7 @@ def _load_model(allow_download: bool = False):
             model = _quiet_load(lambda: StaticModel.from_pretrained(model_name), allow_download)
     except Exception:
         if not allow_download:
-            _MODEL_CACHE[cache_key] = _MISSING_MODEL
+            _mark_missing(cache_key)
         raise
     _MODEL_CACHE[cache_key] = model
     return model
@@ -260,7 +276,7 @@ def load_reranker(allow_download: bool = False) -> Reranker | None:
     model_name = rerank_model_name()
     cache_key = f"rerank:{model_name}"
     model = _MODEL_CACHE.get(cache_key)
-    if model is _MISSING_MODEL and not allow_download:
+    if not allow_download and _known_missing(cache_key):
         return None
     if model is None or model is _MISSING_MODEL:
         try:
@@ -271,7 +287,7 @@ def load_reranker(allow_download: bool = False) -> Reranker | None:
             _MODEL_CACHE[cache_key] = model
         except Exception:
             if not allow_download:
-                _MODEL_CACHE[cache_key] = _MISSING_MODEL
+                _mark_missing(cache_key)
             return None
 
     def _score(query: str, documents: list[str]) -> list[float]:
