@@ -105,7 +105,13 @@ class QueryCoreTests(unittest.TestCase):
         self.assertEqual(payload["wiki"]["search_results"][0]["provenance"]["path"], "wiki/concepts/agent-memory.md")
         self.assertLessEqual(len(payload["context_packet"]), 4)
         self.assertIn("why_selected", payload["context_packet"][0])
-        self.assertIn("provenance", payload["context_packet"][0])
+        # The ranked list points at its content; provenance travels with the
+        # content, once, in the section it names.
+        first = payload["context_packet"][0]
+        section = payload["wiki"]["pages"] if first["see"] == "wiki.pages" else payload["memory"]["items"]
+        target = next(item for item in section if item["name"] == first["name"])
+        self.assertIn("provenance", target)
+        self.assertNotIn("text", first)
         self.assertIn("recall_capsule", payload)
         self.assertGreater(payload["recall_capsule"]["estimated_tokens"], 0)
         self.assertIn("hybrid", payload["recall_capsule"]["ranking"])

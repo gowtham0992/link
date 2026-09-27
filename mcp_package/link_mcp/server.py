@@ -312,6 +312,51 @@ def _compact_session_brief(brief: dict) -> dict:
     return compact
 
 
+# What each slim tool can do, for clients deciding what needs confirmation.
+# Nothing in Link reaches the network, so every tool is closed-world.
+SLIM_TOOL_HINTS: dict[str, dict[str, bool]] = {
+    "status": {"readOnlyHint": True},
+    "recall": {"readOnlyHint": True},
+    "remember": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
+    "ingest": {"readOnlyHint": False, "destructiveHint": False},
+    # review can archive, restore and (with confirm) forget a memory.
+    "review": {"readOnlyHint": False, "destructiveHint": True},
+    # admin covers migrate, backup restore paths and capture deletion.
+    "admin": {"readOnlyHint": False, "destructiveHint": True},
+}
+
+
+def _register_tool(fn, hints: dict[str, bool] | None):
+    """Register with annotations and without a duplicate structured copy.
+
+    Link tools return a JSON string. Left to its defaults, FastMCP also sent
+    that same string back as structuredContent under a {"result": string}
+    schema, so every result crossed the wire twice. Older mcp releases lack
+    one or both keywords, so registration degrades rather than failing.
+    """
+    annotations = None
+    if hints is not None:
+        try:
+            from mcp.types import ToolAnnotations
+
+            annotations = ToolAnnotations(
+                readOnlyHint=hints.get("readOnlyHint"),
+                destructiveHint=hints.get("destructiveHint"),
+                idempotentHint=hints.get("idempotentHint"),
+                openWorldHint=False,
+            )
+        except Exception:
+            annotations = None
+    try:
+        return mcp.tool(annotations=annotations, structured_output=False)(fn)
+    except TypeError:
+        pass
+    try:
+        return mcp.tool(annotations=annotations)(fn)
+    except TypeError:
+        return mcp.tool()(fn)
+
+
 def _surface_tool(surface: str):
     def decorator(fn):
         if MCP_SURFACE != surface:
@@ -321,7 +366,7 @@ def _surface_tool(surface: str):
         def wrapper(*args, **kwargs):
             return _attach_session_brief(fn(*args, **kwargs))
 
-        return mcp.tool()(wrapper)
+        return _register_tool(wrapper, SLIM_TOOL_HINTS.get(fn.__name__) if surface == "slim" else None)
 
     return decorator
 

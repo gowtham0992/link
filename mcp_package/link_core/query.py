@@ -424,6 +424,27 @@ def _estimated_tokens(chars: int) -> int:
     return max(1, (chars + 3) // 4) if chars else 0
 
 
+def _packet_reference(item: Mapping[str, object]) -> dict[str, object]:
+    """Where a ranked item's content lives in the packet, without repeating it.
+
+    The ranked list used to carry every memory and page in full, a second
+    copy of what the memory and wiki sections already hold (the primary
+    item appeared up to eight times in one packet). It now says what ranked
+    where and why, and points at the section with the content.
+    """
+    kind = str(item.get("kind") or "")
+    reference: dict[str, object] = {
+        "kind": kind,
+        "name": item.get("name", ""),
+        "title": item.get("title", ""),
+        "see": "memory.items" if kind == "memory" else "wiki.pages",
+    }
+    for key in ("relationship", "why_selected", "hybrid_rank", "rank_signals", "confidence"):
+        if key in item:
+            reference[key] = item[key]
+    return reference
+
+
 def _context_packet_budget_item(packet: list[dict[str, object]], limit: int) -> dict[str, object]:
     chars = _estimated_json_chars(packet)
     item = _budget_item(len(packet), limit, False)
@@ -587,16 +608,17 @@ def query_link(
             "Memory matches are weak (shared words only); verify with the user "
             "before acting on them and do not present them as known preferences.",
         )
+    packet_references = [_packet_reference(item) for item in packet]
     budget_report = {
         "memories": _budget_item(len(memories), limits["memories"], memory_has_more),
         "wiki_search": _budget_item(len(search_results), limits["search_results"], search_has_more),
         "graph_context": _budget_item(len(pages), limits["context_pages"], context_has_more),
-        "context_packet": _context_packet_budget_item(packet, limits["memories"] + limits["context_pages"]),
+        "context_packet": _context_packet_budget_item(packet_references, limits["memories"] + limits["context_pages"]),
     }
     if any(bool(section.get("has_more")) for section in budget_report.values()):
         guidance.insert(1, "This packet is budget-limited; use follow_up instead of scanning files manually.")
 
-    return {
+    result: dict[str, object] = {
         "query": q,
         "project": project_name,
         "budget": budget_name,
@@ -629,6 +651,13 @@ def query_link(
             "search_results": [_compact_search_result(page) for page in search_results],
             "pages": pages,
         },
-        "context_packet": packet,
+        "context_packet": packet_references,
         "agent_guidance": guidance,
     }
+    # The whole packet, not one section of it: what an agent actually pays.
+    whole_chars = _estimated_json_chars(result)
+    budget_report["packet_total"] = {
+        "estimated_chars": whole_chars,
+        "estimated_tokens": _estimated_tokens(whole_chars),
+    }
+    return result
