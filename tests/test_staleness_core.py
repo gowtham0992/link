@@ -254,3 +254,108 @@ class RecallPacketMarkerTests(unittest.TestCase):
         self.assertFalse(any("stale_paths" in line for line in packet["agent_guidance"]))
         packet = self._packet(None)                    # opt-in not given
         self.assertNotIn("stale_paths", packet["memory"]["items"][0])
+
+
+class StalenessV2Tests(unittest.TestCase):
+    """Scripts, targets, dependencies, variables, URLs, versions, managers."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="link-stale-v2-")
+        self.repo = Path(self.temp.name)
+        _git(self.repo, "init", "--initial-branch", "main")
+        (self.repo / "package.json").write_text(json.dumps({
+            "scripts": {"build": "tsc", "deploy:staging": "node deploy.js", "lint": "eslint ."},
+            "dependencies": {"left-pad": "1.0.0", "express": "4.0.0"},
+            "engines": {"node": ">=18"},
+        }), encoding="utf-8")
+        (self.repo / "Makefile").write_text("release:\n\techo release\nclean:\n\trm -rf out\n", encoding="utf-8")
+        (self.repo / "config.py").write_text(
+            "import os\nKEY = os.environ['LEGACY_API_TOKEN']\nURL = 'https://staging.acme-internal.dev/api'\n",
+            encoding="utf-8")
+        (self.repo / "package-lock.json").write_text("{}", encoding="utf-8")
+        (self.repo / "pyproject.toml").write_text('[project]\nname="x"\nrequires-python = ">=3.10"\n', encoding="utf-8")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-m", "seed")
+        # Then the project moves on.
+        (self.repo / "package.json").write_text(json.dumps({
+            "scripts": {"build": "tsc", "lint": "eslint ."},
+            "dependencies": {"express": "4.0.0"},
+            "engines": {"node": ">=20"},
+        }), encoding="utf-8")
+        (self.repo / "Makefile").write_text("clean:\n\trm -rf out\n", encoding="utf-8")
+        (self.repo / "config.py").write_text("import os\nKEY = os.environ['API_TOKEN']\nURL = 'https://api.acme.dev'\n",
+                                             encoding="utf-8")
+        (self.repo / "package-lock.json").unlink()
+        (self.repo / "pnpm-lock.yaml").write_text("lockfileVersion: 9\n", encoding="utf-8")
+        (self.repo / "pyproject.toml").write_text('[project]\nname="x"\nrequires-python = ">=3.12"\n', encoding="utf-8")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-m", "move on")
+        self.checker = StalenessChecker(self.repo)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _kinds(self, text):
+        return {(f["kind"], f["reference"]) for f in self.checker.findings(text)}
+
+    def test_removed_script_target_dependency_variable_and_url_are_flagged(self):
+        found = self._kinds(
+            "Deploy with `npm run deploy:staging`, then make release. We pad with `left-pad`. "
+            "Set LEGACY_API_TOKEN first. Staging lives at https://staging.acme-internal.dev/api."
+        )
+        self.assertEqual(found, {
+            ("script", "deploy:staging"), ("make_target", "release"), ("dependency", "left-pad"),
+            ("env_var", "LEGACY_API_TOKEN"), ("url", "staging.acme-internal.dev"),
+        })
+
+    def test_things_that_still_exist_are_left_alone(self):
+        self.assertEqual(self._kinds(
+            "Build with npm run build, lint with pnpm lint, make clean when stuck. We use `express`. "
+            "Set API_TOKEN. The API is https://api.acme.dev."
+        ), set())
+
+    def test_things_the_repository_never_had_are_prose_not_staleness(self):
+        self.assertEqual(self._kinds(
+            "Someday we might add npm run storybook, make docs, `react-query`, SENTRY_DSN and https://example.org."
+        ), set())
+
+    def test_runtime_version_contradicting_a_manifest_is_flagged(self):
+        found = self.checker.findings("We develop on Python 3.10 and Node 18.")
+        kinds = {(f["kind"], f["reference"]) for f in found}
+        self.assertEqual(kinds, {("version", "python 3.10"), ("version", "node 18")})
+        self.assertTrue(any("requires-python" in f["evidence"] for f in found))
+        self.assertEqual(self._kinds("We develop on Python 3.12 and Node 20."), set())
+
+    def test_package_manager_replaced_by_another_is_flagged(self):
+        found = self.checker.findings("Always use npm install before running tests.")
+        self.assertEqual([(f["kind"], f["reference"], f["successor"]) for f in found],
+                         [("package_manager", "npm", "pnpm")])
+        self.assertEqual(self._kinds("We use pnpm."), set())
+
+    def test_verdict_is_verified_stale_or_unverifiable(self):
+        verified = self.checker.verdict("Build with npm run build on Node 20.")
+        self.assertEqual(verified["verdict"], "verified")
+        self.assertTrue(verified["sha"])
+        stale = self.checker.verdict("Deploy with npm run deploy:staging.")
+        self.assertEqual(stale["verdict"], "stale")
+        self.assertEqual(stale["findings"][0]["reference"], "deploy:staging")
+        nothing = self.checker.verdict("I prefer short answers.")
+        self.assertEqual(nothing["verdict"], "unverifiable")
+
+    def test_describe_findings_uses_the_evidence(self):
+        lines = describe_findings(self.checker.findings("run make release"))
+        self.assertEqual(len(lines), 1)
+        self.assertIn("release", lines[0])
+
+
+class VersionSpecTests(unittest.TestCase):
+    def test_common_runtime_specs(self):
+        from link_core.staleness import _satisfies
+        cases = [
+            ("3.11", ">=3.12", False), ("3.12", ">=3.12", True), ("3.13", ">=3.10,<3.13", False),
+            ("3.11", ">=3.10,<3.13", True), ("18", "^20", False), ("20.4", "^20", True),
+            ("18.4", "~18.4", True), ("18.5", "~18.4", False), ("20", "20.x", True), ("18", "20.x", False),
+            ("19", ">=18 <21", True), ("21", ">=18 <21", False), ("3.12", "3.12", True), ("1.22", "1.21", False),
+        ]
+        for claimed, spec, expected in cases:
+            self.assertEqual(_satisfies(claimed, spec), expected, (claimed, spec))

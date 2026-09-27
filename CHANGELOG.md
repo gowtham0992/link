@@ -6,6 +6,25 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- **`lnk stale` checks far more than file paths.** 3.0 questioned a memory
+  only when it named a file git no longer has. It now also notices package
+  scripts (`npm run deploy:staging`), make and just targets, dependencies,
+  environment variables and URLs the repository once had and no longer does,
+  and two contradictions with files the repository checks in: a runtime
+  version the manifests no longer allow ("Python 3.10" when `pyproject.toml`
+  requires `>=3.12`, "Node 18" when `engines.node` is `>=20`), and a package
+  manager whose lockfile was replaced by another manager's. The precision
+  rule is unchanged - a reference is reported only when history shows the
+  thing existed - and it holds: 0 false flags across 322 references in
+  Link's own documentation and 298 more across eight other real
+  repositories, every real deletion caught, and every one of seven removal
+  kinds caught in the eval's scratch repository. Findings carry the
+  evidence ("package.json no longer defines scripts.deploy:staging").
+  Memories also get a per-memory verdict against the checkout -
+  `verified`, `stale`, or `unverifiable` when there is nothing to check.
+
 ### Security
 
 - **Team memories arrive through your review gate.** `lnk team-sync`
