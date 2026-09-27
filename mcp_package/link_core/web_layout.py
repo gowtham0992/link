@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from .web_assets import (
     COPY_BUTTON_JS,
     CSS,
+    INBOX_JS,
     MEMORY_ACTION_JS,
     PROPOSAL_UI_JS,
     RAW_SOURCE_JS,
@@ -157,7 +158,7 @@ def _asset_bundles() -> dict[str, tuple[str, str]]:
         "css": (CSS, "text/css; charset=utf-8"),
         "theme": (THEME_INIT_JS, "text/javascript; charset=utf-8"),
         "js": ("\n;\n".join([KEYBOARD_NAV_JS, NAV_CURRENT_JS, THEME_CONTROL_JS, MEMORY_ACTION_JS,
-                              COPY_BUTTON_JS, RAW_SOURCE_JS, PROPOSAL_UI_JS]), "text/javascript; charset=utf-8"),
+                              COPY_BUTTON_JS, RAW_SOURCE_JS, PROPOSAL_UI_JS, INBOX_JS]), "text/javascript; charset=utf-8"),
     }
     out: dict[str, tuple[str, str]] = {}
     for name, (text, content_type) in bundles.items():

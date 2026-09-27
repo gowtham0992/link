@@ -589,6 +589,40 @@ class ServeTests(unittest.TestCase):
         status, _, _ = _run_html_with_headers("/assets/link-js.deadbeef0000.js")
         self.assertEqual(status, 404)
 
+    def test_inbox_offers_keyboard_bulk_and_inline_edit(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/deploy-day.md",
+                   "---\ntype: memory\ntitle: Deploy day\nmemory_type: decision\nscope: user\nstatus: active\n"
+                   "review_status: pending\n---\n\n# Deploy day\n\n> **TLDR:** Deploy on Tuesdays.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/inbox")
+        self.assertEqual(status, 200)
+        self.assertIn('data-inbox-item data-memory="deploy-day"', body)
+        self.assertIn("data-inbox-bulk=\"review\"", body)
+        self.assertIn("data-inbox-text", body)
+        self.assertIn("data-inbox-visibility", body)
+        self.assertIn("data-inbox-list", _asset_text())
+
+    def test_set_memory_visibility_endpoint(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/deploy-day.md",
+                   "---\ntype: memory\ntitle: Deploy day\nmemory_type: decision\nscope: project\nproject: link\n"
+                   "status: active\nvisibility: private\n---\n\n# Deploy day\n\nDeploy on Tuesdays.\n")
+        reset_wiki(wiki)
+        headers = {"Content-Type": "application/json", "X-Link-Local-Action": "true"}
+        body = json.dumps({"memory": "deploy-day", "visibility": "team"}).encode()
+        status, payload = run_handler("POST", "/api/set-memory-visibility", body=body,
+                                      headers={**headers, "Content-Length": str(len(body))})
+        self.assertEqual(status, 200, payload)
+        self.assertIn("visibility: team", (wiki / "memories/deploy-day.md").read_text(encoding="utf-8"))
+        bad = json.dumps({"memory": "deploy-day", "visibility": "public"}).encode()
+        status, _ = run_handler("POST", "/api/set-memory-visibility", body=bad,
+                                headers={**headers, "Content-Length": str(len(bad))})
+        self.assertEqual(status, 400)
+        status, _ = run_handler("POST", "/api/set-memory-visibility", body=body,
+                                headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
+        self.assertEqual(status, 403)
+
     def test_options_preflight_returns_local_json_405(self):
         self.make_wiki()
 

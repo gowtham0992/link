@@ -348,7 +348,17 @@ def render_inbox_page(
         content = "<p>Inbox is clear.</p>"
     else:
         rows = "".join(_render_inbox_item(item, page_href=page_href) for item in items)
-        content = f"<ul class='page-list'>{rows}</ul>"
+        toolbar = (
+            '<div class="inbox-toolbar" data-inbox-toolbar>'
+            '<button type="button" data-inbox-bulk="review" disabled>Review selected</button>'
+            '<button type="button" data-inbox-bulk="archive" disabled>Archive selected</button>'
+            '<span class="inbox-status" data-inbox-status aria-live="polite"></span>'
+            '<span class="inbox-keys" aria-hidden="true">'
+            '<kbd>j</kbd>/<kbd>k</kbd> move · <kbd>r</kbd> review · <kbd>a</kbd> archive · '
+            '<kbd>e</kbd> edit · <kbd>x</kbd> select</span>'
+            '</div>'
+        )
+        content = f"{toolbar}<ul class='page-list inbox-list' data-inbox-list>{rows}</ul>"
     project = str(inbox.get("project") or "")
     inbox_actions = _copy_actions([(_inbox_prompt(project), "Copy review prompt")])
     body = (
@@ -564,13 +574,32 @@ def _render_inbox_item(item: Mapping[str, object], *, page_href: PageHref) -> st
             f'<p class="summary"><strong>Next:</strong> {html.escape(str(primary.get("label") or ""))} '
             f'- {html.escape(str(primary.get("description") or ""))}</p>'
         )
+    title = str(item.get("title") or name)
+    visibility = str(item.get("visibility") or "")
+    options = "".join(
+        f'<option value="{value}"{" selected" if value == visibility else ""}>{value}</option>'
+        for value in ("private", "project", "team")
+    )
+    # Inline edit: the claim goes through update-memory (so the claim head
+    # moves and conflict checks run), visibility through set-memory-visibility.
+    # Before this the inbox told you to go edit frontmatter in a terminal.
+    edit_html = (
+        '<details class="inbox-edit" data-inbox-edit><summary>Edit</summary>'
+        f'<label>Claim<textarea data-inbox-text rows="3">{html.escape(str(summary))}</textarea></label>'
+        f'<label>Visibility<select data-inbox-visibility>{options}</select></label>'
+        '<button type="button" data-inbox-save>Save</button>'
+        '</details>'
+    )
     return (
-        f'<li><a href="{html.escape(page_href(name), quote=True)}">{html.escape(str(item.get("title") or name))}</a>'
+        f'<li class="inbox-item" data-inbox-item data-memory="{html.escape(name, quote=True)}" tabindex="-1">'
+        f'<input type="checkbox" class="inbox-select" data-inbox-select aria-label="Select {html.escape(title, quote=True)}">'
+        f'<a href="{html.escape(page_href(name), quote=True)}">{html.escape(title)}</a>'
         f'<div class="memory-meta">{html.escape(meta)}</div>'
         f'<div class="memory-meta"><a href="/explain-memory?memory={urllib.parse.quote(name, safe="")}">explain</a></div>'
         f'{f"<small>{html.escape(str(summary))}</small>" if summary else ""}'
         f'<ul class="memory-issues">{issues}</ul>'
         f'{primary_html}'
+        f'{edit_html}'
         f'{render_memory_action_commands(_dict_list(item.get("actions")))}</li>'
     )
 

@@ -24,6 +24,7 @@ if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
 from link_core.memory import (
+    set_memory_visibility as _core_set_memory_visibility,
     add_capture_review_to_brief as _core_add_capture_review_to_brief,
     count_values as _core_count_values,
     is_active_memory as _core_is_active_memory,
@@ -1562,6 +1563,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._json({"saved": bool(result.get("updated")), **result}, status=http_status)
             except ValueError as exc:
                 self._json({"saved": False, "error": str(exc)}, status=400)
+            return
+        if path == "/api/set-memory-visibility":
+            if not self._require_local_action_header():
+                return
+            payload = self._read_json_or_reply({"updated": False})
+            if payload is None:
+                return
+            identifier = _clean_text_input(payload.get("memory") or payload.get("identifier"), max_len=300)
+            visibility = _clean_text_input(payload.get("visibility"), max_len=20).lower()
+            if not identifier or visibility not in {"private", "project", "team"}:
+                self._json({"updated": False, "error": "memory and visibility (private, project, team) required"},
+                           status=400)
+                return
+            try:
+                result = _core_set_memory_visibility(WIKI_DIR, identifier, visibility, _utc_timestamp(),
+                                                     records=_memory_records(), log_writer=_append_log)
+            except ValueError as exc:
+                self._json({"updated": False, "error": str(exc)}, status=400)
+                return
+            _invalidate_pages_cache()
+            self._json({"updated": True, **result})
             return
         if path in {"/api/review-memory", "/api/archive-memory", "/api/restore-memory"}:
             if not self._require_local_action_header():

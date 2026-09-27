@@ -657,6 +657,18 @@ pre code { color: var(--surface-code-ink); background: transparent; }
   background: transparent; color: var(--text-strong); border: 1px solid var(--border-strong); }
 .button-link:hover, button:not(.copy-button):not(.theme-toggle):not(.cmd-copy):not(.graph-control):hover {
   background: var(--chip-bg); }
+
+.inbox-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.inbox-toolbar button[disabled] { opacity: 0.5; cursor: default; }
+.inbox-status { color: var(--subtle); font-size: 13px; }
+.inbox-keys { margin-left: auto; color: var(--subtle); font-size: 12px; }
+.inbox-keys kbd { font-family: inherit; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.inbox-item { position: relative; padding-left: 28px; border-radius: 6px; }
+.inbox-item:focus { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
+.inbox-select { position: absolute; left: 4px; top: 6px; }
+.inbox-edit { margin: 8px 0; }
+.inbox-edit label { display: block; margin: 6px 0; font-size: 13px; color: var(--subtle); }
+.inbox-edit textarea { width: 100%; font: inherit; }
 """
 
 THEME_INIT_JS = """
@@ -794,6 +806,112 @@ MEMORY_ACTION_JS = """
       }
     });
   });
+})();
+"""
+
+INBOX_JS = """
+(function() {
+  var list = document.querySelector('[data-inbox-list]');
+  if (!list) return;
+  var status = document.querySelector('[data-inbox-status]');
+  var bulkButtons = Array.from(document.querySelectorAll('[data-inbox-bulk]'));
+  var endpoints = {review: '/api/review-memory', archive: '/api/archive-memory'};
+
+  function items() { return Array.from(list.querySelectorAll('[data-inbox-item]')); }
+  function say(text) { if (status) status.textContent = text; }
+  function focused() {
+    var active = document.activeElement;
+    var item = active && active.closest ? active.closest('[data-inbox-item]') : null;
+    return item || items()[0] || null;
+  }
+  function focusItem(item) { if (item) { item.focus(); item.scrollIntoView({block: 'nearest'}); } }
+  function move(delta) {
+    var all = items();
+    if (!all.length) return;
+    var index = all.indexOf(focused());
+    focusItem(all[Math.max(0, Math.min(all.length - 1, index + delta))]);
+  }
+  function selected() { return items().filter(function(item) { return item.querySelector('[data-inbox-select]').checked; }); }
+  function syncBulk() {
+    var count = selected().length;
+    bulkButtons.forEach(function(button) { button.disabled = count === 0; });
+    if (count) say(count + ' selected');
+  }
+  async function post(endpoint, payload) {
+    var response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Link-Local-Action': 'true'},
+      body: JSON.stringify(payload)
+    });
+    var data = {};
+    try { data = await response.json(); } catch (err) {}
+    if (!response.ok) throw new Error(data.error || ('request failed (' + response.status + ')'));
+    return data;
+  }
+  function finish(item) {
+    // Auto-advance: the next item takes focus instead of reloading the page.
+    var all = items();
+    var next = all[all.indexOf(item) + 1] || all[all.indexOf(item) - 1] || null;
+    item.remove();
+    focusItem(next);
+    if (!items().length) { list.insertAdjacentHTML('afterend', '<p>Inbox is clear.</p>'); }
+    syncBulk();
+  }
+  async function act(item, action) {
+    if (!item) return;
+    var payload = {memory: item.getAttribute('data-memory')};
+    if (action === 'archive') payload.reason = 'archived from the inbox';
+    say(action === 'review' ? 'Marking reviewed...' : 'Archiving...');
+    try {
+      await post(endpoints[action], payload);
+      say(action === 'review' ? 'Marked reviewed.' : 'Archived - restore it from the memory page.');
+      finish(item);
+    } catch (err) { say(err.message); }
+  }
+  async function save(item) {
+    var text = item.querySelector('[data-inbox-text]').value.trim();
+    var visibility = item.querySelector('[data-inbox-visibility]').value;
+    var memory = item.getAttribute('data-memory');
+    say('Saving...');
+    try {
+      if (text) await post('/api/update-memory', {memory: memory, text: text, source: 'inbox edit'});
+      if (visibility) await post('/api/set-memory-visibility', {memory: memory, visibility: visibility});
+      say('Saved. Review it when it reads right.');
+      item.querySelector('[data-inbox-edit]').open = false;
+    } catch (err) { say(err.message); }
+  }
+
+  bulkButtons.forEach(function(button) {
+    button.addEventListener('click', async function() {
+      var action = button.getAttribute('data-inbox-bulk');
+      var chosen = selected();
+      for (var i = 0; i < chosen.length; i++) { await act(chosen[i], action); }
+    });
+  });
+  list.addEventListener('change', function(event) {
+    if (event.target.matches('[data-inbox-select]')) syncBulk();
+  });
+  list.addEventListener('click', function(event) {
+    var saveButton = event.target.closest('[data-inbox-save]');
+    if (saveButton) save(saveButton.closest('[data-inbox-item]'));
+  });
+  document.addEventListener('keydown', function(event) {
+    var tag = (event.target.tagName || '').toLowerCase();
+    if (tag === 'input' && event.target.type !== 'checkbox' || tag === 'textarea' || tag === 'select') return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    var item = focused();
+    if (event.key === 'j') { move(1); event.preventDefault(); }
+    else if (event.key === 'k') { move(-1); event.preventDefault(); }
+    else if (event.key === 'r') { act(item, 'review'); event.preventDefault(); }
+    else if (event.key === 'a') { act(item, 'archive'); event.preventDefault(); }
+    else if (event.key === 'x' && item) {
+      var box = item.querySelector('[data-inbox-select]'); box.checked = !box.checked; syncBulk(); event.preventDefault();
+    } else if (event.key === 'e' && item) {
+      var edit = item.querySelector('[data-inbox-edit]'); edit.open = true;
+      edit.querySelector('[data-inbox-text]').focus(); event.preventDefault();
+    }
+  });
+  focusItem(items()[0]);
 })();
 """
 

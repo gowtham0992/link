@@ -37,6 +37,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- **The viewer's review inbox is a real loop.** Reviewing used to mean a
+  confirm dialog, a full page reload per memory, and a "Next" hint telling
+  you to edit frontmatter in a terminal. Now `j`/`k` move, `r` reviews, `a`
+  archives, `x` selects, `e` edits; focus advances to the next memory
+  without a reload; selected memories can be reviewed or archived in bulk;
+  and each item edits its claim (through update-memory, so the claim moves
+  and conflict checks run) and its visibility inline.
 - **The viewer's home page stays small.** It listed every page in the wiki
   (173 KB of links at 1,000 pages); each section now shows twelve and links
   to the filtered, paged view for the rest. `/api/pages` is capped at 500
