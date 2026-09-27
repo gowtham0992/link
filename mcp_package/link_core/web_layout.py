@@ -53,6 +53,21 @@ document.addEventListener('keydown', function(e) {
 """
 
 NAV_CURRENT_JS = """
+// Keep the project context: a ?project= view used to be lost on the first
+// navigation click. Internal links without their own project inherit it.
+(function() {
+  var project = new URLSearchParams(window.location.search).get('project');
+  if (!project) return;
+  document.querySelectorAll('a[href^="/"]').forEach(function(link) {
+    var href = link.getAttribute('href') || '';
+    if (href.indexOf('//') === 0 || href.indexOf('/raw/') === 0 || href.indexOf('/assets/') === 0) return;
+    var url = new URL(href, window.location.origin);
+    if (url.searchParams.has('project')) return;
+    url.searchParams.set('project', project);
+    link.setAttribute('href', url.pathname + url.search + url.hash);
+  });
+})();
+
 // Mark the active local navigation item.
 (function() {
   function cleanPath(path) {

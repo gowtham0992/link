@@ -138,6 +138,21 @@ def render_graph_script(
     el.style.background = el.getAttribute('data-swatch-color');
   }});
 
+  // Suggest node titles in the Find box: focusing used to require typing a
+  // title exactly right.
+  var titleList = document.getElementById('graph-node-titles');
+  if (titleList) {{
+    var seenTitles = {{}};
+    nodes.slice(0, 2000).forEach(function(node) {{
+      var title = String(node.title || node.label || node.id || '');
+      if (!title || seenTitles[title]) return;
+      seenTitles[title] = true;
+      var option = document.createElement('option');
+      option.value = title;
+      titleList.appendChild(option);
+    }});
+  }}
+
   var canvas = document.getElementById('graph-canvas');
   var ctx = canvas.getContext('2d');
   var tooltip = document.getElementById('graph-tooltip');
@@ -1399,7 +1414,8 @@ def render_graph_page_body(
         '<button id="graph-copy-link" type="button">Copy link</button>'
         f"{load_full_button}"
         '<label class="graph-control">Find'
-        '<input id="graph-search" type="search" placeholder="node title"></label>'
+        '<input id="graph-search" type="search" placeholder="node title" list="graph-node-titles" autocomplete="off">'
+        '<datalist id="graph-node-titles"></datalist></label>'
         '<label class="graph-control">Type'
         f'<select id="graph-category">{category_options}</select></label>'
         '<label class="graph-control">Size'

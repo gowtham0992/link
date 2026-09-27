@@ -57,3 +57,10 @@ class WebLayoutCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ViewerNavigationTests(unittest.TestCase):
+    def test_project_context_is_carried_across_internal_links(self):
+        from link_core.web_layout import viewer_assets
+        bundle = "".join(text for text, _ in viewer_assets().values())
+        self.assertIn("url.searchParams.set('project', project)", bundle)

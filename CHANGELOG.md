@@ -44,6 +44,10 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   without a reload; selected memories can be reviewed or archived in bulk;
   and each item edits its claim (through update-memory, so the claim moves
   and conflict checks run) and its visibility inline.
+- **The viewer keeps your project, and the graph suggests titles.** A
+  `?project=` view was lost on the first navigation click; internal links
+  now carry it. The graph's Find box suggests node titles instead of
+  needing an exact one.
 - **The viewer's home page stays small.** It listed every page in the wiki
   (173 KB of links at 1,000 pages); each section now shows twelve and links
   to the filtered, paged view for the rest. `/api/pages` is capped at 500
