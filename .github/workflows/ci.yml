@@ -2,6 +2,11 @@ name: CI
 
 on:
   pull_request:
+  # develop is pushed to directly between releases, and a release tag must
+  # carry its own CI record; pull_request alone covered neither.
+  push:
+    branches: [develop, main]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
