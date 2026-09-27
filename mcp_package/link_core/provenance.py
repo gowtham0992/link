@@ -59,7 +59,7 @@ def detect_repo_root(start: Path | None = None) -> Path | None:
     try:
         completed = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(start or Path.cwd()), capture_output=True, text=True, timeout=5, check=False,
+            cwd=str(start or Path.cwd()), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

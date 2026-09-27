@@ -84,7 +84,7 @@ class SyncError(RuntimeError):
 
 def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, timeout=120,
+        ["git", *args], cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120,
     )
     if check and result.returncode != 0:
         message = (result.stderr or result.stdout or "").strip()
@@ -94,7 +94,7 @@ def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
 
 def _git_available() -> bool:
     try:
-        subprocess.run(["git", "--version"], capture_output=True, timeout=10)
+        subprocess.run(["git", "--version"], stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
         return True
     except (OSError, subprocess.TimeoutExpired):
         return False

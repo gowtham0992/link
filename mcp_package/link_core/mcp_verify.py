@@ -81,6 +81,7 @@ def check_link_mcp_import(python_cmd: str) -> dict[str, object]:
         result = subprocess.run(
             [python_cmd, "-c", code],
             check=False,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -118,7 +119,7 @@ def python_is_externally_managed(python_cmd: str | None = None) -> bool:
     try:
         result = subprocess.run(
             [python_cmd, "-c", code],
-            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
     except OSError:
         return False

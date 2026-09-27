@@ -63,6 +63,12 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- **MCP on Windows no longer hangs when Link runs git.** Inside the MCP
+  server, stdin is the connection to the agent. Child processes (git for
+  sync, project seeding and repository checks, and Python for runtime
+  checks) inherited it. On Windows a child holding that pipe waits until
+  its timeout, so any tool that ran git stalled. Every spawn in the package
+  now closes stdin, and a test fails if a new one does not.
 - **The viewer's review inbox is a real loop.** Reviewing used to mean a
   confirm dialog, a full page reload per memory, and a "Next" hint telling
   you to edit frontmatter in a terminal. Now `j`/`k` move, `r` reviews, `a`

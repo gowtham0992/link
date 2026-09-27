@@ -84,12 +84,16 @@ def repo_path_references(text: str) -> list[str]:
 
 def _git(repo_root: Path, arguments: list[str], runner: Callable[..., object] | None = None) -> str:
     """Run one read-only git command, returning "" when git cannot answer."""
+    # stdin is closed on purpose. Inside the MCP server, stdin is the stdio
+    # transport; a child that inherits it hangs on Windows until its timeout,
+    # which made every recall there time out.
     if runner is not None:
         return str(runner(repo_root, arguments) or "")
     try:
         completed = subprocess.run(
             ["git", *arguments],
             cwd=str(repo_root),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=10,

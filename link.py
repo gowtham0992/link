@@ -1258,7 +1258,7 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
     repo_dir = Path(repo).expanduser().resolve()
     inside = subprocess.run(
         ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
-        capture_output=True, text=True, check=False,
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False,
     ) if repo_dir.is_dir() else None
     if inside is None or inside.returncode != 0 or inside.stdout.strip() != "true":
         # Saying "no stale references" about a folder git cannot read was a
