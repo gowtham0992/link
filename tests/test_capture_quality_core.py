@@ -43,6 +43,9 @@ DURABLE = {
     "do not, standing": "Do not use em dashes in commit messages, ever.",
     "by default": "By default, deploy to staging first.",
     "whenever": "Whenever the containers start, the UI should be available too.",
+    "always imperative": "Always show the full diff before committing.",
+    "always be": "Always be explicit about assumptions.",
+    "never imperative": "Never show emoji in commit messages.",
 }
 
 
@@ -61,6 +64,26 @@ class NonDurableTests(unittest.TestCase):
         for label, text in DURABLE.items():
             with self.subTest(label=label):
                 self.assertIsNotNone(classify_memory_segment(text), text)
+
+
+class ExplicitRememberTests(unittest.TestCase):
+    """A sentence someone chose to save keeps its type; capture stays strict."""
+
+    RULES = (
+        "Do not use tabs in YAML files.",
+        "Avoid mocking the database in integration tests.",
+        "Deploys are risky late in the week; it should never happen on Fridays.",
+    )
+
+    def test_explicit_rules_are_typed_as_rules(self):
+        for text in self.RULES:
+            with self.subTest(text=text):
+                classified = classify_memory_segment(text, explicit=True)
+                self.assertIsNotNone(classified, text)
+                self.assertNotEqual(classified["memory_type"], "note")
+
+    def test_capture_still_drops_task_instructions(self):
+        self.assertIsNone(classify_memory_segment("Do not score the quality of the submission package."))
 
 
 class ProcedureLeadTests(unittest.TestCase):

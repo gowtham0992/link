@@ -82,6 +82,17 @@ def _body_snippet(body: str) -> str:
     return body_lines[0][:200] if body_lines else ""
 
 
+def _quarantined_memory(category: str, meta: dict[str, Any]) -> bool:
+    """A teammate's memory nobody here has reviewed (memory.memory_quarantined).
+
+    It stays in the cache so the viewer can show it for review, but search,
+    topic context and index.md - the paths that reach agents - leave it out.
+    """
+    if category != "memories" or not str(meta.get("imported_from") or "").strip():
+        return False
+    return str(meta.get("review_status") or "pending").strip().strip('"').lower() in {"pending", "needs_review"}
+
+
 def _markdown_page_paths(wiki_dir: Path) -> list[Path]:
     return sorted(path for path in wiki_dir.rglob("*.md") if not path.name.startswith("."))
 
@@ -288,6 +299,8 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
             "date_updated": meta.get("date_updated", ""),
             "date_published": meta.get("date_published", ""),
         }
+        if _quarantined_memory(category, meta):
+            page["quarantined"] = True
         pages.append(page)
         page_index[stem] = md
         # Stems are not unique: wiki/index.md and
@@ -523,7 +536,7 @@ def context_for_topic(
 
     forward: list[str] = []
     forward_seen: set[str] = set()
-    page_set = {page["name"].lower() for page in cache["pages"]}
+    page_set = {page["name"].lower() for page in cache["pages"] if not page.get("quarantined")}
     forward_links_index = cache.get("forward_links_index")
     if isinstance(forward_links_index, dict):
         cached_forward = (
@@ -1005,7 +1018,7 @@ def page_link_summary(
 def _index_pages(cache: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         page for page in cache["pages"]
-        if str(page.get("name") or "").lower() not in {"index", "log"}
+        if str(page.get("name") or "").lower() not in {"index", "log"} and not page.get("quarantined")
     ]
 
 

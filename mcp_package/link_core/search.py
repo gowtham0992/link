@@ -380,7 +380,7 @@ def search_pages(query: str, cache: dict[str, Any], limit: int = 20) -> list[dic
                 text_words = search_words(text_normalized)
             if all(token in text_words for token in query_tokens):
                 score += 2
-        if score > 0:
+        if score > 0 and not page.get("quarantined"):
             scored.append((score, {**page, "score": score, "snippet": snippet_index.get(stem, "")}))
 
     scored.sort(key=lambda item: (-item[0], str(item[1]["title"]).lower()))

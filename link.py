@@ -774,6 +774,7 @@ def _write_memory_page(
     applies_when: str | None = None,
     supersedes: str | None = None,
     context: str | None = None,
+    project_explicit: bool = False,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -789,7 +790,7 @@ def _write_memory_page(
         supersedes=supersedes,
         context=context,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
-        allow_secret=allow_secret,
+        allow_secret=allow_secret, project_explicit=project_explicit,
         **options,
     )
 
@@ -1452,7 +1453,7 @@ def remember(
         # "I prefer X" saved as a generic note gets the wrong trust window
         # and misses preference-scoped conflict checks. When the user didn't
         # choose a type, use the same cues the capture pipeline trusts.
-        classified = _core_classify_memory_segment(text.strip().splitlines()[0])
+        classified = _core_classify_memory_segment(text.strip().splitlines()[0], explicit=True)
         memory_type = str(classified["memory_type"]) if classified else "note"
     try:
         result = _write_memory_page(
@@ -1467,6 +1468,7 @@ def remember(
             allow_conflict=allow_conflict,
             allow_secret=allow_secret,
             project=project or _default_project(target),
+            project_explicit=bool(project),
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,

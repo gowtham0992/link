@@ -261,6 +261,20 @@ def _token_unspaced(character: str) -> bool:
     )
 
 
+def _substring_script(value: str) -> bool:
+    """True when whole-word matching cannot work for this text.
+
+    Scripts without spaces (see _token_unspaced) have no word boundaries, and
+    Korean attaches particles to words ("배포" is written "배포는"). Such
+    query words match as substrings, the way 3.x matched everything.
+    """
+    return any(
+        _token_unspaced(character) or 0xAC00 <= ord(character) <= 0xD7AF
+        or 0x1100 <= ord(character) <= 0x11FF or 0x3130 <= ord(character) <= 0x318F
+        for character in value
+    )
+
+
 def _compose(value: str) -> str:
     """Recompose a token after NFKD.
 
@@ -514,7 +528,22 @@ def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
 
 def _contains_phrase(text: str, phrase: str) -> bool:
     """Whole-word containment: "main" is not inside "maintain"."""
-    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
+    if text.isascii() and phrase.isascii():
+        return re.search(rf"(?<![A-Za-z0-9_]){re.escape(phrase)}(?![A-Za-z0-9_])", text) is not None
+    if _substring_script(phrase):
+        return phrase in text
+    # A letter from a script without spaces is a boundary too: "vault" is a
+    # whole word in "鍵はvaultに保存する".
+    for match in re.finditer(re.escape(phrase), text):
+        before = text[match.start() - 1] if match.start() else ""
+        after = text[match.end()] if match.end() < len(text) else ""
+        if not _word_character(before) and not _word_character(after):
+            return True
+    return False
+
+
+def _word_character(character: str) -> bool:
+    return bool(character) and (character.isalnum() or character == "_") and not _substring_script(character)
 
 
 def expanded_memory_query_tokens(value: str) -> set[str]:
@@ -548,6 +577,15 @@ NEGATION_WORDS_MULTILINGUAL = {
 NEGATION_SUBSTRINGS_UNSPACED = (
     "ない", "ません", "禁止", "決して", "するな", "不", "别", "別", "勿", "않", "못", "금지", "마세요", "말고",
 )
+# Everyday words that contain a marker without negating anything: 特别
+# "especially", 区别 "difference", 個別 "individual", 危ない "dangerous",
+# 少ない "few", 不具合 "bug", 不可欠 "essential". Removed before the check, so
+# "发布前特别要运行测试" does not read as the opposite of "发布前运行测试".
+_NEGATION_FALSE_COMPOUNDS = (
+    "特别", "特別", "区别", "區別", "区別", "分别", "分別", "个别", "個別", "差别", "差別", "告别", "告別",
+    "类别", "類別", "级别", "級別", "识别", "識別", "性别", "性別", "别名", "別名", "別途", "別々", "別の",
+    "危ない", "少ない", "切ない", "仕方ない", "不具合", "不可欠", "不安", "不動産",
+)
 
 
 def has_negation(value: str) -> bool:
@@ -564,7 +602,11 @@ def has_negation(value: str) -> bool:
         return True  # French ne ... pas
     if value.isascii():
         return False
-    return any(cue in value for cue in NEGATION_SUBSTRINGS_UNSPACED)
+    stripped = value
+    for compound in _NEGATION_FALSE_COMPOUNDS:
+        if compound in stripped:
+            stripped = stripped.replace(compound, " ")
+    return any(cue in stripped for cue in NEGATION_SUBSTRINGS_UNSPACED)
 
 
 # Options that are only options inside a phrase. Bare, "release" and
@@ -1556,6 +1598,19 @@ def title_restates_claim(title: str, claim: str) -> bool:
     )
 
 
+def _update_restates_claim(record: Mapping[str, object], update_text: str) -> bool:
+    """True when an update is the same claim reworded ("Tuesdays" -> "Wednesdays").
+
+    At least half of the content words shared with the claim's head. An
+    update that adds something new ("also pin pip to 24.0") shares few.
+    """
+    head = f"{record.get('title') or ''} {record.get('tldr') or ''}"
+    head_words = cached_stems(frozenset(significant_memory_tokens(head))) - _CONFLICT_CUE_TOKENS
+    new_words = cached_stems(frozenset(significant_memory_tokens(update_text))) - _CONFLICT_CUE_TOKENS
+    union = head_words | new_words
+    return bool(union) and len(head_words & new_words) / len(union) >= 0.5
+
+
 def rewrite_memory_head(body: str, old_title: str, new_text: str) -> tuple[str, str | None]:
     """Point a memory's TLDR (and a claim-shaped title) at its latest text.
 
@@ -1576,9 +1631,15 @@ def rewrite_memory_head(body: str, old_title: str, new_text: str) -> tuple[str, 
     if tldr_re.search(body):
         body = tldr_re.sub(lambda match: match.group(1) + summary, body, count=1)
     if new_title:
-        body = re.sub(
-            r"^#\s+.+$", lambda _match: f"# {new_title}", body, count=1, flags=re.MULTILINE
-        )
+        # Only the page's own heading, above its first section: a page with
+        # no H1 must not have a heading inside an appended update renamed.
+        section = re.search(r"^##\s", body, flags=re.MULTILINE)
+        head_end = section.start() if section else len(body)
+        head, rest = body[:head_end], body[head_end:]
+        renamed = re.sub(r"^#\s+.+$", lambda _match: f"# {new_title}", head, count=1, flags=re.MULTILINE)
+        if renamed == head:
+            new_title = None
+        body = renamed + rest
     return body, new_title
 
 
@@ -1868,6 +1929,8 @@ def update_memory_page(
     if error:
         raise ValueError(error)
     assert page_path is not None and record is not None
+    if memory_quarantined(record):
+        raise ValueError("this memory was imported from your team and is waiting for review; review it first")
     if not is_active_memory(record):
         raise ValueError("cannot update archived or stale memory; restore it first")
     conflict_candidates = memory_conflict_candidates(
@@ -1897,9 +1960,19 @@ def update_memory_page(
     original = page_path.read_text(encoding="utf-8", errors="replace")
     _, body = parse_frontmatter(original)
     updated_body = append_memory_update(body, clean_text, timestamp, clean_source)
-    updated_body, new_title = rewrite_memory_head(
-        updated_body, str(record.get("title") or ""), clean_text
-    )
+    # The head moves to the new text only when the update revises the claim
+    # ("Python 3.11" -> "3.12"). An update that adds to it ("also pin pip")
+    # is appended and leaves the claim agents read unchanged.
+    revises_claim = _update_restates_claim(record, clean_text) or bool(memory_conflict_candidates(
+        [record], clean_text, None,
+        str(record.get("memory_type") or "note"), str(record.get("scope") or "user"),
+        project=project or str(record.get("project") or ""), embedder=lambda _texts: [],
+    ))
+    new_title = None
+    if revises_claim:
+        updated_body, new_title = rewrite_memory_head(
+            updated_body, str(record.get("title") or ""), clean_text
+        )
     updates = {
         "updated_at": f'"{timestamp}"',
         "update_count": str(next_update_count),
@@ -1908,7 +1981,15 @@ def update_memory_page(
     }
     if new_title:
         updates["title"] = f'"{frontmatter_string(new_title)}"'
-    updated_text = update_frontmatter_fields(original, updates, remove={"reviewed_at", "review_note"})
+    remove = {"reviewed_at", "review_note"}
+    imported_from = str(record.get("imported_from") or "").strip()
+    if imported_from:
+        # The person reviewed this import and is now changing it: it is their
+        # claim from here on. Keeping `imported_from` would put it back in
+        # quarantine the moment the update resets review to pending.
+        updates["originally_imported_from"] = frontmatter_string(imported_from)
+        remove.add("imported_from")
+    updated_text = update_frontmatter_fields(original, updates, remove=remove)
     with operation_journal(
         wiki_dir,
         "update-memory",
@@ -1980,6 +2061,10 @@ def write_memory_page(
     # A ContradictionScorer, None to skip, or "auto" to use the local model
     # when it is set up. Typed loosely for callers that pass keyword dicts.
     contradiction_scorer: object = "auto",
+    # True only when the person named the project themselves. Callers also
+    # pass a default project (the workspace or cwd repo name) on every write,
+    # and that default must never turn a user-wide memory into a project one.
+    project_explicit: bool = False,
 ) -> dict[str, object]:
     if memory_type not in MEMORY_TYPES:
         raise ValueError(f"memory_type must be one of: {', '.join(MEMORY_TYPES)}")
@@ -2039,7 +2124,7 @@ def write_memory_page(
     # dropped silently unless --scope project was also given, so
     # `remember "Use ruff" --project api` saved a user-wide memory.
     scope_inferred = False
-    if normalize_project(project) and scope == "user":
+    if project_explicit and normalize_project(project) and scope == "user":
         scope = "project"
         scope_inferred = True
     clean_project = normalize_project(project) if scope == "project" else ""
@@ -2733,7 +2818,7 @@ def memory_brief(
         # applies to every task yet shares no words with any of them, so
         # task recall never finds it and recency alone let it fall out of a
         # five-item brief (found by the behavioral A/B harness).
-        for record in standing_preferences(record_list, project=project_name, limit=STANDING_BRIEF_SLOTS):
+        for record in standing_preferences(record_list, project=project_name, limit=min(STANDING_BRIEF_SLOTS, limit)):
             relevant.append(slim_memory(record))
             seen.add(str(record.get("name") or ""))
         for memory_type in ("preference", "decision", "project"):
@@ -2994,8 +3079,15 @@ def score_memory(
         score += 8
     if q and _contains_phrase(body, q):
         score += 4
+    substring_tokens = {token for token in significant_tokens if _substring_script(token)}
+    for token in substring_tokens:
+        token_points = (
+            (6 if token in title else 0) + (4 if token in tldr else 0)
+            + (3 if token in tags else 0) + (1 if token in body else 0)
+        )
+        score += round(token_points * weight.get(token, 1.0))
     for token in tokens:
-        if token in MEMORY_STOPWORDS:
+        if token in MEMORY_STOPWORDS or token in substring_tokens:
             continue
         # Exact words carry full weight; another form of the word ("required"
         # for "require") counts a little less, so an exact match wins a tie.
@@ -3016,10 +3108,13 @@ def score_memory(
             token_points += 1
         score += round(token_points * weight.get(token, 1.0))
     if significant_tokens:
-        searchable = title_tokens | tldr_tokens | tags_tokens | body_tokens
+        head_text = f"{title} {tldr} {tags}"
+        found_head = {token for token in substring_tokens if token in head_text}
+        found_any = found_head | {token for token in substring_tokens if token in body}
+        searchable = title_tokens | tldr_tokens | tags_tokens | body_tokens | found_any
         if significant_tokens <= searchable:
             score += 8
-        if significant_tokens <= (title_tokens | tldr_tokens | tags_tokens):
+        if significant_tokens <= (title_tokens | tldr_tokens | tags_tokens | found_head):
             score += 10
     for token in expanded_tokens - set(tokens):
         if token in title_tokens:
@@ -3235,7 +3330,8 @@ def recall_memories(
     records_by_name: dict[str, Mapping[str, object]] = {}
     record_list = list(records)
     word_weights = query_word_weights(record_list, q)
-    query_vocabulary = _query_vocabulary(q.lower())
+    # Substring-matched scripts cannot be prefiltered by word forms.
+    query_vocabulary = frozenset() if _substring_script(q) else _query_vocabulary(q.lower())
     for record in record_list:
         records_by_name[str(record.get("name") or "")] = record
         if not memory_visible_for_project(record, project_name):
@@ -3682,13 +3778,32 @@ _NEGATED_OBJECT_RES = (
 # "Buildkite replaced Jenkins", "instead of 3", "took over from Priya",
 # "on Wednesday, not Thursday". Those words are the old value.
 _VALUE_WORD = r"[\w./:@+-]+"
+# "from X to Y" names a replaced value only after a verb of change: "copy the
+# database from staging to prod" moves data and replaces nothing.
+_CHANGE_VERB = (
+    r"(?:mov(?:e|ed|es|ing)|migrat(?:e|ed|es|ing)|switch(?:ed|es|ing)?|chang(?:e|ed|es|ing)|"
+    r"upgrad(?:e|ed|es|ing)|downgrad(?:e|ed|es|ing)|rais(?:e|ed|es|ing)|lower(?:ed|s|ing)?|"
+    r"increas(?:e|ed|es|ing)|decreas(?:e|ed|es|ing)|bump(?:ed|s|ing)?|went|shift(?:ed|s|ing)?|"
+    r"convert(?:ed|s|ing)?|ported|transition(?:ed|s|ing)?|updat(?:e|ed|es|ing)|reduc(?:e|ed|es|ing)|cut)"
+)
 _TRANSITION_OLD_RES = (
-    re.compile(rf"\bfrom\s+(?:the\s+)?(?:port\s+|node\s+|version\s+)?({_VALUE_WORD})\s+to\b", re.IGNORECASE),
+    re.compile(
+        rf"\b{_CHANGE_VERB}\b[^.;]*?\bfrom\s+(?:the\s+)?(?:port\s+|node\s+|version\s+)?({_VALUE_WORD})\s+to\b",
+        re.IGNORECASE,
+    ),
     re.compile(rf"\b{_VALUE_WORD}\s+(?:replaced|replaces|supersedes)\s+({_VALUE_WORD})", re.IGNORECASE),
     re.compile(rf"\binstead of\s+({_VALUE_WORD})", re.IGNORECASE),
     re.compile(rf"\b(?:took over|switched|moved|migrated)\b[^.;]*?\bfrom\s+({_VALUE_WORD})\s*[.;,]?\s*$", re.IGNORECASE),
     re.compile(rf",\s*not\s+({_VALUE_WORD})\s*[.;]?\s*$", re.IGNORECASE),
 )
+
+
+def _subject_words_only(tokens: set[str], other: set[str]) -> set[str]:
+    """Content words in `tokens` but not `other`, ignoring values and cue words."""
+    return {
+        token for token in tokens - other
+        if not _VALUE_RE.fullmatch(token) and stem_memory_token(token) not in _CONFLICT_CUE_TOKENS
+    }
 
 
 def transition_old_values(text: str) -> set[str]:
@@ -3817,7 +3932,13 @@ def memory_conflict_candidates(
         record_values = claim_values(record_text)
         if new_values and record_values and not (new_values & record_values):
             subject = [token for token in overlap if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS]
-            if len(subject) >= 2 and overlap_ratio >= 0.5:
+            # Two claims about different things can share half their words
+            # ("Node 20 runs the api" / "Node 18 runs the worker"). When each
+            # names something the other does not, they are two subjects with
+            # two values, not one subject that changed value.
+            new_only = _subject_words_only(new_tokens, record_tokens)
+            record_only = _subject_words_only(record_tokens, new_tokens)
+            if len(subject) >= 2 and overlap_ratio >= 0.5 and not (new_only and record_only):
                 score = max(score, 89)
                 reasons.append("changed_value")
 
@@ -4314,9 +4435,11 @@ _DURABILITY_RE = re.compile(
     r"by default|ever again|ever)\b"
 )
 # Someone else's habit, not the user's rule: "she never knows", "they always".
-_THIRD_PARTY_ABSOLUTE_RE = re.compile(r"\b(?:she|he|they|it)\s+(?:\w+\s+)?(?:never|always)\b")
+# "it" is left out: "it should never happen on Fridays" is the user's rule.
+_THIRD_PARTY_ABSOLUTE_RE = re.compile(r"\b(?:she|he|they)\s+(?:\w+\s+)?(?:never|always)\b")
 # "always stays", "never being included": describing how something behaves,
-# not a rule about what to do.
+# not a rule about what to do. A sentence that opens with always/never is an
+# imperative ("Always show the full diff", "Never show emoji") and is exempt.
 _STATIVE_ABSOLUTE_RE = re.compile(
     r"\b(?:never|always)\s+(?:stay|stays|remain|remains|is|are|was|were|be|being|been|seem|seems|"
     r"know|knows|happen|happens|get|gets|show|shows|work|works)\b"
@@ -4344,7 +4467,12 @@ def non_durable_reason(text: str) -> str | None:
         return "a throwaway or hypothetical"
     if _THIRD_PARTY_ABSOLUTE_RE.search(lower):
         return "someone else's habit, not the user's rule"
-    if _STATIVE_ABSOLUTE_RE.search(lower):
+    stative = _STATIVE_ABSOLUTE_RE.search(lower)
+    if (
+        stative and not re.match(r"(?:please\s+)?(?:always|never)\b", lower)
+        # "should never happen", "must always be": a modal makes it a rule.
+        and not re.search(r"\b(?:should|must|shall|will|would|can|may|to)\s+$", lower[:stative.start()])
+    ):
         return "a description of behaviour, not a rule"
     durable = _DURABILITY_RE.search(lower) or re.search(r"\b(?:always|never)\b", lower)
     if _TASK_GOAL_RE.search(lower) and not durable:
@@ -4360,11 +4488,18 @@ def non_durable_reason(text: str) -> str | None:
     return None
 
 
-def classify_memory_segment(segment: str) -> dict[str, object] | None:
+def classify_memory_segment(segment: str, *, explicit: bool = False) -> dict[str, object] | None:
+    """Type a sentence as durable memory, or None.
+
+    Session capture proposes memory on its own, so it drops anything that
+    reads like an instruction for the work at hand. `explicit` is for text a
+    person chose to save ("remember: do not use tabs in YAML files"): the
+    choice already says it is durable, so only its type is decided here.
+    """
     text = segment.strip()
     if is_interrogative(text):
         return None
-    if non_durable_reason(text):
+    if not explicit and non_durable_reason(text):
         return None
     lower = text.lower()
     if any(cue in lower for cue in ("maybe", "might", "not sure", "wondering", "considering", "could later")):
@@ -4445,6 +4580,7 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
                     continue
                 if (
                     pattern is _BARE_ABSOLUTE_CUE
+                    and not explicit
                     and not _FIRST_PERSON_RE.search(candidate_lower)
                     and not _IMPERATIVE_ABSOLUTE_RE.search(candidate_lower)
                 ):

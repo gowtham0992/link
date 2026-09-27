@@ -59,6 +59,21 @@ class SlimRecallContractTests(unittest.TestCase):
                 result = json.loads(server.admin(**call["arguments"]))
                 self.assertNotIn("error", result, call)
 
+    def test_a_year_in_the_question_still_reaches_the_wiki(self):
+        with mcp_server(self.root) as server:
+            plain = json.loads(server.recall(query="how did transformers change retrieval"))
+            dated = json.loads(server.recall(query="how did transformers change retrieval in 2017"))
+        self.assertEqual(plain["mode"], "query")
+        self.assertEqual(dated["mode"], "query", "no memory holds 2017, so the wiki must answer")
+        self.assertTrue(dated["found"])
+        self.assertTrue(dated["context_packet"], "the dated question gets the same wiki pages")
+
+    def test_unknown_memory_type_is_an_error(self):
+        with mcp_server(self.root) as server:
+            payload = json.loads(server.recall(query="deploy day", memory_type="preferences"))
+        self.assertIn("error", payload)
+        self.assertIn("preference", payload["error"])
+
     def test_first_response_reports_the_real_review_queue(self):
         with mcp_server(self.root) as server:
             brief = json.loads(server.recall(query="", mode="brief"))["brief"]

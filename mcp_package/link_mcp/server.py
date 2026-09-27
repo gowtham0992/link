@@ -1200,6 +1200,9 @@ def _write_mcp_memory_page(
         context=_clean_text_input(context, max_len=600) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         allow_secret=allow_secret,
+        # Only a project the agent named makes the memory project-scoped;
+        # the resolved default project is always present.
+        project_explicit=bool(_clean_text_input(project)),
         **options,
     )
     if result.get("created"):
@@ -1487,12 +1490,24 @@ def recall(
     # Point-in-time and typed questions are memory questions: route them to
     # memory recall, where lineage and types live. A time phrase in the
     # query resolves to a date and is removed from the ranked text.
+    if clean_type:
+        from link_core.memory import MEMORY_TYPES as _memory_types
+        if clean_type not in _memory_types:
+            return json.dumps({
+                "surface": "slim", "tool": "recall",
+                "error": f"memory_type must be one of: {', '.join(_memory_types)}",
+            })
     search_query = clean_query
+    # A time phrase found in the text ("in 2017") is a hint, not an order:
+    # in auto mode, when memory holds nothing for that date the question
+    # goes to the full packet, wiki included, instead of an abstention.
+    time_hint_only = False
     if clean_query and not clean_as_of:
         temporal = _core_parse_time_expression(clean_query)
         if temporal and temporal.get("as_of"):
             clean_as_of = str(temporal["as_of"])
             search_query = str(temporal.get("residual_query") or "") or clean_query
+            time_hint_only = clean_mode == "auto" and not clean_type
     if clean_query and (clean_as_of or clean_type) and clean_mode in {"auto", "memory"}:
         clean_mode = "memory"
 
@@ -1516,6 +1531,10 @@ def recall(
             )
         except ValueError as exc:
             return json.dumps({"surface": "slim", "tool": "recall", "error": str(exc)})
+        if not memories and time_hint_only:
+            clean_mode = "auto"
+            clean_as_of = ""
+    if clean_mode == "memory":
         # The default surface's memory and query modes were never recorded,
         # so "never retrieved" counted memories agents had in fact read.
         _core_record_retrieval(
@@ -1588,7 +1607,7 @@ def remember(
         # Same cue-based inference as the CLI: "I prefer X" is a preference,
         # not a generic note — typing drives trust windows and conflict scope.
         from link_core.memory import classify_memory_segment as _classify
-        classified = _classify(text.strip().splitlines()[0] if text.strip() else "")
+        classified = _classify(text.strip().splitlines()[0] if text.strip() else "", explicit=True)
         memory_type = str(classified["memory_type"]) if classified else "note"
     try:
         result = _write_mcp_memory_page(
@@ -1727,7 +1746,7 @@ def review(
                 "surface": "slim",
                 "tool": "review",
                 "error": f"unsupported action: {clean_action}",
-                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "explain", "reviewed", "archive", "restore", "forget", "consolidate"],
+                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "receipt", "explain", "reviewed", "archive", "restore", "forget", "consolidate"],
             })
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "review", "updated": False, "error": str(exc)})
