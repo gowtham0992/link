@@ -90,8 +90,39 @@ def _persistent_cache_path(wiki_dir: Path) -> Path:
     return wiki_dir.parent / ".link-cache" / f"wiki-cache-v{PERSISTENT_CACHE_SCHEMA_VERSION}.json"
 
 
+FTS_CACHE_VERSION = 3
+
+
 def _persistent_fts_path(wiki_dir: Path) -> Path:
-    return wiki_dir.parent / ".link-cache" / "page-fts-v3.sqlite"
+    return wiki_dir.parent / ".link-cache" / f"page-fts-v{FTS_CACHE_VERSION}.sqlite"
+
+
+def _prune_superseded_fts_caches(wiki_dir: Path) -> list[str]:
+    """Delete FTS index files an older Link version built.
+
+    A version bump rebuilds the index under a new name and nothing reads the
+    old one again, so after an upgrade it was dead weight in .link-cache.
+    Only files matching the index's own naming pattern are touched.
+    """
+    removed: list[str] = []
+    cache_dir = wiki_dir.parent / ".link-cache"
+    current = _persistent_fts_path(wiki_dir).name
+    try:
+        candidates = list(cache_dir.glob("page-fts-v*.sqlite*"))
+    except OSError:
+        return removed
+    for path in candidates:
+        if path.name.startswith(current):
+            continue  # current index and its -wal/-shm companions
+        stem = path.name.split(".sqlite", 1)[0]
+        if not stem[len("page-fts-v"):].isdigit():
+            continue
+        try:
+            path.unlink()
+            removed.append(path.name)
+        except OSError:
+            pass  # held open elsewhere (Windows); the next build retries
+    return removed
 
 
 def _page_signatures(wiki_dir: Path, page_paths: list[Path]) -> list[dict[str, Any]]:
@@ -334,6 +365,8 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
             forward_links_index.setdefault(source_name, []).append(target)
 
     persistent_fts_path = _persistent_fts_path(wiki_dir)
+    if use_persistent_cache and not persistent_fts_path.exists():
+        _prune_superseded_fts_caches(wiki_dir)
     fts_index = build_fts_index(
         pages,
         fulltext,

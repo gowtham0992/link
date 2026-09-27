@@ -117,3 +117,45 @@ class OptionGroupContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TransitionTests(unittest.TestCase):
+    def test_replaced_values_are_read_from_the_revision(self):
+        from link_core.memory import transition_old_values
+
+        self.assertEqual(transition_old_values("Staging moved from port 8080 to 8443 when we turned on TLS."), {"8080"})
+        self.assertEqual(transition_old_values("Buildkite replaced Jenkins for CI."), {"jenkins"})
+        self.assertEqual(transition_old_values("Webhook delivery now retries 5 times instead of 3."), {"3"})
+        self.assertEqual(transition_old_values("Marcus took over the on-call rotation from Priya."), {"priya"})
+        self.assertEqual(transition_old_values("Payments deploys now go out on Wednesday, not Thursday."), {"thursday"})
+        self.assertEqual(transition_old_values("We deploy on Tuesdays."), set())
+
+    def test_revision_that_names_the_old_value_conflicts_with_it(self):
+        original = _rec("ci", "Our CI runs on Jenkins.")
+        hits = memory_conflict_candidates([original], "Buildkite replaced Jenkins for CI.", None, "decision", "user",
+                                          embedder=lambda _texts: [])
+        self.assertIn("replaces_stated_value", hits[0]["conflict_reasons"])
+
+    def test_without_lineage_the_newer_value_is_read_first(self):
+        old = _rec("port-a", "The staging server listens on port 8080.", memory_type="fact",
+                   date_captured="2026-01-01T00:00:00Z")
+        new = _rec("port-b", "Staging moved from port 8080 to 8443 when we turned on TLS.", memory_type="fact",
+                   date_captured="2026-03-01T00:00:00Z")
+        hits = recall_memories([old, new], "which port does the staging server listen on", limit=2)
+        self.assertEqual([hit["name"] for hit in hits], ["port-b", "port-a"])
+        self.assertEqual(hits[1].get("contradicted_by"), "port-b")
+
+
+class AcronymTests(unittest.TestCase):
+    def test_two_letter_acronyms_are_tokens(self):
+        from link_core.memory import memory_tokens
+
+        self.assertIn("ci", memory_tokens("CI moved to github-actions"))
+        self.assertIn("ci", memory_tokens("which ci system do we run"))
+        self.assertIn("s3", memory_tokens("artifacts live in S3"))
+        self.assertNotIn("go", memory_tokens("go ahead and do it"))
+
+    def test_an_acronym_query_finds_its_memory(self):
+        ci = _rec("ci", "CI moved from Buildkite to github-actions.")
+        hits = recall_memories([ci], "which CI system do we run")
+        self.assertEqual([hit["name"] for hit in hits], ["ci"])

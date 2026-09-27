@@ -347,16 +347,36 @@ def _unicode_memory_tokens(value: str) -> set[str]:
 unicode_memory_tokens = _unicode_memory_tokens
 
 
+# Two-character tokens are dropped as noise, which also dropped every
+# acronym: "which CI system do we run" had nothing to match. Kept when written
+# in capitals (CI, DB, PR), when a letter meets a digit (S3, K8), or when one
+# of these common engineering acronyms is typed in lowercase. "go" and "it"
+# stay out: they are ordinary words far more often than names.
+_ACRONYM_RE = re.compile(r"(?<![A-Za-z0-9])(?:[A-Z][A-Z0-9]|[A-Za-z][0-9]|[0-9][A-Za-z])(?![A-Za-z0-9])")
+_KNOWN_ACRONYMS = frozenset({
+    "ci", "cd", "db", "ui", "ux", "pr", "qa", "os", "ip", "js", "ts", "ai", "ml", "vm", "s3", "k8", "tz",
+})
+
+
+def _acronym_tokens(value: str) -> set[str]:
+    found = {match.lower() for match in _ACRONYM_RE.findall(value)}
+    lowered = value.lower()
+    found |= {word for word in _KNOWN_ACRONYMS if re.search(rf"(?<![a-z0-9]){word}(?![a-z0-9])", lowered)}
+    return found
+
+
 def memory_tokens(value: str) -> set[str]:
     # ASCII text needs no folding, no mark handling, and no segmentation, so
     # it keeps the original path: byte-identical tokens, no added cost.
     if value.isascii():
-        return {
+        tokens = {
             token
             for token in _ASCII_TOKEN_SPLIT.split(value.lower())
             if len(token) >= 3
         }
-    return _unicode_memory_tokens(value)
+    else:
+        tokens = _unicode_memory_tokens(value)
+    return tokens | _acronym_tokens(value)
 
 
 def compact_memory_text(value: str) -> str:
@@ -757,6 +777,12 @@ def _heading_title(body: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _frontmatter_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
 def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = True) -> dict[str, object]:
     wiki_root = wiki_dir.expanduser().resolve()
     path = path.expanduser().resolve()
@@ -796,6 +822,9 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "supersedes": str(meta.get("supersedes") or ""),
         "superseded_by": str(meta.get("superseded_by") or ""),
         "imported_from": str(meta.get("imported_from") or "").strip(),
+        # file:line anchors added when the memory was written inside a repo
+        # (provenance.py); checked by lnk stale and the recall packet.
+        "anchors": _frontmatter_string_list(meta.get("anchors")),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -2742,7 +2771,7 @@ def _field_has_exact_word(field_tokens: set[str], token: str) -> bool:
 @functools.lru_cache(maxsize=1024)
 def _query_terms(q: str) -> tuple[tuple[str, ...], frozenset[str], frozenset[str]]:
     """A query's words, content words and expansions, computed once per query."""
-    tokens = tuple(token for token in re.split(r"\W+", q) if len(token) >= 3)
+    tokens = tuple(token for token in re.split(r"\W+", q) if len(token) >= 3 or token in _KNOWN_ACRONYMS)
     return tokens, frozenset(significant_memory_tokens(q)), frozenset(expanded_memory_query_tokens(q))
 
 
@@ -3174,18 +3203,7 @@ def _demote_contradicted(
             lower_record = records_by_name.get(str(lower.get("name") or ""))
             if upper_record is None or lower_record is None:
                 continue
-            if str(upper_record.get("memory_type") or "") not in MEMORY_CONFLICT_TYPES:
-                continue
-            conflict = memory_conflict_candidates(
-                [lower_record],
-                memory_claim_text(upper_record),
-                str(upper_record.get("title") or ""),
-                str(upper_record.get("memory_type") or "note"),
-                str(upper_record.get("scope") or "user"),
-                project=str(upper_record.get("project") or ""),
-                embedder=_no_embedder,
-            )
-            if not conflict:
+            if not _records_contradict(upper_record, lower_record):
                 continue
             older, newer = (
                 (upper, lower) if _memory_recency(upper_record) < _memory_recency(lower_record)
@@ -3199,6 +3217,29 @@ def _demote_contradicted(
 
 def _no_embedder(_texts: list[str]) -> list[list[float]]:
     return []
+
+
+def _records_contradict(a: Mapping[str, object], b: Mapping[str, object]) -> bool:
+    """Whether either memory, read as a new claim, conflicts with the other.
+
+    Both directions: a revision usually names the value it replaced ("moved
+    from 8080 to 8443"), so only the revision, read against the original,
+    shows the contradiction.
+    """
+    for claim, other in ((a, b), (b, a)):
+        if str(claim.get("memory_type") or "") not in MEMORY_CONFLICT_TYPES:
+            continue
+        if memory_conflict_candidates(
+            [other],
+            memory_claim_text(claim),
+            str(claim.get("title") or ""),
+            str(claim.get("memory_type") or "note"),
+            str(claim.get("scope") or "user"),
+            project=str(claim.get("project") or ""),
+            embedder=_no_embedder,
+        ):
+            return True
+    return False
 
 
 APPLICABILITY_CONDITION_KINDS = ("project", "path", "task")
@@ -3518,6 +3559,30 @@ _NEGATED_OBJECT_RES = (
 )
 
 
+# A revision usually names what it replaced: "moved from 8080 to 8443",
+# "Buildkite replaced Jenkins", "instead of 3", "took over from Priya",
+# "on Wednesday, not Thursday". Those words are the old value.
+_VALUE_WORD = r"[\w./:@+-]+"
+_TRANSITION_OLD_RES = (
+    re.compile(rf"\bfrom\s+(?:the\s+)?(?:port\s+|node\s+|version\s+)?({_VALUE_WORD})\s+to\b", re.IGNORECASE),
+    re.compile(rf"\b{_VALUE_WORD}\s+(?:replaced|replaces|supersedes)\s+({_VALUE_WORD})", re.IGNORECASE),
+    re.compile(rf"\binstead of\s+({_VALUE_WORD})", re.IGNORECASE),
+    re.compile(rf"\b(?:took over|switched|moved|migrated)\b[^.;]*?\bfrom\s+({_VALUE_WORD})\s*[.;,]?\s*$", re.IGNORECASE),
+    re.compile(rf",\s*not\s+({_VALUE_WORD})\s*[.;]?\s*$", re.IGNORECASE),
+)
+
+
+def transition_old_values(text: str) -> set[str]:
+    """Values a revision says it replaced, lowercased."""
+    olds: set[str] = set()
+    for pattern in _TRANSITION_OLD_RES:
+        for match in pattern.finditer(text.strip()):
+            word = match.group(1).strip(".,;:").lower()
+            if word:
+                olds.add(word)
+    return olds
+
+
 def negated_claim_tokens(text: str) -> set[str]:
     """Stemmed content words of what the text says is no longer true."""
     words: set[str] = set()
@@ -3554,7 +3619,9 @@ def memory_conflict_candidates(
     new_negated = has_negation(new_text)
     new_groups = _extract_option_groups(new_text)
     new_pairs = _extract_preference_pairs(new_text)
-    new_values = claim_values(new_text)
+    replaced_values = transition_old_values(text)
+    # The value a revision states now: "from 8080 to 8443" is about 8443.
+    new_values = claim_values(new_text) - replaced_values
     negated_object = negated_claim_tokens(text)
     project_name = normalize_project(project)
     excluded = {name for name in (exclude_names or []) if name}
@@ -3607,6 +3674,27 @@ def memory_conflict_candidates(
         # The subject must match closely (every rule above ignores numbers),
         # and the values must be disjoint, so "Node 20 for the api" never
         # meets "Node 18 for the worker".
+        # Transition shape: the new text names what it replaced, and this
+        # memory states exactly that on the same subject. "Staging moved
+        # from port 8080 to 8443" revises "The staging server listens on
+        # port 8080"; "Buildkite replaced Jenkins for CI" revises "Our CI
+        # runs on Jenkins".
+        if replaced_values:
+            record_words = memory_tokens(record_text) | {value.lower() for value in claim_values(record_text)}
+            record_lower = record_text.lower()
+            stated_old = {
+                value for value in replaced_values
+                if value in record_words or re.search(rf"(?<![\w.]){re.escape(value)}(?![\w])", record_lower)
+            }
+            if stated_old:
+                subject = [
+                    token for token in overlap
+                    if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS and token not in replaced_values
+                ]
+                if subject:
+                    score = max(score, 90)
+                    reasons.append("replaces_stated_value")
+
         record_values = claim_values(record_text)
         if new_values and record_values and not (new_values & record_values):
             subject = [token for token in overlap if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS]

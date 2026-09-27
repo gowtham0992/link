@@ -1276,7 +1276,8 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
     flagged: list[dict[str, object]] = []
     for record in records:
         text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
-        findings = checker.findings(text)
+        anchors = record.get("anchors")
+        findings = checker.findings(text) + checker.anchor_findings(anchors if isinstance(anchors, list) else None)
         if not findings:
             continue
         flagged.append({

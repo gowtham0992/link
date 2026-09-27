@@ -183,7 +183,8 @@ def _mark_stale_paths(
         if item is None:
             continue
         text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
-        verdict = checker.verdict(text)
+        anchors = record.get("anchors")
+        verdict = checker.verdict(text, anchors=anchors if isinstance(anchors, list) else None)
         findings = verdict.get("findings") or []
         if verdict.get("verdict") == "stale" and findings:
             item["stale_paths"] = [
