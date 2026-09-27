@@ -299,3 +299,90 @@ class DetectInstalledAgentsTests(unittest.TestCase):
             # Project-scoped configs (.vscode) never auto-detect.
             (home / ".vscode").mkdir()
             self.assertNotIn("vscode", detect_installed_agents(home=home))
+
+
+class JsoncConfigTests(unittest.TestCase):
+    """VS Code and Zed settings carry comments; editing must keep them."""
+
+    def test_write_into_a_commented_zed_settings_file_keeps_every_comment(self):
+        from link_core.mcp_connect import _agent_by_name, _jsonc_loads, _write_json_config
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "settings.json"
+            original = ('// Zed settings\n{\n  // theme\n  "theme": "One Dark", /* keep me */\n'
+                        '  "context_servers": {\n    "other": {"command": "x"}, // other server\n  },\n}\n')
+            path.write_text(original, encoding="utf-8")
+            _write_json_config(path, _agent_by_name("zed"), "/usr/bin/python3", Path("/w/wiki"))
+            text = path.read_text(encoding="utf-8")
+            for comment in ("// Zed settings", "// theme", "/* keep me */", "// other server"):
+                self.assertIn(comment, text)
+            parsed = _jsonc_loads(text)
+            self.assertEqual(sorted(parsed["context_servers"]), ["link", "other"])
+            self.assertEqual(parsed["context_servers"]["link"]["source"], "custom")
+
+    def test_invalid_config_is_reported_not_overwritten(self):
+        from link_core.mcp_connect import _agent_by_name, _write_json_config
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "mcp.json"
+            path.write_text('{"servers": {"x": ', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                _write_json_config(path, _agent_by_name("vscode"), "/usr/bin/python3", Path("/w/wiki"))
+            self.assertEqual(path.read_text(encoding="utf-8"), '{"servers": {"x": ')
+
+
+class DisconnectTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="link-disconnect-")
+        self.dir = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_disconnect_removes_only_links_entry_and_hooks(self):
+        from link_core.mcp_connect import build_disconnect_payload
+        config = self.dir / "claude.json"
+        config.write_text(json.dumps({"mcpServers": {"link": {"command": "py"}, "github": {"command": "gh"}},
+                                      "theme": "dark"}), encoding="utf-8")
+        settings = self.dir / "settings.json"
+        settings.write_text(json.dumps({"hooks": {
+            "SessionStart": [{"matcher": "startup", "hooks": [
+                {"type": "command", "command": "python3 /home/me/link/link.py hook session-start /home/me/link"},
+                {"type": "command", "command": "echo other hook"}]}],
+            "UserPromptSubmit": [{"hooks": [
+                {"type": "command", "command": "lnk hook prompt-check /home/me/link"}]}],
+        }, "model": "opus"}), encoding="utf-8")
+        preview = build_disconnect_payload("claude-code", config_path=str(config), hooks_settings=str(settings))
+        self.assertTrue(preview["found"])
+        self.assertFalse(preview["changed"])
+        self.assertIn('"link"', config.read_text(encoding="utf-8"))
+
+        done = build_disconnect_payload("claude-code", config_path=str(config), hooks_settings=str(settings), write=True)
+        self.assertTrue(done["changed"])
+        remaining = json.loads(config.read_text(encoding="utf-8"))
+        self.assertEqual(remaining["mcpServers"], {"github": {"command": "gh"}})
+        self.assertEqual(remaining["theme"], "dark")
+        hooks = json.loads(settings.read_text(encoding="utf-8"))
+        self.assertEqual(hooks["hooks"]["SessionStart"][0]["hooks"], [{"type": "command", "command": "echo other hook"}])
+        self.assertNotIn("UserPromptSubmit", hooks["hooks"])
+        self.assertEqual(hooks["model"], "opus")
+
+    def test_disconnect_codex_toml_block(self):
+        from link_core.mcp_connect import build_disconnect_payload
+        config = self.dir / "config.toml"
+        config.write_text('model = "o4"\n\n[mcp_servers.link]\ncommand = "py"\nargs = ["-m", "link_mcp"]\n\n'
+                          '[mcp_servers.other]\ncommand = "x"\n', encoding="utf-8")
+        build_disconnect_payload("codex", config_path=str(config), hooks_settings=str(self.dir / "none.json"), write=True)
+        text = config.read_text(encoding="utf-8")
+        self.assertNotIn("mcp_servers.link", text)
+        self.assertIn("[mcp_servers.other]", text)
+        self.assertIn('model = "o4"', text)
+
+    def test_disconnect_keeps_comments_in_jsonc(self):
+        from link_core.mcp_connect import _jsonc_loads, build_disconnect_payload
+        config = self.dir / "settings.json"
+        config.write_text('{\n  // editor\n  "context_servers": {\n    "link": {"command": "py", "source": "custom"},\n'
+                          '    "other": {"command": "x"} // keep\n  }\n}\n', encoding="utf-8")
+        build_disconnect_payload("zed", config_path=str(config), write=True)
+        text = config.read_text(encoding="utf-8")
+        self.assertIn("// editor", text)
+        self.assertIn("// keep", text)
+        self.assertEqual(list(_jsonc_loads(text)["context_servers"]), ["other"])

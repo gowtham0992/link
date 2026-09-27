@@ -140,7 +140,58 @@ def _flat_entry(command: str, timeout: int) -> dict[str, object]:
 def _is_link_hook_command(command: object, event: str) -> bool:
     if not isinstance(command, str):
         return False
-    return _HOOK_SCRIPT_MARKER in command and f" hook {event}" in command
+    # Hooks run the workspace's link.py today; an installed `lnk` launcher
+    # counts too, so disconnect finds either form.
+    launcher = _HOOK_SCRIPT_MARKER in command or re.search(r"(?:^|[\s/\"'])lnk(?:\s|\"|$)", command)
+    return bool(launcher) and f" hook {event}" in command
+
+
+LINK_HOOK_EVENTS = ("session-start", "session-end", "prompt-check")
+
+
+def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, object]:
+    """Find (and with write, remove) Link's hook entries; other hooks stay."""
+    config = _find_hook_agent(agent)
+    result: dict[str, object] = {"path": str(path), "supported": config is not None,
+                                 "found": [], "removed": False}
+    if config is None or not path.exists():
+        return result
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        return result
+    settings = json.loads(text)
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return result
+    found: list[str] = []
+    for event_name in list(hooks):
+        groups = hooks.get(event_name)
+        if not isinstance(groups, list):
+            continue
+        kept_groups: list[object] = []
+        for group in groups:
+            if config.schema == "nested" and isinstance(group, dict) and isinstance(group.get("hooks"), list):
+                inner = [h for h in group["hooks"]
+                         if not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
+                                                             for e in LINK_HOOK_EVENTS))]
+                if len(inner) != len(group["hooks"]):
+                    found.append(event_name)
+                if inner:
+                    kept_groups.append({**group, "hooks": inner})
+            elif isinstance(group, dict) and any(_is_link_hook_command(group.get("command"), e)
+                                                 for e in LINK_HOOK_EVENTS):
+                found.append(event_name)
+            else:
+                kept_groups.append(group)
+        if kept_groups:
+            hooks[event_name] = kept_groups
+        else:
+            del hooks[event_name]
+    result["found"] = sorted(set(found))
+    if found and write:
+        atomic_write_json(path, settings)
+        result["removed"] = True
+    return result
 
 
 def _merge_nested_event(

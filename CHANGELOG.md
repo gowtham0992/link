@@ -70,6 +70,25 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   now reads the menu bar state, the health dots, the status rows and the
   icon-only buttons.
 
+- **`lnk disconnect <agent>`.** Uninstalling Link removed the instruction
+  block and nothing else; the MCP server entry and session hooks stayed, so
+  after deleting the workspace every new Claude Code session printed "wiki
+  missing" into the model's context. `lnk disconnect` previews, and with
+  `--write` removes, exactly Link's entries - other servers, other hooks and
+  comments are left alone - and every `integrations/*/uninstall.sh` now calls
+  it.
+- **Editor configs with comments.** VS Code and Zed settings are JSON with
+  comments and trailing commas; `lnk connect --write` failed on them with a
+  JSON parse error. Link now edits those files in place, inserting or
+  replacing only its own entry and keeping every comment, and re-reads the
+  result before writing it.
+- **The integration scripts use `lnk connect`.** Each installer only
+  registered MCP when the agent's config file already existed, and Kiro's
+  project mode never registered at all. The installers now delegate to
+  `lnk connect --write` (with `--hooks` for Claude Code, Codex and Cursor),
+  which creates the config, verifies the runtime and installs hooks; the old
+  inline registration remains as the fallback when no Link CLI is found.
+
 ### Security
 
 - **Team memories arrive through your review gate.** `lnk team-sync`

@@ -181,6 +181,7 @@ lnk connect codex ~/link --write
 lnk connect kiro ~/link --write
 lnk connect claude-code ~/link --hooks --write
 lnk verify-mcp ~/link</code></pre>
+        <p>Use <code>lnk disconnect &lt;agent&gt;</code> to take Link out of an agent: it previews, and with <code>--write</code> removes, Link's MCP server entry and its session hooks. Other servers, other hooks and comments in those files are left as they were, so it is safe on hand-edited VS Code and Zed settings. Run it before deleting a workspace, or new sessions keep trying to load it.</p>
         <p>Add <code>--hooks</code> (Claude Code, Codex, Cursor) to also install session hooks: every new session then starts with a bounded Link memory brief injected automatically, and session end stores proposal-only notes with memory candidates for later review — no durable memory is written without approval. Codex has no session-end event, so it gets the session-start brief only. Sessions without memory-worthy content are skipped and duplicate end events are deduplicated, so the capture inbox does not fill with noise. The hooks run <code>lnk hook session-start</code> and <code>lnk hook session-end</code>, which you can also invoke directly to inspect what they inject or capture. Codex and Cursor hook support is new and follows those vendors' documented hook schemas — if a hook misbehaves there, please open an issue. If the workspace runtime predates session hooks, <code>--write</code> refreshes it automatically.</p>
         <p>Use <code>lnk recipes</code> to list saved procedure memories with their triggers, and <code>lnk recall "&lt;task&gt;" --type procedure</code> to recall only recipes. Consolidation plans also surface recurring themes across session captures — the review-gated way an agent learns your patterns: detection is automatic and deterministic, but turning a pattern into one durable memory is always proposed to you first. A scheduled idle-time agent session can run the plan as a "dream pass" and bring proposals to your next session.</p>
         <p>Use <code>lnk consolidate</code> when the capture or review backlog builds up. It is read-only: it counts pending captures and memories needing review, groups duplicate captures, and prints paste-safe accept/discard/review commands to run with the user. When the backlog crosses a threshold, the injected session-start brief nudges the agent to offer a consolidation pass, and MCP agents can request the same plan through <code>review(action="consolidate")</code>.</p>
@@ -249,6 +250,7 @@ lnk rebuild-backlinks
 lnk stale [dir] [--repo path] [--json]
 lnk verify-mcp [--json]
 lnk connect &lt;agent&gt; [dir] [--write] [--config path] [--python python] [--hooks]
+lnk disconnect &lt;agent&gt; [--write] [--config path] [--hooks-settings path]
 lnk hook session-start|session-end [dir] [--limit N] [--project slug]
 lnk backup [--list] [--include-raw]
 lnk restore-backup &lt;backup.tar.gz&gt; [--include-raw] --confirm

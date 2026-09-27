@@ -3119,6 +3119,49 @@ def verify_mcp(
     return code
 
 
+def disconnect_agent(
+    agent: str,
+    *,
+    write: bool = False,
+    config_path: str | None = None,
+    hooks_settings: str | None = None,
+    json_output: bool = False,
+) -> int:
+    """Remove Link from one agent: its MCP entry and its session hooks."""
+    from link_core.mcp_connect import build_disconnect_payload
+
+    try:
+        payload = build_disconnect_payload(agent, config_path=config_path, hooks_settings=hooks_settings, write=write)
+    except (ValueError, json.JSONDecodeError) as exc:
+        print(f"Disconnect failed: {exc}", file=sys.stderr)
+        return 1
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    mcp = payload["mcp"] if isinstance(payload["mcp"], dict) else {}
+    hooks = payload["hooks"] if isinstance(payload["hooks"], dict) else {}
+    verb = "Removed" if write else "Would remove"
+    lines = [f"Link in {payload['display_name']}:"]
+    if mcp.get("found"):
+        lines.append(f"  {verb} the MCP server entry from {mcp.get('path')}")
+    else:
+        lines.append(f"  No Link MCP entry in {mcp.get('path')}")
+    found_hooks = hooks.get("found") if isinstance(hooks.get("found"), list) else []
+    if found_hooks:
+        lines.append(f"  {verb} session hooks ({', '.join(str(e) for e in found_hooks)}) from {hooks.get('path')}")
+    elif hooks.get("supported"):
+        lines.append(f"  No Link hooks in {hooks.get('path')}")
+    if not payload["found"]:
+        lines.append("Nothing to remove.")
+    elif write:
+        lines.append(str(payload["restart_hint"]))
+        lines.append("Other servers, other hooks and comments in those files were left as they were.")
+    else:
+        lines.append("Preview only. Run again with --write to remove.")
+    _print_text("\n".join(lines))
+    return 0
+
+
 def connect_mcp(
     target: Path,
     agent: str,
@@ -4318,6 +4361,7 @@ def main(argv: list[str] | None = None) -> int:
             "stale": stale,
             "verify-mcp": verify_mcp,
             "connect": connect_mcp,
+            "disconnect": disconnect_agent,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,
         })
     except ValueError as exc:

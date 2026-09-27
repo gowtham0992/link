@@ -29,6 +29,12 @@ else
     bash "$SCRIPT_DIR/../_shared/scaffold.sh"
 fi
 
+LINK_CONNECTED=""
+if [ "$MODE" = "--project" ]; then
+    link_connect copilot "${WIKI_PATH%/wiki}"
+fi
+# Built-in registration, used only when lnk connect is unavailable.
+if [ -z "$LINK_CONNECTED" ]; then
 MCP_PYTHON="python3"
 MCP_MARKER="${WIKI_PATH%/wiki}/.link-mcp-python"
 if [ -f "$MCP_MARKER" ]; then
@@ -38,5 +44,7 @@ fi
 echo ""
 echo "  MCP: add to your Copilot MCP config:"
 echo "  { \"mcpServers\": { \"link\": { \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"] } } }"
+
+fi
 
 link_print_next_steps "$MODE"

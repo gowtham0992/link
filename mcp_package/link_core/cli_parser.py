@@ -31,7 +31,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "set-memory-visibility", "memory-log", "memory-audit",
     )),
     ("Agents & automation", (
-        "connect", "hook", "verify-mcp",
+        "connect", "disconnect", "hook", "verify-mcp",
     )),
     ("Workspace & health", (
         "status", "health", "doctor", "validate", "migrate", "backup",
@@ -586,6 +586,16 @@ def build_cli_parser(
     )
     connect_cmd.add_argument("--json", action="store_true", help="print machine-readable connection plan")
 
+    disconnect_cmd = sub.add_parser(
+        "disconnect", help="remove Link's MCP entry and session hooks from a local agent (preview unless --write)",
+    )
+    disconnect_cmd.add_argument("agent", help="agent to disconnect: codex, kiro, claude-code, cursor, antigravity, windsurf, zed, vscode, copilot")
+    disconnect_cmd.add_argument("--write", action="store_true", help="actually edit the agent's config files")
+    disconnect_cmd.add_argument("--config", default=None, help="override the agent config file path")
+    disconnect_cmd.add_argument("--hooks-settings", default=None, dest="hooks_settings",
+                                help="override the hooks settings file")
+    disconnect_cmd.add_argument("--json", action="store_true", help="print the removal plan as JSON")
+
     return parser
 
 
@@ -998,6 +1008,11 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
                 agent=str(args.target),
             )
         return handlers["verify-mcp"](Path(args.target), json_output=args.json, python_cmd=args.python)
+    if command == "disconnect":
+        return handlers["disconnect"](
+            args.agent, write=args.write, config_path=args.config,
+            hooks_settings=args.hooks_settings, json_output=args.json,
+        )
     if command == "connect":
         return handlers["connect"](
             Path(args.target),

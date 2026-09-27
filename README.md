@@ -171,9 +171,9 @@ which memory was read and when, never what you asked; it never syncs, and
 the hooked ones: the first MCP tool response of a session carries the
 brief, whatever tool was called.
 
-## Quick Start
+## First Run, In Detail
 
-Two commands: see it work, then make it yours.
+The quick start above is the whole install. This is what each step does.
 
 ```bash
 brew install gowtham0992/link/link
@@ -209,12 +209,16 @@ Recall: found through the same bounded recall path used by CLI, skills, and MCP.
 Result: proof passed
 ```
 
-`lnk onboard --agent claude-code --write` then creates `~/link`, provisions the
-MCP runtime, and wires the agent — including the session hooks that capture
-memory automatically as you work (swap `claude-code` for `codex`, `cursor`,
-`kiro`, `copilot`, `antigravity`, or others). Drop `--write` to preview the
-config without touching anything, or drop `--agent` to just create the
-workspace.
+`lnk onboard --agent claude-code --write --hooks` creates `~/link`, provisions
+the MCP runtime, and wires the agent. Swap `claude-code` for `codex`,
+`cursor`, `kiro`, `copilot`, `antigravity`, `windsurf`, `zed` or `vscode`.
+Session hooks - a brief at session start, proposals captured at session end -
+exist for Claude Code, Cursor and Codex (Codex has no session-end event, so it
+gets the start brief only). The other agents get memory through MCP, where the
+first tool response of a session carries the same brief. Drop `--write` to
+preview without touching anything, or drop `--agent` to just create the
+workspace. `lnk disconnect <agent> --write` takes Link back out: its MCP entry
+and hooks, nothing else.
 
 The installed command is `lnk` because `link` is already a POSIX/macOS system
 utility. From a source checkout, use `python3 link.py ...` instead.

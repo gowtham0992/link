@@ -31,8 +31,9 @@ if [ "$MODE" = "--global" ]; then
     fi
 
     # Auto-register Link MCP server in Kiro's mcp.json
+    link_connect kiro "${WIKI_PATH%/wiki}"
     MCP_CONFIG="$HOME/.kiro/settings/mcp.json"
-    if [ -f "$MCP_CONFIG" ]; then
+    if [ -z "$LINK_CONNECTED" ] && [ -f "$MCP_CONFIG" ]; then
         LINK_MCP_PYTHON="$MCP_PYTHON" LINK_WIKI_PATH="$WIKI_PATH" python3 - << 'PYEOF'
 import json, os
 config_path = os.path.expanduser("~/.kiro/settings/mcp.json")
@@ -66,6 +67,7 @@ elif [ "$MODE" = "--project" ]; then
     echo "Link steering → $TARGET"
 
     bash "$SCRIPT_DIR/../_shared/scaffold.sh" --project
+    link_connect kiro "$(pwd)"
     link_print_next_steps "$MODE"
 else
     echo "Usage: bash install.sh [--project]"
