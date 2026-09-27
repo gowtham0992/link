@@ -1101,9 +1101,18 @@ def team_sync(
                 parts.append(f"shared {len(exported)}")
             if imported:
                 parts.append(f"imported {len(imported)}")
+            rejected_obj = payload.get("rejected")
+            rejected: list[object] = rejected_obj if isinstance(rejected_obj, list) else []
+            if rejected:
+                parts.append(f"rejected {len(rejected)}")
             _print_text("Team sync: " + (", ".join(parts) if parts else "already up to date"))
             for name in imported:
-                _print_text(f"  new from the team: {name}")
+                _print_text(f"  new from the team, pending your review: {name}")
+            if imported:
+                _print_text("  Review them: " + _shell_words_for_target("memory-inbox", target))
+            for item in rejected:
+                if isinstance(item, dict):
+                    _print_text(f"  not imported: {item.get('name')} ({item.get('reason')})")
             if conflicts:
                 _print_text(f"  {len(conflicts)} memory(ies) differ from the team version — kept yours:")
                 for name in conflicts:
@@ -3467,6 +3476,12 @@ def sync(
         if payload.get("pushed"):
             parts.append("pushed")
         lines = ["Synced: " + (", ".join(parts) if parts else "already up to date")]
+        untracked_obj = payload.get("untracked_private")
+        untracked: list[object] = untracked_obj if isinstance(untracked_obj, list) else []
+        if untracked:
+            lines.append("Stopped syncing private material an older setup had tracked: "
+                         + ", ".join(str(item) for item in untracked)
+                         + ". The files stay on this machine; earlier commits on the remote still contain them.")
         both_obj = payload.get("both_versions")
         both: list[object] = both_obj if isinstance(both_obj, list) else []
         if both:

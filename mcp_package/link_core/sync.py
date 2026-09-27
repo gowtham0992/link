@@ -4,9 +4,11 @@
 user controls (a private GitHub repo, a homelab bare repo, anything git can
 push to). Three promises distinguish it from plain git:
 
-- **Secrets never leave.** Before anything is pushed, every outgoing wiki
-  change is scanned with the same detector that guards memory writes; a
-  credential-shaped value aborts the push with the file named.
+- **Secrets never leave.** Before anything is pushed, every outgoing
+  change - not only wiki pages - is scanned with the same detector that
+  guards memory writes; a credential-shaped value aborts the push with the
+  file named. Private material (raw captures, ingest staging, operation
+  snapshots, backups) is ignored and, if it was ever tracked, untracked.
 - **Conflicts become review items, never markers.** When two machines edit
   the same memory, the remote version keeps the original path and the
   local version is preserved as a sibling memory file — both real, both
@@ -22,15 +24,16 @@ provides its own), caches and backups.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import subprocess
 from pathlib import Path
 from typing import Callable
 
-from .frontmatter import parse_frontmatter
+from .frontmatter import parse_frontmatter, update_frontmatter_fields
 from .log import append_log, merge_log_texts, utc_timestamp
-from .security import secret_value_warnings
+from .security import injected_instruction_warnings, secret_value_warnings
 
 # Appended to the workspace .gitignore at init: the runtime is derived from
 # the installed package (syncing it would fight the stale-runtime guard and
@@ -45,7 +48,14 @@ SYNC_IGNORE_LINES = (
     "/logo.svg",
     "/logo.png",
     "/.link-team.json",
+    "/.link-team-imports.json",
     "/.link-usage.json",
+    "# Private local material: never leaves this machine",
+    "/raw/",
+    "/.link-ingest/",
+    "/.link-backups/",
+    "/.link-cache/",
+    "/wiki/.link-operations/",
     # Obsidian's per-machine UI state: changes on every open, and syncing it
     # between machines produces pointless conflicts. Themes/plugins in the
     # rest of .obsidian/ still sync so the vault feels the same everywhere.
@@ -53,6 +63,16 @@ SYNC_IGNORE_LINES = (
 )
 
 TEAM_CONFIG_FILE = ".link-team.json"
+# Machine-local record of what team-sync imported, so a memory the user
+# forgot or archived is not resurrected by the next sync.
+TEAM_IMPORT_LEDGER = ".link-team-imports.json"
+
+# Paths that must never be tracked in a sync repo, even if an older
+# .gitignore let them in. Untracking keeps the files on disk.
+PRIVATE_TRACKED_PATHS = ("raw", ".link-ingest", ".link-backups", ".link-cache", "wiki/.link-operations")
+
+# Outgoing files larger than this are not text a person wrote; skip the scan.
+SECRET_SCAN_MAX_BYTES = 2_000_000
 
 # Regenerated after every merge instead of being merged.
 GENERATED_WIKI_FILES = ("wiki/index.md", "wiki/_backlinks.json", "wiki/_link_schema.json")
@@ -142,6 +162,7 @@ def sync_init(root: Path, remote: str | None = None) -> dict[str, object]:
         created = True
     _ensure_commit_identity(root)
     ignore_updated = ensure_sync_gitignore(root)
+    untrack_private_paths(root)
     _git(root, "add", "-A")
     dirty = bool(_git(root, "status", "--porcelain").stdout.strip())
     committed = False
@@ -150,9 +171,17 @@ def sync_init(root: Path, remote: str | None = None) -> dict[str, object]:
         committed = True
     remote_set = False
     if remote:
-        if _remote_url(root):
-            _git(root, "remote", "set-url", "origin", remote)
-        else:
+        existing = _remote_url(root)
+        if existing and existing != remote:
+            # Re-pointing someone's existing origin (a workspace that lives
+            # inside a project repo, say) would push the whole repo to the
+            # memory remote. Make the person do that on purpose.
+            raise SyncError(
+                f"this workspace is already a git repo with origin {existing}; "
+                "refusing to re-point it. Use a dedicated workspace, or run "
+                "`git remote remove origin` there first if that is really what you want."
+            )
+        if not existing:
             _git(root, "remote", "add", "origin", remote)
         remote_set = True
     return {
@@ -193,21 +222,44 @@ def sync_status(root: Path) -> dict[str, object]:
     }
 
 
+def untrack_private_paths(root: Path) -> list[str]:
+    """Remove private material from the index if an older setup tracked it.
+
+    The files stay on disk; they simply stop being part of what syncs.
+    """
+    removed: list[str] = []
+    for rel in PRIVATE_TRACKED_PATHS:
+        tracked = _git(root, "ls-files", "--", rel, check=False).stdout.strip()
+        if tracked:
+            _git(root, "rm", "-r", "-q", "--cached", "--", rel, check=False)
+            removed.append(rel)
+    return removed
+
+
 def _outgoing_secret_findings(root: Path, branch: str) -> list[dict[str, str]]:
-    """Scan every outgoing wiki change for secret-shaped values."""
+    """Scan every outgoing change for secret-shaped values.
+
+    Every path in the outgoing commits is scanned, not just wiki pages: a
+    stray notes file or an old tracked capture is exactly what leaks.
+    """
     upstream = f"origin/{branch}"
     has_upstream = _git(root, "rev-parse", "--verify", upstream, check=False).returncode == 0
     if has_upstream:
         changed = _git(root, "diff", "--name-only", f"{upstream}..HEAD", check=False).stdout.splitlines()
     else:
-        changed = _git(root, "ls-files", "wiki").stdout.splitlines()
+        changed = _git(root, "ls-files").stdout.splitlines()
     findings: list[dict[str, str]] = []
     for rel in changed:
         rel = rel.strip()
-        if not rel.startswith("wiki/"):
+        if not rel:
             continue
         path = root / rel
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            if path.stat().st_size > SECRET_SCAN_MAX_BYTES:
+                continue
+        except OSError:
             continue
         try:
             labels = secret_value_warnings(path.read_text(encoding="utf-8", errors="replace"))
@@ -282,6 +334,7 @@ def sync_workspace(
 
     _ensure_commit_identity(root)
     ensure_sync_gitignore(root)
+    untracked_private = untrack_private_paths(root)
     _git(root, "add", "-A")
     committed = False
     if _git(root, "status", "--porcelain").stdout.strip():
@@ -355,6 +408,7 @@ def sync_workspace(
         "pushed": pushed,
         "resolutions": resolutions,
         "secret_findings": [],
+        "untracked_private": untracked_private,
         "both_versions": [r for r in resolutions if r["resolution"] == "both_versions"],
     }
 
@@ -429,10 +483,16 @@ def export_team_memories(wiki_dir: Path, team_wiki: Path) -> list[str]:
     if not source_dir.exists():
         return exported
     for path in sorted(source_dir.glob("*.md")):
+        # A symlink is not a memory someone reviewed; and writing through a
+        # symlinked target would overwrite whatever file it points at.
+        if path.is_symlink() or not path.is_file():
+            continue
         if _memory_visibility(path) != "team" or not _memory_is_active(path):
             continue
         content = path.read_text(encoding="utf-8", errors="replace")
         target = target_dir / path.name
+        if target.is_symlink():
+            continue
         if target.exists() and target.read_text(encoding="utf-8", errors="replace") == content:
             continue
         target.write_text(content, encoding="utf-8")
@@ -440,27 +500,105 @@ def export_team_memories(wiki_dir: Path, team_wiki: Path) -> list[str]:
     return exported
 
 
-def import_team_memories(team_wiki: Path, wiki_dir: Path) -> dict[str, list[str]]:
-    """Bring teammates' memories into the local wiki; local versions win."""
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _load_import_ledger(path: Path) -> dict[str, dict[str, str]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    imported = payload.get("imported") if isinstance(payload, dict) else None
+    return {str(k): dict(v) for k, v in imported.items() if isinstance(v, dict)} if isinstance(imported, dict) else {}
+
+
+def _save_import_ledger(path: Path, ledger: dict[str, dict[str, str]]) -> None:
+    path.write_text(json.dumps({"imported": ledger}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def import_team_memories(
+    team_wiki: Path,
+    wiki_dir: Path,
+    *,
+    ledger_path: Path | None = None,
+) -> dict[str, list]:
+    """Bring teammates' memories into the local wiki, through the review gate.
+
+    A teammate reviewed a memory for their own use; that is not your review.
+    So a team memory arrives as `review_status: pending` with
+    `imported_from: team`, and it has to earn its place like any capture:
+    it must really be `visibility: team` and active, carry no secret-shaped
+    value and no injection-shaped instruction, and be a regular file (a
+    symlink in a shared repo can point at any file on your disk). Anything
+    else is rejected and reported, never written. Local versions win, and a
+    memory you forgot or archived after importing it stays gone.
+    """
     imported: list[str] = []
     conflicts: list[str] = []
+    rejected: list[dict[str, str]] = []
+    skipped_forgotten: list[str] = []
     source_dir = team_wiki / "memories"
     target_dir = wiki_dir / "memories"
     target_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_path or (wiki_dir.parent / TEAM_IMPORT_LEDGER)
+    ledger = _load_import_ledger(ledger_file)
+    changed_ledger = False
+    result: dict[str, list] = {
+        "imported": imported, "conflicts": conflicts,
+        "rejected": rejected, "skipped_forgotten": skipped_forgotten,
+    }
     if not source_dir.exists():
-        return {"imported": imported, "conflicts": conflicts}
+        return result
     for path in sorted(source_dir.glob("*.md")):
-        content = path.read_text(encoding="utf-8", errors="replace")
-        target = target_dir / path.name
-        if not target.exists():
-            target.write_text(content, encoding="utf-8")
-            imported.append(path.stem)
+        name = path.stem
+        if path.is_symlink() or not path.is_file():
+            rejected.append({"name": name, "reason": "not a regular file (symlink)"})
             continue
-        if target.read_text(encoding="utf-8", errors="replace") != content:
-            # The local version wins; the pair is the human's to reconcile
-            # (edit and re-share, or accept the team version deliberately).
-            conflicts.append(path.stem)
-    return {"imported": imported, "conflicts": conflicts}
+        content = path.read_text(encoding="utf-8", errors="replace")
+        meta, _ = parse_frontmatter(content)
+        if str(meta.get("visibility") or "").strip().lower() != "team":
+            rejected.append({"name": name, "reason": "not marked visibility: team"})
+            continue
+        if str(meta.get("status") or "active").strip().lower() != "active":
+            rejected.append({"name": name, "reason": f"status is {meta.get('status')}"})
+            continue
+        secrets = secret_value_warnings(content)
+        if secrets:
+            rejected.append({"name": name, "reason": "secret-looking value: " + ", ".join(secrets)})
+            continue
+        injections = injected_instruction_warnings(content)
+        if injections:
+            rejected.append({"name": name, "reason": "injection-shaped instruction: " + ", ".join(injections)})
+            continue
+        team_hash = _sha256(content)
+        target = target_dir / path.name
+        if target.is_symlink():
+            rejected.append({"name": name, "reason": "local path is a symlink"})
+            continue
+        previous = ledger.get(name)
+        if not target.exists():
+            if previous:
+                # Imported before and gone now: the person forgot or moved it.
+                skipped_forgotten.append(name)
+                continue
+            gated = update_frontmatter_fields(content, {
+                "review_status": "pending",
+                "imported_from": "team",
+            }, remove={"reviewed_at"})
+            target.write_text(gated, encoding="utf-8")
+            ledger[name] = {"team_sha256": team_hash}
+            changed_ledger = True
+            imported.append(name)
+            continue
+        if previous and previous.get("team_sha256") != team_hash:
+            # The teammate changed it since you imported it; yours stays.
+            conflicts.append(name)
+        elif not previous and target.read_text(encoding="utf-8", errors="replace") != content:
+            conflicts.append(name)
+    if changed_ledger:
+        _save_import_ledger(ledger_file, ledger)
+    return result
 
 
 def team_sync_workspace(
@@ -489,14 +627,16 @@ def team_sync_workspace(
             [f"memory: {name}" for name in exported],
         )
     sync_report = sync_workspace(team_root, team_wiki, regenerate=lambda: None)
-    imports = import_team_memories(team_wiki, wiki_dir)
-    if imports["imported"] or imports["conflicts"]:
+    imports = import_team_memories(team_wiki, wiki_dir, ledger_path=root / TEAM_IMPORT_LEDGER)
+    if imports["imported"] or imports["conflicts"] or imports["rejected"]:
         append_log(
             wiki_dir, utc_timestamp(), "team-sync",
-            f"Imported {len(imports['imported'])} team memory(ies); "
-            f"{len(imports['conflicts'])} kept local over team version",
-            [f"imported: {name}" for name in imports["imported"]]
-            + [f"kept local: {name}" for name in imports["conflicts"]],
+            f"Imported {len(imports['imported'])} team memory(ies) for review; "
+            f"{len(imports['conflicts'])} kept local over team version; "
+            f"{len(imports['rejected'])} rejected",
+            [f"imported (pending review): {name}" for name in imports["imported"]]
+            + [f"kept local: {name}" for name in imports["conflicts"]]
+            + [f"rejected: {item['name']} ({item['reason']})" for item in imports["rejected"]],
         )
         if imports["imported"]:
             regenerate()
@@ -504,6 +644,8 @@ def team_sync_workspace(
         "exported": exported,
         "imported": imports["imported"],
         "conflicts": imports["conflicts"],
+        "rejected": imports["rejected"],
+        "skipped_forgotten": imports["skipped_forgotten"],
         "team_dir": str(team_root),
         "sync": sync_report,
     }

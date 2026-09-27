@@ -6,6 +6,26 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Security
+
+- **Team memories arrive through your review gate.** `lnk team-sync`
+  copied every page in the shared repo straight into your active memory: no
+  review, no visibility check, no secret scan, no injection label. Anyone
+  with push access to the team remote could plant a memory in every
+  teammate's next session. Imports now land as `review_status: pending`
+  with `imported_from: team`; pages that are not `visibility: team`, not
+  active, symlinks, or carry a secret-shaped value or injection-shaped
+  instruction are rejected and reported. A team memory you forgot or
+  archived is no longer resurrected by the next sync. Export never writes
+  through a symlinked file in the team repo.
+- **`lnk sync` scans everything it pushes.** The secret gate only looked at
+  `wiki/`, while sync staged the whole workspace, and `raw/` was not in its
+  ignore list - so a workspace whose `.gitignore` predated Link pushed raw
+  captures unscanned. Every outgoing file is scanned now; `raw/`, ingest
+  staging, operation snapshots, backups and caches are ignored, and if an
+  older setup tracked them, sync untracks them and says so. `--init`
+  refuses to re-point a workspace that already has a different `origin`.
+
 ## [3.0.0] - 2026-09-16
 
 ### Added
