@@ -1,14 +1,17 @@
 """Local backup helpers for Link wiki data."""
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import tarfile
 import tempfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .log import refresh_log_anchor
 from .validation import validate_wiki
 
 
@@ -105,19 +108,25 @@ def create_backup(
 
     file_count = 0
     current_arcname = ""
+    # Write to a hidden partial file and rename into place: a backup killed
+    # halfway used to leave a truncated archive under the final name, which
+    # list_backups reported as valid and restore then choked on.
+    partial_path = backup_path.with_name(f".{backup_path.name}.partial")
     try:
-        with tarfile.open(backup_path, "w:gz") as tar:
+        with tarfile.open(partial_path, "w:gz") as tar:
             for prefix, source_root in included_roots:
                 for path in _iter_files(source_root):
                     rel = path.relative_to(source_root)
                     current_arcname = (Path(prefix) / rel).as_posix()
                     tar.add(path, arcname=current_arcname, recursive=False)
                     file_count += 1
+        os.replace(partial_path, backup_path)
     except (OSError, tarfile.TarError) as exc:
-        try:
-            backup_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        for leftover in (partial_path, backup_path):
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError:
+                pass
         detail = f" while adding {current_arcname}" if current_arcname else ""
         raise BackupError(f"backup failed{detail}: {exc}") from exc
 
@@ -197,6 +206,16 @@ def _safe_member_path(name: str) -> PurePosixPath:
     return path
 
 
+_DAMAGED_ARCHIVE_ERRORS = (tarfile.TarError, EOFError, zlib.error)
+
+
+def _damaged(backup_path: Path, exc: BaseException) -> RestoreError:
+    return RestoreError(
+        f"backup archive is damaged or incomplete: {backup_path.name} ({exc.__class__.__name__}). "
+        "Pick another backup with `lnk backup --list`."
+    )
+
+
 def inspect_backup(
     link_root: Path,
     backup: str | Path,
@@ -213,20 +232,24 @@ def inspect_backup(
     skipped_roots: set[str] = set()
     file_count = 0
     skipped_count = 0
-    with tarfile.open(backup_path, "r:gz") as tar:
-        for member in tar.getmembers():
-            safe_path = _safe_member_path(member.name)
-            root_name = safe_path.parts[0]
-            if not (member.isfile() or member.isdir()):
-                raise RestoreError(f"backup contains unsupported member type: {member.name}")
-            if root_name == "raw" and not include_raw:
-                skipped_roots.add("raw")
-                if member.isfile():
-                    skipped_count += 1
-                continue
-            restore_roots.add(root_name)
+    try:
+        with tarfile.open(backup_path, "r:gz") as tar:
+            members = tar.getmembers()
+    except _DAMAGED_ARCHIVE_ERRORS as exc:
+        raise _damaged(backup_path, exc) from exc
+    for member in members:
+        safe_path = _safe_member_path(member.name)
+        root_name = safe_path.parts[0]
+        if not (member.isfile() or member.isdir()):
+            raise RestoreError(f"backup contains unsupported member type: {member.name}")
+        if root_name == "raw" and not include_raw:
+            skipped_roots.add("raw")
             if member.isfile():
-                file_count += 1
+                skipped_count += 1
+            continue
+        restore_roots.add(root_name)
+        if member.isfile():
+            file_count += 1
     return {
         "backup": str(backup_path),
         "name": backup_path.name,
@@ -236,6 +259,27 @@ def inspect_backup(
         "file_count": file_count,
         "skipped_file_count": skipped_count,
     }
+
+
+def _extract_to_staging(backup_path: Path, staging: Path, include_raw: bool) -> None:
+    with tarfile.open(backup_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            safe_path = _safe_member_path(member.name)
+            root_name = safe_path.parts[0]
+            if root_name == "raw" and not include_raw:
+                continue
+            if member.isdir():
+                (staging / safe_path).mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                raise RestoreError(f"backup contains unsupported member type: {member.name}")
+            target_path = staging / safe_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            source = tar.extractfile(member)
+            if source is None:
+                raise RestoreError(f"backup member could not be read: {member.name}")
+            with source, target_path.open("wb") as output:
+                shutil.copyfileobj(source, output)
 
 
 def restore_backup(
@@ -271,36 +315,39 @@ def restore_backup(
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".link-restore-", dir=root) as tmp_name:
         staging = Path(tmp_name)
-        with tarfile.open(backup_path, "r:gz") as tar:
-            for member in tar.getmembers():
-                safe_path = _safe_member_path(member.name)
-                root_name = safe_path.parts[0]
-                if root_name == "raw" and not include_raw:
+        try:
+            _extract_to_staging(backup_path, staging, include_raw)
+        except _DAMAGED_ARCHIVE_ERRORS as exc:
+            raise _damaged(backup_path, exc) from exc
+        retired = staging / ".replaced"
+        retired.mkdir()
+        moved_aside: list[tuple[Path, Path]] = []
+        try:
+            for root_name in plan["restore_roots"]:
+                restored_root = staging / root_name
+                destination = root / root_name
+                if not restored_root.exists():
                     continue
-                if member.isdir():
-                    (staging / safe_path).mkdir(parents=True, exist_ok=True)
-                    continue
-                if not member.isfile():
-                    raise RestoreError(f"backup contains unsupported member type: {member.name}")
-                target_path = staging / safe_path
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                source = tar.extractfile(member)
-                if source is None:
-                    raise RestoreError(f"backup member could not be read: {member.name}")
-                with source, target_path.open("wb") as output:
-                    shutil.copyfileobj(source, output)
+                # Move the current tree aside first, then the restored one in.
+                # Deleting first left a window with no wiki/ at all.
+                if destination.exists() or destination.is_symlink():
+                    aside = retired / root_name
+                    os.replace(destination, aside)
+                    moved_aside.append((aside, destination))
+                os.replace(restored_root, destination)
+        except OSError:
+            for aside, destination in reversed(moved_aside):
+                try:
+                    if destination.exists() and destination.is_dir():
+                        shutil.rmtree(destination)
+                    os.replace(aside, destination)
+                except OSError:
+                    pass
+            raise
 
-        for root_name in plan["restore_roots"]:
-            restored_root = staging / root_name
-            destination = root / root_name
-            if not restored_root.exists():
-                continue
-            if destination.exists():
-                if destination.is_dir():
-                    shutil.rmtree(destination)
-                else:
-                    destination.unlink()
-            shutil.move(str(restored_root), str(destination))
+    if "wiki" in plan["restore_roots"]:
+        # The restored log is the backup's history: accept its head.
+        refresh_log_anchor(root / "wiki")
 
     integrity: dict[str, Any] = {
         "checked": False,

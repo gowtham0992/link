@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Callable
 
 from .frontmatter import parse_frontmatter, update_frontmatter_fields
-from .log import append_log, merge_log_texts, utc_timestamp
+from .log import append_log, merge_log_texts, refresh_log_anchor, utc_timestamp
 from .security import injected_instruction_warnings, secret_value_warnings
 
 # Appended to the workspace .gitignore at init: the runtime is derived from
@@ -363,6 +363,14 @@ def sync_workspace(
                     _git(root, "diff", "--name-only", "--diff-filter=U").stdout.splitlines()
                     if line.strip()
                 ]
+                if not conflicted:
+                    # The merge failed for another reason (untracked files in
+                    # the way, a hook, a lock). Committing and pushing on top
+                    # of that left MERGE_HEAD behind and a non-fast-forward
+                    # push; stop cleanly instead.
+                    _git(root, "merge", "--abort", check=False)
+                    detail = (merge.stderr or merge.stdout or "").strip()[:300]
+                    raise SyncError(f"could not merge the remote changes: {detail}")
                 resolutions = _resolve_conflicts(root, wiki_dir, conflicted)
                 regenerate()
                 both = [r for r in resolutions if r["resolution"] == "both_versions"]
@@ -379,6 +387,13 @@ def sync_workspace(
                 )
                 _git(root, "add", "-A")
                 _git(root, "commit", "--no-edit", check=False)
+            else:
+                # A clean pull can bring new pages; index and backlinks are
+                # generated, so rebuild them instead of trusting the merge.
+                regenerate()
+            # The pulled log is another machine's history, verified by its
+            # chain; accept its head as this machine's anchor.
+            refresh_log_anchor(wiki_dir)
 
     findings = _outgoing_secret_findings(root, branch)
     pushed = False

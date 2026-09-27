@@ -47,6 +47,31 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   hides dismissed proposals, but MCP `accept_capture` numbered them anyway,
   so "accept 1" after dismissing the first proposal stored the one you had
   just declined. The CLI already matched; MCP does now.
+- **The audit log is tamper-evident in the ways the docs claimed.** The
+  previous hash was read outside the lock that guarded the append, so
+  concurrent hooks and MCP writes chained onto the same parent and forked
+  the log; verification then failed on honest entries. A newline in a title
+  or reason split an entry and broke its own hash. Deleting the first or
+  last entries verified clean. Now the read and append share one lock,
+  headings and details are single-line by construction, the first entry
+  must start the chain or continue the newest rotated file, and a
+  machine-local anchor (`.link-cache/log-anchor.json`) records the newest
+  entry so a cut-off tail is reported. Sync and restore accept the new head
+  explicitly. Forgetting a memory now redacts rotated log files too (they
+  kept the title forever), atomically and under the log's lock.
+- **Backups and restores cannot leave you with nothing.** A backup is
+  written to a hidden partial file and renamed into place, so a killed
+  backup no longer leaves a truncated archive that looks valid; a damaged
+  archive is a clear error instead of a traceback; and restore moves the
+  current tree aside before moving the restored one in, putting it back if
+  anything fails, instead of deleting `wiki/` first.
+- **`lnk snapshot --force` only replaces a previous snapshot.** It deleted
+  any non-empty output directory; `lnk snapshot ~ --force` would have
+  removed your home folder. It now requires the directory to contain a Link
+  `snapshot.json`.
+- **Sync stops cleanly when a merge fails for a reason other than a
+  conflict**, instead of committing and pushing on top of a half-merge, and
+  a clean pull regenerates the index and backlinks.
 - **Capture commands refuse symlinks**, so `delete-capture` can no longer be
   pointed at a memory page through a link in `raw/`, and capture
   de-duplication sees all of a capture's proposals rather than the first

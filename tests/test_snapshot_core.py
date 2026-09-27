@@ -145,7 +145,8 @@ class SnapshotCoreTests(unittest.TestCase):
 
     def test_export_snapshot_refuses_non_empty_output_without_force(self):
         output = self.root / "snapshot"
-        output.mkdir()
+        first = export_snapshot(self.wiki, output)
+        self.assertTrue(first["created"])
         (output / "old.html").write_text("old", encoding="utf-8")
 
         blocked = export_snapshot(self.wiki, output)
@@ -155,6 +156,17 @@ class SnapshotCoreTests(unittest.TestCase):
         self.assertIn("not empty", blocked["error"])
         self.assertTrue(created["created"])
         self.assertFalse((output / "old.html").exists())
+
+    def test_force_never_deletes_a_directory_that_is_not_a_snapshot(self):
+        precious = self.root / "home-like"
+        precious.mkdir()
+        (precious / "thesis.md").write_text("years of work", encoding="utf-8")
+
+        refused = export_snapshot(self.wiki, precious, force=True)
+
+        self.assertFalse(refused["created"])
+        self.assertIn("nothing was deleted", refused["error"])
+        self.assertTrue((precious / "thesis.md").exists())
 
 
 if __name__ == "__main__":

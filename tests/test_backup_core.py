@@ -155,3 +155,38 @@ class BackupCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackupAtomicityTests(unittest.TestCase):
+    def test_truncated_archive_is_a_clean_restore_error(self):
+        from link_core.backup import RestoreError, create_backup, inspect_backup, list_backups
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "wiki").mkdir()
+            (root / "wiki" / "index.md").write_text("# Index\n" + "x" * 5000, encoding="utf-8")
+            made = create_backup(root)
+            archive = Path(made["path"])
+            archive.write_bytes(archive.read_bytes()[: archive.stat().st_size // 2])
+            with self.assertRaises(RestoreError) as caught:
+                inspect_backup(root, archive)
+            self.assertIn("damaged", str(caught.exception))
+            # No stray partial files are listed as backups.
+            names = [item["name"] for item in list_backups(root)["backups"]]
+            self.assertEqual(names, [archive.name])
+            self.assertFalse(list((root / ".link-backups").glob(".*.partial")))
+
+    def test_restore_swaps_trees_and_keeps_the_log_anchor_valid(self):
+        from link_core.backup import create_backup, restore_backup
+        from link_core.log import append_log, verify_log_integrity
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            wiki = root / "wiki"
+            wiki.mkdir()
+            append_log(wiki, "2026-09-26T00:00:00Z", "remember", "before backup", [])
+            made = create_backup(root)
+            append_log(wiki, "2026-09-26T00:01:00Z", "remember", "after backup", [])
+            restore_backup(root, made["path"], confirm=True, safety_backup=False)
+            self.assertNotIn("after backup", (wiki / "log.md").read_text(encoding="utf-8"))
+            report = verify_log_integrity(wiki)
+            self.assertTrue(report["passed"], report["findings"])
+            self.assertEqual(report["anchor"], "ok")

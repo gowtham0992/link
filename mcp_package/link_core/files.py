@@ -165,3 +165,32 @@ def append_text_with_rotation(
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
+
+
+# Public names for callers that must do several steps under one lock (the
+# audit log reads its last hash and appends in the same critical section;
+# doing those two under separate locks forked the hash chain under
+# concurrent writers).
+file_lock = _file_lock
+
+
+def rotate_file_unlocked(target: Path, backups: int) -> None:
+    """Rotate `target` to `target.1`...; caller must hold file_lock(target)."""
+    _rotate_file_unlocked(target, backups)
+
+
+def atomic_write_text_unlocked(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    """Atomic replace; caller must already hold file_lock(path)."""
+    _atomic_write_bytes_unlocked(path, text.encode(encoding))
+
+
+def append_text_unlocked(path: Path, text: str, *, encoding: str = "utf-8", initial_text: str = "") -> None:
+    """Append + fsync; caller must already hold file_lock(path)."""
+    target = path.expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding=encoding) as handle:
+        if initial_text and target.stat().st_size == 0:
+            handle.write(initial_text)
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())

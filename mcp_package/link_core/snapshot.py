@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -251,6 +252,14 @@ def _page_html(page: Mapping[str, Any], body_markdown: str, page_href: Mapping[s
     return _html_shell(title, body, root_prefix="../")
 
 
+def _is_previous_snapshot(directory: Path) -> bool:
+    try:
+        manifest = json.loads((directory / "snapshot.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(manifest, dict) and manifest.get("schema") == SNAPSHOT_SCHEMA
+
+
 def export_snapshot(
     wiki_dir: Path,
     output_dir: Path,
@@ -278,6 +287,15 @@ def export_snapshot(
             return {
                 "created": False,
                 "error": "snapshot output directory is not empty; choose another path or use --force",
+                "output": str(output_dir),
+            }
+        # --force replaces a previous snapshot; it never deletes an arbitrary
+        # directory. `lnk snapshot ~ --force` used to rmtree the home folder.
+        if not _is_previous_snapshot(output_dir):
+            return {
+                "created": False,
+                "error": "--force only replaces a previous Link snapshot (a directory with snapshot.json); "
+                         "this directory is not one, so nothing was deleted",
                 "output": str(output_dir),
             }
         shutil.rmtree(output_dir)
