@@ -1899,6 +1899,12 @@ class LinkCliTests(unittest.TestCase):
                 json_output=True,
             )
         capture = json.loads(capture_out.getvalue())
+        # Captures are redacted at write time now; redact-capture is for
+        # files written before that, or dropped into raw/ by hand.
+        capture_file = target / capture["path"]
+        self.assertNotIn(fake_key, capture_file.read_text(encoding="utf-8"))
+        capture_file.write_text(capture_file.read_text(encoding="utf-8").replace(
+            "[redacted-secret]", fake_key), encoding="utf-8")
 
         redact_out = StringIO()
         with redirect_stdout(redact_out):

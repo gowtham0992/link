@@ -884,12 +884,36 @@ class McpContractTests(unittest.TestCase):
         recall = json.loads(self.server.recall_memory("MCP capture approval", project="link"))
         self.assertEqual(recall["memories"][0]["project"], "link")
 
+    def test_accept_capture_numbers_proposals_like_the_inbox_after_a_dismissal(self):
+        from link_core.capture import record_dismissed_proposals
+        capture = json.loads(self.server.capture_session(
+            "From now on I always deploy payments on Tuesdays.\n"
+            "From now on I always run the linter before every commit.",
+            title="Two rules session",
+        ))
+        inbox = json.loads(self.server.capture_inbox())
+        previews = inbox["captures"][0]["proposals"]
+        self.assertGreaterEqual(len(previews), 2)
+        first, second = previews[0]["memory"], previews[1]["memory"]
+        record_dismissed_proposals(self.target, [first])
+
+        accepted = json.loads(self.server.accept_capture(capture["path"], index=1))
+        stored = (self.target / accepted["result"]["path"]).read_text(encoding="utf-8")
+        claim = stored.split("## Memory", 1)[1].split("##", 1)[0]
+        self.assertIn(second.split()[-1].rstrip("."), claim)
+        self.assertNotIn(first.split()[-1].rstrip("."), claim)
+
     def test_redact_capture_contract(self):
         fake_key = "sk-" + ("C" * 24)
         capture = json.loads(self.server.capture_session(
             f"Remember that MCP capture redaction stays local. Test key {fake_key}",
             title="MCP capture redaction session",
         ))
+        # Born redacted; simulate a capture written before write-time redaction.
+        capture_file = self.target / capture["path"]
+        self.assertNotIn(fake_key, capture_file.read_text(encoding="utf-8"))
+        capture_file.write_text(capture_file.read_text(encoding="utf-8").replace(
+            "[redacted-secret]", fake_key), encoding="utf-8")
 
         redacted = json.loads(self.server.redact_capture(capture["path"]))
         capture_text = (self.target / capture["path"]).read_text(encoding="utf-8")

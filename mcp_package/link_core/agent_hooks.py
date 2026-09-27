@@ -17,6 +17,7 @@ Supported agents differ in mechanism, so each config records its schema:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -358,6 +359,52 @@ LINK_ECHO_MARKERS = (
 )
 
 
+# Text that arrives in the transcript with role "user" but that the user
+# never typed: subagent reports, slash-command expansions, local command
+# output, interruption markers, compaction summaries, peer-session messages.
+# Mining these as "the user's own turns" turned a subagent's report ("always
+# run migrations with --force") into a high-confidence preference
+# attributed to the user. Newer transcripts label the origin; older ones
+# only carry the tag, so both are checked.
+HARNESS_TEXT_PREFIXES = (
+    "<task-notification>",
+    "<local-command-caveat>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "<system-reminder>",
+    "<cross-session-message",
+    "[Request interrupted",
+    "This session is being continued from a previous conversation",
+)
+_SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+
+
+def _harness_reason(entry: dict[str, object], text: str) -> str | None:
+    """Why a user-role entry is not the user's own words, or None if it is."""
+    if entry.get("isSidechain") is True:
+        return "subagent turn"
+    if entry.get("isCompactSummary") is True:
+        return "compaction summary"
+    if entry.get("promptSource") == "system":
+        return "system prompt"
+    origin = entry.get("origin")
+    if isinstance(origin, dict):
+        kind = str(origin.get("kind") or "")
+        if kind and kind != "human":
+            return f"{kind} message"
+    stripped = text.lstrip()
+    for prefix in HARNESS_TEXT_PREFIXES:
+        if stripped.startswith(prefix):
+            return f"harness text ({prefix.strip('<>[')})"
+    return None
+
+
 def extract_transcript_text(
     transcript_path: Path,
     *,
@@ -405,6 +452,17 @@ def extract_transcript_text(
         text = _content_text(message.get("content"))
         if not text:
             continue
+        if entry.get("type") == "user":
+            reason = _harness_reason(entry, text)
+            if reason:
+                if stats is not None:
+                    stats["dropped_harness_text"] = stats.get("dropped_harness_text", 0) + 1
+                continue
+            # A reminder the harness appended to a real prompt is not part
+            # of what the person typed.
+            text = _SYSTEM_REMINDER_RE.sub("", text).strip()
+            if not text:
+                continue
         if any(marker in text for marker in LINK_ECHO_MARKERS):
             if stats is not None:
                 stats["dropped_link_output"] = stats.get("dropped_link_output", 0) + 1

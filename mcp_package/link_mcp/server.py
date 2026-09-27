@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Collection
 from pathlib import Path
 
 from link_core.version import LINK_VERSION
@@ -375,6 +376,7 @@ from link_core.capture import (
     capture_proposal_selection as _core_capture_proposal_selection,
     capture_records as _core_capture_records,
     capture_review_summary as _core_capture_review_summary,
+    load_dismissed_fingerprints as _core_load_dismissed_fingerprints,
     dedup_pending_captures as _core_dedup_pending_captures,
     delete_capture_file as _core_delete_capture_file,
     mcp_capture_commands as _core_mcp_capture_commands,
@@ -761,6 +763,7 @@ def _propose_memories_from_text(
     limit: int = 10,
     project: str = "",
     curated: bool = False,
+    exclude_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
     return _core_propose_memories_from_text(
         text,
@@ -770,6 +773,7 @@ def _propose_memories_from_text(
         writes_memory=False,
         project=_resolve_project(project),
         curated=curated,
+        exclude_fingerprints=exclude_fingerprints,
     )
 
 
@@ -870,6 +874,10 @@ def _accept_capture(
     allow_conflict: bool = False,
 ) -> dict[str, object]:
     root = WIKI_DIR.parent
+    # The inbox preview hides proposals the user dismissed; accept must
+    # number them the same way, or "accept 1" after dismissing #1 stores
+    # the very proposal the user just declined.
+    dismissed = set(_core_load_dismissed_fingerprints(root))
     selection = _core_capture_proposal_selection(
         root,
         capture,
@@ -884,6 +892,7 @@ def _accept_capture(
             limit=proposal_limit,
             project=project_name,
             curated=curated,
+            exclude_fingerprints=dismissed,
         ),
     )
     rel_path = str(selection["capture"])

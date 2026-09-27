@@ -813,3 +813,42 @@ class CapturePreviewLimitTests(unittest.TestCase):
             # Curated preview: all 8 deliberate lines visible, not just the
             # chat-shaped subset.
             self.assertEqual(len(full[0]["proposals"]), 8)
+
+
+class CaptureTrustBoundaryTests(unittest.TestCase):
+    """What a capture writes to disk, and what capture commands may touch."""
+
+    def test_secret_in_session_notes_is_redacted_on_disk_but_still_warned(self):
+        from mcp_package.link_core.capture import write_session_capture
+        key = "sk-proj-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnop"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            payload = write_session_capture(root, text=f"we set the staging key to {key} today", source="session-end")
+            self.assertTrue(payload["secret_warnings"])
+            written = (root / payload["path"]).read_text(encoding="utf-8")
+            self.assertNotIn(key, written)
+            self.assertIn("[redacted-secret]", written)
+            self.assertNotIn(key, payload["title"])
+
+    def test_delete_capture_refuses_a_symlink_pointing_at_a_memory(self):
+        from mcp_package.link_core.capture import delete_capture_file as delete_capture
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            memory = root / "wiki" / "memories" / "keep-me.md"
+            memory.parent.mkdir(parents=True)
+            memory.write_text("---\ntitle: keep\n---\n\nImportant.\n", encoding="utf-8")
+            captures = root / "raw" / "memory-captures"
+            captures.mkdir(parents=True)
+            (captures / "20260101T000000Z-trap.md").symlink_to(memory)
+            with self.assertRaises(ValueError):
+                delete_capture(root, "raw/memory-captures/20260101T000000Z-trap.md", confirm=True)
+            self.assertTrue(memory.exists())
+
+    def test_fingerprints_cover_more_than_ten_proposals(self):
+        from mcp_package.link_core.capture import capture_proposal_fingerprints
+        rules = "\n".join(
+            f"- From now on I always use tool number {word} for task {word}."
+            for word in ("alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima").split()
+        )
+        prints = capture_proposal_fingerprints(f"---\ntitle: t\n---\n\n## Notes\n\n{rules}\n")
+        self.assertGreater(len(prints), 10)

@@ -25,6 +25,33 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   staging, operation snapshots, backups and caches are ignored, and if an
   older setup tracked them, sync untracks them and says so. `--init`
   refuses to re-point a workspace that already has a different `origin`.
+- **Only your own words become proposals.** Claude Code writes subagent
+  reports, slash-command expansions, local command output, interruption
+  markers and compaction summaries into the transcript with the user's
+  role. Session-end mined them as "your own turns", so a subagent's report
+  saying "always run migrations with --force" became a high-confidence
+  preference attributed to you. Those entries are dropped by origin label
+  and by tag, and system reminders appended to a real prompt are removed.
+  The decision trail reports how many were dropped.
+- **Captures no longer keep the secrets they warn about.** `session-end`
+  warned about a key and then wrote it verbatim into the capture file. The
+  notes, title and source are redacted before the file is written; the
+  inbox still names what was redacted so you know to rotate it.
+- **Handoffs are labelled.** A handoff reaches every next session on any
+  agent, which made it the strongest write in Link that skips review. It
+  is now framed as notes from a previous session, re-checked for
+  injection-shaped instructions on every read (the file can be edited by
+  anything), and a flagged handoff tells the agent to show it to you and
+  wait. The source label is sanitised so it cannot carry prose.
+- **Accept after dismiss picks the right proposal over MCP.** The inbox
+  hides dismissed proposals, but MCP `accept_capture` numbered them anyway,
+  so "accept 1" after dismissing the first proposal stored the one you had
+  just declined. The CLI already matched; MCP does now.
+- **Capture commands refuse symlinks**, so `delete-capture` can no longer be
+  pointed at a memory page through a link in `raw/`, and capture
+  de-duplication sees all of a capture's proposals rather than the first
+  ten (a capture whose first ten were covered was deleted as a duplicate
+  even when later proposals were new).
 
 ## [3.0.0] - 2026-09-16
 

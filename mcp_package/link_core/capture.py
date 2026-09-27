@@ -164,6 +164,9 @@ def record_dismissed_proposals(root: Path, memories: list[str]) -> int:
     return added
 
 
+CAPTURE_FINGERPRINT_LIMIT = 50
+
+
 def capture_proposal_fingerprints(text: str, project: str | None = None) -> set[str]:
     """Fingerprints of everything a saved capture would propose on re-mining."""
     mining_text = capture_proposal_source(text)
@@ -171,7 +174,10 @@ def capture_proposal_fingerprints(text: str, project: str | None = None) -> set[
         _, mining_text = capture_notes_from_markdown(text)
     if not mining_text:
         return set()
-    mined = propose_memories_from_text(mining_text, [], limit=10, project=project)
+    # Must see every proposal a capture can yield: at limit=10 a capture
+    # whose first ten were covered was deleted as "all duplicates" even when
+    # proposals 11+ were new.
+    mined = propose_memories_from_text(mining_text, [], limit=CAPTURE_FINGERPRINT_LIMIT, project=project)
     proposals = mined.get("proposals")
     items: list[object] = proposals if isinstance(proposals, list) else []
     return {
@@ -257,10 +263,16 @@ def write_session_capture(
     proposals were kept or dropped, so the pipeline is reviewable.
     """
     root = root.expanduser().resolve()
-    notes = text.strip()
-    if not notes:
+    original_notes = text.strip()
+    if not original_notes:
         raise ValueError("session capture input is required")
+    # The warning is computed from what was said; the file stores the
+    # redacted text. A capture that warns about a key and then writes the
+    # key to disk verbatim has already leaked it.
+    secret_warnings = secret_value_warnings(original_notes)
+    notes, _, _ = redact_secret_values(original_notes)
     source_value = str(source or default_source).strip() or default_source
+    source_value, _, _ = redact_secret_values(source_value)
     captured_at = timestamp or utc_timestamp()
     project_name = normalize_project(project)
     capture_name = capture_title(
@@ -270,7 +282,6 @@ def write_session_capture(
         default_source=default_source,
         path_source=path_source,
     )
-    secret_warnings = secret_value_warnings(notes)
     capture_dir = root / "raw" / "memory-captures"
     capture_dir.mkdir(parents=True, exist_ok=True)
     conversation = str(conversation_id or "").strip()
@@ -281,12 +292,16 @@ def write_session_capture(
     capture_path = refreshed_capture or capture_filename(captured_at, capture_name, capture_dir)
     project_line = f'project: "{frontmatter_string(project_name)}"\n' if project_name else ""
     conversation_line = f'conversation: "{frontmatter_string(conversation)}"\n' if conversation else ""
+    # Remember what was redacted so the inbox still says "this session
+    # contained a key - rotate it", after the value itself is gone.
+    redacted_line = (f'redacted_secrets: "{frontmatter_string(", ".join(secret_warnings))}"\n'
+                     if secret_warnings else "")
 
     # Proposal source: the user's own turns, redacted, so accept-time mining
     # reads exactly what the hook mined — not the assistant's prose beneath.
     mined = (proposal_text or "").strip()
     mined_section = ""
-    if mined and mined != notes:
+    if mined and mined != original_notes:
         safe_mined, _, _ = redact_secret_values(mined)
         mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{safe_mined}\n"
 
@@ -304,7 +319,7 @@ def write_session_capture(
 title: "{frontmatter_string(capture_name)}"
 source_type: {source_type}
 date_captured: "{captured_at}"
-{project_line}{conversation_line}---
+{project_line}{conversation_line}{redacted_line}---
 
 # {capture_name}
 
@@ -351,6 +366,10 @@ def resolve_capture_file(root: Path, capture: str, *, max_len: int | None = None
         ])
 
     for candidate in candidates:
+        # A symlink inside raw/ can point at a memory page or any file under
+        # the root; delete/redact would then act on that file instead.
+        if candidate.is_symlink():
+            continue
         try:
             resolved = candidate.resolve()
         except OSError:
@@ -584,7 +603,7 @@ def delete_capture_file(
             if mining_text is None:
                 _, mining_text = capture_notes_from_markdown(text)
             mined = propose_memories_from_text(
-                mining_text or "", [], limit=10,
+                mining_text or "", [], limit=CAPTURE_FINGERPRINT_LIMIT,
                 project=normalize_project(str(meta.get("project") or "")),
             )
             proposals = mined.get("proposals")
@@ -722,6 +741,10 @@ def capture_records(
         if project_name and capture_project and capture_project != project_name:
             continue
         warnings = secret_value_warnings(text)
+        for label in str(meta.get("redacted_secrets") or "").split(","):
+            label = label.strip()
+            if label and label not in warnings:
+                warnings.append(label)
         injection_warnings = injected_instruction_warnings(text)
         safe_notes, _, _ = redact_secret_values(notes)
         # What Accept will actually save: mine from the user's own turns

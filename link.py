@@ -2814,7 +2814,9 @@ def _hook_session_end(
     notes = _core_extract_transcript_text(transcript_path, stats=extraction_stats)
     _trace(
         f"Read the session: kept {extraction_stats.get('kept_messages', 0)} messages, "
-        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own injected output (echo guard, layer 1)."
+        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own injected output (echo guard, layer 1)"
+        f" and {extraction_stats.get('dropped_harness_text', 0)} the harness wrote in your name"
+        " (subagent reports, command output, compaction summaries)."
     )
     if len(notes.strip()) < 200:
         _trace("skipped: under 200 characters of conversation — nothing memory-worthy in a trivial session.")
