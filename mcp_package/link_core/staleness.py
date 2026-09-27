@@ -114,6 +114,8 @@ def _git(repo_root: Path, arguments: list[str], runner: Callable[..., object] | 
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",  # git's paths are UTF-8, not the Windows locale
+            errors="replace",
             timeout=timeout,
             check=False,
         )

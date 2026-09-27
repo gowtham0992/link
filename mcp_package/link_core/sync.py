@@ -96,7 +96,9 @@ def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     # skipped the secret scan and its conflict was never resolved.
     result = subprocess.run(
         ["git", "-c", "core.quotepath=off", *args], cwd=root, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, errors="surrogateescape", timeout=120,
+        # Git writes paths as UTF-8 on every platform; decoding with the
+        # Windows locale turned café.md into cafÃ©.md, which matched no file.
+        capture_output=True, text=True, encoding="utf-8", errors="surrogateescape", timeout=120,
     )
     if check and result.returncode != 0:
         message = (result.stderr or result.stdout or "").strip()

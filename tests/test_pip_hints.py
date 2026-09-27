@@ -24,6 +24,7 @@ class PipShimTests(unittest.TestCase):
         shim.chmod(0o755)
         return mock.patch.dict(os.environ, {"PATH": temp.name})
 
+    @unittest.skipIf(os.name == "nt", "Windows installs lnk.exe; an extensionless script is not on PATH there")
     def test_pip_console_script_for_this_interpreter_counts(self):
         with self._with_lnk(f"#!{sys.executable}\nfrom link_cli import main\nmain()\n"):
             self.assertTrue(link._lnk_on_path_runs_this_runtime())
