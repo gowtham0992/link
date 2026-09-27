@@ -184,7 +184,8 @@ class StaleCommandTests(unittest.TestCase):
             before = {p: p.read_bytes() for p in pages}
             result = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", str(repo)],
                             capture_output=True, text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            # Exit 1: something was flagged (0 would mean all clear).
+            self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn("gone.py", result.stdout)
             self.assertNotIn("archived-note", result.stdout)
             self.assertIn("Nothing was changed", result.stdout)
@@ -193,7 +194,7 @@ class StaleCommandTests(unittest.TestCase):
             # The JSON view carries the same facts for LinkBar's status row.
             as_json = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", str(repo), "--json"],
                              capture_output=True, text=True, env=env)
-            self.assertEqual(as_json.returncode, 0, as_json.stderr)
+            self.assertEqual(as_json.returncode, 1, as_json.stderr)
             report = json.loads(as_json.stdout)
             self.assertEqual(report["flagged"], 1)
             self.assertEqual(report["checked"], len([p for p in pages if p.name != "archived-note.md"]))
@@ -203,6 +204,21 @@ class StaleCommandTests(unittest.TestCase):
             self.assertEqual([f["path"] for f in entry["findings"]], ["gone.py"])
             self.assertEqual(entry["lines"], ["gone.py is no longer in the repository"])
             self.assertEqual({p: p.read_bytes() for p in pages}, before, "stale --json must not write")
+
+
+class StaleNonGitTests(unittest.TestCase):
+    def test_a_folder_git_cannot_read_is_an_error_not_an_all_clear(self):
+        import subprocess as sp  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as plain:
+            env = {**os.environ, "HOME": workspace, "USERPROFILE": workspace}
+            sp.run([sys.executable, str(ROOT / "link.py"), "demo", workspace, "--force"],
+                   check=True, capture_output=True, env=env)
+            result = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", plain],
+                            capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("not a git repository", result.stderr)
+            self.assertNotIn("No stale", result.stdout)
 
 
 class RecallPacketMarkerTests(unittest.TestCase):

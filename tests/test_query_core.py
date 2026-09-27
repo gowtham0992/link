@@ -115,7 +115,8 @@ class QueryCoreTests(unittest.TestCase):
         self.assertGreater(payload["budget_report"]["context_packet"]["estimated_chars"], 0)
         self.assertGreater(payload["budget_report"]["context_packet"]["estimated_tokens"], 0)
         self.assertEqual(payload["follow_up"][0]["tool"], "admin")
-        self.assertEqual(payload["follow_up"][0]["arguments"], {"action": "context", "topic": "agent-memory"})
+        self.assertEqual(payload["follow_up"][0]["arguments"]["action"], "context")
+        self.assertEqual(json.loads(payload["follow_up"][0]["arguments"]["arguments"]), {"topic": "agent-memory"})
 
     def test_query_link_flags_weak_only_memory_matches(self):
         root = Path(tempfile.mkdtemp(prefix="link-query-weak-"))
@@ -309,7 +310,8 @@ class QueryCoreTests(unittest.TestCase):
             )
         )
         self.assertEqual(payload["follow_up"][0]["tool"], "admin")
-        self.assertEqual(payload["follow_up"][0]["arguments"], {"action": "context", "topic": "agent-memory-0"})
+        self.assertEqual(payload["follow_up"][0]["arguments"]["action"], "context")
+        self.assertEqual(json.loads(payload["follow_up"][0]["arguments"]["arguments"]), {"topic": "agent-memory-0"})
 
 
 if __name__ == "__main__":

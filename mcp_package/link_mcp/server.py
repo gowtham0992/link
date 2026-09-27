@@ -279,7 +279,11 @@ def _compact_session_brief(brief: dict) -> dict:
 
     profile_obj = brief.get("profile")
     profile: dict = profile_obj if isinstance(profile_obj, dict) else {}
-    needs_review = brief.get("needs_review_count") or profile.get("needs_review_count") or 0
+    # memory_brief reports the review queue under review.count; the old
+    # needs_review_count key never existed, so this was always 0.
+    review_obj = brief.get("review")
+    review_block: dict = review_obj if isinstance(review_obj, dict) else {}
+    needs_review = review_block.get("count") or profile.get("review_count") or 0
     # A waiting handoff outranks memory: put it first in the digest.
     handoff_block = ""
     try:
@@ -354,6 +358,7 @@ from link_core.memory import (
     memory_review_issues as _core_memory_review_issues,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memory_results,
+    parse_time_expression as _core_parse_time_expression,
     recall_abstention as _core_recall_abstention,
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
@@ -738,6 +743,8 @@ def _recall_memory_results(
     include_archived: bool = False,
     project: str = "",
     context_path: str = "",
+    as_of: str = "",
+    memory_type: str = "",
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
     records = _memory_records()
@@ -750,7 +757,9 @@ def _recall_memory_results(
         include_archived=include_archived,
         project=_resolve_project(project),
         context_path=_clean_text_input(context_path, max_len=500) or None,
-        semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, query, records),
+        semantic_scores=None if as_of else _core_semantic_memory_scores(WIKI_DIR.parent, query, records),
+        as_of=as_of or None,
+        memory_type=memory_type or None,
     )
     if reranker is not None:
         results = _core_rerank_blend(query, results, limit=limit, reranker=reranker)
@@ -1387,6 +1396,8 @@ def recall(
     mode: str = "auto",
     limit: int = 6,
     context_path: str = "",
+    as_of: str = "",
+    memory_type: str = "",
 ) -> str:
     """Retrieve local memory/wiki context through one obvious read tool.
 
@@ -1397,12 +1408,29 @@ def recall(
     Pass context_path (the session's working directory) so memories fenced
     with applies_when path: conditions can match; without it they are
     honestly demoted as out_of_context.
+    as_of (YYYY-MM-DD) answers what was true on that date, rebuilt from
+    supersede lineage; a plain phrase in the query ("in March", "last
+    quarter") does the same. memory_type (preference, decision, fact,
+    procedure, project, note) narrows memory recall to one kind.
     """
     clean_query = _clean_text_input(query, max_len=MAX_TEXT_INPUT)
     clean_mode = (_clean_text_input(mode, max_len=40) or "auto").lower().replace("-", "_")
     clean_budget = (_clean_text_input(budget, max_len=40) or "medium").lower()
     clean_project = _resolve_project(project)
     parsed_limit = _parse_limit(limit, default=6, max_limit=20)
+    clean_as_of = _clean_text_input(as_of, max_len=40)
+    clean_type = (_clean_text_input(memory_type, max_len=40) or "").lower()
+    # Point-in-time and typed questions are memory questions: route them to
+    # memory recall, where lineage and types live. A time phrase in the
+    # query resolves to a date and is removed from the ranked text.
+    search_query = clean_query
+    if clean_query and not clean_as_of:
+        temporal = _core_parse_time_expression(clean_query)
+        if temporal and temporal.get("as_of"):
+            clean_as_of = str(temporal["as_of"])
+            search_query = str(temporal.get("residual_query") or "") or clean_query
+    if clean_query and (clean_as_of or clean_type) and clean_mode in {"auto", "memory"}:
+        clean_mode = "memory"
 
     if clean_mode == "brief" or (clean_mode == "auto" and not clean_query):
         brief = _memory_brief(query=clean_query, limit=parsed_limit, project=clean_project)
@@ -1417,14 +1445,20 @@ def recall(
     if clean_mode == "memory":
         if not clean_query:
             return json.dumps({"surface": "slim", "tool": "recall", "error": "query required for memory mode"})
-        memories = _recall_memory_results(
-            clean_query, limit=parsed_limit, project=clean_project, context_path=context_path
-        )
+        try:
+            memories = _recall_memory_results(
+                search_query, limit=parsed_limit, project=clean_project, context_path=context_path,
+                as_of=clean_as_of, memory_type=clean_type,
+            )
+        except ValueError as exc:
+            return json.dumps({"surface": "slim", "tool": "recall", "error": str(exc)})
         payload = {
             "surface": "slim",
             "tool": "recall",
             "mode": "memory",
             "query": clean_query,
+            "as_of": clean_as_of,
+            "memory_type": clean_type,
             "project": clean_project,
             "count": len(memories),
             "abstention": _core_recall_abstention(memories),

@@ -140,23 +140,64 @@ def _set_offline_guard(allow_download: bool) -> None:
         os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
 
 
+# Remembers a model that could not be loaded offline, so a missing optional
+# model costs one attempt per process instead of one per recall.
+_MISSING_MODEL = object()
+
+
+def _quiet_load(factory, allow_download: bool):
+    """Run a model constructor without printing to the user's terminal.
+
+    Offline loads of a model that was never fetched made fastembed log two
+    ERROR lines and Hugging Face draw a "Fetching 10 files" progress bar on
+    every `lnk recall`: noise that also reads like a download. The explicit
+    setup step (allow_download=True) keeps its progress output.
+    """
+    if allow_download:
+        return factory()
+    import contextlib
+    import io
+
+    try:
+        from loguru import logger as loguru_logger
+
+        loguru_logger.disable("fastembed")
+    except Exception:
+        pass
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+
+        disable_progress_bars()
+    except Exception:
+        pass
+    with contextlib.redirect_stderr(io.StringIO()):
+        return factory()
+
+
 def _load_model(allow_download: bool = False):
     """Load the embedding model; offline unless setup explicitly allows."""
     provider = semantic_provider()
     model_name = semantic_model_name()
     cache_key = f"{provider}:{model_name}"
     cached = _MODEL_CACHE.get(cache_key)
-    if cached is not None:
+    if cached is _MISSING_MODEL and not allow_download:
+        raise RuntimeError(f"{model_name} is not available offline")
+    if cached is not None and cached is not _MISSING_MODEL:
         return cached
     _set_offline_guard(allow_download)
-    if provider == "fastembed":
-        from fastembed import TextEmbedding
+    try:
+        if provider == "fastembed":
+            from fastembed import TextEmbedding
 
-        model = TextEmbedding(model_name)
-    else:
-        from model2vec import StaticModel
+            model = _quiet_load(lambda: TextEmbedding(model_name), allow_download)
+        else:
+            from model2vec import StaticModel
 
-        model = StaticModel.from_pretrained(model_name)
+            model = _quiet_load(lambda: StaticModel.from_pretrained(model_name), allow_download)
+    except Exception:
+        if not allow_download:
+            _MODEL_CACHE[cache_key] = _MISSING_MODEL
+        raise
     _MODEL_CACHE[cache_key] = model
     return model
 
@@ -219,14 +260,18 @@ def load_reranker(allow_download: bool = False) -> Reranker | None:
     model_name = rerank_model_name()
     cache_key = f"rerank:{model_name}"
     model = _MODEL_CACHE.get(cache_key)
-    if model is None:
+    if model is _MISSING_MODEL and not allow_download:
+        return None
+    if model is None or model is _MISSING_MODEL:
         try:
             from fastembed.rerank.cross_encoder import TextCrossEncoder
 
             _set_offline_guard(allow_download)
-            model = TextCrossEncoder(model_name)
+            model = _quiet_load(lambda: TextCrossEncoder(model_name), allow_download)
             _MODEL_CACHE[cache_key] = model
         except Exception:
+            if not allow_download:
+                _MODEL_CACHE[cache_key] = _MISSING_MODEL
             return None
 
     def _score(query: str, documents: list[str]) -> list[float]:

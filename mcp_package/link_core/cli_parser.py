@@ -58,24 +58,29 @@ class _GroupedCommandHelp(argparse.RawDescriptionHelpFormatter):
         return super()._format_action(action)
 
 
-def _grouped_epilog() -> str:
+def _grouped_epilog(prog: str = "lnk") -> str:
     lines = ["commands:"]
     for group, names in COMMAND_GROUPS:
         lines.append(f"\n  {group}:")
         lines.append("    " + ", ".join(names))
-    lines.append("\nRun `link.py <command> --help` for that command's options.")
+    lines.append(f"\nRun `{prog} <command> --help` for that command's options.")
     return "\n".join(lines)
 
 
 def build_cli_parser(
     default_demo_dir: str = DEFAULT_DEMO_DIR,
     default_proof_dir: str = DEFAULT_PROOF_DIR,
+    prog: str = "lnk",
 ) -> argparse.ArgumentParser:
-    """Build the Link CLI argument parser."""
+    """Build the Link CLI argument parser.
+
+    `prog` is the name help and usage lines show. Installed Link runs as
+    `lnk`; a clone run directly shows `link.py`, which is what works there.
+    """
     parser = argparse.ArgumentParser(
-        prog="link.py",
-        description="Link — local, review-gated memory for AI agents. New? Run: link.py try",
-        epilog=_grouped_epilog(),
+        prog=prog,
+        description=f"Link — local, review-gated memory for AI agents. New? Run: {prog} try",
+        epilog=_grouped_epilog(prog),
         formatter_class=_GroupedCommandHelp,
     )
     parser.add_argument("--version", action="version", version=f"Link {LINK_VERSION}")

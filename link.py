@@ -1256,6 +1256,19 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     repo_dir = Path(repo).expanduser().resolve()
+    inside = subprocess.run(
+        ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True, check=False,
+    ) if repo_dir.is_dir() else None
+    if inside is None or inside.returncode != 0 or inside.stdout.strip() != "true":
+        # Saying "no stale references" about a folder git cannot read was a
+        # false all-clear; a script checking the exit code believed it.
+        message = f"{repo_dir} is not a git repository; lnk stale checks memories against git history"
+        if json_output:
+            print(json.dumps({"repo": str(repo_dir), "error": message}, indent=2))
+        else:
+            print(message, file=sys.stderr)
+        return 2
     # Archived and expired memories are already out of the way; questioning
     # them would only add noise to a report that must stay quiet by default.
     records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
@@ -1271,7 +1284,11 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
             "title": str(record.get("title") or record.get("name") or ""),
             "path": str(record.get("path") or ""),
             "findings": [
-                {"path": finding.get("path", ""), "successor": finding.get("successor", "")}
+                {
+                    key: finding.get(key, "")
+                    for key in ("kind", "path", "reference", "reason", "successor", "evidence")
+                    if key in finding or key in {"path", "successor"}
+                }
                 for finding in findings
             ],
             "lines": describe_findings(findings),
@@ -1287,7 +1304,7 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
             "memories": flagged,
             "changed": False,
         }, indent=2, ensure_ascii=False))
-        return 0
+        return 1 if flagged else 0
     for entry in flagged:
         print(entry["name"] or entry["path"])
         for line in entry["lines"]:  # type: ignore[union-attr]
@@ -1296,10 +1313,12 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
         print(f"No stale repository references in {checked} active memories ({repo_dir}).")
         return 0
     print(
-        f"\n{len(flagged)} of {checked} active memories name paths that moved in {repo_dir}."
+        f"\n{len(flagged)} of {checked} active memories name things that changed in {repo_dir}."
         "\nNothing was changed. Review each one and update or archive it."
     )
-    return 0
+    # Exit 1 when anything is flagged, like a linter, so CI and scripts can
+    # act on it; 2 is reserved for "could not check".
+    return 1
 
 
 def rebuild_backlinks(target: Path) -> int:
@@ -3053,6 +3072,17 @@ def _lnk_on_path_runs_this_runtime() -> bool:
     return str(ROOT / "link.py") in shim
 
 
+def _cli_program_name() -> str:
+    """"lnk" when that is how the user runs Link, else "link.py".
+
+    Every help screen used to say `usage: link.py`, which is not a command
+    that exists on a Homebrew or pip install.
+    """
+    if Path(sys.argv[0]).name in {"lnk", "lnk.exe"} or _lnk_on_path_runs_this_runtime():
+        return "lnk"
+    return "link.py"
+
+
 def _configure_link_command_display() -> None:
     if os.environ.get("LINK_CLI_COMMAND"):
         _core_set_link_command_override(None)
@@ -4288,7 +4318,9 @@ def main(argv: list[str] | None = None) -> int:
             "Docs: https://gowtham0992.github.io/link/",
         ]))
         return 0
-    parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
+    parser = _core_build_cli_parser(
+        default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR, prog=_cli_program_name(),
+    )
     args = parser.parse_args(argv)
     _normalize_review_all_args(args)
     _apply_default_workspace(args)

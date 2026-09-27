@@ -1997,6 +1997,13 @@ def write_memory_page(
     clean_expires_at = str(expires_at or "").strip()
     if clean_expires_at:
         _parse_expires_date(clean_expires_at)
+    # Naming a project means the memory belongs to it. The project used to be
+    # dropped silently unless --scope project was also given, so
+    # `remember "Use ruff" --project api` saved a user-wide memory.
+    scope_inferred = False
+    if normalize_project(project) and scope == "user":
+        scope = "project"
+        scope_inferred = True
     clean_project = normalize_project(project) if scope == "project" else ""
     derived_title = title
     if not (derived_title and derived_title.strip()) and memory_type == "procedure" and clean_trigger:
@@ -2186,6 +2193,7 @@ tags: {yaml_list(tag_values)}
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
     return {
         "created": True,
+        "scope_inferred_from_project": scope_inferred,
         "supersedes": superseded_name,
         "name": page_name,
         "path": f"wiki/memories/{page_path.name}",
@@ -2647,8 +2655,13 @@ def memory_brief(
 
     guidance = [
         "Use relevant_memories as durable local context before answering or coding.",
-        "Call explain_memory before relying on a surprising, stale, or high-impact memory.",
-        "Only write memory after explicit user approval; use propose_memories for candidates first.",
+        # Named for both surfaces: the default MCP surface has no
+        # explain_memory or propose_memories tools, so naming those sent
+        # agents looking for tools that were not there.
+        "Before relying on a surprising, stale, or high-impact memory, explain it "
+        "(MCP review action=explain, or lnk explain-memory).",
+        "Only write memory after explicit user approval; propose candidates first "
+        "(MCP admin action=propose_memories, or lnk propose-memories).",
         "If a new memory duplicates an existing one, update the existing memory instead of creating another page.",
     ]
     if inbox["review_count"]:

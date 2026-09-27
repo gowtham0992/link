@@ -435,16 +435,19 @@ def _follow_up_actions(
                 "tool": "recall",
                 "arguments": args,
             })
+    # admin takes `action` plus a JSON-object *string* in `arguments`. Nested
+    # objects here produced calls the tool rejected ("topic required"), so
+    # the suggestions are emitted in the exact shape the tool accepts.
     if primary:
         actions.append({
             "when": "need the full source-backed topic neighborhood",
             "tool": "admin",
-            "arguments": {"action": "context", "topic": primary},
+            "arguments": {"action": "context", "arguments": json.dumps({"topic": primary})},
         })
     actions.append({
         "when": "need a different angle or exact page candidates",
         "tool": "admin",
-        "arguments": {"action": "search", "query": query, "limit": 10},
+        "arguments": {"action": "search", "arguments": json.dumps({"query": query, "limit": 10})},
     })
     return actions
 
