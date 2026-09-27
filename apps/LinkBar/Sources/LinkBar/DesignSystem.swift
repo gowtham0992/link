@@ -4,7 +4,7 @@ import SwiftUI
 /// Link's rust carries the opinion, one serif wordmark is the signature.
 enum LinkBrand {
     /// One source of truth for the app version shown in footer + settings.
-    static let version = "1.4.0"
+    static let version = "1.5.0"
 
     /// Rust — Link's accent. Lifted and desaturated slightly in dark mode
     /// so it reads as warm, not muddy, on dark materials.
@@ -136,6 +136,19 @@ struct HealthDot: View {
                 Circle().stroke(Color(red: c.r, green: c.g, blue: c.b).opacity(0.35), lineWidth: 3)
                     .opacity(level == .error || level == .warn ? 1 : 0)
             )
+            .accessibilityLabel(level.spoken)
+    }
+}
+
+extension SurfaceHealth.Level {
+    /// Colour alone carries the state; say it for VoiceOver.
+    var spoken: String {
+        switch self {
+        case .ok: return "healthy"
+        case .warn: return "needs attention"
+        case .error: return "broken"
+        case .info: return "information"
+        }
     }
 }
 
@@ -180,6 +193,8 @@ struct StatusRow: View {
             RoundedRectangle(cornerRadius: 7)
                 .fill(hovering ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear))
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(surface.name), \(surface.level.spoken): \(surface.detail)")
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: hovering)
     }

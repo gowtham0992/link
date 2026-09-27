@@ -45,6 +45,8 @@ struct LinkBarApp: App {
                         .frame(width: 6, height: 6)
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(store.menuBarAccessibilityLabel)
             .onAppear { Self.snapshotIfRequested(store: store); Self.notifyTestIfRequested() }
         }
         .menuBarExtraStyle(.window)

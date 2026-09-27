@@ -35,6 +35,26 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   prompt to an agent command you choose; Link makes no network calls, and
   nothing runs without `--yes`.
 
+### Fixed
+
+- **LinkBar 1.5.0.** The CLI bridge read a command's stdout to the end
+  before reading stderr, so any command that wrote more than a pipe buffer
+  to stderr first (a Python traceback from a broken venv, pip or model
+  download progress) hung LinkBar forever; both pipes are drained at once
+  now. "Clear handoff" never ran - it launched `handoffs` as if it were an
+  executable path - and reported success anyway; it goes through `lnk`
+  and reports failures. Refreshes are coalesced: an agent session writing
+  captures used to start five Python processes every 0.6 seconds, now one
+  refresh runs at a time and events during it collapse into one follow-up.
+  Watchers are reopened only for directories that newly exist, instead of
+  on every refresh. When both inbox reads fail the app says why (lnk
+  missing, no workspace at that path, or the CLI's own error) instead of
+  always suggesting a reinstall; Setup, Update, Wire and Clear show the
+  CLI's reason when they fail. The stale-references row decides "needs
+  Link 3.0" from the CLI version rather than from a failed probe. VoiceOver
+  now reads the menu bar state, the health dots, the status rows and the
+  icon-only buttons.
+
 ### Security
 
 - **Team memories arrive through your review gate.** `lnk team-sync`

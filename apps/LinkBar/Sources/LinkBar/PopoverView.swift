@@ -491,6 +491,7 @@ struct PopoverView: View {
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     /// The post-upgrade drift warning, with its one-click repair.
@@ -670,14 +671,14 @@ struct PopoverView: View {
                         Spacer(minLength: 6)
                         Button {
                             store.markReviewed(item)
-                        } label: { Image(systemName: "checkmark") }
+                        } label: { Image(systemName: "checkmark").accessibilityLabel(Text("Mark reviewed")) }
                             .buttonStyle(.borderedProminent)
                             .tint(LinkBrand.rust)
                             .controlSize(.small)
                             .help("Mark reviewed — confirm this memory is accurate")
                         Button {
                             store.archive(item)
-                        } label: { Image(systemName: "archivebox") }
+                        } label: { Image(systemName: "archivebox").accessibilityLabel(Text("Archive")) }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .help("Archive — keep it out of recall, never deleted")
@@ -839,7 +840,7 @@ struct PopoverView: View {
                         }
                         Button {
                             store.deleteCapture(capture)
-                        } label: { Image(systemName: "trash") }
+                        } label: { Image(systemName: "trash").accessibilityLabel(Text("Discard capture")) }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .help("Discard this capture — Link remembers the dismissal and won't re-propose it")

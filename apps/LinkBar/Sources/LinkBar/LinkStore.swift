@@ -73,7 +73,14 @@ final class LinkStore: ObservableObject {
     }
 
     private var timer: Timer?
-    private var watchers: [DirectoryWatcher] = []
+    private var watchers: [String: DirectoryWatcher] = [:]
+    // Refresh coalescing: an agent session writes captures continuously, and
+    // every watcher event used to start five lnk processes. One refresh runs
+    // at a time; events during it collapse into a single follow-up.
+    private var refreshInFlight = false
+    private var refreshPending = false
+    /// Whether the last health probe could not run `lnk stale` on a 3.x CLI.
+    @Published var staleFailed = false
     private var refreshDebounce: DispatchWorkItem?
     private var flashGeneration = 0
     private var started = false
@@ -105,18 +112,23 @@ final class LinkStore: ObservableObject {
     }
 
     private func startWatching() {
-        watchers = watchPaths.compactMap { path in
-            DirectoryWatcher(path: path) { [weak self] in
+        for path in watchPaths where watchers[path] == nil {
+            if let watcher = DirectoryWatcher(path: path, onChange: { [weak self] in
                 Task { @MainActor in self?.scheduleRefresh() }
+            }) {
+                watchers[path] = watcher
             }
         }
     }
 
     /// A fresh workspace may not have raw/memory-captures yet, so its
     /// watcher fails at launch; once the first capture creates the
-    /// directory, pick it up instead of staying blind until restart.
+    /// directory, pick it up instead of staying blind until restart. Only
+    /// the missing paths that now exist are opened - re-creating every
+    /// watcher on every refresh reopened file descriptors forever.
     private func healWatchersIfNeeded() {
-        guard watchers.count < watchPaths.count else { return }
+        let fm = FileManager.default
+        guard watchPaths.contains(where: { watchers[$0] == nil && fm.fileExists(atPath: $0) }) else { return }
         startWatching()
     }
 
@@ -127,7 +139,7 @@ final class LinkStore: ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         refreshDebounce = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
     }
 
     /// One CLI read off the main actor; nil on any failure (missing lnk,
@@ -147,6 +159,11 @@ final class LinkStore: ObservableObject {
     }
 
     func refresh() {
+        if refreshInFlight {
+            refreshPending = true
+            return
+        }
+        refreshInFlight = true
         busy = true
         let workspace = LinkCLI.workspace
         Task.detached(priority: .userInitiated) {
@@ -161,18 +178,20 @@ final class LinkStore: ObservableObject {
             let sessions = Self.scanAgentSessions()
             let memories = MemoryPage.load(from: workspace)
             let (inbox, captures, log, status, handoffs) = await (inboxRead, capturesRead, logRead, statusRead, handoffsRead)
+            // Only when both inbox reads failed: say why, instead of always
+            // blaming a missing install.
+            let failure = (inbox == nil && captures == nil) ? LinkCLI.diagnose(workspace) : nil
             await MainActor.run {
                 // A refresh that began before a workspace switch must not
                 // paint the old workspace over the new one.
-                guard workspace == LinkCLI.workspace else { return }
+                guard workspace == LinkCLI.workspace else {
+                    self.finishRefresh()
+                    return
+                }
                 self.activeSessions = sessions
                 self.rememberStaleRepo(from: sessions)
                 self.memories = memories
-                if inbox == nil && captures == nil {
-                    self.lastError = "Could not reach lnk — is Link installed? (brew install gowtham0992/link/link)"
-                } else {
-                    self.lastError = nil
-                }
+                self.lastError = failure
                 self.handoffsWaiting = handoffs?.handoffs ?? self.handoffsWaiting
                 self.inbox = inbox ?? self.inbox
                 self.captures = captures ?? self.captures
@@ -184,7 +203,7 @@ final class LinkStore: ObservableObject {
                         .first { $0.code == "stale_runtime" }?
                         .message
                 }
-                self.busy = false
+                self.finishRefresh()
                 self.healWatchersIfNeeded()
                 if let caps = self.captures?.captures {
                     NotificationManager.shared.announceNewCaptures(caps)
@@ -195,6 +214,20 @@ final class LinkStore: ObservableObject {
             // screen — the dots fill in a moment later without blocking.
             await self.refreshHealthIfDue()
         }
+    }
+
+    private func finishRefresh() {
+        refreshInFlight = false
+        busy = false
+        if refreshPending {
+            refreshPending = false
+            scheduleRefresh()
+        }
+    }
+
+    /// Major version of the connected CLI, when known.
+    var linkMajorVersion: Int? {
+        linkVersion.split(separator: ".").first.flatMap { Int($0) }
     }
 
     /// Force a health refresh now (used by the manual refresh button and
@@ -249,7 +282,11 @@ final class LinkStore: ObservableObject {
         digest = snapshot.digest ?? digest
         syncState = snapshot.sync ?? syncState
         stale = repo == nil ? nil : (snapshot.stale ?? stale)
-        staleUnsupported = repo != nil && snapshot.stale == nil && stale == nil && snapshot.semantic != nil
+        // Decide from the CLI's version, not from a failed probe: a transient
+        // failure on a 3.x CLI used to read as "needs Link 3.0".
+        let probeFailed = repo != nil && snapshot.stale == nil && stale == nil
+        staleUnsupported = probeFailed && (linkMajorVersion.map { $0 < 3 } ?? false)
+        staleFailed = probeFailed && !staleUnsupported && snapshot.semantic != nil
         if let digest = snapshot.digest { NotificationManager.shared.announceWeeklyDigest(digest) }
         claudeHooksWired = snapshot.hooks
         viewerRunning = snapshot.viewer
@@ -262,6 +299,10 @@ final class LinkStore: ObservableObject {
     /// live agent session is working in. Remembered so the check keeps
     /// running after the session ends, and only when it is a git checkout -
     /// lnk stale is inert anywhere else.
+    private var staleRepoName: String {
+        (staleRepo.map { ($0 as NSString).lastPathComponent }) ?? "the repository"
+    }
+
     private var staleRepo: String? {
         // Snapshot aid: LINKBAR_STALE_REPO pins the repository so the warn
         // state can be rendered without a live agent session steering it.
@@ -425,7 +466,7 @@ final class LinkStore: ObservableObject {
             if let stale, stale.flagged > 0 {
                 let noun = stale.flagged == 1 ? "memory names" : "memories name"
                 rows.append(.init(icon: "clock.badge.exclamationmark", name: "Stale references", level: .warn,
-                                  detail: "\(stale.flagged) \(noun) files that moved in \(stale.repoName)",
+                                  detail: "\(stale.flagged) \(noun) things \(stale.repoName) no longer has",
                                   sub: Array(stale.memories.prefix(3).map { "\($0.title) \u{00B7} \($0.lines.first ?? "")" }),
                                   fix: .init(label: "Show") { [weak self] in self?.showStaleMemories() }))
             } else if let stale {
@@ -434,6 +475,9 @@ final class LinkStore: ObservableObject {
             } else if staleUnsupported {
                 rows.append(.init(icon: "clock.badge.questionmark", name: "Stale references", level: .info,
                                   detail: "needs Link 3.0 \u{00B7} lnk \(linkVersion.isEmpty ? "?" : linkVersion) has no stale check"))
+            } else if staleFailed {
+                rows.append(.init(icon: "clock.badge.questionmark", name: "Stale references", level: .info,
+                                  detail: "couldn't check \(staleRepoName) \u{00B7} run lnk stale there to see why"))
             } else {
                 rows.append(.init(icon: "clock.badge.checkmark", name: "Stale references", level: .info, detail: "checking\u{2026}"))
             }
@@ -617,9 +661,19 @@ final class LinkStore: ObservableObject {
     func clearHandoff(_ handoff: HandoffsPayload.Handoff) {
         busy = true
         Task.detached(priority: .userInitiated) {
-            _ = try? LinkCLI.runRaw(["handoffs", LinkCLI.workspace, "--clear", handoff.file])
+            // `lnk handoffs --clear`, through the lnk launcher. This used
+            // runRaw, which treats the first word as an executable path, so
+            // the clear never ran and the success message was always wrong.
+            let reason = Self.failureReason {
+                _ = try LinkCLI.run(["handoffs", LinkCLI.workspace, "--clear", handoff.file])
+            }
             await MainActor.run {
-                self.showFlash("Handoff cleared.", tone: .success)
+                if let reason {
+                    self.showFlash("Couldn't clear the handoff: \(reason)", tone: .info)
+                    self.busy = false
+                } else {
+                    self.showFlash("Handoff cleared.", tone: .success)
+                }
                 self.refresh()
             }
         }
@@ -736,7 +790,7 @@ final class LinkStore: ObservableObject {
         busy = true
         showFlash("Setting up semantic recall…", tone: .info)
         Task.detached(priority: .userInitiated) {
-            _ = try? LinkCLI.run(["semantic", LinkCLI.workspace, "--setup"])
+            let reason = Self.failureReason { _ = try LinkCLI.run(["semantic", LinkCLI.workspace, "--setup"]) }
             let after = try? LinkCLI.runJSON(SemanticStatus.self, ["semantic", LinkCLI.workspace, "--json"])
             await MainActor.run {
                 self.busy = false
@@ -744,7 +798,8 @@ final class LinkStore: ObservableObject {
                 if after?.enabled == true {
                     self.showFlash("Semantic recall ready — \(after?.tier ?? "on").", tone: .success)
                 } else {
-                    self.showFlash("Needs a one-time install — run: lnk semantic \(LinkCLI.workspace) --setup", tone: .info)
+                    self.showFlash((reason.map { "Setup failed: \($0). " } ?? "")
+                                   + "Run: lnk semantic \(LinkCLI.workspace) --setup", tone: .info)
                 }
                 self.refreshHealth()
             }
@@ -761,7 +816,7 @@ final class LinkStore: ObservableObject {
         busy = true
         showFlash("Updating link-mcp…", tone: .info)
         Task.detached(priority: .userInitiated) {
-            _ = try? LinkCLI.runRaw(command)
+            let reason = Self.failureReason { _ = try LinkCLI.runRaw(command) }
             let after = try? LinkCLI.runJSON(MCPVerify.self, ["verify-mcp", LinkCLI.workspace, "--json"])
             await MainActor.run {
                 self.busy = false
@@ -769,7 +824,8 @@ final class LinkStore: ObservableObject {
                 if after?.ready == true {
                     self.showFlash("MCP updated to Link \(after?.expectedVersion ?? "").", tone: .success)
                 } else {
-                    self.showFlash("Couldn't auto-update — run: \(command.joined(separator: " "))", tone: .info)
+                    self.showFlash((reason.map { "Update failed: \($0). " } ?? "")
+                                   + "Run: \(command.joined(separator: " "))", tone: .info)
                 }
                 self.refreshHealth()
             }
@@ -783,18 +839,41 @@ final class LinkStore: ObservableObject {
         busy = true
         showFlash("Wiring Claude Code hooks…", tone: .info)
         Task.detached(priority: .userInitiated) {
-            _ = try? LinkCLI.run(["connect", "claude-code", LinkCLI.workspace, "--hooks", "--write"])
+            let reason = Self.failureReason {
+                _ = try LinkCLI.run(["connect", "claude-code", LinkCLI.workspace, "--hooks", "--write"])
+            }
             let wired = Self.claudeHooksAreWired()
             await MainActor.run {
                 self.busy = false
                 self.claudeHooksWired = wired
                 self.showFlash(wired
                     ? "Hooks wired — new sessions capture automatically."
-                    : "Couldn't wire hooks — check Claude Code settings.",
+                    : "Couldn't wire hooks" + (reason.map { ": \($0)" } ?? " — check Claude Code settings."),
                     tone: wired ? .success : .info)
                 self.refreshHealth()
             }
         }
+    }
+
+    /// Run a mutating CLI step; return the last stderr line if it failed.
+    nonisolated private static func failureReason(_ body: () throws -> Void) -> String? {
+        do {
+            try body()
+            return nil
+        } catch {
+            return LinkCLI.lastLine(String(describing: error)) ?? "unknown error"
+        }
+    }
+
+    /// What VoiceOver says for the menu bar item: the dots and badge are
+    /// colour-only, so the state is spelled out.
+    var menuBarAccessibilityLabel: String {
+        if pendingCount > 0 {
+            return "Link, \(pendingCount) item\(pendingCount == 1 ? "" : "s") waiting for your review"
+        }
+        if !activeSessions.isEmpty { return "Link, agents are writing memory now" }
+        if anyUnhealthy { return "Link, a surface needs attention" }
+        return "Link, all reviewed"
     }
 
     func openInstallDocs() {
@@ -875,11 +954,12 @@ final class LinkStore: ObservableObject {
         inbox = nil; captures = nil; activity = []; memories = []; explanations = [:]
         recallResults = []; searchedQuery = nil; abstention = nil
         stats = nil; digest = nil; syncState = nil; handoffsWaiting = []; runtimeWarning = nil
-        mcp = nil; semantic = nil; stale = nil; staleUnsupported = false; lastError = nil
+        mcp = nil; semantic = nil; stale = nil; staleUnsupported = false; staleFailed = false; lastError = nil
         memoryFilterStale = false
         lastHealthAt = .distantPast
         NotificationManager.shared.reprime()
-        watchers = []
+        watchers = [:]
+        refreshPending = false
         startWatching()
         refresh()
         showFlash("Now watching \(LinkCLI.abbreviated(LinkCLI.workspace)).", tone: .success)
