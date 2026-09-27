@@ -117,7 +117,11 @@ class NliMissingRetryTests(unittest.TestCase):
         self.addCleanup(lambda: (nli._CACHE.clear(), nli._CACHE.update(saved[0]),
                                  nli._MISSING_AT.clear(), nli._MISSING_AT.update(saved[1])))
         nli._CACHE[key] = nli._MISSING
-        nli._MISSING_AT[key] = 0.0  # failed long ago
+        import time
+
+        # Relative to now: the monotonic clock starts at boot, so a fresh CI
+        # machine can be under a minute old and 0.0 would not be "long ago".
+        nli._MISSING_AT[key] = time.monotonic() - nli.MISSING_MODEL_RETRY_SECONDS - 1
         with mock.patch.object(nli, "nli_disabled", return_value=False), \
                 mock.patch.object(nli, "_model_cached_locally", return_value=True), \
                 mock.patch.object(nli, "nli_dependencies_installed", return_value=True), \
