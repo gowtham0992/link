@@ -469,6 +469,10 @@ def build_cli_parser(
     semantic_cmd.add_argument("--setup", action="store_true", help="fetch the local embedding model once and build the index")
     semantic_cmd.add_argument("--rebuild", action="store_true", help="rebuild the semantic index offline")
     semantic_cmd.add_argument("--json", action="store_true", help="print machine-readable semantic status")
+    semantic_cmd.add_argument(
+        "--nli", action="store_true",
+        help="with --setup: also fetch the local contradiction model (~87 MB) that flags possible contradictions at write time",
+    )
 
     recipes_cmd = sub.add_parser("recipes", help="list saved procedure memories (recipes) with their triggers")
     recipes_cmd.add_argument("target", nargs="?", default=".")
@@ -969,7 +973,9 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "consolidate":
         return handlers["consolidate"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "semantic":
-        return handlers["semantic"](Path(args.target), setup=args.setup, rebuild=args.rebuild, json_output=args.json)
+        return handlers["semantic"](
+            Path(args.target), setup=args.setup, rebuild=args.rebuild, json_output=args.json, nli=bool(args.nli),
+        )
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":

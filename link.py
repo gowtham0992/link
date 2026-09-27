@@ -2656,7 +2656,9 @@ def _read_hook_stdin() -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_output: bool = False) -> int:
+def semantic(
+    target: Path, setup: bool = False, rebuild: bool = False, json_output: bool = False, nli: bool = False,
+) -> int:
     """Show, set up, or rebuild the optional local semantic recall layer."""
     target = target.expanduser().resolve()
     root = _resolve_link_root(target)
@@ -2733,6 +2735,21 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                     "the MCP server loads it once and stays fast. Prefer instant CLI recall? "
                     "Set LINK_SEMANTIC_PROVIDER=model2vec (fast tier)."
                 )
+    if setup and nli:
+        # The contradiction model is its own opt-in: flags at write time,
+        # never on the recall path, and never downloaded without --nli.
+        from link_core.nli import setup_nli
+
+        nli_outcome = setup_nli()
+        if nli_outcome.get("ready"):
+            action_result = (action_result + " " if action_result else "") + (
+                "Contradiction flags ready: new memories that may contradict a stored one are "
+                "noted for review (never blocked)."
+            )
+        else:
+            action_error = (action_error + " " if action_error else "") + (
+                f"Contradiction model not set up: {nli_outcome.get('reason') or 'download failed'}."
+            )
     payload = _core_build_semantic_status(
         root,
         memory_count=total_count,
@@ -2740,6 +2757,9 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
         python_cmd=sys.executable,
         externally_managed=_core_python_is_externally_managed(),
     )
+    from link_core.nli import nli_status
+
+    payload["contradiction_flags"] = nli_status()
     if action_result:
         payload["action_result"] = action_result
     if action_error:
