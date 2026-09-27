@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import functools
 import math
 import re
+import threading
 import unicodedata
 import urllib.parse
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -183,7 +185,12 @@ def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
 
 
 def normalize_project(value: str | None) -> str:
-    return slugify(value or "", fallback="")
+    return _normalize_project_cached(value or "")
+
+
+@functools.lru_cache(maxsize=4096)
+def _normalize_project_cached(value: str) -> str:
+    return slugify(value, fallback="")
 
 
 def default_memory_visibility(scope: str) -> str:
@@ -404,6 +411,7 @@ def significant_memory_tokens(value: str) -> set[str]:
     }
 
 
+@functools.lru_cache(maxsize=131_072)
 def stem_memory_token(token: str) -> str:
     """Light deterministic suffix stemming so close paraphrases still match.
 
@@ -456,16 +464,15 @@ def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
     trigger = str(record.get("trigger") or "").lower()
     if trigger:
         tldr = f"{tldr} {trigger}".strip()
-    body = str(record.get("body", "")).lower()
     if q and len(q.split()) >= 2 and (_contains_phrase(title, q) or _contains_phrase(tldr, q)):
         return "strong"
     if not significant:
         return "weak"
-    title_tokens = stemmed_memory_tokens(memory_tokens(title))
-    head_tokens = title_tokens | stemmed_memory_tokens(
-        memory_tokens(tldr) | memory_tokens(tags)
+    title_tokens = cached_stems(cached_field_tokens(title))
+    head_tokens = title_tokens | cached_stems(
+        cached_field_tokens(tldr) | cached_field_tokens(tags)
     )
-    all_tokens = head_tokens | stemmed_memory_tokens(memory_tokens(body))
+    all_tokens = head_tokens | cached_stems(cached_field_tokens(str(record.get("body", ""))))
     # One shared content word is never strong evidence on its own: with
     # question words no longer counted, "can you deploy it" is just "deploy",
     # and a memory titled with that word is a candidate, not an answer.
@@ -797,15 +804,48 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
     return record
 
 
+# Parsed records per memories directory, keyed by file path and reused while
+# the file's (mtime_ns, size, inode) is unchanged. Every CLI command, MCP call
+# and viewer page reads the whole store; re-parsing 20,000 files cost ~1.3 s
+# per call. An edit, an atomic replace or a new file changes the key, so a
+# stale record is never served.
+_RECORD_CACHE: dict[str, dict[str, tuple[tuple[int, int, int], dict[str, object]]]] = {}
+_RECORD_CACHE_LOCK = threading.Lock()
+
+
 def memory_records(wiki_dir: Path, include_body: bool = True) -> list[dict[str, object]]:
     memories_dir = wiki_dir / "memories"
     if not memories_dir.exists():
         return []
+    cache_key = str(memories_dir.resolve())
+    with _RECORD_CACHE_LOCK:
+        cached = _RECORD_CACHE.get(cache_key, {})
+    fresh: dict[str, tuple[tuple[int, int, int], dict[str, object]]] = {}
     records: list[dict[str, object]] = []
     for path in sorted(memories_dir.rglob("*.md")):
         if path.name.startswith("."):
             continue
-        records.append(memory_record_from_page(wiki_dir, path, include_body=include_body))
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        entry = cached.get(str(path))
+        if entry is not None and entry[0] == signature:
+            record = entry[1]
+        else:
+            try:
+                record = memory_record_from_page(wiki_dir, path, include_body=True)
+            except OSError:
+                continue
+        fresh[str(path)] = (signature, record)
+        # Callers get their own dict; the cached one is never handed out.
+        if include_body:
+            records.append(dict(record))
+        else:
+            records.append({key: value for key, value in record.items() if key != "body"})
+    with _RECORD_CACHE_LOCK:
+        _RECORD_CACHE[cache_key] = fresh
     return records
 
 
@@ -2652,10 +2692,22 @@ def _same_word(a: str, b: str) -> bool:
     return long_[len(short):] in _INFLECTION_SUFFIXES
 
 
-def _field_has_word(field_tokens: set[str], token: str) -> bool:
+@functools.lru_cache(maxsize=65_536)
+def _word_forms(token: str) -> frozenset[str]:
+    """Every string that _same_word would accept for this token."""
+    forms = {token + suffix for suffix in _INFLECTION_SUFFIXES}
+    for suffix in _INFLECTION_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            forms.add(token[: -len(suffix)])
+    return frozenset(forms)
+
+
+def _field_has_word(field_tokens: set[str] | frozenset[str], token: str) -> bool:
     if token in field_tokens:
         return True
-    return any(_same_word(token, candidate) for candidate in field_tokens)
+    if len(token) < 3:
+        return False
+    return not field_tokens.isdisjoint(_word_forms(token))
 
 
 def _plural_forms(token: str) -> tuple[str, ...]:
@@ -2670,6 +2722,30 @@ def _plural_forms(token: str) -> tuple[str, ...]:
 def _field_has_exact_word(field_tokens: set[str], token: str) -> bool:
     """The word itself or its plural: "commit" and "commits" are one word."""
     return token in field_tokens or any(form in field_tokens for form in _plural_forms(token))
+
+
+@functools.lru_cache(maxsize=1024)
+def _query_terms(q: str) -> tuple[tuple[str, ...], frozenset[str], frozenset[str]]:
+    """A query's words, content words and expansions, computed once per query."""
+    tokens = tuple(token for token in re.split(r"\W+", q) if len(token) >= 3)
+    return tokens, frozenset(significant_memory_tokens(q)), frozenset(expanded_memory_query_tokens(q))
+
+
+@functools.lru_cache(maxsize=1024)
+def _query_vocabulary(q: str) -> frozenset[str]:
+    """Every word form a record must contain for score_memory to be non-zero.
+
+    Used to skip records that share nothing with the query before scoring
+    them. Covers exact words, inflected forms, plurals, stems and the small
+    synonym groups, so skipping never changes a score.
+    """
+    tokens, significant, expanded = _query_terms(q)
+    vocabulary: set[str] = set(tokens) | set(significant) | set(expanded)
+    for token in list(vocabulary):
+        vocabulary |= _word_forms(token)
+        vocabulary |= set(_plural_forms(token))
+        vocabulary.add(stem_memory_token(token))
+    return frozenset(vocabulary)
 
 
 # Stores smaller than this carry too little signal for document frequency
@@ -2710,15 +2786,26 @@ def _record_tags(record: Mapping[str, object]) -> list[object]:
     return list(tags) if isinstance(tags, (list, tuple, set)) else []
 
 
-def _record_word_set(record: Mapping[str, object]) -> set[str]:
-    text = " ".join([
-        str(record.get("title") or ""), str(record.get("tldr") or ""),
-        " ".join(str(tag) for tag in _record_tags(record)),
-        str(record.get("trigger") or ""), str(record.get("body") or ""),
-        str(record.get("context") or ""),
-    ])
-    tokens = memory_tokens(text)
-    return tokens | stemmed_memory_tokens(tokens)
+def _record_word_set(record: Mapping[str, object]) -> frozenset[str]:
+    tokens: frozenset[str] = frozenset()
+    for field in ("title", "tldr", "trigger", "body", "context"):
+        value = record.get(field)
+        if value:
+            tokens |= cached_field_tokens(str(value))
+    tag_text = " ".join(str(tag) for tag in _record_tags(record))
+    if tag_text:
+        tokens |= cached_field_tokens(tag_text)
+    return tokens | cached_stems(tokens)
+
+
+@functools.lru_cache(maxsize=262_144)
+def cached_field_tokens(text: str) -> frozenset[str]:
+    return frozenset(memory_tokens(text))
+
+
+@functools.lru_cache(maxsize=262_144)
+def cached_stems(tokens: frozenset[str]) -> frozenset[str]:
+    return frozenset(stemmed_memory_tokens(set(tokens)))
 
 
 def score_memory(
@@ -2728,9 +2815,7 @@ def score_memory(
 ) -> int:
     weight = word_weights or {}
     q = query.lower().strip()
-    tokens = [token for token in re.split(r"\W+", q) if len(token) >= 3]
-    significant_tokens = significant_memory_tokens(q)
-    expanded_tokens = expanded_memory_query_tokens(q)
+    tokens, significant_tokens, expanded_tokens = _query_terms(q)
     title = str(record.get("title", "")).lower()
     tldr = str(record.get("tldr", "")).lower()
     body = str(record.get("body", "")).lower()
@@ -2748,10 +2833,17 @@ def score_memory(
     context = str(record.get("context") or "").lower()
     if context:
         body = f"{body} {context}".strip()
-    title_tokens = memory_tokens(title)
-    tldr_tokens = memory_tokens(tldr)
-    body_tokens = memory_tokens(body)
-    tags_tokens = memory_tokens(tags)
+    # Tokenized once per distinct field text, not once per query: the
+    # record cache hands back the same string objects, whose hashes Python
+    # keeps, so these lookups cost almost nothing after the first query.
+    title_tokens = set(cached_field_tokens(str(record.get("title", ""))))
+    tldr_tokens = set(cached_field_tokens(str(record.get("tldr", ""))))
+    if trigger:
+        tldr_tokens |= cached_field_tokens(str(record.get("trigger") or ""))
+    body_tokens = set(cached_field_tokens(str(record.get("body", ""))))
+    if context:
+        body_tokens |= cached_field_tokens(str(record.get("context") or ""))
+    tags_tokens = set(cached_field_tokens(tags))
     score = 0
     if q and _contains_phrase(title, q):
         score += 20
@@ -2800,8 +2892,8 @@ def score_memory(
     # Stemmed pass: catch close paraphrases ("committing" vs "commit push")
     # that raw token equality misses, at lower weight than exact hits.
     exact_all = title_tokens | tldr_tokens | tags_tokens | body_tokens
-    stemmed_head = stemmed_memory_tokens(title_tokens | tldr_tokens | tags_tokens)
-    stemmed_body = stemmed_memory_tokens(body_tokens)
+    stemmed_head = cached_stems(frozenset(title_tokens | tldr_tokens | tags_tokens))
+    stemmed_body = cached_stems(frozenset(body_tokens))
     for token in significant_tokens:
         if token in exact_all:
             continue
@@ -2958,6 +3050,7 @@ def recall_memories(
     records_by_name: dict[str, Mapping[str, object]] = {}
     record_list = list(records)
     word_weights = query_word_weights(record_list, q)
+    query_vocabulary = _query_vocabulary(q.lower())
     for record in record_list:
         records_by_name[str(record.get("name") or "")] = record
         if not memory_visible_for_project(record, project_name):
@@ -2971,10 +3064,16 @@ def recall_memories(
                 continue
         elif not include_archived and not is_active_memory(record):
             continue
-        lexical_score = score_memory(record, q, word_weights)
         semantic_match = None
         if semantic_scores:
             semantic_match = semantic_scores.get(str(record.get("name") or ""))
+        if (
+            query_vocabulary
+            and semantic_match is None
+            and _record_word_set(record).isdisjoint(query_vocabulary)
+        ):
+            continue  # shares no word form with the query: its score is 0
+        lexical_score = score_memory(record, q, word_weights)
         score = lexical_score + semantic_match_points(semantic_match)
         if score >= MEMORY_RECALL_MIN_SCORE:
             lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE

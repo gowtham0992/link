@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from .memory import (
-    memory_brief,
+    memory_inbox,
+    memory_visible_for_project,
     normalize_project,
     recall_memories,
     slugify,
@@ -493,14 +494,19 @@ def query_link(
     memory_has_more = len(raw_memories) > selected_count
     memories = [_compact_memory(memory) for memory in raw_memories[:selected_count]]
     _mark_stale_paths(memories, record_list, repo_root)
-    brief = memory_brief(
-        record_list,
-        query=q,
+    # Only the review queue is needed here. Building a whole brief with the
+    # query scored the corpus a second time (half of query_link's time on a
+    # large store) to throw the ranking away.
+    inbox = memory_inbox(
+        [record for record in record_list if memory_visible_for_project(record, project_name)],
         limit=limits["memories"],
         review_command=review_command,
-        project=project_name,
-        semantic_scores=semantic_scores,
     )
+    brief_review = {
+        "count": inbox["review_count"],
+        "counts_by_severity": inbox["counts_by_severity"],
+        "items": inbox["items"],
+    }
     raw_search_results = search_pages(q, cache, limit=limits["search_results"] + 1)
     search_has_more = len(raw_search_results) > limits["search_results"]
     search_results = raw_search_results[: limits["search_results"]]
@@ -533,7 +539,7 @@ def query_link(
         "If important context appears missing, call recall with a larger budget or admin(action='context') on the primary page.",
         "Do not create or update memory from this packet unless the user explicitly asks.",
     ]
-    review = _compact_review(brief.get("review", {}), limit=limits["memories"])
+    review = _compact_review(brief_review, limit=limits["memories"])
     if review.get("count"):
         guidance.insert(2, "Some memories need review; treat provisional memories carefully.")
     if close_call:
