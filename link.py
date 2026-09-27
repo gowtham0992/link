@@ -3182,7 +3182,15 @@ def _lnk_on_path_runs_this_runtime() -> bool:
         shim = Path(lnk).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    return str(ROOT / "link.py") in shim
+    if str(ROOT / "link.py") in shim:
+        return True
+    # pip's console script imports link_cli and sits in the same bin
+    # directory as the interpreter running us (a venv or --user install).
+    first_line = shim.splitlines()[0] if shim else ""
+    return "link_cli" in shim and (
+        first_line.lstrip("#!").strip() == sys.executable
+        or Path(lnk).parent.resolve() == Path(sys.executable).parent.resolve()
+    )
 
 
 def _cli_program_name() -> str:
@@ -3202,7 +3210,9 @@ def _configure_link_command_display() -> None:
     elif _lnk_on_path_runs_this_runtime():
         _core_set_link_command_override(None)
     else:
-        _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
+        # The file actually running: link.py in a checkout, link_cli.py in a
+        # pip install (which ships no link.py, so naming it gave dead hints).
+        _core_set_link_command_override([sys.executable, str(Path(__file__).resolve())])
 
 
 def verify_mcp(
