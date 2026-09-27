@@ -115,9 +115,6 @@ class OptionGroupContextTests(unittest.TestCase):
         self.assertEqual(hits, [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TransitionTests(unittest.TestCase):
     def test_replaced_values_are_read_from_the_revision(self):
@@ -159,3 +156,18 @@ class AcronymTests(unittest.TestCase):
         ci = _rec("ci", "CI moved from Buildkite to github-actions.")
         hits = recall_memories([ci], "which CI system do we run")
         self.assertEqual([hit["name"] for hit in hits], ["ci"])
+
+
+class RecallTextTests(unittest.TestCase):
+    def test_a_disputed_memory_says_so_in_the_terminal(self):
+        from link_core.cli_memory import render_recall_text
+
+        _code, text = render_recall_text(query="port", results=[{
+            "title": "Staging port", "memory_type": "fact", "scope": "user", "path": "wiki/memories/a.md",
+            "tldr": "The staging server listens on port 8080.", "contradicted_by": "port-b",
+        }])
+        self.assertIn("Disputed by a newer memory: port-b", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

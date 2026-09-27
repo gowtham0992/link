@@ -287,6 +287,9 @@ def render_recall_text(
         summary = record.get("tldr") or record.get("snippet")
         if summary:
             lines.append(f"  {summary}")
+        disputed_by = str(record.get("contradicted_by") or "")
+        if disputed_by:
+            lines.append(f"  Disputed by a newer memory: {disputed_by} - check which one is current.")
     if results and all(str(record.get("confidence") or "") == "weak" for record in results):
         lines.extend([
             "",
