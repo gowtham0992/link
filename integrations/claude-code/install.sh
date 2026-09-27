@@ -34,7 +34,11 @@ else
     bash "$SCRIPT_DIR/../_shared/scaffold.sh" --project
 fi
 
-link_connect claude-code "${WIKI_PATH%/wiki}" --hooks
+# Session hooks live in the agent's global settings, so only a global
+# install adds them; a --project install must not rewrite the user's hooks.
+HOOKS_FLAG=""
+if [ "$MODE" = "--global" ]; then HOOKS_FLAG="--hooks"; fi
+link_connect claude-code "${WIKI_PATH%/wiki}" $HOOKS_FLAG
 # Built-in registration, used only when lnk connect is unavailable.
 if [ -z "$LINK_CONNECTED" ]; then
 MCP_PYTHON="python3"

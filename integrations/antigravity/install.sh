@@ -32,7 +32,12 @@ else
     bash "$SCRIPT_DIR/../_shared/scaffold.sh" --project
 fi
 
-link_connect antigravity "${WIKI_PATH%/wiki}"
+# ~/.gemini/settings.json is global: only a global install writes it. A
+# --project install prints the entry instead, as 3.x did.
+LINK_CONNECTED=""
+if [ "$MODE" = "--global" ]; then
+    link_connect antigravity "${WIKI_PATH%/wiki}"
+fi
 # Built-in registration, used only when lnk connect is unavailable.
 if [ -z "$LINK_CONNECTED" ]; then
 MCP_PYTHON="python3"

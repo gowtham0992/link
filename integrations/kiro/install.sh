@@ -67,7 +67,9 @@ elif [ "$MODE" = "--project" ]; then
     echo "Link steering → $TARGET"
 
     bash "$SCRIPT_DIR/../_shared/scaffold.sh" --project
-    link_connect kiro "$(pwd)"
+    # ~/.kiro/settings/mcp.json is global; a --project install must not
+    # repoint the user's Link server at this repository's wiki.
+    echo "  MCP: to point Kiro's Link server at this wiki, run: lnk connect kiro \"$(pwd)\" --write"
     link_print_next_steps "$MODE"
 else
     echo "Usage: bash install.sh [--project]"

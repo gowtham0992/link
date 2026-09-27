@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .files import atomic_write_json, atomic_write_text
+from .files import atomic_write_bytes, atomic_write_json, atomic_write_text
 from .mcp_verify import (
     display_command,
     ensure_link_mcp_runtime,
@@ -383,31 +383,98 @@ def _remove_link_entry(text: str, top_key: str) -> tuple[str, bool]:
     return text[:start] + text[end:], True
 
 
+_BOM = "\ufeff"
+
+
+def _read_config(path: Path) -> tuple[str, bool, str]:
+    """(text without BOM, had BOM, newline style) - read without newline translation.
+
+    Editors on Windows save these files with a UTF-8 BOM and CRLF. A BOM made
+    the file unparseable (connect refused it, disconnect and doctor thought
+    Link was not configured), and text-mode reading rewrote every CRLF as LF.
+    """
+    raw = path.read_bytes().decode("utf-8", errors="replace")
+    bom = raw.startswith(_BOM)
+    text = raw[len(_BOM):] if bom else raw
+    return text, bom, "\r\n" if "\r\n" in text else "\n"
+
+
+def _write_config_text(path: Path, text: str, *, bom: bool, newline: str) -> None:
+    if newline == "\r\n":
+        text = re.sub(r"(?<!\r)\n", "\r\n", text)
+    atomic_write_bytes(path, ((_BOM if bom else "") + text).encode("utf-8"))
+
+
+# Every TOML table that belongs to Link's server: [mcp_servers.link] and its
+# subtables ([mcp_servers.link.env], quoted forms too). A disconnect that left
+# a user-added env table behind produced mcp_servers.link with no command.
+_CODEX_LINK_HEADER = re.compile(r'^\s*\[\[?\s*mcp_servers\s*\.\s*(?:link|"link")\s*(?:\.[^\]]*)?\]\]?\s*(?:#.*)?$')
+_TOML_HEADER = re.compile(r"^\s*\[")
+
+
+def _remove_codex_link_tables(text: str) -> tuple[str, bool]:
+    kept: list[str] = []
+    inside = found = False
+    for line in text.splitlines(keepends=True):
+        if _TOML_HEADER.match(line):
+            inside = bool(_CODEX_LINK_HEADER.match(line.rstrip("\r\n")))
+            found = found or inside
+        if not inside:
+            kept.append(line)
+    return "".join(kept), found
+
+
 def remove_link_mcp_entry(path: Path, config: "AgentMcpConfig", *, write: bool) -> dict[str, object]:
     """Find (and with write, remove) Link's server entry from an agent config."""
     result: dict[str, object] = {"path": str(path), "found": False, "removed": False}
     if not path.exists():
         return result
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text, bom, newline = _read_config(path)
     if config.config_format == "codex-toml":
-        pattern = re.compile(r"(?ms)^\[mcp_servers\.link\]\r?\n.*?(?=^\[|\Z)")
-        if not pattern.search(text):
+        updated, found = _remove_codex_link_tables(text)
+        if not found:
             return result
         result["found"] = True
         if write:
-            updated = pattern.sub("", text).rstrip() + "\n"
-            atomic_write_text(path, updated if updated.strip() else "")
+            updated = updated.rstrip() + newline if updated.strip() else ""
+            _check_codex_without_link(path, updated)
+            _write_config_text(path, updated, bom=bom, newline=newline)
             result["removed"] = True
         return result
-    updated, found = _remove_link_entry(text, config.top_key)
+    try:
+        payload = _jsonc_loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path} is not valid JSON or JSONC ({exc.msg} at line {exc.lineno}); "
+                         "remove the link entry by hand") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get(config.top_key), dict) \
+            or "link" not in payload[config.top_key]:
+        return result
+    try:
+        updated, found = _remove_link_entry(text, config.top_key)
+    except (IndexError, StopIteration, ValueError) as exc:
+        raise ValueError(f"could not edit {path} safely; remove the link entry by hand") from exc
     result["found"] = found
     if found and write:
         check = _jsonc_loads(updated)
         if not isinstance(check, dict) or "link" in (check.get(config.top_key) or {}):
             raise ValueError(f"could not edit {path} safely; remove the link entry by hand")
-        atomic_write_text(path, updated)
+        _write_config_text(path, updated, bom=bom, newline=newline)
         result["removed"] = True
     return result
+
+
+def _check_codex_without_link(path: Path, text: str) -> None:
+    """Refuse to write a Codex config that still has, or half-has, Link's server."""
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10: the table-level edit above is the check
+        return
+    try:
+        parsed = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"could not edit {path} safely ({exc}); remove the link entry by hand") from exc
+    if "link" in (parsed.get("mcp_servers") or {}):
+        raise ValueError(f"could not edit {path} safely; remove the link entry by hand")
 
 
 def _object_is_empty(masked: str, open_index: int) -> bool:
@@ -447,7 +514,7 @@ def _splice_link_entry(text: str, top_key: str, entry: dict[str, object]) -> str
 
 def _write_json_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki_dir: Path) -> None:
     entry = _server_config(config, python_cmd, wiki_dir)
-    text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    text, bom, newline = _read_config(path) if path.exists() else ("", False, "\n")
     if not text.strip():
         atomic_write_json(path, {config.top_key: {"link": entry}})
         return
@@ -458,19 +525,22 @@ def _write_json_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki
                          "fix it, or add the snippet below by hand") from exc
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object")
-    updated = _splice_link_entry(text, config.top_key, entry)
+    try:
+        updated = _splice_link_entry(text, config.top_key, entry)
+    except (IndexError, StopIteration) as exc:
+        raise ValueError(f"could not edit {path} safely; add the snippet below by hand") from exc
     try:
         check = _jsonc_loads(updated)
     except json.JSONDecodeError as exc:
         raise ValueError(f"could not edit {path} safely ({exc.msg}); add the snippet below by hand") from exc
     if not isinstance(check, dict) or check.get(config.top_key, {}).get("link") != entry:
         raise ValueError(f"could not edit {path} safely; add the snippet below by hand")
-    atomic_write_text(path, updated)
+    _write_config_text(path, updated, bom=bom, newline=newline)
 
 
 def _write_codex_config(path: Path, python_cmd: str, wiki_dir: Path) -> None:
     block = _codex_toml_snippet(python_cmd, wiki_dir) + "\n"
-    text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    text, bom, newline = _read_config(path) if path.exists() else ("", False, "\n")
     pattern = re.compile(r"(?ms)^\[mcp_servers\.link\]\r?\n.*?(?=^\[|\Z)")
     if pattern.search(text):
         text = pattern.sub(block, text)
@@ -478,7 +548,7 @@ def _write_codex_config(path: Path, python_cmd: str, wiki_dir: Path) -> None:
             text += "\n"
     else:
         text = text.rstrip() + ("\n\n" if text.strip() else "") + block
-    atomic_write_text(path, text)
+    _write_config_text(path, text, bom=bom, newline=newline)
 
 
 def _write_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki_dir: Path) -> None:
@@ -516,7 +586,7 @@ def read_agent_link_server(agent: str, config_path: str | None = None) -> dict[s
     }
     if not path.exists():
         return result
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = _read_config(path)[0]
     command: str | None = None
     args: list[str] = []
     if config.config_format == "codex-toml":

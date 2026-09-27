@@ -376,6 +376,51 @@ class DisconnectTests(unittest.TestCase):
         self.assertIn("[mcp_servers.other]", text)
         self.assertIn('model = "o4"', text)
 
+    def test_disconnect_codex_removes_link_subtables_too(self):
+        from link_core.mcp_connect import build_disconnect_payload
+        config = self.dir / "config.toml"
+        config.write_text('[mcp_servers.link]\ncommand = "py"\n\n[mcp_servers.link.env]\nLINK_USAGE = "off"\n\n'
+                          '[mcp_servers.other]\ncommand = "x"\n', encoding="utf-8")
+        build_disconnect_payload("codex", config_path=str(config), hooks_settings=str(self.dir / "none.json"), write=True)
+        text = config.read_text(encoding="utf-8")
+        self.assertNotIn("mcp_servers.link", text)
+        self.assertIn('[mcp_servers.other]\ncommand = "x"', text)
+        try:
+            import tomllib
+        except ImportError:
+            return
+        self.assertEqual(tomllib.loads(text), {"mcp_servers": {"other": {"command": "x"}}})
+
+    def test_bom_and_crlf_configs_are_read_and_kept(self):
+        from link_core.mcp_connect import _agent_by_name, _write_json_config, build_disconnect_payload
+        config = self.dir / "claude.json"
+        original = '{\r\n  "mcpServers": {\r\n    "link": {"command": "py", "args": ["--wiki", "/w"]},\r\n' \
+                   '    "gh": {"command": "gh"}\r\n  }\r\n}\r\n'
+        config.write_bytes(("\ufeff" + original).encode("utf-8"))
+        self.assertTrue(read_agent_link_server("claude-code", str(config))["configured"])
+        done = build_disconnect_payload("claude-code", config_path=str(config), hooks_settings=str(self.dir / "none.json"),
+                                        write=True)
+        self.assertTrue(done["changed"])
+        raw = config.read_bytes()
+        self.assertTrue(raw.startswith("\ufeff".encode("utf-8")))
+        self.assertNotIn(b"link", raw)
+        self.assertNotRegex(raw.decode("utf-8"), r"(?<!\r)\n")
+        _write_json_config(config, _agent_by_name("claude-code"), "/usr/bin/python3", Path("/w/wiki"))
+        raw = config.read_bytes().decode("utf-8")
+        self.assertTrue(raw.startswith("\ufeff"))
+        self.assertIn('"link"', raw)
+        self.assertNotRegex(raw, r"(?<!\r)\n")
+
+    def test_truncated_config_is_a_clear_error_not_a_crash(self):
+        from link_core.mcp_connect import build_disconnect_payload
+        config = self.dir / "claude.json"
+        config.write_text('{"mcpServers": {"link"', encoding="utf-8")
+        with self.assertRaises(ValueError) as caught:
+            build_disconnect_payload("claude-code", config_path=str(config),
+                                     hooks_settings=str(self.dir / "none.json"), write=True)
+        self.assertIn("not valid JSON", str(caught.exception))
+        self.assertEqual(config.read_text(encoding="utf-8"), '{"mcpServers": {"link"')
+
     def test_disconnect_keeps_comments_in_jsonc(self):
         from link_core.mcp_connect import _jsonc_loads, build_disconnect_payload
         config = self.dir / "settings.json"
