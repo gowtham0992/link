@@ -401,6 +401,24 @@ die in the pipeline: dropped, flagged, or defanged — none unlabeled.
 CI-enforced — any change that lets an attack reach the inbox without a
 label, or flags a legitimate directive, fails the build.
 
+**The other ways in (added in 4.0).** A review found three channels into a
+session that the layers above never saw, so the same 18 attacks now go
+through each of them too:
+
+| channel | how the attack arrives | result |
+|---|---|---|
+| harness text | written into the transcript in the user's name: a subagent report, command output, a compaction summary, a subagent turn, a peer session (6 wrappers) | 0 of 108 probes became a proposal |
+| handoff | left as a session handoff, pushed to the top of the next session on any agent | 13 of 18 labelled in the brief; 0 injection-shaped attacks unlabeled; 0 credentials left unredacted |
+| team import | shared as a teammate's `visibility: team` memory | 14 of 18 rejected at import, 4 quarantined for review, 0 active |
+
+Before 4.0 the harness channel turned a subagent's report into a proposal
+attributed to the user, a handoff carried a prose password verbatim, and a
+team import became active memory with no review at all. Each of those is a
+CI failure now. The five unlabeled handoffs are the attacks the detector
+does not label in any channel (hearsay, a question, credential planting
+that is redacted instead) - the handoff channel matches the direct one, it
+does not get weaker.
+
 Honest notes: labels are warnings, not blocks — a human may genuinely hold
 a "never ask confirmation before builds" preference, so the pipeline never
 censors; it attributes ("verify you actually said this before accepting").

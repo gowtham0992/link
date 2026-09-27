@@ -33,7 +33,7 @@ from pathlib import Path
 from .frontmatter import frontmatter_string, parse_frontmatter
 from .files import atomic_write_text
 from .memory import normalize_project
-from .security import injected_instruction_warnings, redact_secret_values
+from .security import injected_instruction_warnings, redact_password_values, redact_secret_values
 
 HANDOFF_DIR = "handoffs"
 HANDOFF_TTL_HOURS = 48
@@ -96,9 +96,11 @@ def write_handoff(
     project_name = normalize_project(project)
     source = _clean_source(source)
     safe_body, _, _ = redact_secret_values(body)
+    safe_body, _ = redact_password_values(safe_body)
     # Title (and the filename slug derived from it) must come from the
     # redacted text - the first line of a note can carry the secret.
     safe_task, _, _ = redact_secret_values((task or "").strip())
+    safe_task, _ = redact_password_values(safe_task)
     title = (safe_task or safe_body.splitlines()[0]).strip()[:80]
     steps = [str(step).strip() for step in (next_steps or []) if str(step).strip()]
     steps_section = ""
@@ -106,6 +108,7 @@ def write_handoff(
         safe_steps = []
         for step in steps:
             safe, _, _ = redact_secret_values(step)
+            safe, _ = redact_password_values(safe)
             safe_steps.append(f"- {safe}")
         steps_section = "\n## Next Steps\n\n" + "\n".join(safe_steps) + "\n"
 

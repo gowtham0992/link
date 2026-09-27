@@ -17,6 +17,7 @@ from .memory import (
 )
 from .security import (
     injected_instruction_warnings,
+    redact_password_values,
     redact_secret_values,
     secret_value_warnings,
 )
@@ -271,6 +272,9 @@ def write_session_capture(
     # key to disk verbatim has already leaked it.
     secret_warnings = secret_value_warnings(original_notes)
     notes, _, _ = redact_secret_values(original_notes)
+    notes, password_count = redact_password_values(notes)
+    if password_count and "password in prose" not in secret_warnings:
+        secret_warnings.append("password in prose")
     source_value = str(source or default_source).strip() or default_source
     source_value, _, _ = redact_secret_values(source_value)
     captured_at = timestamp or utc_timestamp()

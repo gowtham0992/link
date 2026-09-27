@@ -66,6 +66,40 @@ def looks_like_password_note(text: str) -> str | None:
     return None
 
 
+def _credential_shaped(word: str) -> bool:
+    core = word.strip(".,;:!?)(\"'")
+    if core.isdigit():
+        return 4 <= len(core) <= 12
+    return (6 <= len(core) <= 40 and any(c.isdigit() for c in core) and any(c.isalpha() for c in core)
+            and (any(not c.isalnum() for c in core) or core != core.lower()))
+
+
+def redact_password_values(text: str, replacement: str = "[redacted-secret]") -> tuple[str, int]:
+    """Redact human passwords written in prose ("the password is Zk9#mango42").
+
+    Token patterns cannot catch these, so the rule is the same one
+    looks_like_password_note uses: within a sentence that mentions a
+    password, PIN or code, credential-shaped words are replaced. Text
+    without a credential keyword is returned unchanged.
+    """
+    if not _PASSWORD_KEYWORD_RE.search(text or ""):
+        return text, 0
+    count = 0
+    pieces: list[str] = []
+    for sentence in re.split(r"(?<=[.!?\n])", text):
+        if _PASSWORD_KEYWORD_RE.search(sentence):
+            def swap(match: re.Match[str]) -> str:
+                nonlocal count
+                word = match.group(0)
+                if _credential_shaped(word) and not _PASSWORD_KEYWORD_RE.fullmatch(word):
+                    count += 1
+                    return replacement
+                return word
+            sentence = re.sub(r"\S+", swap, sentence)
+        pieces.append(sentence)
+    return "".join(pieces), count
+
+
 def secret_value_warnings(text: str) -> list[str]:
     """Return labels for secret-looking values found in text."""
     warnings: list[str] = []

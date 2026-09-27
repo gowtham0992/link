@@ -91,6 +91,14 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - **Sync stops cleanly when a merge fails for a reason other than a
   conflict**, instead of committing and pushing on top of a half-merge, and
   a clean pull regenerates the index and backlinks.
+- **The poisoning benchmark covers every way into a session.** The same 18
+  attacks now also go through harness-written transcript text (0 of 108
+  probes become proposals), handoffs (every attack the detector labels is
+  labelled in the brief, 0 credentials unredacted) and team imports (14
+  rejected, 4 quarantined, 0 active). All three are CI gates. Writing the
+  handoff track found one more gap, closed here: a password written in
+  prose ("the staging password is ...") passed through handoffs and
+  captures verbatim; it is now redacted like a token.
 - **Capture commands refuse symlinks**, so `delete-capture` can no longer be
   pointed at a memory page through a link in `raw/`, and capture
   de-duplication sees all of a capture's proposals rather than the first

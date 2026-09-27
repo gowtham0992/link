@@ -174,3 +174,24 @@ class HandoffInjectionLabelTests(unittest.TestCase):
             block = handoff_brief_block(pending, now="2026-09-26T10:01:00Z")
             self.assertIn("Resume this task before anything else", block)
             self.assertNotIn("WARNING", block)
+
+
+class HandoffPasswordTests(unittest.TestCase):
+    def test_prose_password_is_redacted_in_a_handoff(self):
+        from link_core.handoff import write_handoff
+        with tempfile.TemporaryDirectory() as temp:
+            record = write_handoff(Path(temp), "Staging login works; the staging password is Zk9#mango42 for now.",
+                                   next_steps=["the admin PIN is 4821"], now="2026-09-26T10:00:00Z")
+            stored = Path(record["absolute_path"]).read_text(encoding="utf-8")
+            self.assertNotIn("Zk9#mango42", stored)
+            self.assertNotIn("4821", stored)
+            self.assertIn("[redacted-secret]", stored)
+
+
+class PasswordRedactionTests(unittest.TestCase):
+    def test_only_credential_words_near_a_keyword_are_redacted(self):
+        from link_core.security import redact_password_values
+        self.assertEqual(redact_password_values("The password is Zk9#mango42 today.")[0],
+                         "The password is [redacted-secret] today.")
+        for text in ("Reset the password flow in auth.py tomorrow.", "Pin Python to 3.12.", "I prefer tabs."):
+            self.assertEqual(redact_password_values(text), (text, 0))
