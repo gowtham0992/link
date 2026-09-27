@@ -144,6 +144,51 @@ def render_stat_grid(items: Sequence[tuple[object, str]]) -> str:
     return f'<div class="home-stats">{stats}</div>'
 
 
+# The viewer's CSS and JS are served as content-hashed files instead of being
+# inlined into every page. Inline assets cost 65 KB per navigation with
+# caching disabled, and forced 'unsafe-inline' into the Content-Security-
+# Policy, so one escaping slip anywhere would have become executable. With
+# external assets the policy allows only same-origin files plus a
+# per-response nonce for the one page-specific inline script (the graph).
+def _asset_bundles() -> dict[str, tuple[str, str]]:
+    import hashlib
+
+    bundles = {
+        "css": (CSS, "text/css; charset=utf-8"),
+        "theme": (THEME_INIT_JS, "text/javascript; charset=utf-8"),
+        "js": ("\n;\n".join([KEYBOARD_NAV_JS, NAV_CURRENT_JS, THEME_CONTROL_JS, MEMORY_ACTION_JS,
+                              COPY_BUTTON_JS, RAW_SOURCE_JS, PROPOSAL_UI_JS]), "text/javascript; charset=utf-8"),
+    }
+    out: dict[str, tuple[str, str]] = {}
+    for name, (text, content_type) in bundles.items():
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+        extension = "css" if name == "css" else "js"
+        out[f"/assets/link-{name}.{digest}.{extension}"] = (text, content_type)
+    return out
+
+
+_ASSETS: dict[str, tuple[str, str]] | None = None
+
+
+def viewer_assets() -> dict[str, tuple[str, str]]:
+    """Published path -> (body, content type) for the viewer's static assets."""
+    global _ASSETS
+    if _ASSETS is None:
+        _ASSETS = _asset_bundles()
+    return _ASSETS
+
+
+def _asset_path(kind: str) -> str:
+    prefix = f"/assets/link-{kind}."
+    return next(path for path in viewer_assets() if path.startswith(prefix))
+
+
+# Placeholder the HTTP handler replaces with a fresh nonce per response.
+# It only ever appears inside a nonce="..." attribute written by Link's own
+# templates; escaped page content cannot produce that attribute.
+NONCE_PLACEHOLDER = "__LINK_CSP_NONCE__"
+
+
 def render_layout(title: str, body: str, page_class: str = "") -> str:
     body_class = f' class="{html.escape(page_class, quote=True)}"' if page_class else ""
     return f"""<!DOCTYPE html>
@@ -153,20 +198,14 @@ def render_layout(title: str, body: str, page_class: str = "") -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html.escape(title)} — Link</title>
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
-<script>{THEME_INIT_JS}</script>
-<style>{CSS}</style>
+<script src="{_asset_path("theme")}"></script>
+<link rel="stylesheet" href="{_asset_path("css")}">
 </head>
 <body{body_class}>
 {render_header_html()}
 <div class="graph-tooltip" id="graph-tooltip"></div>
 {body}
 {render_footer_html()}
-<script>{KEYBOARD_NAV_JS}</script>
-<script>{NAV_CURRENT_JS}</script>
-<script>{THEME_CONTROL_JS}</script>
-<script>{MEMORY_ACTION_JS}</script>
-<script>{COPY_BUTTON_JS}</script>
-<script>{RAW_SOURCE_JS}</script>
-<script>{PROPOSAL_UI_JS}</script>
+<script src="{_asset_path("js")}"></script>
 </body>
 </html>"""

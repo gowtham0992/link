@@ -103,7 +103,7 @@ POST /api/rebuild-index</code></pre>
           <li><code>/api</code> for a compact discovery payload with recommended endpoints.</li>
           <li><code>/api/health</code> for one machine-readable readiness packet with validation and interrupted-operation state.</li>
           <li><code>/api/query-link</code> for answer-ready context.</li>
-          <li><code>/api/page-list</code> instead of <code>/api/pages</code> when paging matters.</li>
+          <li><code>/api/page-list</code> instead of <code>/api/pages</code> when paging matters. <code>/api/pages</code> returns at most 500 pages by default (<code>?limit=</code> up to 5000) and reports the full count in <code>X-Total-Count</code>, with <code>X-Link-Truncated: true</code> when it cut the list.</li>
           <li><code>/api/graph-summary</code> instead of <code>/api/graph</code> for agent context.</li>
           <li><code>/api/page-links</code> for paginated inbound and forward links.</li>
         </ul>

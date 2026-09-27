@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 
 from .web_ingest import copy_button
@@ -54,6 +55,9 @@ def _render_stats(pages: Sequence[dict[str, object]]) -> str:
     return f'<div class="home-stats">{stats_items}</div>'
 
 
+HOME_SECTION_LIMIT = 12
+
+
 def _render_page_sections(pages: Sequence[dict[str, object]], *, page_href: PageHref) -> str:
     categories: dict[str, list[dict[str, object]]] = {}
     for page in pages:
@@ -73,13 +77,23 @@ def _render_page_sections(pages: Sequence[dict[str, object]], *, page_href: Page
 
     sections = ""
     for category in sorted(categories):
+        members = sorted(categories[category], key=lambda item: str(item.get("title") or ""))
+        # The home page listed every page; at 1k pages that was 173 KB of
+        # links nobody scrolls. Each section shows a handful and links to the
+        # filtered, paged view for the rest.
+        shown = members[:HOME_SECTION_LIMIT]
         items = "".join(
             f'<li><a href="{html.escape(page_href(str(page["name"])), quote=True)}">'
             f'{html.escape(str(page["title"]))}</a>'
             f'<span class="type">{html.escape(str(page.get("type") or ""))}</span></li>'
-            for page in sorted(categories[category], key=lambda item: str(item.get("title") or ""))
+            for page in shown
         )
-        sections += f'<h2>{html.escape(category)}</h2><ul class="page-list">{items}</ul>'
+        more = ""
+        if len(members) > len(shown):
+            href = "/all?" + urllib.parse.urlencode({"type": category, "limit": "250"})
+            more = (f'<li class="more"><a href="{html.escape(href, quote=True)}">'
+                    f'View all {len(members)} {html.escape(category)} &rarr;</a></li>')
+        sections += f'<h2>{html.escape(category)}</h2><ul class="page-list">{items}{more}</ul>'
     return sections
 
 

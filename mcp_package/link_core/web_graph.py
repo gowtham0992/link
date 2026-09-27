@@ -102,7 +102,7 @@ def graph_legend_items(colors: Mapping[str, str] = GRAPH_CATEGORY_COLORS) -> str
         '<button type="button" class="graph-legend-item" aria-pressed="false" '
         f'data-graph-category="{html.escape(str(category), quote=True)}" '
         f'title="Filter graph to {html.escape(str(category), quote=True)}">'
-        f'<span style="background:{html.escape(str(color), quote=True)}"></span>'
+        f'<span data-swatch-color="{html.escape(str(color), quote=True)}"></span>'
         f'{html.escape(str(category))}</button>'
         for category, color in colors.items()
         if category != "root"
@@ -126,11 +126,17 @@ def render_graph_script(
 ) -> str:
     """Render the browser-side graph simulation script."""
     return f"""
-<script>
+<script nonce="__LINK_CSP_NONCE__">
 (function() {{
   var nodes = {nodes_json};
   var edges = {edges_json};
   var catColors = {cat_colors_json};
+
+  // Legend swatch colours come from data attributes and are applied through
+  // the CSSOM, which the strict style policy allows (style="" does not).
+  document.querySelectorAll('[data-swatch-color]').forEach(function(el) {{
+    el.style.background = el.getAttribute('data-swatch-color');
+  }});
 
   var canvas = document.getElementById('graph-canvas');
   var ctx = canvas.getContext('2d');

@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import socketserver
 import tempfile
@@ -47,6 +48,48 @@ def write_page(wiki_dir: Path, rel: str, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _run_html_with_headers(path: str):
+    handler = object.__new__(serve.Handler)
+    handler.command = "GET"
+    handler.path = path
+    handler.request_version = "HTTP/1.1"
+    handler.requestline = f"GET {path} HTTP/1.1"
+    handler.client_address = ("127.0.0.1", 0)
+    handler.server = None
+    handler.headers = {"Host": "127.0.0.1"}
+    handler.rfile = BytesIO(b"")
+    handler.wfile = BytesIO()
+    handler.do_GET()
+    header_bytes, _, body_bytes = handler.wfile.getvalue().partition(b"\r\n\r\n")
+    lines = header_bytes.decode("latin-1").splitlines()
+    headers = {k.strip(): v.strip() for k, _, v in (line.partition(":") for line in lines[1:]) if k}
+    return int(lines[0].split()[1]), body_bytes.decode("utf-8", errors="replace"), headers
+
+
+def _asset_text() -> str:
+    """The viewer's CSS and JS, which are served as files, not inlined."""
+    return "".join(text for text, _ in serve._core_viewer_assets().values())
+
+
+def run_handler_text(method: str, path: str, headers: dict[str, str] | None = None):
+    """GET an HTML route; returns (status, decoded body)."""
+    handler = object.__new__(serve.Handler)
+    handler.command = method
+    handler.path = path
+    handler.request_version = "HTTP/1.1"
+    handler.requestline = f"{method} {path} HTTP/1.1"
+    handler.client_address = ("127.0.0.1", 0)
+    handler.server = None
+    handler.headers = {"Host": "127.0.0.1", **(headers or {})}
+    handler.rfile = BytesIO(b"")
+    handler.wfile = BytesIO()
+    handler.do_GET()
+    raw = handler.wfile.getvalue()
+    header_bytes, _, body_bytes = raw.partition(b"\r\n\r\n")
+    status = int(header_bytes.splitlines()[0].decode("ascii").split()[1])
+    return status, body_bytes.decode("utf-8", errors="replace")
 
 
 def run_handler(method: str, path: str, body: bytes = b"", headers: dict[str, str] | None = None):
@@ -166,7 +209,7 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(serve._plural_type_label("memory"), "memories")
 
     def test_layout_handles_search_enter_key(self):
-        html = serve._layout("Test", "<p>Body</p>")
+        html = serve._layout("Test", "<p>Body</p>") + _asset_text()
 
         self.assertIn("document.activeElement.id === 'search-input'", html)
         self.assertIn("window.location.href = '/search?q=' + encodeURIComponent(q);", html)
@@ -483,6 +526,68 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(second_payload["error"], "local mutation rate limit exceeded")
         self.assertGreaterEqual(second_payload["retry_after_seconds"], 1)
         self.assertEqual(second_headers["Retry-After"], str(second_payload["retry_after_seconds"]))
+
+    def test_blind_cross_origin_posts_cannot_lock_the_viewer(self):
+        self.make_wiki()
+        serve._mutation_rate_limiter = serve._CoreLocalRateLimiter(max_events=5, window_seconds=60)
+        # A hostile page can send simple form posts (no preflight). None of
+        # them carry the local-action header, so none may count.
+        for _ in range(20):
+            run_handler("POST", "/api/nothing", body=b"x=1",
+                        headers={"Content-Type": "application/x-www-form-urlencoded", "Content-Length": "3"})
+            run_handler("POST", "/api/archive-memory", body=b"x=1",
+                        headers={"Content-Type": "application/x-www-form-urlencoded", "Content-Length": "3"})
+        status, payload = run_handler("POST", "/api/rebuild-backlinks", body=b"{}", headers={
+            "Content-Type": "application/json", "Content-Length": "2", "X-Link-Local-Action": "true"})
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload["rebuilt"])
+
+    def test_home_sections_are_capped_with_a_view_all_link(self):
+        wiki = self.make_wiki()
+        for i in range(30):
+            write_page(wiki, f"concepts/concept-{i:02d}.md", f"---\ntitle: Concept {i:02d}\ntype: concept\n---\n\n# Concept {i:02d}\n\nBody.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertLessEqual(body.count("Concept "), 12 + 8)  # section cap plus the recent-pages strip
+        self.assertIn("View all 30 concepts", body)
+        status, listing = run_handler_text("GET", "/all?type=concepts&limit=250")
+        self.assertEqual(status, 200)
+        self.assertIn("Concept 29", listing)
+
+    def test_api_pages_is_capped_and_reports_the_total(self):
+        wiki = self.make_wiki()
+        for i in range(12):
+            write_page(wiki, f"concepts/c{i}.md", f"---\ntitle: C{i}\n---\n\n# C{i}\n")
+        reset_wiki(wiki)
+        status, payload, headers = run_handler_with_headers("GET", "/api/pages?limit=5")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(payload), 5)
+        self.assertEqual(headers["X-Link-Truncated"], "true")
+        self.assertGreaterEqual(int(headers["X-Total-Count"]), 12)
+
+    def test_html_has_no_inline_script_without_a_nonce_and_a_strict_csp(self):
+        self.make_wiki()
+        status, body, headers = _run_html_with_headers("/graph")
+        self.assertEqual(status, 200)
+        policy = headers["Content-Security-Policy"]
+        self.assertNotIn("unsafe-inline", policy)
+        nonce = re.search(r"'nonce-([^']+)'", policy).group(1)
+        for tag in re.findall(r"<script\b[^>]*>", body):
+            self.assertTrue("src=" in tag or f'nonce="{nonce}"' in tag, tag)
+        self.assertNotIn("__LINK_CSP_NONCE__", body)
+        self.assertNotIn(' style="', body)
+        # A second response gets a different nonce.
+        _, _, again = _run_html_with_headers("/graph")
+        self.assertNotEqual(again["Content-Security-Policy"], policy)
+
+    def test_assets_are_served_with_long_cache(self):
+        path = next(iter(serve._core_viewer_assets()))
+        status, _, headers = _run_html_with_headers(path)
+        self.assertEqual(status, 200)
+        self.assertIn("immutable", headers["Cache-Control"])
+        status, _, _ = _run_html_with_headers("/assets/link-js.deadbeef0000.js")
+        self.assertEqual(status, 404)
 
     def test_options_preflight_returns_local_json_405(self):
         self.make_wiki()
@@ -1640,6 +1745,8 @@ class ServeTests(unittest.TestCase):
         self.make_wiki()
 
         html = serve._render_propose(project="link", source="raw/first-memory.md")
+
+        html += _asset_text()
 
         self.assertIn('<a href="/propose">propose</a>', html)
         self.assertIn('data-proposal-sources', html)

@@ -32,6 +32,8 @@ class WebLayoutCoreTests(unittest.TestCase):
 
     def test_layout_escapes_title_and_page_class(self):
         html = render_layout('<Title>', "<main>Body</main>", page_class='graph" onclick="bad')
+        from link_core.web_layout import viewer_assets
+        html += "".join(text for text, _ in viewer_assets().values())
 
         self.assertIn("<title>&lt;Title&gt; — Link</title>", html)
         self.assertIn('class="graph&quot; onclick=&quot;bad"', html)

@@ -37,6 +37,10 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- **The viewer's home page stays small.** It listed every page in the wiki
+  (173 KB of links at 1,000 pages); each section now shows twelve and links
+  to the filtered, paged view for the rest. `/api/pages` is capped at 500
+  by default with the total in `X-Total-Count`.
 - **LinkBar 1.5.0.** The CLI bridge read a command's stdout to the end
   before reading stderr, so any command that wrote more than a pipe buffer
   to stderr first (a Python traceback from a broken venv, pip or model
@@ -129,6 +133,20 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   handoff track found one more gap, closed here: a password written in
   prose ("the staging password is ...") passed through handoffs and
   captures verbatim; it is now redacted like a token.
+- **The local viewer's Content-Security-Policy no longer allows inline
+  script.** Every page inlined 65 KB of CSS and JavaScript, which forced
+  `'unsafe-inline'` into the policy, so a single escaping slip anywhere would
+  have been executable. The assets are now served as content-hashed files
+  (cached for good, a new build is a new URL), the one page-specific
+  inline script - the graph - carries a fresh nonce per response, and the
+  policy allows only same-origin scripts and styles plus that nonce.
+- **A web page can no longer lock you out of your own viewer.** The
+  mutation rate limit counted every POST before checking where it came
+  from, so any site you visited could send 180 blind form posts to
+  localhost and disable Mark reviewed, Archive and Save for a minute, over
+  and over. Only requests that prove they come from the viewer are
+  counted now, and the Origin/Referer check also requires the viewer's own
+  port instead of accepting any localhost origin.
 - **Capture commands refuse symlinks**, so `delete-capture` can no longer be
   pointed at a memory page through a link in `raw/`, and capture
   de-duplication sees all of a capture's proposals rather than the first

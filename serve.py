@@ -6,6 +6,7 @@ import errno
 import html
 import http.server
 import json
+import secrets
 import os
 import re
 import socketserver
@@ -108,6 +109,8 @@ from link_core.web_layout import (
     render_footer_html as _core_render_footer_html,
     render_header_html as _core_render_header_html,
     render_layout as _core_render_layout,
+    viewer_assets as _core_viewer_assets,
+    NONCE_PLACEHOLDER as _core_nonce_placeholder,
 )
 from link_core.web_graph import (
     GRAPH_CATEGORY_COLORS as _core_graph_category_colors,
@@ -146,6 +149,7 @@ from link_core.web_http import (
     resolve_raw_static_path as _core_resolve_raw_static_path,
     safe_resolve as _core_safe_resolve,
     SVG_CONTENT_SECURITY_POLICY as _core_svg_content_security_policy,
+    html_content_security_policy as _core_html_content_security_policy,
     validate_local_browser_source_headers as _core_validate_local_browser_source_headers,
     validate_local_host_header as _core_validate_local_host_header,
 )
@@ -208,6 +212,8 @@ MAX_PROPOSAL_SOURCE_BYTES = 64 * 1024
 MAX_RAW_SOURCE_BYTES = 60 * 1024
 LOCAL_ACTION_HEADER = "X-Link-Local-Action"
 LOCAL_ACTION_VALUES = {"1", "true", "yes"}
+API_PAGES_DEFAULT_LIMIT = 500
+API_PAGES_MAX_LIMIT = 5000
 MUTATION_RATE_LIMIT = 180
 MUTATION_RATE_WINDOW_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 15
@@ -1023,9 +1029,14 @@ def _render_all(query: dict[str, list[str]] | None = None):
     sorted_pages = sorted(pages, key=lambda x: x["title"])
     type_counts = Counter(str(page.get("type") or page.get("category") or "root") for page in sorted_pages)
     active_type = _query_text(query, "type", "page_type", max_len=80).lower()
+    # A filter value matches the page's type label or its folder, so the
+    # home page's "view all concepts" link lands on the same pages it listed.
     visible_pages = [
         page for page in sorted_pages
-        if not active_type or str(page.get("type") or page.get("category") or "root").lower() == active_type
+        if not active_type or active_type in {
+            str(page.get("type") or page.get("category") or "root").lower(),
+            str(page.get("category") or "").lower(),
+        }
     ]
     total = len(visible_pages)
     window = visible_pages[offset:offset + limit]
@@ -1486,8 +1497,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._head_only = False
         if not self._require_allowed_host():
             return
-        if not self._require_mutation_rate_limit():
-            return
+        # Rate limiting happens after a request proves it comes from the
+        # viewer (see _require_local_action_header). Counting every POST
+        # first let any web page fire 180 blind form posts at localhost and
+        # lock the user's own review buttons for a minute, indefinitely.
         parsed = urllib.parse.urlparse(self.path)
         self._handle_api_post(parsed.path)
 
@@ -1508,6 +1521,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(result, status=http_status)
             return
         if path == "/api/propose-memories":
+            # Read-only and header-free by design; it gets its own bucket so
+            # it can never starve the mutation buckets.
+            if not self._require_mutation_rate_limit(bucket="propose"):
+                return
             payload = self._read_json_or_reply({"proposed": False, "count": 0, "proposals": []})
             if payload is None:
                 return
@@ -1583,7 +1600,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
-        if path == "/logo.svg":
+        if path.startswith("/assets/link-"):
+            asset = _core_viewer_assets().get(path)
+            if asset is None:
+                self._err("asset")
+            else:
+                self._asset(*asset)
+        elif path == "/logo.svg":
             self._file(_brand_file("logo.svg"), "image/svg+xml")
         elif path == "/logo.png":
             self._file(_brand_file("logo.png"), "image/png")
@@ -1651,7 +1674,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in {"/api", "/api/"}:
             self._json(_api_discovery_payload())
         elif path == "/api/pages":
-            self._json(_all_pages())
+            # Unbounded, this sent every page's metadata on each call (355 KB
+            # at 1k pages). /api/page-list is the paged endpoint; this one
+            # keeps its list shape, capped, with the total in a header.
+            limit, limit_error = _core_parse_bounded_int(
+                query.get("limit", [str(API_PAGES_DEFAULT_LIMIT)])[0], "limit", API_PAGES_DEFAULT_LIMIT, 1, API_PAGES_MAX_LIMIT)
+            if limit_error:
+                self._json({"error": limit_error}, status=400)
+                return
+            pages = _all_pages()
+            self._json(pages[: int(limit or API_PAGES_DEFAULT_LIMIT)], headers={
+                "X-Total-Count": str(len(pages)),
+                "X-Link-Truncated": "true" if len(pages) > int(limit or API_PAGES_DEFAULT_LIMIT) else "false",
+            })
         elif path == "/api/page-list":
             limit, limit_error = _core_parse_bounded_int(query.get("limit", ["100"])[0], "limit", 100, 1, 1000)
             offset, offset_error = _core_parse_bounded_int(query.get("offset", ["0"])[0], "offset", 0, 0, 1000000)
@@ -1844,11 +1879,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     project=_query_text(query, "project", max_len=80),
                 ))
 
+    def _with_nonce(self, body: str) -> tuple[bytes, str]:
+        nonce = secrets.token_urlsafe(18)
+        marked = f'nonce="{_core_nonce_placeholder}"'
+        return body.replace(marked, f'nonce="{nonce}"').encode(), _core_html_content_security_policy(nonce)
+
     def _ok(self, body: str):
-        encoded = body.encode()
+        encoded, policy = self._with_nonce(body)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self._security_headers()
+        self._security_headers(policy)
         self.send_header("Content-Length", str(len(encoded)))
         self._no_store_headers()
         self.end_headers()
@@ -1856,10 +1896,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(encoded)
 
     def _err(self, name: str):
-        encoded = _layout("Not Found", f"<h1>Not found</h1><p>No page: {html.escape(name)}</p>").encode()
+        encoded, policy = self._with_nonce(_layout("Not Found", f"<h1>Not found</h1><p>No page: {html.escape(name)}</p>"))
         self.send_response(404)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self._security_headers()
+        self._security_headers(policy)
         self.send_header("Content-Length", str(len(encoded)))
         self._no_store_headers()
         self.end_headers()
@@ -1892,9 +1932,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             allowed, error = _core_validate_local_browser_source_headers(
                 self.headers.get("Origin", ""),
                 self.headers.get("Referer", ""),
+                allowed_port=self._server_port(),
             )
             if allowed:
-                return True
+                # Only requests that proved they come from the viewer count
+                # against the mutation limit.
+                return self._require_mutation_rate_limit()
             payload = dict(error_payload or {"updated": False})
             payload["error"] = error
             self._json(payload, status=403)
@@ -1906,10 +1949,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         }, status=403)
         return False
 
-    def _require_mutation_rate_limit(self) -> bool:
+    def _server_port(self) -> int | None:
+        address = getattr(getattr(self, "server", None), "server_address", None)
+        try:
+            return int(address[1]) if address else None
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    def _require_mutation_rate_limit(self, bucket: str = "mutation") -> bool:
         client_host = self.client_address[0] if self.client_address else "local"
         with _rate_limiter_lock:
-            allowed, retry_after = _mutation_rate_limiter.check(client_host)
+            allowed, retry_after = _mutation_rate_limiter.check(f"{bucket}:{client_host}")
         if allowed:
             return True
         self._json(
@@ -1984,6 +2034,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             return None, "JSON body must be an object", 400
         return payload, None, 200
+
+    def _asset(self, text: str, content_type: str) -> None:
+        # Content-hashed path: safe to cache forever, a new build is a new URL.
+        encoded = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self._security_headers()
+        self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.end_headers()
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(encoded)
 
     def _security_headers(self, content_security_policy: str = CONTENT_SECURITY_POLICY):
         for key, value in _core_local_security_headers(API_VERSION, content_security_policy):
