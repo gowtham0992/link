@@ -250,7 +250,9 @@ def link_status(
         next_actions.append(_action(
             "seed source-backed project context",
             "admin",
-            {"action": "seed_project", "project_root": "<project root>"},
+            # admin takes its options as a JSON string in `arguments`; a
+            # top-level project_root was dropped by the MCP layer.
+            {"action": "seed_project", "arguments": '{"project_root": "<project root>"}'},
         ))
         next_actions.append(_action("add raw sources or inspect ingest readiness", "ingest", {"action": "status"}))
         next_actions.append(_action("show first-run prompts", "admin", {"action": "prompts"}))

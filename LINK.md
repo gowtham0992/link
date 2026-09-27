@@ -599,7 +599,7 @@ Used during query to find related pages, and during lint to detect orphans and b
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/page-list?limit=100&offset=0` | Bounded page metadata list for agents and large wikis, with follow-up pagination actions |
-| `GET /api/pages` | Full page metadata list for local UI/export use |
+| `GET /api/pages?limit=500` | Page metadata list for local UI/export use, capped at 500 by default (`limit` up to 5000); `X-Total-Count` and `X-Link-Truncated` headers say when more exist — use `/api/page-list` to paginate |
 | `GET /api/status?validate=true` | Readiness summary with page/memory counts, optional validation summary, and safe next actions |
 | `GET /api/ingest-status` | Raw ingest state with pending files, represented-source completion cards, safety summary, graph health, and next prompts/checks |
 | `GET /api/memory-brief?q=<task>&project=<slug>` | Startup memory context: relevant memories, review warnings, capture status, and safe rules |

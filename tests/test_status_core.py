@@ -136,7 +136,7 @@ class StatusCoreTests(unittest.TestCase):
         self.assertEqual(payload["next_actions"][0]["tool"], "admin")
         self.assertEqual(
             payload["next_actions"][0]["arguments"],
-            {"action": "seed_project", "project_root": "<project root>"},
+            {"action": "seed_project", "arguments": '{"project_root": "<project root>"}'},
         )
         self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
         self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "status"})

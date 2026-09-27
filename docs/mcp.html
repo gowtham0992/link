@@ -143,7 +143,7 @@ python3 -m link_mcp --semantic-setup --wiki ~/link/wiki</code></pre>
           <li>Call <code>ingest</code> when the user drops files into <code>raw/</code>.</li>
           <li>Call <code>remember</code> only after the user explicitly approves durable memory.</li>
           <li>At session end, call <code>admin(action="session_end")</code> or <code>capture_session</code> to propose memory candidates without saving them silently.</li>
-          <li>Call <code>review</code> for memory inbox, profile, audit, explain, archive, restore, forget, and visibility workflows.</li>
+          <li>Call <code>review</code> for memory inbox, profile, audit, log, receipt, explain, archive, restore, and forget workflows. Change who a memory is shared with through <code>admin(action="set_visibility")</code>, after the user approves.</li>
           <li>Call <code>admin</code> for backup, migrate, validate, rebuild, graph export, pages, captures, and advanced updates.</li>
         </ol>
 
@@ -155,6 +155,15 @@ remember
 ingest
 review
 admin</code></pre>
+        <p>What each slim tool accepts:</p>
+        <ul>
+          <li><code>status(include_validation)</code>: readiness and safe next actions.</li>
+          <li><code>recall(query, budget, project, mode, limit, context_path, as_of, memory_type)</code>: an empty query returns the session brief. <code>as_of</code> (YYYY-MM-DD) answers what was true on a date, and a time phrase in the query (&ldquo;last quarter&rdquo;) does the same. <code>memory_type</code> narrows memory recall to one kind.</li>
+          <li><code>remember(text, title, memory_type, scope, visibility, project, tags, review_after, expires_at, trigger, applies_when, supersedes, ...)</code>: only after the user asks or approves.</li>
+          <li><code>ingest(action)</code>: <code>status</code>, <code>validate</code>, <code>rebuild</code>.</li>
+          <li><code>review(action, ...)</code>: <code>inbox</code>, <code>audit</code>, <code>profile</code>, <code>log</code>, <code>wins</code>, <code>receipt</code>, <code>explain</code>, <code>reviewed</code>, <code>archive</code>, <code>restore</code>, <code>forget</code>, <code>consolidate</code>.</li>
+          <li><code>admin(action, arguments)</code>, where <code>arguments</code> is a JSON object string: <code>backup</code>, <code>migrate</code>, <code>validate</code>, <code>operations</code>, <code>prompts</code>, <code>search</code>, <code>context</code>, <code>pages</code>, <code>backlinks</code>, <code>graph_summary</code>, <code>graph</code>, <code>rebuild_index</code>, <code>rebuild_backlinks</code>, <code>seed_project</code>, <code>propose_memories</code>, <code>capture_session</code>, <code>session_end</code>, <code>capture_inbox</code>, <code>accept_capture</code>, <code>redact_capture</code>, <code>delete_capture</code>, <code>dedup_captures</code>, <code>update_memory</code>, <code>set_visibility</code>.</li>
+        </ul>
         <p>MCP prompts exposed by Link:</p>
         <pre><code>link_start
 link_brief
