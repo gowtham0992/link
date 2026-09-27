@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from pathlib import Path
 try:
     import sqlite3
@@ -101,7 +102,7 @@ def _open_persistent_fts(db_path: Path, signature_payload: str) -> "_FtsIndex | 
         return None
     conn = None
     try:
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
         row = conn.execute("SELECT value FROM link_fts_meta WHERE key = 'page_signatures'").fetchone()
         if not row or str(row[0]) != signature_payload:
             conn.close()
@@ -140,7 +141,7 @@ def _build_persistent_fts(
         conn.close()
         conn = None
         os.replace(tmp_path, db_path)
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
         return _FtsIndex(conn, persistent=True, reused=False, path=str(db_path))
     except Exception:
         if conn is not None:
@@ -180,7 +181,7 @@ def build_fts_index(
             return persistent
     conn = None
     try:
-        conn = sqlite3.connect(":memory:")
+        conn = sqlite3.connect(":memory:", check_same_thread=False)
         _populate_fts(conn, pages, fulltext)
         return _FtsIndex(conn)
     except Exception:
@@ -194,6 +195,16 @@ def _fts_expr(terms: list[str], operator: str) -> str:
 
 
 class _FtsIndex:
+    """A read-only FTS connection shared by the viewer's request threads.
+
+    The viewer serves each request on its own thread and keeps one index
+    between requests. SQLite's default same-thread check made every search
+    from another thread fail (silently, falling back to the slow path) and
+    every close from another thread raise, which crashed each viewer
+    mutation after it had already written. The connection is opened
+    shareable and every use is serialized by a lock.
+    """
+
     def __init__(
         self,
         conn: Any,
@@ -203,6 +214,7 @@ class _FtsIndex:
         path: str = "",
     ) -> None:
         self._conn = conn
+        self._lock = threading.Lock()
         self.persistent = persistent
         self.reused = reused
         self.path = path
@@ -224,10 +236,13 @@ class _FtsIndex:
             expressions.append(_fts_expr(terms, "OR"))
         for expression in expressions:
             try:
-                rows = self._conn.execute(
-                    "SELECT name FROM page_fts WHERE page_fts MATCH ? ORDER BY bm25(page_fts) LIMIT ?",
-                    (expression, max(1, limit)),
-                ).fetchall()
+                with self._lock:
+                    if self._conn is None:
+                        return []
+                    rows = self._conn.execute(
+                        "SELECT name FROM page_fts WHERE page_fts MATCH ? ORDER BY bm25(page_fts) LIMIT ?",
+                        (expression, max(1, limit)),
+                    ).fetchall()
             except Exception:
                 continue
             names = [str(row[0]) for row in rows]
@@ -236,11 +251,12 @@ class _FtsIndex:
         return []
 
     def close(self) -> None:
-        conn = self._conn
-        if conn is None:
-            return
-        self._conn = None
-        conn.close()
+        with self._lock:
+            conn = self._conn
+            if conn is None:
+                return
+            self._conn = None
+            conn.close()
 
     def __del__(self) -> None:
         try:

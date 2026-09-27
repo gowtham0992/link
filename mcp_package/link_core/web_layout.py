@@ -199,12 +199,6 @@ def _asset_path(kind: str) -> str:
     return next(path for path in viewer_assets() if path.startswith(prefix))
 
 
-# Placeholder the HTTP handler replaces with a fresh nonce per response.
-# It only ever appears inside a nonce="..." attribute written by Link's own
-# templates; escaped page content cannot produce that attribute.
-NONCE_PLACEHOLDER = "__LINK_CSP_NONCE__"
-
-
 def render_layout(title: str, body: str, page_class: str = "") -> str:
     body_class = f' class="{html.escape(page_class, quote=True)}"' if page_class else ""
     return f"""<!DOCTYPE html>

@@ -31,5 +31,31 @@ class FtsPruneTests(unittest.TestCase):
             self.assertFalse(any(name.startswith(("page-fts-v1", "page-fts-v2")) for name in remaining))
 
 
+class FtsThreadingTests(unittest.TestCase):
+    """The viewer builds the index on one request thread and uses it on others."""
+
+    def test_search_and_close_work_from_another_thread(self):
+        import threading
+
+        from link_core.search import build_fts_index
+        pages = [{"name": "alpha", "title": "Alpha", "aliases": [], "tags": [], "tldr": ""}]
+        index = build_fts_index(pages, {"alpha": "retrieval augmented generation"})
+        self.assertIsNotNone(index)
+        seen: dict[str, object] = {}
+
+        def other_request() -> None:
+            try:
+                seen["search"] = index.search("retrieval", 5)
+                index.close()
+                seen["closed"] = True
+            except Exception as exc:  # the viewer turned this into an empty response
+                seen["error"] = repr(exc)
+
+        worker = threading.Thread(target=other_request)
+        worker.start()
+        worker.join()
+        self.assertEqual(seen, {"search": ["alpha"], "closed": True})
+
+
 if __name__ == "__main__":
     unittest.main()

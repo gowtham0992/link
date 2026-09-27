@@ -123,10 +123,17 @@ def render_graph_script(
     label_json: str = '"sparse"',
     total_node_count: int,
     total_edge_count: int,
+    nonce: str,
 ) -> str:
-    """Render the browser-side graph simulation script."""
+    """Render the browser-side graph simulation script.
+
+    `nonce` is this response's CSP nonce, handed to this one script by the
+    server. It is never a placeholder replaced across the page afterwards:
+    that would also bless any markup that happened to contain the
+    placeholder text.
+    """
     return f"""
-<script nonce="__LINK_CSP_NONCE__">
+<script nonce="{html.escape(nonce, quote=True)}">
 (function() {{
   var nodes = {nodes_json};
   var edges = {edges_json};

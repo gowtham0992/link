@@ -111,7 +111,6 @@ from link_core.web_layout import (
     render_header_html as _core_render_header_html,
     render_layout as _core_render_layout,
     viewer_assets as _core_viewer_assets,
-    NONCE_PLACEHOLDER as _core_nonce_placeholder,
 )
 from link_core.web_graph import (
     GRAPH_CATEGORY_COLORS as _core_graph_category_colors,
@@ -151,6 +150,7 @@ from link_core.web_http import (
     safe_resolve as _core_safe_resolve,
     SVG_CONTENT_SECURITY_POLICY as _core_svg_content_security_policy,
     html_content_security_policy as _core_html_content_security_policy,
+    host_header_port as _core_host_header_port,
     validate_local_browser_source_headers as _core_validate_local_browser_source_headers,
     validate_local_host_header as _core_validate_local_host_header,
 )
@@ -1151,7 +1151,7 @@ def _render_explain_memory(identifier: str):
     )
 
 
-def _render_graph(query: dict[str, list[str]] | None = None):
+def _render_graph(query: dict[str, list[str]] | None = None, *, nonce: str = ""):
     query = query or {}
     focus = _query_text(query, "focus", "page", "node", max_len=300)
     graph_search = _query_text(query, "q", "search", max_len=200)
@@ -1222,6 +1222,7 @@ def _render_graph(query: dict[str, list[str]] | None = None):
         label_json=_json_for_script(graph_labels),
         total_node_count=total_node_count,
         total_edge_count=total_edge_count,
+        nonce=nonce,
     )
 
     body = _core_render_graph_page_body(
@@ -1680,7 +1681,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/all":
             self._ok(_render_all(query))
         elif path == "/graph":
-            self._ok(_render_graph(query))
+            nonce = secrets.token_urlsafe(18)
+            self._ok(_render_graph(query, nonce=nonce), nonce=nonce)
         elif path == "/search":
             self._ok(_render_search(_query_text(query, "q"), page_type=_query_text(query, "type", "page_type", max_len=80)))
         elif path.startswith("/page/"):
@@ -1901,13 +1903,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     project=_query_text(query, "project", max_len=80),
                 ))
 
-    def _with_nonce(self, body: str) -> tuple[bytes, str]:
-        nonce = secrets.token_urlsafe(18)
-        marked = f'nonce="{_core_nonce_placeholder}"'
-        return body.replace(marked, f'nonce="{nonce}"').encode(), _core_html_content_security_policy(nonce)
+    def _with_nonce(self, body: str, nonce: str | None = None) -> tuple[bytes, str]:
+        # The nonce reaches the page only through the renderer that asked for
+        # it (the graph script). The body is never searched and rewritten.
+        return body.encode(), _core_html_content_security_policy(nonce or secrets.token_urlsafe(18))
 
-    def _ok(self, body: str):
-        encoded, policy = self._with_nonce(body)
+    def _ok(self, body: str, nonce: str | None = None):
+        encoded, policy = self._with_nonce(body, nonce)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self._security_headers(policy)
@@ -1954,7 +1956,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             allowed, error = _core_validate_local_browser_source_headers(
                 self.headers.get("Origin", ""),
                 self.headers.get("Referer", ""),
-                allowed_port=self._server_port(),
+                # The port the browser used (Host), not the one we bound:
+                # port forwarding serves the viewer on another port.
+                allowed_port=_core_host_header_port(self.headers.get("Host", "")) or self._server_port(),
             )
             if allowed:
                 # Only requests that proved they come from the viewer count

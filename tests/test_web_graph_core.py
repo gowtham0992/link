@@ -186,6 +186,7 @@ class WebGraphCoreTests(unittest.TestCase):
             label_json='"neighbors"',
             total_node_count=10,
             total_edge_count=20,
+            nonce="abc123",
         )
 
         self.assertIn('var nodes = [{"id":"a","title":"A","category":"concepts"}];', script)

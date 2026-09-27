@@ -181,6 +181,23 @@ def _browser_source_port(header_value: object) -> int | None:
     return port
 
 
+def host_header_port(host_header: object, *, default: int | None = 80) -> int | None:
+    """The port the browser addressed, from the Host header ("localhost:8080" -> 8080).
+
+    This, not the port the server bound, is what a same-origin Origin carries:
+    behind `ssh -L 8080:127.0.0.1:3000` or an editor's port forwarding the
+    viewer listens on 3000 while the page is served, and posts, as :8080.
+    """
+    host = str(host_header or "").strip().lower()
+    if not host:
+        return None
+    try:
+        port = urlsplit(f"//{host}").port
+    except ValueError:
+        return None
+    return port if port is not None else default
+
+
 def validate_local_browser_source_headers(
     origin_header: object,
     referer_header: object,
@@ -190,8 +207,9 @@ def validate_local_browser_source_headers(
 ) -> tuple[bool, str | None]:
     """Allow browser-supplied Origin/Referer only from the local viewer.
 
-    With `allowed_port`, the source must also be the viewer's own port: any
-    other dev server or tool on localhost is a different origin, and the
+    With `allowed_port`, the source must also be the viewer's own port as the
+    browser sees it (pass `host_header_port` of the request's Host header):
+    any other dev server or tool on localhost is a different origin, and the
     custom header should not be the only thing standing between it and a
     mutation.
     """

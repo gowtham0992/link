@@ -581,6 +581,20 @@ class ServeTests(unittest.TestCase):
         _, _, again = _run_html_with_headers("/graph")
         self.assertNotEqual(again["Content-Security-Policy"], policy)
 
+    def test_page_content_can_never_borrow_the_response_nonce(self):
+        # The nonce used to be filled in by rewriting a placeholder anywhere
+        # in the page, so markup that contained the placeholder text got a
+        # live nonce. Now only the graph script is handed one.
+        wiki = self.make_wiki()
+        write_page(wiki, "concepts/bait.md",
+                   '---\ntype: concept\ntitle: Bait\n---\n# Bait\n\n'
+                   '<script nonce="__LINK_CSP_NONCE__">alert(1)</script>\n'
+                   'nonce="__LINK_CSP_NONCE__"\n')
+        status, body, headers = _run_html_with_headers("/page/bait")
+        self.assertEqual(status, 200)
+        nonce = re.search(r"'nonce-([^']+)'", headers["Content-Security-Policy"]).group(1)
+        self.assertNotIn(nonce, body)
+
     def test_assets_are_served_with_long_cache(self):
         path = next(iter(serve._core_viewer_assets()))
         status, _, headers = _run_html_with_headers(path)
@@ -2341,6 +2355,21 @@ class ServeTests(unittest.TestCase):
         self.assertIn("Origin/Referer", bad_origin_payload["error"])
         self.assertEqual(rebuilt["backlinks"], {"b": ["a"]})
         self.assertEqual(rebuilt["forward"], {"a": ["b"]})
+
+    def test_mutations_work_behind_a_forwarded_port(self):
+        # `ssh -L 8080:127.0.0.1:3000` or editor port forwarding: the viewer
+        # binds 3000, the browser addresses and posts from :8080. Comparing
+        # the Origin with the bound port 403'd every mutation there.
+        wiki = self.make_wiki()
+        (wiki / "_backlinks.json").write_text(json.dumps({"backlinks": {}, "forward": {}}), encoding="utf-8")
+        base = {"Content-Type": "application/json", "Content-Length": "2", "X-Link-Local-Action": "true"}
+        forwarded_status, forwarded = run_handler("POST", "/api/rebuild-backlinks", body=b"{}", headers={
+            **base, "Host": "localhost:8080", "Origin": "http://localhost:8080"})
+        other_site_status, other_site = run_handler("POST", "/api/rebuild-backlinks", body=b"{}", headers={
+            **base, "Host": "localhost:8080", "Origin": "http://localhost:5173"})
+        self.assertEqual(forwarded_status, 200, forwarded)
+        self.assertEqual(other_site_status, 403)
+        self.assertIn("Origin/Referer", other_site["error"])
 
     def test_rebuild_backlinks_reports_read_errors(self):
         wiki = self.make_wiki()

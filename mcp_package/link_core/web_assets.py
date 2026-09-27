@@ -868,14 +868,40 @@ INBOX_JS = """
       finish(item);
     } catch (err) { say(err.message); }
   }
+  // Send only what the person changed. The claim box starts filled in, so
+  // posting it unchanged appended a duplicate "Update" block to the memory
+  // on every Save.
+  function initialVisibility(select) {
+    for (var i = 0; i < select.options.length; i++) {
+      if (select.options[i].defaultSelected) return select.options[i].value;
+    }
+    return select.options.length ? select.options[0].value : '';
+  }
   async function save(item) {
-    var text = item.querySelector('[data-inbox-text]').value.trim();
-    var visibility = item.querySelector('[data-inbox-visibility]').value;
+    var textBox = item.querySelector('[data-inbox-text]');
+    var select = item.querySelector('[data-inbox-visibility]');
+    var text = textBox.value.trim();
+    var visibility = select.value;
+    var textChanged = text && text !== textBox.defaultValue.trim();
+    var visibilityChanged = visibility && visibility !== initialVisibility(select);
     var memory = item.getAttribute('data-memory');
+    if (!textChanged && !visibilityChanged) {
+      say('Nothing changed.');
+      item.querySelector('[data-inbox-edit]').open = false;
+      return;
+    }
     say('Saving...');
     try {
-      if (text) await post('/api/update-memory', {memory: memory, text: text, source: 'inbox edit'});
-      if (visibility) await post('/api/set-memory-visibility', {memory: memory, visibility: visibility});
+      if (textChanged) {
+        await post('/api/update-memory', {memory: memory, text: text, source: 'inbox edit'});
+        textBox.defaultValue = text;
+      }
+      if (visibilityChanged) {
+        await post('/api/set-memory-visibility', {memory: memory, visibility: visibility});
+        for (var i = 0; i < select.options.length; i++) {
+          select.options[i].defaultSelected = select.options[i].value === visibility;
+        }
+      }
       say('Saved. Review it when it reads right.');
       item.querySelector('[data-inbox-edit]').open = false;
     } catch (err) { say(err.message); }
