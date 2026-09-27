@@ -21,7 +21,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 
-from .memory import recall_memories
+from .memory import (
+    memory_claim_text,
+    recall_memories,
+    significant_memory_tokens,
+    stemmed_memory_tokens,
+)
 from .usage import load_usage
 
 _CONSTRAINT_RE = re.compile(
@@ -31,6 +36,7 @@ _CONSTRAINT_RE = re.compile(
 # single stray shared token can never trigger an interruption.
 _STRONG_CONFIDENCE = {"high", "strong", "moderate"}
 _MIN_SCORE = 15
+_MIN_SHARED_WORDS = 2
 _MIN_PROMPT_CHARS = 12
 # One reminder per memory per stretch of work: repeating the same
 # constraint every prompt is how a guard gets turned off.
@@ -88,6 +94,17 @@ def guard_reminder(
     score_obj = top.get("score")
     score = score_obj if isinstance(score_obj, int) else 0
     if confidence not in _STRONG_CONFIDENCE or score < _MIN_SCORE:
+        return None
+    # Interrupting needs more than one shared content word: "can you deploy
+    # it" shares only "deploy" with a Tuesdays-only deploy rule, and is not
+    # a request to deploy on the wrong day.
+    record = next(
+        (item for item in constraints if str(item.get("name") or "") == str(top.get("name") or "")),
+        top,
+    )
+    prompt_words = stemmed_memory_tokens(significant_memory_tokens(text))
+    memory_words = stemmed_memory_tokens(significant_memory_tokens(memory_claim_text(record)))
+    if len(prompt_words & memory_words) < _MIN_SHARED_WORDS:
         return None
     return {
         "name": str(top.get("name") or ""),

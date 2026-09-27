@@ -1272,7 +1272,9 @@ class LinkCliTests(unittest.TestCase):
 
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["count"], 5)
+        # Four demo memories name "local" or "memory" as words; a fifth used to
+        # match only because "local" was found inside other words.
+        self.assertEqual(payload["count"], 4)
         self.assertEqual(payload["memories"][0]["name"], "local-memory-preference")
         self.assertEqual(payload["memories"][0]["recall"]["state"], "needs_review")
         self.assertEqual(payload["memories"][0]["review_issue_count"], 1)

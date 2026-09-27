@@ -93,6 +93,14 @@ NEGATION_TERMS = {
     "not",
     "without",
 }
+# How a question is asked, not what it is about. Left in, "what is the
+# branch policy" needed "what" in a memory's head to rate strong, so ordinary
+# questions were capped at moderate and "where do I push" scored nothing.
+MEMORY_STOPWORDS |= {
+    "what", "which", "where", "when", "who", "whom", "whose", "why", "how",
+    "does", "did", "can", "could", "would", "should", "shall", "will",
+    "are", "was", "were", "our", "you", "your", "they", "them", "their",
+}
 CONFLICT_OPTION_GROUPS = {
     "branch_policy": {"develop", "development", "direct", "feature", "main", "master", "release"},
     "storage_policy": {"cloud", "hosted", "local", "offline", "remote"},
@@ -401,10 +409,23 @@ def stem_memory_token(token: str) -> str:
     services. Enough to make "committing" match "commit" and "answers"
     match "answer" without changing Link's local-first story.
     """
-    for suffix in ("ing", "ed", "es", "s"):
-        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
-            return token[: -len(suffix)]
-    return token
+    if not token.isascii():
+        return token
+    stem = token
+    if stem.endswith("ies") and len(stem) - 3 >= 3:
+        stem = stem[:-3] + "y"  # policies -> policy
+    else:
+        for suffix in ("ing", "ed", "es", "s"):
+            if stem.endswith(suffix) and len(stem) - len(suffix) >= 3:
+                stem = stem[: -len(suffix)]
+                if suffix in {"ing", "ed"} and len(stem) >= 4 and stem[-1] == stem[-2] and stem[-1] not in "lsz":
+                    stem = stem[:-1]  # committing -> committ -> commit
+                break
+    # A final silent e is dropped so both forms of a word meet:
+    # license/licensed -> licens, package/packages -> packag.
+    if stem.endswith("e") and len(stem) >= 5:
+        stem = stem[:-1]
+    return stem
 
 
 def stemmed_memory_tokens(tokens: set[str]) -> set[str]:
@@ -434,7 +455,7 @@ def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
     if trigger:
         tldr = f"{tldr} {trigger}".strip()
     body = str(record.get("body", "")).lower()
-    if q and (q in title or q in tldr):
+    if q and len(q.split()) >= 2 and (_contains_phrase(title, q) or _contains_phrase(tldr, q)):
         return "strong"
     if not significant:
         return "weak"
@@ -443,14 +464,22 @@ def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
         memory_tokens(tldr) | memory_tokens(tags)
     )
     all_tokens = head_tokens | stemmed_memory_tokens(memory_tokens(body))
-    if significant <= head_tokens:
+    # One shared content word is never strong evidence on its own: with
+    # question words no longer counted, "can you deploy it" is just "deploy",
+    # and a memory titled with that word is a candidate, not an answer.
+    if len(significant) >= 2 and significant <= head_tokens:
         return "strong"
-    coverage = len(significant & all_tokens) / len(significant)
-    if coverage >= 0.5:
+    matched = significant & all_tokens
+    if len(matched) >= 2 and len(matched) / len(significant) >= 0.5:
         return "moderate"
     if significant & title_tokens:
         return "moderate"
     return "weak"
+
+
+def _contains_phrase(text: str, phrase: str) -> bool:
+    """Whole-word containment: "main" is not inside "maintain"."""
+    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
 
 
 def expanded_memory_query_tokens(value: str) -> set[str]:
@@ -2542,6 +2571,31 @@ def memory_brief(
     }
 
 
+# Inflections that turn one word into another form of itself. Matching a
+# query word against a field used plain substring tests, which found real
+# forms ("package" in "packages") but also noise: "main" inside "domain",
+# "the" inside "theme", "how" inside "show". A word now matches a field token
+# only when they are equal or differ by one of these endings.
+_INFLECTION_SUFFIXES = frozenset({
+    "s", "es", "d", "ed", "ing", "er", "ers", "ion", "ions", "ment", "ments", "ly", "al",
+})
+
+
+def _same_word(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    if len(short) < 3 or not long_.startswith(short):
+        return False
+    return long_[len(short):] in _INFLECTION_SUFFIXES
+
+
+def _field_has_word(field_tokens: set[str], token: str) -> bool:
+    if token in field_tokens:
+        return True
+    return any(_same_word(token, candidate) for candidate in field_tokens)
+
+
 def score_memory(record: Mapping[str, object], query: str) -> int:
     q = query.lower().strip()
     tokens = [token for token in re.split(r"\W+", q) if len(token) >= 3]
@@ -2578,13 +2632,23 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     if q and q in body:
         score += 4
     for token in tokens:
-        if token in title:
+        if token in MEMORY_STOPWORDS:
+            continue
+        # Exact words carry full weight; another form of the word ("required"
+        # for "require") counts a little less, so an exact match wins a tie.
+        if token in title_tokens:
             score += 6
-        if token in tldr:
+        elif _field_has_word(title_tokens, token):
             score += 4
-        if token in tags:
+        if token in tldr_tokens:
+            score += 4
+        elif _field_has_word(tldr_tokens, token):
             score += 3
-        if token in body:
+        if token in tags_tokens:
+            score += 3
+        elif _field_has_word(tags_tokens, token):
+            score += 2
+        if token in body_tokens:
             score += 1
     if significant_tokens:
         searchable = title_tokens | tldr_tokens | tags_tokens | body_tokens

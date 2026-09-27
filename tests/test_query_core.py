@@ -198,9 +198,11 @@ class QueryCoreTests(unittest.TestCase):
         )
         (wiki / "_backlinks.json").write_text(json.dumps(build_backlinks(wiki)), encoding="utf-8")
 
+        # "oauth setup", not "auth setup": "auth" used to match inside
+        # "oauth" by substring, which is also how "main" matched "domain".
         payload = query_link(
             wiki,
-            "auth setup",
+            "oauth setup",
             build_wiki_cache(wiki),
             memory_records(wiki),
             budget="micro",
