@@ -106,5 +106,27 @@ class RealModelTests(unittest.TestCase):
                                         "decision", "user", "", _REAL)
         self.assertEqual(flags, [])
 
+class NliMissingRetryTests(unittest.TestCase):
+    def test_a_failed_load_is_retried_later(self):
+        from unittest import mock
+
+        from link_core import nli
+
+        key = nli.nli_model_name()
+        saved = dict(nli._CACHE), dict(nli._MISSING_AT)
+        self.addCleanup(lambda: (nli._CACHE.clear(), nli._CACHE.update(saved[0]),
+                                 nli._MISSING_AT.clear(), nli._MISSING_AT.update(saved[1])))
+        nli._CACHE[key] = nli._MISSING
+        nli._MISSING_AT[key] = 0.0  # failed long ago
+        with mock.patch.object(nli, "nli_disabled", return_value=False), \
+                mock.patch.object(nli, "_model_cached_locally", return_value=True), \
+                mock.patch.object(nli, "nli_dependencies_installed", return_value=True), \
+                mock.patch.object(nli, "_model_files", side_effect=RuntimeError("still missing")) as files:
+            self.assertIsNone(nli.load_contradiction_scorer())
+            self.assertEqual(files.call_count, 1, "an old failure is retried")
+            self.assertIsNone(nli.load_contradiction_scorer())
+            self.assertEqual(files.call_count, 1, "a fresh failure is not retried at once")
+
+
 if __name__ == "__main__":
     unittest.main()

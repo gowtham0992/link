@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable, Sequence
 
 NLI_MODEL_ENV = "LINK_NLI_MODEL"
@@ -39,6 +40,10 @@ ContradictionScorer = Callable[[Sequence[tuple[str, str]]], list[float]]
 
 _CACHE: dict[str, object] = {}
 _MISSING = object()
+_MISSING_AT: dict[str, float] = {}
+# A failed load is retried after this long, so a long-running MCP server
+# picks up a model that `lnk semantic --setup --nli` fetched later.
+MISSING_MODEL_RETRY_SECONDS = 60.0
 
 
 def nli_disabled() -> bool:
@@ -99,16 +104,20 @@ def load_contradiction_scorer(allow_download: bool = False) -> ContradictionScor
         return None
     key = nli_model_name()
     cached = _CACHE.get(key)
-    if cached is _MISSING and not allow_download:
+    if (
+        cached is _MISSING and not allow_download
+        and time.monotonic() - _MISSING_AT.get(key, 0.0) < MISSING_MODEL_RETRY_SECONDS
+    ):
         return None
     if cached is not None and cached is not _MISSING:
         return cached  # type: ignore[return-value]
     try:
+        # Files first: a missing model is found without importing onnxruntime.
+        model_path, tokenizer_path, config_path = _model_files(allow_download)
         import numpy as np
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        model_path, tokenizer_path, config_path = _model_files(allow_download)
         session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
         tokenizer = Tokenizer.from_file(tokenizer_path)
         tokenizer.enable_truncation(MAX_PAIR_TOKENS)
@@ -120,6 +129,7 @@ def load_contradiction_scorer(allow_download: bool = False) -> ContradictionScor
     except Exception:
         if not allow_download:
             _CACHE[key] = _MISSING
+            _MISSING_AT[key] = time.monotonic()
         return None
 
     def _probabilities(pairs: Sequence[tuple[str, str]]) -> list[float]:
