@@ -1598,17 +1598,17 @@ def title_restates_claim(title: str, claim: str) -> bool:
     )
 
 
-def _update_restates_claim(record: Mapping[str, object], update_text: str) -> bool:
-    """True when an update is the same claim reworded ("Tuesdays" -> "Wednesdays").
+_ADDITIVE_UPDATE_RE = re.compile(
+    r"^\s*(?:also|additionally|in addition|plus|another|and also|as well as|furthermore|moreover|p\.?s\.?)\b"
+    r"|\b(?:too|as well)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
 
-    At least half of the content words shared with the claim's head. An
-    update that adds something new ("also pin pip to 24.0") shares few.
-    """
-    head = f"{record.get('title') or ''} {record.get('tldr') or ''}"
-    head_words = cached_stems(frozenset(significant_memory_tokens(head))) - _CONFLICT_CUE_TOKENS
-    new_words = cached_stems(frozenset(significant_memory_tokens(update_text))) - _CONFLICT_CUE_TOKENS
-    union = head_words | new_words
-    return bool(union) and len(head_words & new_words) / len(union) >= 0.5
+
+def _update_adds_to_claim(update_text: str) -> bool:
+    """True when an update says it adds to the claim rather than replacing it."""
+    first_line = update_text.strip().splitlines()[0] if update_text.strip() else ""
+    return bool(_ADDITIVE_UPDATE_RE.search(first_line))
 
 
 def rewrite_memory_head(body: str, old_title: str, new_text: str) -> tuple[str, str | None]:
@@ -1960,16 +1960,12 @@ def update_memory_page(
     original = page_path.read_text(encoding="utf-8", errors="replace")
     _, body = parse_frontmatter(original)
     updated_body = append_memory_update(body, clean_text, timestamp, clean_source)
-    # The head moves to the new text only when the update revises the claim
-    # ("Python 3.11" -> "3.12"). An update that adds to it ("also pin pip")
-    # is appended and leaves the claim agents read unchanged.
-    revises_claim = _update_restates_claim(record, clean_text) or bool(memory_conflict_candidates(
-        [record], clean_text, None,
-        str(record.get("memory_type") or "note"), str(record.get("scope") or "user"),
-        project=project or str(record.get("project") or ""), embedder=lambda _texts: [],
-    ))
+    # An update revises the claim ("standup moved to 10:00") unless it says
+    # it adds to it ("Also pin pip to 24.0"): an addition is appended and
+    # leaves the claim agents read unchanged. Guessing revisions from shared
+    # words missed most real ones and kept serving the stale value.
     new_title = None
-    if revises_claim:
+    if not _update_adds_to_claim(clean_text):
         updated_body, new_title = rewrite_memory_head(
             updated_body, str(record.get("title") or ""), clean_text
         )
@@ -3783,7 +3779,7 @@ _VALUE_WORD = r"[\w./:@+-]+"
 _CHANGE_VERB = (
     r"(?:mov(?:e|ed|es|ing)|migrat(?:e|ed|es|ing)|switch(?:ed|es|ing)?|chang(?:e|ed|es|ing)|"
     r"upgrad(?:e|ed|es|ing)|downgrad(?:e|ed|es|ing)|rais(?:e|ed|es|ing)|lower(?:ed|s|ing)?|"
-    r"increas(?:e|ed|es|ing)|decreas(?:e|ed|es|ing)|bump(?:ed|s|ing)?|went|shift(?:ed|s|ing)?|"
+    r"increas(?:e|ed|es|ing)|decreas(?:e|ed|es|ing)|bump(?:ed|s|ing)?|go|goes|going|gone|went|shift(?:ed|s|ing)?|"
     r"convert(?:ed|s|ing)?|ported|transition(?:ed|s|ing)?|updat(?:e|ed|es|ing)|reduc(?:e|ed|es|ing)|cut)"
 )
 _TRANSITION_OLD_RES = (
@@ -3798,11 +3794,22 @@ _TRANSITION_OLD_RES = (
 )
 
 
+# Words that say how a thing runs, not which thing it is: "The API runs on
+# Node 18" and "API servers now use Node 20" are one subject.
+_GENERIC_SUBJECT_STEMS = frozenset(stem_memory_token(word) for word in (
+    "run", "runs", "running", "use", "uses", "using", "used", "now", "currently", "still",
+    "server", "servers", "service", "services", "host", "hosted", "hosts", "live", "lives",
+    "power", "powered", "powers", "serve", "serves", "sit", "sits", "stay", "stays", "set", "pinned",
+))
+
+
 def _subject_words_only(tokens: set[str], other: set[str]) -> set[str]:
-    """Content words in `tokens` but not `other`, ignoring values and cue words."""
+    """Words naming a subject in `tokens` but not `other` (values, cues and generic verbs aside)."""
     return {
         token for token in tokens - other
-        if not _VALUE_RE.fullmatch(token) and stem_memory_token(token) not in _CONFLICT_CUE_TOKENS
+        if not _VALUE_RE.fullmatch(token)
+        and stem_memory_token(token) not in _CONFLICT_CUE_TOKENS
+        and stem_memory_token(token) not in _GENERIC_SUBJECT_STEMS
     }
 
 

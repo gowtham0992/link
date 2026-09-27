@@ -266,9 +266,10 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   its memory), and a Latin word inside Japanese text is a whole word.
 - **An update changes what recall shows.** `update-memory` appended the
   new claim but left the summary and a claim-shaped title on the old one,
-  so agents kept reading "Python 3.11" after the update to 3.12. A
-  revision now moves the summary and a claim-shaped title; an addition
-  ("also pin pip to 24.0") is appended and leaves the claim as it was.
+  so agents kept reading "Python 3.11" after the update to 3.12. An update
+  now moves the summary and a claim-shaped title, unless it says it adds
+  to the claim ("Also pin pip to 24.0", "... as well"): an addition is
+  appended and leaves the claim as it was.
 - **Contradiction detection sees value changes and more.** Version, port
   and count changes were invisible (short tokens were dropped), facts were
   never checked, "Never use Ruff" did not meet "Use Ruff for linting",
@@ -300,6 +301,12 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   safely across request threads. Present since 3.0.
 - **Inbox Save sends only what changed**, so changing a memory's
   visibility no longer appends a copy of its claim as an "update".
+- **Two machines syncing no longer break the audit log.** Only a
+  conflicted `log.md` was re-chained after a merge; when git merged it
+  cleanly, one machine's entries followed the other's with their own
+  previous hashes, and `lnk doctor` reported a broken chain on both
+  machines after ordinary use. A merged log is now always re-chained and
+  the re-anchor recorded. Present since 3.0.
 - **pip installs suggest next steps that run.** The CLI's suggested
   commands named a `link.py` that pip installs do not ship, even when the
   venv's `lnk` was first on PATH. They now say `lnk`, or name the file that
@@ -318,8 +325,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   archived is no longer resurrected by the next sync, and an imported copy
   is never exported back, so a teammate's deletion sticks. Until you
   review it, an import stays out of wiki search, topic context and
-  `index.md` as well as memory recall; once reviewed and edited, it is
-  yours. Team sync refuses a shared repo or incoming change that contains
+  `index.md` as well as memory recall; once reviewed you can edit it, and
+  the edit stays on your machine instead of overwriting the teammate's
+  page. Team sync refuses a shared repo or incoming change that contains
   a symlink anywhere, before merging, so a committed `wiki/log.md ->
   ~/.zshrc` can never be written through.
 - **`lnk sync` scans everything it pushes.** The secret gate only looked at
@@ -334,7 +342,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   `raw/`, ingest staging, operation snapshots, backups and caches are
   ignored and never staged; if an older setup tracked them, sync says how
   to untrack them rather than doing it, because the untracking commit
-  would delete those files on machines still running 3.x. `--init`
+  would delete those files on machines still running 3.x. A pull never
+  deletes or overwrites local private files, and a local edit to one
+  (`redact-capture` edits in place) no longer blocks later pulls. `--init`
   refuses to re-point a workspace that already has a different `origin`
   before it changes anything.
 - **Only your own words become proposals.** Claude Code writes subagent

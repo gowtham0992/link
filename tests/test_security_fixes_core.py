@@ -224,6 +224,38 @@ class PrivatePathPullTests(_TwoMachines):
         self.assertTrue(kept.exists(), "a pull must never delete local private files")
         self.assertEqual(kept.read_text(encoding="utf-8"), "old capture\n")
 
+    def test_a_local_edit_to_a_tracked_capture_does_not_block_pulls(self):
+        self._track_raw_on_a()
+        edited = self.b / "raw" / "memory-captures" / "old.md"
+        edited.write_text("old capture, redacted on this machine\n", encoding="utf-8")
+        # The other machine follows Link's advice and stops tracking raw/.
+        _git(self.a, "rm", "-r", "-q", "--cached", "raw")
+        _git(self.a, "commit", "-qm", "untrack raw")
+        _git(self.a, "push", "-q", "origin", "main")
+        for _ in range(2):  # and it keeps working on the next sync
+            report = sync_workspace(self.b, self.wiki_b, regenerate=_noop)
+            self.assertTrue(report["synced"], report)
+        self.assertEqual(edited.read_text(encoding="utf-8"), "old capture, redacted on this machine\n")
+
+
+
+class LogChainAcrossMachinesTests(_TwoMachines):
+    """Two machines taking turns must end with a log that verifies on both."""
+
+    def test_alternating_writes_keep_the_chain(self):
+        sync_workspace(self.b, self.wiki_b, regenerate=_noop)
+        for round_number in range(3):
+            for root, wiki in ((self.a, self.wiki_a), (self.b, self.wiki_b)):
+                append_log(wiki, f"2026-09-27T10:0{round_number}:{'0' if root == self.a else '3'}0Z",
+                           "remember", f"{root.name} fact {round_number}", [f"Created: memories/{root.name}-{round_number}.md"])
+                report = sync_workspace(root, wiki, regenerate=_noop)
+                self.assertTrue(report["synced"], report)
+        sync_workspace(self.a, self.wiki_a, regenerate=_noop)
+        for wiki in (self.wiki_a, self.wiki_b):
+            with self.subTest(wiki=str(wiki)):
+                result = verify_log_integrity(wiki)
+                self.assertTrue(result["passed"], result["findings"])
+
 
 class SyncInitValidationTests(unittest.TestCase):
     """Item 4: init must refuse before it touches the project repo."""
@@ -349,6 +381,27 @@ class TeamDeletionTests(unittest.TestCase):
             (team_wiki / "memories" / "deploy-window.md").unlink()
             self.assertEqual(export_team_memories(wiki, team_wiki), [])
             self.assertFalse((team_wiki / "memories" / "deploy-window.md").exists())
+
+    def test_an_edited_import_is_not_exported_or_reported_as_a_conflict(self):
+        from link_core.memory import mark_memory_reviewed, memory_records, update_memory_page
+
+        with tempfile.TemporaryDirectory(prefix="link-sec-team-edit-") as temp:
+            base = Path(temp)
+            team_wiki = base / "team" / "wiki"
+            (team_wiki / "memories").mkdir(parents=True)
+            root = base / "me"
+            root.mkdir()
+            wiki = _workspace(root)
+            ledger = root / ".link-team-imports.json"
+            _memory(team_wiki, "deploy-window", "Deploys happen on Tuesdays.", "team")
+            team_page = (team_wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8")
+            import_team_memories(team_wiki, wiki, ledger_path=ledger)
+            mark_memory_reviewed(wiki, "deploy-window", None, "2026-09-20T00:00:00Z")
+            update_memory_page(wiki, "deploy-window", "Also freeze deploys during the release week.", "test",
+                               "2026-09-21T00:00:00Z", records=memory_records(wiki))
+            self.assertEqual(export_team_memories(wiki, team_wiki), [])
+            self.assertEqual((team_wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8"), team_page)
+            self.assertEqual(import_team_memories(team_wiki, wiki, ledger_path=ledger)["conflicts"], [])
 
 
 class DeleteCaptureScopeTests(unittest.TestCase):

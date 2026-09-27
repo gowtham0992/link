@@ -363,7 +363,9 @@ def _history_rewrite_hint(root: Path, branch: str, has_upstream: bool) -> str:
     return (
         "An unpushed commit still contains the secret, even if the file is redacted now. "
         "Link does not rewrite history for you. Nothing has reached the remote yet, so after redacting "
-        f"run `git -C {root} update-ref -d HEAD` (your files stay as they are) and sync again."
+        f"run `git -C {root} update-ref -d HEAD` (your files stay as they are) and sync again. "
+        "That starts the workspace's git history over: if you kept history here before syncing, "
+        "remove the secret with an interactive rebase instead."
     )
 
 
@@ -524,6 +526,44 @@ def _private_files_on_disk(root: Path) -> list[str]:
     return [rel for rel in _z_names(listing) if (root / rel).is_file() and not (root / rel).is_symlink()]
 
 
+def _set_aside_dirty_private(root: Path) -> tuple[dict[str, bytes], list[str]]:
+    """Local edits to still-tracked private files, reset so a merge can run.
+
+    Sync never stages private files, so an edit to a tracked raw/ capture
+    (redact-capture edits in place) stayed dirty, and every later merge that
+    touched it refused: "your local changes would be overwritten". Their
+    bytes are kept here and written back after the merge; private files
+    never sync, so the local copy always wins.
+    """
+    listing = _git(root, "diff", "--name-only", "-z", "HEAD", "--", *PRIVATE_TRACKED_PATHS, check=False).stdout
+    saved: dict[str, bytes] = {}
+    missing: list[str] = []
+    for rel in _z_names(listing):
+        path = root / rel
+        if path.is_symlink() or _symlinked_component(root, str(Path(rel).parent)):
+            continue
+        if path.is_file():
+            saved[rel] = path.read_bytes()
+        elif not path.exists():
+            missing.append(rel)
+    if saved or missing:
+        _git(root, "checkout", "HEAD", "--", *saved, *missing, check=False)
+    return saved, missing
+
+
+def _put_back_private(root: Path, saved: dict[str, bytes], missing: list[str]) -> None:
+    for rel, data in saved.items():
+        path = root / rel
+        if path.is_symlink() or _symlinked_component(root, str(Path(rel).parent)):
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    for rel in missing:
+        path = root / rel
+        if path.is_file() and not path.is_symlink():
+            path.unlink()
+
+
 def _restore_private_files(root: Path, before: str, paths: list[str]) -> list[str]:
     """Put back private files the merge removed from disk (as untracked files).
 
@@ -557,6 +597,86 @@ def _blocked(committed: bool, pulled: int, resolutions: list[dict[str, str]],
         "message": message,
         **extra,
     }
+
+
+def _merge_remote(root: Path, wiki_dir: Path, branch: str, regenerate: Callable[[], None]) -> list[dict[str, str]]:
+    """Merge origin/<branch> into HEAD, resolving the conflicts Link understands."""
+    resolutions: list[dict[str, str]] = []
+    # --allow-unrelated-histories: two teammates (or two machines)
+    # that ran --init independently share a remote without a common
+    # ancestor; their first sync is exactly this bootstrap merge.
+    merge = _git(root, "merge", "--no-edit", "--allow-unrelated-histories", f"origin/{branch}", check=False)
+    if merge.returncode != 0:
+        conflicted = _z_names(_git(root, "diff", "--name-only", "-z", "--diff-filter=U").stdout)
+        if not conflicted:
+            # The merge failed for another reason (untracked files in
+            # the way, a hook, a lock). Committing and pushing on top
+            # of that left MERGE_HEAD behind and a non-fast-forward
+            # push; stop cleanly instead.
+            _git(root, "merge", "--abort", check=False)
+            detail = (merge.stderr or merge.stdout or "").strip()[:300]
+            raise SyncError(f"could not merge the remote changes: {detail}")
+        try:
+            resolutions = _resolve_conflicts(root, wiki_dir, conflicted)
+            unresolved = _z_names(_git(root, "diff", "--name-only", "-z", "--diff-filter=U").stdout)
+            if unresolved:
+                raise SyncError("could not resolve merge conflicts in: " + ", ".join(unresolved[:5]))
+        except SyncError:
+            _git(root, "merge", "--abort", check=False)
+            raise
+        regenerate()
+        both = [r for r in resolutions if r["resolution"] == "both_versions"]
+        append_log(
+            wiki_dir,
+            utc_timestamp(),
+            "sync-merge",
+            f"Merged remote changes with {len(resolutions)} conflict(s) resolved",
+            [
+                f"{r['path']}: {r['resolution']}" for r in resolutions
+            ] + (["Hash chain re-anchored by this entry."]
+                 if any(r["resolution"] == "log_union" for r in resolutions) else [])
+              + ([f"Review both versions: run consolidate ({len(both)} pair(s))."] if both else []),
+        )
+        _stage_all(root)
+        _git(root, "commit", "--no-edit", check=False)
+    else:
+        _rechain_clean_merged_log(root, wiki_dir)
+        # A clean pull can bring new pages; index and backlinks are
+        # generated, so rebuild them instead of trusting the merge.
+        regenerate()
+    return resolutions
+
+
+def _rechain_clean_merged_log(root: Path, wiki_dir: Path) -> None:
+    """Rebuild the log chain when git combined both machines' logs by itself.
+
+    Only a conflicted log went through merge_log_texts. When git merged
+    wiki/log.md cleanly, one machine's entries sat after the other's with
+    their own previous hashes, and `lnk doctor` reported a broken chain on
+    both machines after ordinary two-machine use.
+    """
+    parents = _git(root, "rev-list", "--parents", "-n", "1", "HEAD", check=False).stdout.split()
+    if len(parents) < 3:
+        return  # a fast-forward: the log is exactly one side's
+    rel = "wiki/log.md"
+    ours = _git_bytes(root, "show", f"{parents[1]}:{rel}")
+    theirs = _git_bytes(root, "show", f"{parents[2]}:{rel}")
+    path = root / rel
+    if ours.returncode != 0 or theirs.returncode != 0 or not path.is_file() or path.is_symlink():
+        return
+    current = path.read_bytes()
+    if current in (ours.stdout, theirs.stdout):
+        return  # git took one side whole; that side's chain is intact
+    merged = merge_log_texts(
+        ours.stdout.decode("utf-8", errors="replace"), theirs.stdout.decode("utf-8", errors="replace"),
+    )
+    path.write_text(merged, encoding="utf-8")
+    append_log(
+        wiki_dir, utc_timestamp(), "sync-merge", "Merged remote log",
+        ["wiki/log.md: log_union", "Hash chain re-anchored by this entry."],
+    )
+    _git(root, "add", "--", rel)
+    _git(root, "commit", "-m", "link sync: re-chain merged log", check=False)
 
 
 def sync_workspace(
@@ -621,47 +741,11 @@ def sync_workspace(
         if pulled:
             before = _git(root, "rev-parse", "HEAD", check=False).stdout.strip()
             private_before = _private_files_on_disk(root)
-            # --allow-unrelated-histories: two teammates (or two machines)
-            # that ran --init independently share a remote without a common
-            # ancestor; their first sync is exactly this bootstrap merge.
-            merge = _git(root, "merge", "--no-edit", "--allow-unrelated-histories", f"origin/{branch}", check=False)
-            if merge.returncode != 0:
-                conflicted = _z_names(_git(root, "diff", "--name-only", "-z", "--diff-filter=U").stdout)
-                if not conflicted:
-                    # The merge failed for another reason (untracked files in
-                    # the way, a hook, a lock). Committing and pushing on top
-                    # of that left MERGE_HEAD behind and a non-fast-forward
-                    # push; stop cleanly instead.
-                    _git(root, "merge", "--abort", check=False)
-                    detail = (merge.stderr or merge.stdout or "").strip()[:300]
-                    raise SyncError(f"could not merge the remote changes: {detail}")
-                try:
-                    resolutions = _resolve_conflicts(root, wiki_dir, conflicted)
-                    unresolved = _z_names(_git(root, "diff", "--name-only", "-z", "--diff-filter=U").stdout)
-                    if unresolved:
-                        raise SyncError("could not resolve merge conflicts in: " + ", ".join(unresolved[:5]))
-                except SyncError:
-                    _git(root, "merge", "--abort", check=False)
-                    raise
-                regenerate()
-                both = [r for r in resolutions if r["resolution"] == "both_versions"]
-                append_log(
-                    wiki_dir,
-                    utc_timestamp(),
-                    "sync-merge",
-                    f"Merged remote changes with {len(resolutions)} conflict(s) resolved",
-                    [
-                        f"{r['path']}: {r['resolution']}" for r in resolutions
-                    ] + (["Hash chain re-anchored by this entry."]
-                         if any(r["resolution"] == "log_union" for r in resolutions) else [])
-                      + ([f"Review both versions: run consolidate ({len(both)} pair(s))."] if both else []),
-                )
-                _stage_all(root)
-                _git(root, "commit", "--no-edit", check=False)
-            else:
-                # A clean pull can bring new pages; index and backlinks are
-                # generated, so rebuild them instead of trusting the merge.
-                regenerate()
+            dirty_private, deleted_private = _set_aside_dirty_private(root)
+            try:
+                resolutions = _merge_remote(root, wiki_dir, branch, regenerate)
+            finally:
+                _put_back_private(root, dirty_private, deleted_private)
             restored_private = _restore_private_files(root, before, private_before)
             # The pulled log is another machine's history, verified by its
             # chain; accept its head as this machine's anchor.
@@ -765,7 +849,13 @@ def _imported_from_team(path: Path) -> bool:
         meta, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return False
-    return str(meta.get("imported_from") or "").strip().lower() == "team"
+    # A reviewed import the person then edited carries originally_imported_from
+    # (memory.update_memory_page): still the teammate's memory, with a local
+    # change. Exporting it overwrote their page and undid their deletions.
+    return "team" in {
+        str(meta.get("imported_from") or "").strip().lower(),
+        str(meta.get("originally_imported_from") or "").strip().lower(),
+    }
 
 
 def _refuse_symlinked_dirs(*paths: Path) -> None:

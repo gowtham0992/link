@@ -87,6 +87,11 @@ class FalseConflictTests(unittest.TestCase):
                       self._conflicts("The staging server listens on port 8080.",
                                       "Staging moved from port 8080 to 8443 when we turned on TLS."))
 
+    def test_paraphrased_revisions_still_conflict(self):
+        self.assertIn("changed_value", self._conflicts("The API runs on Node 18.", "API servers now use Node 20."))
+        self.assertIn("replaces_stated_value",
+                      self._conflicts("Backend Python is 3.11.", "Backend Python goes from 3.11 to 3.12."))
+
     def test_the_right_subject_is_not_demoted(self):
         api = _rec("api", "Node 20 runs the api.")
         worker = _rec("worker", "Node 18 runs the worker.", date="2026-03-01T00:00:00Z")
@@ -118,6 +123,23 @@ class AdditiveUpdateTests(unittest.TestCase):
         self.assertIn("Python 3.11", record["title"])
         self.assertIn("Python 3.11", record["tldr"])
         self.assertIn("pin pip to 24.0", (self.wiki / "memories" / f"{name}.md").read_text(encoding="utf-8"))
+
+    def test_real_revisions_move_the_claim(self):
+        pairs = [
+            ("Team standup is at 9:30 every morning", "Team standup moved to 10:00", "10:00"),
+            ("Deploys happen on Tuesdays", "Deploys now happen on Wednesdays after the freeze", "Wednesdays"),
+            ("The staging URL is staging.acme.dev", "Staging moved to stage.acme.io", "stage.acme.io"),
+            ("Use pnpm for the web app", "Switched the web app to bun", "bun"),
+            ("Release freeze starts on the 20th", "The release freeze now starts on the 15th", "15th"),
+        ]
+        for original, revision, marker in pairs:
+            with self.subTest(original=original):
+                for page in (self.wiki / "memories").glob("*.md"):
+                    page.unlink()
+                name = self._write(original)
+                update_memory_page(self.wiki, name, revision, "test", "2026-09-20T00:00:00Z",
+                                   records=memory_records(self.wiki))
+                self.assertIn(marker, memory_records(self.wiki)[0]["tldr"])
 
     def test_a_heading_inside_an_update_is_not_renamed(self):
         name = self._write("We deploy with Python 3.11 on the api service.")
