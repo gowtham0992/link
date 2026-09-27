@@ -4077,9 +4077,85 @@ _FIRST_PERSON_RE = re.compile(r"\b(?:i|we|my|our|me|us|user|human|please)\b")
 _IMPERATIVE_ABSOLUTE_RE = re.compile(r"^(?:no,?\s+)?(?:please\s+)?(?:always|never|avoid|do not|don't)\b")
 
 
+# Measured on real developer sessions: 58 proposals from 12 transcripts, 3
+# worth keeping. The junk fell into a handful of shapes, each rejected here
+# before a segment can classify as memory.
+_REQUEST_TO_AGENT_RE = re.compile(r"\b(?:want|wants|need|needs|would like)\s+(?:you|u|ya)\s+to\b")
+# "I want to know / see / win ..." is an intention for this conversation.
+_INTENTION_RE = re.compile(
+    r"\b(?:i|we|user)\s+(?:want|wants|need|needs)\s+to\s+"
+    r"(?:know|see|win|try|check|understand|learn|confirm|be|have|get|make sure|figure|find|look)\b"
+)
+_THROWAWAY_RE = re.compile(r"\b(?:lol|lmao|haha+|jk|rofl)\b|^(?:what if|let'?s say|lets say|suppose|imagine)\b|\bwhat if\b")
+# Link's own brief lines ("Deploy day (decision · user)") pasted back into a
+# session: an echo of stored memory, not something new.
+_LINK_LISTING_RE = re.compile(
+    r"·\s*(?:user|project|global)\)|\((?:prefe|decis|proje|proced|fact|note)\w*\s*·"
+    r"|\((?:prefe|decis|proje|proced)\w*\.?\s*$"
+)
+# Instructions about the work at hand rather than a standing rule: an
+# imperative "do not" that points at this task's things.
+_TASK_IMPERATIVE_RE = re.compile(r"^(?:no,?\s+)?(?:please\s+)?(?:do not|don't|dont|avoid)\b")
+_TASK_DEIXIS_RE = re.compile(
+    r"\b(?:this|these|that|those|here|now|yet|current|currently|anything|any|it|our|us|we|"
+    r"earlier|above|below|merely|simply|just|prematurely|the project|the repo|the files?)\b"
+)
+_DURABILITY_RE = re.compile(
+    r"\b(?:from now on|going forward|in (?:the )?future|every time|whenever|as a rule|in general|"
+    r"by default|ever again|ever)\b"
+)
+# Someone else's habit, not the user's rule: "she never knows", "they always".
+_THIRD_PARTY_ABSOLUTE_RE = re.compile(r"\b(?:she|he|they|it)\s+(?:\w+\s+)?(?:never|always)\b")
+# "always stays", "never being included": describing how something behaves,
+# not a rule about what to do.
+_STATIVE_ABSOLUTE_RE = re.compile(
+    r"\b(?:never|always)\s+(?:stay|stays|remain|remains|is|are|was|were|be|being|been|seem|seems|"
+    r"know|knows|happen|happens|get|gets|show|shows|work|works)\b"
+)
+# "I want a ...", "user wants the ...", "we do not want another ...": a
+# deliverable for this conversation. Standing wants are phrased about a
+# practice ("I want tests for every change"), not an article-led object.
+_TASK_GOAL_RE = re.compile(
+    r"\b(?:i|we|user)\s+(?:do not |don't |dont )?(?:want|wants)\s+"
+    r"(?:a|an|the|all|everything|it|this|that|these|like|something|some|more|another|to)\b"
+)
+_TIME_BOUND_RE = re.compile(r"\b(?:today|tomorrow|tonight|yesterday|right now|at the moment)\b")
+
+
+def non_durable_reason(text: str) -> str | None:
+    """Why a sentence is not durable memory, or None if it might be."""
+    lower = text.strip().lower()
+    if _LINK_LISTING_RE.search(text):
+        return "echo of a Link memory listing"
+    if _REQUEST_TO_AGENT_RE.search(lower):
+        return "a request to the agent, not a preference"
+    if _INTENTION_RE.search(lower):
+        return "an intention for this conversation"
+    if _THROWAWAY_RE.search(lower):
+        return "a throwaway or hypothetical"
+    if _THIRD_PARTY_ABSOLUTE_RE.search(lower):
+        return "someone else's habit, not the user's rule"
+    if _STATIVE_ABSOLUTE_RE.search(lower):
+        return "a description of behaviour, not a rule"
+    durable = _DURABILITY_RE.search(lower) or re.search(r"\b(?:always|never)\b", lower)
+    if _TASK_GOAL_RE.search(lower) and not durable:
+        return "a goal for this conversation"
+    if _TIME_BOUND_RE.search(lower):
+        return "tied to today, not durable"
+    # An imperative "do not" at the start of a sentence is almost always an
+    # instruction for the work at hand ("Do not edit any files", "Do not
+    # score the submission"). A standing rule says so: "from now on", "by
+    # default", "every time", or is phrased with never/always.
+    if _TASK_IMPERATIVE_RE.search(lower) and not durable:
+        return "an instruction for the current task"
+    return None
+
+
 def classify_memory_segment(segment: str) -> dict[str, object] | None:
     text = segment.strip()
     if is_interrogative(text):
+        return None
+    if non_durable_reason(text):
         return None
     lower = text.lower()
     if any(cue in lower for cue in ("maybe", "might", "not sure", "wondering", "considering", "could later")):
@@ -4142,6 +4218,11 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
             (
                 _BARE_ABSOLUTE_CUE,
                 r"\b(?:from now on|going forward)\b",
+                # Standing-rule framings. Descriptions that use the same words
+                # ("the pages update whenever we do") are stopped earlier by
+                # non_durable_reason.
+                r"\b(?:by default|as a rule|every time)\b",
+                r"\bwhenever\b.*\b(?:should|must|needs? to|has to|have to)\b",
             ),
         ),
     ]
@@ -4182,6 +4263,11 @@ def confidence_label(score: int) -> str:
 
 
 PROCEDURE_STEP_RE = re.compile(r"^\s*(?:\d+[.)]\s+|step\s+\d+\b)", re.IGNORECASE)
+_PROMPT_LIST_LEAD_RE = re.compile(
+    r"^(?:act as|you are|pretend|imagine|give me|rate|score|rank|pick|choose|answer|evaluate|"
+    r"consider|compare|list|here are|options?|criteria|questions?|i want|we want|i need|we need)\b",
+    re.IGNORECASE,
+)
 
 
 def extract_procedure_candidates(text: str, max_candidates: int = 3) -> list[dict[str, str]]:
@@ -4212,6 +4298,10 @@ def extract_procedure_candidates(text: str, max_candidates: int = 3) -> list[dic
                     trigger = previous.rstrip(":").strip()
                     trigger = re.sub(r"^(?:user|assistant)\s*:\s*", "", trigger, flags=re.IGNORECASE)
                 break
+        if trigger and _PROMPT_LIST_LEAD_RE.search(trigger):
+            # "Act as three people:", "Give me a verdict:" - a numbered list
+            # inside a prompt is not a recipe the user wants to keep.
+            continue
         body = ("\n".join([trigger + ":"] if trigger else []) + "\n" + "\n".join(steps)).strip()
         if len(body) > 1500:
             body = body[:1500].rstrip() + " …"
