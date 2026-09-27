@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
+from .provenance import add_anchors_to_page
 from .semantic import semantic_confidence_cap, semantic_match_points
 from .security import looks_like_password_note, secret_value_warnings
 from .frontmatter import (
@@ -1881,7 +1882,7 @@ def update_memory_page(
         timestamp=timestamp,
         paths=[f"wiki/memories/{page_path.name}", "wiki/_backlinks.json", "wiki/log.md"],
     ):
-        atomic_write_text(page_path, replace_markdown_body(updated_text, updated_body))
+        atomic_write_text(page_path, add_anchors_to_page(replace_markdown_body(updated_text, updated_body), clean_text))
         if log_writer:
             log_writer(
                 timestamp,
@@ -2158,6 +2159,7 @@ tags: {yaml_list(tag_values)}
         timestamp=timestamp,
         paths=journal_paths,
     ):
+        page = add_anchors_to_page(page, f"{clean_text}\n{clean_context}")
         atomic_write_text(page_path, page)
         if superseded_path is not None and superseded_record is not None:
             # Supersession is one atomic story: the successor records what it

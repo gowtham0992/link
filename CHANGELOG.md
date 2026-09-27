@@ -24,6 +24,16 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   evidence ("package.json no longer defines scripts.deploy:staging").
   Memories also get a per-memory verdict against the checkout -
   `verified`, `stale`, or `unverifiable` when there is nothing to check.
+- **Memories about code are anchored to the lines they describe.** When a
+  memory is written or updated inside a git checkout and it names a
+  repository file together with a symbol in that file ("`parse_config` in
+  src/app.py must stay side-effect free"), Link records `path:line symbol`
+  in the memory's `anchors` frontmatter - found by reading the file, not by
+  a model. The staleness verdict re-reads those lines: an anchor holds,
+  has moved (with the new line), or is gone because the symbol or the file
+  disappeared. This catches what path checks cannot: a function deleted or
+  renamed while its file stayed. Ordinary memories never get anchors, and
+  `LINK_ANCHORS=off` turns them off.
 - **A claim-shaped recall slice.** `scripts/eval_claim_updates.py` asks the
   question fact-update benchmarks ask and LoCoMo does not: when a fact
   changed two or three times (a rate limit, a port, a database, a deploy

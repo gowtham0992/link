@@ -171,20 +171,43 @@ class StalenessChecker:
         results.extend(self._symbols.findings(text))
         return results
 
-    def verdict(self, text: str) -> dict[str, object]:
+    def anchor_findings(self, anchors: Iterable[str] | None) -> list[dict[str, str]]:
+        """Line anchors (see provenance.py) that moved or are gone."""
+        if not anchors:
+            return []
+        from .provenance import verify_anchors  # provenance imports this module
+
+        findings: list[dict[str, str]] = []
+        for result in verify_anchors(anchors, self.root):
+            state = str(result.get("state"))
+            if state == "holds":
+                continue
+            findings.append({
+                "kind": "anchor",
+                "path": str(result.get("path") or ""),
+                "reference": str(result.get("anchor") or ""),
+                "reason": "moved" if state == "moved" else "removed",
+                "successor": f"{result.get('path')}:{result.get('line')}" if state == "moved" else "",
+                "evidence": str(result.get("evidence") or ""),
+            })
+        return findings
+
+    def verdict(self, text: str, anchors: Iterable[str] | None = None) -> dict[str, object]:
         """A per-memory verdict for the recall packet.
 
         `verified` means the memory names things Link could check and every
         one of them holds in the repository at `sha`. `stale` means at least
         one does not. `unverifiable` means there was nothing to check - the
-        common case, and not a warning.
+        common case, and not a warning. Pass the memory's `anchors` to have
+        its line anchors checked too.
         """
         if self._sha is None:
             self._sha = head_sha(self.root, self._runner)
-        checkable = checkable_references(text)
+        anchor_list = [str(a) for a in anchors or [] if str(a).strip()]
+        checkable = checkable_references(text) + len(anchor_list)
         if not checkable or not self._sha:
             return {"verdict": "unverifiable", "sha": self._sha or "", "checked": 0, "findings": []}
-        found = self.findings(text)
+        found = self.findings(text) + self.anchor_findings(anchor_list)
         return {
             "verdict": "stale" if found else "verified",
             "sha": self._sha,
@@ -584,6 +607,9 @@ def describe_findings(findings: Iterable[dict[str, str]]) -> list[str]:
     lines: list[str] = []
     for finding in findings:
         kind = finding.get("kind", "path")
+        if kind == "anchor":
+            lines.append(str(finding.get("evidence") or finding.get("reference")))
+            continue
         if kind != "path" and finding.get("evidence"):
             lines.append(str(finding["evidence"]))
         elif finding.get("successor"):
