@@ -375,7 +375,10 @@ class SyncPrivacyTests(unittest.TestCase):
         self.assertNotIn("raw/", remote_files)
         self.assertTrue(capture.exists(), "untracking must keep the file on disk")
 
-    def test_already_tracked_raw_is_untracked_on_next_sync(self):
+    def test_already_tracked_raw_is_reported_never_untracked(self):
+        # Untracking raw/ in a pushed commit deletes it from disk on every
+        # machine that pulls (3.x included), so sync warns and stops staging
+        # changes under it instead.
         from link_core.sync import sync_workspace
         self._init()
         leaked = self.root / "raw" / "old.md"
@@ -383,10 +386,14 @@ class SyncPrivacyTests(unittest.TestCase):
         leaked.write_text("old capture\n", encoding="utf-8")
         subprocess.run(["git", "add", "-f", "raw/old.md"], cwd=self.root, capture_output=True)
         subprocess.run(["git", "commit", "-qm", "oops"], cwd=self.root, capture_output=True)
+        leaked.write_text("old capture, edited\n", encoding="utf-8")
         report = sync_workspace(self.root, self.wiki, regenerate=lambda: None)
-        self.assertIn("raw", report["untracked_private"])
+        self.assertIn("raw", report["private_tracked"])
+        self.assertIn("git -C", report["warnings"][0])
         tracked = subprocess.run(["git", "ls-files", "raw"], cwd=self.root, capture_output=True, text=True).stdout
-        self.assertEqual(tracked.strip(), "")
+        self.assertEqual(tracked.strip(), "raw/old.md")
+        committed = subprocess.run(["git", "show", "HEAD:raw/old.md"], cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(committed.stdout, "old capture\n")
         self.assertTrue(leaked.exists())
 
     def test_init_refuses_to_repoint_a_foreign_origin(self):

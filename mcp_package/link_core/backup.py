@@ -242,6 +242,10 @@ def inspect_backup(
         root_name = safe_path.parts[0]
         if not (member.isfile() or member.isdir()):
             raise RestoreError(f"backup contains unsupported member type: {member.name}")
+        if member.isfile() and len(safe_path.parts) < 2:
+            # A regular file named plain `wiki` would replace the whole
+            # wiki directory and still report a successful restore.
+            raise RestoreError(f"backup contains a file where a directory belongs: {member.name}")
         if root_name == "raw" and not include_raw:
             skipped_roots.add("raw")
             if member.isfile():
@@ -273,6 +277,8 @@ def _extract_to_staging(backup_path: Path, staging: Path, include_raw: bool) -> 
                 continue
             if not member.isfile():
                 raise RestoreError(f"backup contains unsupported member type: {member.name}")
+            if len(safe_path.parts) < 2:
+                raise RestoreError(f"backup contains a file where a directory belongs: {member.name}")
             target_path = staging / safe_path
             target_path.parent.mkdir(parents=True, exist_ok=True)
             source = tar.extractfile(member)
@@ -328,6 +334,8 @@ def restore_backup(
                 destination = root / root_name
                 if not restored_root.exists():
                     continue
+                if restored_root.is_symlink() or not restored_root.is_dir():
+                    raise RestoreError(f"backup {root_name} is not a directory")
                 # Move the current tree aside first, then the restored one in.
                 # Deleting first left a window with no wiki/ at all.
                 if destination.exists() or destination.is_symlink():
@@ -335,14 +343,25 @@ def restore_backup(
                     os.replace(destination, aside)
                     moved_aside.append((aside, destination))
                 os.replace(restored_root, destination)
-        except OSError:
+        except BaseException:
+            # BaseException, not OSError: a Ctrl-C between the two renames
+            # skipped this rollback, and the temporary directory's cleanup
+            # then deleted the moved-aside wiki/.
             for aside, destination in reversed(moved_aside):
                 try:
-                    if destination.exists() and destination.is_dir():
+                    if destination.exists() and destination.is_dir() and not destination.is_symlink():
                         shutil.rmtree(destination)
+                    elif destination.exists() or destination.is_symlink():
+                        destination.unlink()
                     os.replace(aside, destination)
                 except OSError:
-                    pass
+                    # Never leave the user's tree inside the staging dir the
+                    # cleanup is about to delete: park it next to the root.
+                    rescue = root / f".link-restore-rescued-{aside.name}-{os.getpid()}"
+                    try:
+                        os.replace(aside, rescue)
+                    except OSError:
+                        pass
             raise
 
     if "wiki" in plan["restore_roots"]:

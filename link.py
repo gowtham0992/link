@@ -1112,6 +1112,14 @@ def team_sync(
             if rejected:
                 parts.append(f"rejected {len(rejected)}")
             _print_text("Team sync: " + (", ".join(parts) if parts else "already up to date"))
+            sync_obj = payload.get("sync")
+            if isinstance(sync_obj, dict) and sync_obj.get("synced") is False:
+                _print_text("  Push to the team remote stopped — secrets never leave this machine:")
+                findings_obj = sync_obj.get("secret_findings")
+                for finding in findings_obj if isinstance(findings_obj, list) else []:
+                    if isinstance(finding, dict):
+                        _print_text(f"    {finding.get('path')}: {finding.get('label')}")
+                _print_text(f"  {sync_obj.get('message') or ''}")
             for name in imported:
                 _print_text(f"  new from the team, pending your review: {name}")
             if imported:
@@ -3631,6 +3639,17 @@ def sync(
             else:
                 lines.append("Add your private remote: " + _shell_words_for_target("sync", target, "--init", "--remote", "<git-url>"))
             lines.append("raw/ captures and the runtime never sync; reviewed memory does.")
+            init_findings_obj = payload.get("secret_findings")
+            init_findings: list[object] = init_findings_obj if isinstance(init_findings_obj, list) else []
+            if init_findings:
+                lines.append("Nothing committed yet — these files contain secret-looking values:")
+                for finding in init_findings:
+                    if isinstance(finding, dict):
+                        lines.append(f"  {finding.get('path')}: {finding.get('label')}")
+                lines.append("Redact them, then run the daily sync.")
+            init_warnings_obj = payload.get("warnings")
+            for warning in init_warnings_obj if isinstance(init_warnings_obj, list) else []:
+                lines.append(f"Warning: {warning}")
             lines.append(f"Daily: {_shell_words_for_target('sync', target)}")
             _print_text("\n".join(lines))
             return 0
@@ -3661,7 +3680,10 @@ def sync(
             lines = ["Sync stopped before push — secrets never leave this machine."]
             for finding in findings:
                 if isinstance(finding, dict):
-                    lines.append(f"  {finding.get('path')}: {finding.get('label')}")
+                    commits_obj = finding.get("commits")
+                    commits = [str(c) for c in commits_obj] if isinstance(commits_obj, list) else []
+                    where = f" (in unpushed commit {', '.join(commits[:3])})" if commits else ""
+                    lines.append(f"  {finding.get('path')}: {finding.get('label')}{where}")
             lines.append(str(payload.get("message") or ""))
             _print_text("\n".join(lines))
             return 1
@@ -3674,12 +3696,14 @@ def sync(
         if payload.get("pushed"):
             parts.append("pushed")
         lines = ["Synced: " + (", ".join(parts) if parts else "already up to date")]
-        untracked_obj = payload.get("untracked_private")
-        untracked: list[object] = untracked_obj if isinstance(untracked_obj, list) else []
-        if untracked:
-            lines.append("Stopped syncing private material an older setup had tracked: "
-                         + ", ".join(str(item) for item in untracked)
-                         + ". The files stay on this machine; earlier commits on the remote still contain them.")
+        restored_obj = payload.get("restored_private")
+        restored: list[object] = restored_obj if isinstance(restored_obj, list) else []
+        if restored:
+            lines.append(f"Kept {len(restored)} private file(s) on this machine that the pulled changes "
+                         "stopped tracking (they stay local and never sync).")
+        warnings_obj = payload.get("warnings")
+        for warning in warnings_obj if isinstance(warnings_obj, list) else []:
+            lines.append(f"Warning: {warning}")
         both_obj = payload.get("both_versions")
         both: list[object] = both_obj if isinstance(both_obj, list) else []
         if both:

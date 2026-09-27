@@ -282,6 +282,7 @@ def export_snapshot(
             "error": "snapshot output cannot be inside wiki/",
             "output": str(output_dir),
         }
+    replace_previous = False
     if output_dir.exists() and any(output_dir.iterdir()):
         if not force:
             return {
@@ -298,7 +299,7 @@ def export_snapshot(
                          "this directory is not one, so nothing was deleted",
                 "output": str(output_dir),
             }
-        shutil.rmtree(output_dir)
+        replace_previous = True
 
     sensitive_values: list[str] = []
     sensitive_read_errors: list[str] = []
@@ -316,6 +317,10 @@ def export_snapshot(
                 "sensitive_values": sensitive_values,
                 "read_errors": sensitive_read_errors,
             }
+    if replace_previous:
+        # Only after every refusal check: --force used to delete the previous
+        # snapshot and then refuse the new one, leaving nothing.
+        shutil.rmtree(output_dir)
 
     owns_cache = cache is None
     resolved_cache = cache or build_wiki_cache(wiki_dir)

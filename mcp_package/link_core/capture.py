@@ -1,6 +1,7 @@
 """Shared raw capture helpers for Link CLI and MCP runtimes."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from collections.abc import Callable, Collection, Mapping
@@ -271,12 +272,22 @@ def write_session_capture(
     # redacted text. A capture that warns about a key and then writes the
     # key to disk verbatim has already leaked it.
     secret_warnings = secret_value_warnings(original_notes)
-    notes, _, _ = redact_secret_values(original_notes)
-    notes, password_count = redact_password_values(notes)
-    if password_count and "password in prose" not in secret_warnings:
-        secret_warnings.append("password in prose")
+    password_hits = 0
+
+    def redact(value: str) -> str:
+        # Every section written to disk gets both redactions: the Proposal
+        # Source kept "the password is Zk9#mango42" verbatim under a
+        # frontmatter line claiming it had been redacted.
+        nonlocal password_hits
+        value, labels, _ = redact_secret_values(value)
+        secret_warnings.extend(label for label in labels if label not in secret_warnings)
+        value, count = redact_password_values(value)
+        password_hits += count
+        return value
+
+    notes = redact(original_notes)
     source_value = str(source or default_source).strip() or default_source
-    source_value, _, _ = redact_secret_values(source_value)
+    source_value = redact(source_value)
     captured_at = timestamp or utc_timestamp()
     project_name = normalize_project(project)
     capture_name = capture_title(
@@ -286,6 +297,7 @@ def write_session_capture(
         default_source=default_source,
         path_source=path_source,
     )
+    capture_name = redact(capture_name)
     capture_dir = root / "raw" / "memory-captures"
     capture_dir.mkdir(parents=True, exist_ok=True)
     conversation = str(conversation_id or "").strip()
@@ -294,28 +306,26 @@ def write_session_capture(
     # newer proposals) instead of stacking a near-duplicate next to it.
     refreshed_capture = find_conversation_capture(root, conversation) if conversation else None
     capture_path = refreshed_capture or capture_filename(captured_at, capture_name, capture_dir)
+    # Proposal source: the user's own turns, redacted, so accept-time mining
+    # reads exactly what the hook mined — not the assistant's prose beneath.
+    mined = (proposal_text or "").strip()
+    mined_section = ""
+    if mined and mined != original_notes:
+        mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{redact(mined)}\n"
+
+    trail_section = ""
+    if decision_trail:
+        safe_lines = [f"- {redact(str(line))}" for line in decision_trail]
+        trail_section = "\n## How Link Read This Session\n\n" + "\n".join(safe_lines) + "\n"
+
+    if password_hits and "password in prose" not in secret_warnings:
+        secret_warnings.append("password in prose")
     project_line = f'project: "{frontmatter_string(project_name)}"\n' if project_name else ""
     conversation_line = f'conversation: "{frontmatter_string(conversation)}"\n' if conversation else ""
     # Remember what was redacted so the inbox still says "this session
     # contained a key - rotate it", after the value itself is gone.
     redacted_line = (f'redacted_secrets: "{frontmatter_string(", ".join(secret_warnings))}"\n'
                      if secret_warnings else "")
-
-    # Proposal source: the user's own turns, redacted, so accept-time mining
-    # reads exactly what the hook mined — not the assistant's prose beneath.
-    mined = (proposal_text or "").strip()
-    mined_section = ""
-    if mined and mined != original_notes:
-        safe_mined, _, _ = redact_secret_values(mined)
-        mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{safe_mined}\n"
-
-    trail_section = ""
-    if decision_trail:
-        safe_lines = []
-        for line in decision_trail:
-            safe, _, _ = redact_secret_values(str(line))
-            safe_lines.append(f"- {safe}")
-        trail_section = "\n## How Link Read This Session\n\n" + "\n".join(safe_lines) + "\n"
 
     atomic_write_text(
         capture_path,
@@ -359,29 +369,62 @@ def resolve_capture_file(root: Path, capture: str, *, max_len: int | None = None
     if not raw:
         return None
 
+    given_root = root.expanduser().absolute()
     root = root.expanduser().resolve()
+    capture_dirs = {base / "raw" / "memory-captures" for base in (given_root, root)}
+    # The capture directory itself must be real: with
+    # raw/memory-captures -> ../wiki/memories a bare page name used to
+    # resolve to (and delete) a memory.
+    if (root / "raw").is_symlink() or (root / "raw" / "memory-captures").is_symlink():
+        return None
+    real_capture_dir = (root / "raw" / "memory-captures").resolve()
+
     raw_path = Path(raw).expanduser()
     candidates = [raw_path]
     if not raw_path.is_absolute():
-        candidates.extend([
+        candidates = [
             root / raw,
             root / "raw" / "memory-captures" / raw,
             root / "raw" / "memory-captures" / f"{raw}.md",
-        ])
+        ]
 
     for candidate in candidates:
-        # A symlink inside raw/ can point at a memory page or any file under
-        # the root; delete/redact would then act on that file instead.
-        if candidate.is_symlink():
+        # Only a real capture file qualifies: it must sit inside
+        # raw/memory-captures (not merely inside the workspace — delete
+        # accepted wiki/memories/<page>.md), be a .md file that is not a
+        # dotfile, and no component below the capture dir may be a symlink
+        # (one can point at a memory page or any file under the root).
+        lexical = Path(os.path.normpath(candidate))
+        relative: Path | None = None
+        base: Path | None = None
+        for capture_dir in capture_dirs:
+            try:
+                relative = lexical.relative_to(capture_dir)
+                base = capture_dir
+                break
+            except ValueError:
+                continue
+        if relative is None or base is None or not relative.parts:
+            continue
+        if any(part.startswith(".") for part in relative.parts) or lexical.suffix != ".md":
+            continue
+        current = base
+        linked = False
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                linked = True
+                break
+        if linked:
             continue
         try:
-            resolved = candidate.resolve()
+            resolved = lexical.resolve()
         except OSError:
             continue
         if not resolved.is_file():
             continue
         try:
-            resolved.relative_to(root)
+            resolved.relative_to(real_capture_dir)
         except ValueError:
             continue
         return resolved

@@ -383,9 +383,9 @@ def build_agent_hooks_payload(
     }
 
 
-def _content_text(content: object) -> str:
+def _content_blocks(content: object) -> list[str]:
     if isinstance(content, str):
-        return content.strip()
+        return [content.strip()] if content.strip() else []
     parts: list[str] = []
     if isinstance(content, list):
         for block in content:
@@ -393,7 +393,7 @@ def _content_text(content: object) -> str:
                 text = block.get("text")
                 if isinstance(text, str) and text.strip():
                     parts.append(text.strip())
-    return "\n".join(parts)
+    return parts
 
 
 # Text that Link itself injected into the session (the session-start brief,
@@ -500,20 +500,38 @@ def extract_transcript_text(
         message = entry.get("message")
         if not isinstance(message, dict):
             continue
-        text = _content_text(message.get("content"))
-        if not text:
+        blocks = _content_blocks(message.get("content"))
+        if not blocks:
             continue
         if entry.get("type") == "user":
-            reason = _harness_reason(entry, text)
+            # Every text block is checked, not only the first: a real prompt
+            # followed by a <task-notification> block used to be mined whole.
+            # A block that is only a harness reminder is dropped on its own
+            # (the person's text beside it is kept); any other harness block
+            # means the message is not the user's own words.
+            user_blocks: list[str] = []
+            reason = _harness_reason(entry, "")  # entry-level origin markers
+            if not reason:
+                for block in blocks:
+                    cleaned = _SYSTEM_REMINDER_RE.sub("", block).strip()
+                    if not cleaned:
+                        continue
+                    reason = _harness_reason(entry, block)
+                    if reason:
+                        break
+                    user_blocks.append(cleaned)
+                if not reason and not user_blocks:
+                    # Nothing but harness reminders in the whole message.
+                    reason = _harness_reason(entry, blocks[0])
             if reason:
                 if stats is not None:
                     stats["dropped_harness_text"] = stats.get("dropped_harness_text", 0) + 1
                 continue
-            # A reminder the harness appended to a real prompt is not part
-            # of what the person typed.
-            text = _SYSTEM_REMINDER_RE.sub("", text).strip()
+            text = "\n".join(user_blocks)
             if not text:
                 continue
+        else:
+            text = "\n".join(blocks)
         if any(marker in text for marker in LINK_ECHO_MARKERS):
             if stats is not None:
                 stats["dropped_link_output"] = stats.get("dropped_link_output", 0) + 1
