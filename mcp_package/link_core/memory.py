@@ -282,7 +282,10 @@ def _unicode_memory_tokens(value: str) -> set[str]:
     def flush() -> None:
         if not buffer:
             return
-        run = "".join(buffer)
+        # Recompose before slicing: NFKD splits voiced kana into base plus a
+        # combining mark that also sits in the unspaced range, so slicing the
+        # decomposed run cut デプロイ into デ, プ, ゙フ, ゚ロ, ロイ.
+        run = _compose("".join(buffer))
         buffer.clear()
         cursor = 0
         while cursor < len(run):
@@ -339,11 +342,23 @@ def memory_tokens(value: str) -> set[str]:
 
 
 def compact_memory_text(value: str) -> str:
-    return " ".join(
-        token
-        for token in re.split(r"[^a-z0-9]+", value.lower())
-        if token
-    )
+    """Normalized word stream used as a claim's identity.
+
+    Dedupe keys, proposal fingerprints and text-containment checks all read
+    this. It used to keep only [a-z0-9], so any Japanese, Hindi, Arabic or
+    Cyrillic claim compacted to the empty string: three distinct proposals
+    collapsed into one and unrelated claims shared a fingerprint. ASCII text
+    takes the original path byte for byte, so every stored fingerprint and
+    dismissal stays valid; other scripts keep their letters, with Latin
+    accents folded the same way the tokenizer folds them.
+    """
+    if value.isascii():
+        return " ".join(
+            token
+            for token in re.split(r"[^a-z0-9]+", value.lower())
+            if token
+        )
+    return " ".join(_slug_fold(value).replace("-", " ").split())
 
 
 def proposal_fingerprint(memory: str) -> str:
@@ -452,12 +467,40 @@ def expanded_memory_query_tokens(value: str) -> set[str]:
     return expanded
 
 
+# Negation words in common spaced languages, matched as whole words.
+NEGATION_WORDS_MULTILINGUAL = {
+    "nunca", "jamás", "jamas", "jamais", "nicht", "nie", "niemals", "kein", "keine",
+    "não", "nao", "niet", "nooit", "inte", "aldrig", "ikke",
+    "не", "никогда", "нельзя", "ні", "ніколи", "nigdy",
+    "नहीं", "मत", "कभी", "لا", "ليس", "أبدا", "لن", "değil", "asla",
+    "không", "đừng", "tidak", "jangan", "huwag",
+}
+# Left out on purpose: "non", "mai" and "hindi" are also ordinary English
+# words ("non-blocking", "the Hindi docs"); counting them would invent
+# negations in English claims.
+# Scripts written without spaces carry negation inside words, so these match
+# as substrings: Japanese ない/ません/禁止/決して, Chinese 不/别/禁止/勿,
+# Korean 않/못/금지/말.
+NEGATION_SUBSTRINGS_UNSPACED = (
+    "ない", "ません", "禁止", "決して", "するな", "不", "别", "別", "勿", "않", "못", "금지", "마세요", "말고",
+)
+
+
 def has_negation(value: str) -> bool:
     compact = compact_memory_text(value)
     tokens = set(compact.split())
     if tokens & NEGATION_TERMS:
         return True
-    return bool(re.search(r"\b(?:do not|does not|did not|should not|don't|can't|cannot)\b", value, re.IGNORECASE))
+    if re.search(r"\b(?:do not|does not|did not|should not|don't|can't|cannot)\b", value, re.IGNORECASE):
+        return True
+    if tokens & NEGATION_WORDS_MULTILINGUAL:
+        return True
+    padded = f" {compact} "
+    if " ne " in padded and " pas " in padded:
+        return True  # French ne ... pas
+    if value.isascii():
+        return False
+    return any(cue in value for cue in NEGATION_SUBSTRINGS_UNSPACED)
 
 
 def _extract_option_groups(value: str) -> dict[str, set[str]]:
@@ -2900,8 +2943,9 @@ def memory_duplicate_candidates(
         reasons: list[str] = []
         score = 0
         record_title = compact_memory_text(str(record.get("title") or ""))
-        record_text = compact_memory_text(memory_claim_text(record))
-        record_tokens = memory_tokens(record_text)
+        claim_text = memory_claim_text(record)
+        record_text = compact_memory_text(claim_text)
+        record_tokens = memory_tokens(claim_text)
 
         if new_slug and str(record.get("name") or "") == new_slug:
             score = max(score, 100)

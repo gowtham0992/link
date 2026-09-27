@@ -171,7 +171,7 @@ class WikiCoreTests(unittest.TestCase):
         if first["search_backend"] == "sqlite-fts":
             self.assertTrue(first["fts_index_info"]["persistent"])
             self.assertFalse(first["fts_index_info"]["reused"])
-            self.assertTrue((wiki.parent / ".link-cache/page-fts-v2.sqlite").exists())
+            self.assertTrue((wiki.parent / ".link-cache/page-fts-v3.sqlite").exists())
         close_wiki_cache(first)
 
         original_read_text = Path.read_text
