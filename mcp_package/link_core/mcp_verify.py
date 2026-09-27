@@ -84,7 +84,11 @@ def check_link_mcp_import(python_cmd: str) -> dict[str, object]:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            # Not the Windows locale: a path or traceback outside it made
+            # decoding raise instead of reporting the runtime's state.
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except OSError as exc:
         return {"installed": False, "version": None, "error": str(exc)}
@@ -120,6 +124,7 @@ def python_is_externally_managed(python_cmd: str | None = None) -> bool:
         result = subprocess.run(
             [python_cmd, "-c", code],
             check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            encoding="utf-8", errors="replace",
         )
     except OSError:
         return False
