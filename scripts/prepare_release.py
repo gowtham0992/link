@@ -310,7 +310,7 @@ def release_commands(version: str) -> list[str]:
     version = normalize_version(version)
     venv = RELEASE_VENV
     return [
-        f'git add -A && git commit -m "Release Link v{version}" && git push origin develop',
+        f'git add -u && git commit -m "Release Link v{version}" && git push origin develop',
         f'gh pr create --base main --head develop --title "Release Link v{version}"',
         "# wait for CI, merge the PR (merge commit), then:",
         "git switch main && git pull --ff-only origin main",

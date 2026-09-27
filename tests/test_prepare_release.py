@@ -134,6 +134,12 @@ class PrepareReleaseTests(unittest.TestCase):
                         next(i for i, c in enumerate(commands) if c.startswith("git tag")))
         self.assertIn("mcp-publisher validate", commands)
         self.assertIn("mcp-publisher publish", commands)
+        # The release commit stages what the script changed, never a stray
+        # untracked file sitting in the checkout.
+        commit = next(c for c in commands if "git commit" in c)
+        self.assertIn("git add -u", commit)
+        self.assertNotIn("git add -A", commit)
+        self.assertNotIn("git add .", commit)
 
 
 
