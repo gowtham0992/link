@@ -282,6 +282,8 @@ from link_core.agent_instructions import (
 from link_core.usage import (
     load_usage as _core_load_usage,
     memory_receipts as _core_memory_receipts,
+    estimated_tokens as _core_estimated_tokens,
+    record_query_packet as _core_record_query_packet,
     record_retrieval as _core_record_retrieval,
     usage_disabled as _core_usage_disabled,
     usage_summary as _core_usage_summary,
@@ -2185,6 +2187,7 @@ def recall(
     _core_record_retrieval(
         _resolve_link_root(target), "recall",
         [str(item.get("name") or "") for item in results], project=project_name or "",
+        surface="cli", tokens=_core_estimated_tokens(results) if results else 0,
     )
 
     if json_output:
@@ -2452,6 +2455,8 @@ def query(
     query_text = _clean_text_input(query_text, max_len=500)
     project_name = project or _default_project(target)
     payload = _query_link(wiki_dir, query_text, budget=budget, project=project_name)
+    # AGENTS.md sends CLI-only agents here; unrecorded, their sessions had no receipt.
+    _core_record_query_packet(_resolve_link_root(target), payload, project=project_name or "", surface="cli")
     if json_output:
         print(json.dumps(payload, indent=2))
         return 0
@@ -2538,6 +2543,13 @@ def brief(
         payload,
         _capture_review_summary(target, project=project_name),
     )
+    relevant_obj = payload.get("relevant_memories")
+    _core_record_retrieval(
+        _resolve_link_root(target), "brief",
+        [str(item.get("name") or "") for item in (relevant_obj if isinstance(relevant_obj, list) else [])
+         if isinstance(item, dict)],
+        project=project_name or "", surface="cli",
+    )
 
     if json_output:
         print(json.dumps(payload, indent=2))
@@ -2576,7 +2588,7 @@ def start(
     _core_record_retrieval(
         _resolve_link_root(target), "brief",
         [str(item.get("name") or "") for item in relevant_list if isinstance(item, dict)],
-        project=project_name or "",
+        project=project_name or "", surface="cli",
     )
     relevant_count = int(brief_payload.get("relevant_count") or len(relevant_list))
     project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
@@ -3061,7 +3073,7 @@ def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str
             return 0
         _core_record_retrieval(
             root, "guard", [str(reminder.get("name") or "")],
-            project=project_name or "",
+            project=project_name or "", surface="hook",
         )
         print(_core_render_guard_text(reminder))
         return 0

@@ -89,5 +89,21 @@ class ReceiptSurfaceTests(unittest.TestCase):
         self.assertEqual(hook_events[-1]["kind"], "brief")
         self.assertGreater(hook_events[-1]["tokens"], 0)
 
+    def test_cli_agent_commands_are_recorded_under_cli(self):
+        # The shape a CLI-only agent follows from AGENTS.md: brief, recall, query.
+        link = [sys.executable, str(ROOT / "link.py")]
+        for args in (["brief", "session start"], ["recall", "agent memory"], ["recall", "local markdown"],
+                     ["query", "agent memory local markdown", "--budget", "micro"]):
+            subprocess.run([*link, args[0], args[1], str(self.root), *args[2:]],
+                           check=True, capture_output=True, stdin=subprocess.DEVNULL)
+        events = load_usage(self.root)
+        self.assertEqual([event["kind"] for event in events], ["brief", "recall", "recall", "query"])
+        self.assertEqual({event.get("surface") for event in events}, {"cli"})
+        (session,) = memory_receipts(events, sessions=1)
+        self.assertEqual(session["surfaces"], ["cli"])
+        self.assertEqual(session["recalls"], 3)
+        self.assertGreater(session["estimated_tokens"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

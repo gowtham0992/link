@@ -363,10 +363,7 @@ def _register_tool(fn, hints: dict[str, bool] | None):
 
 def _estimated_tokens_of(value: object) -> int:
     """Rough token count of what an agent receives (4 chars per token)."""
-    try:
-        return max(1, (len(json.dumps(value, ensure_ascii=False)) + 3) // 4)
-    except (TypeError, ValueError):
-        return 0
+    return _core_estimated_tokens(value)
 
 
 def _surface_tool(surface: str):
@@ -448,6 +445,8 @@ from link_core.capture import (
 from link_core.usage import (
     load_usage as _core_load_usage,
     memory_receipts as _core_memory_receipts,
+    estimated_tokens as _core_estimated_tokens,
+    record_query_packet as _core_record_query_packet,
     record_retrieval as _core_record_retrieval,
     usage_disabled as _core_usage_disabled,
 )
@@ -793,7 +792,7 @@ def _guard_note_for(query: str, records: list[dict[str, object]] | None = None) 
         name = str(reminder.get("name") or "")
         if _core_recently_guarded(WIKI_DIR.parent, name):
             return ""
-        _core_record_retrieval(WIKI_DIR.parent, "guard", [name])
+        _core_record_retrieval(WIKI_DIR.parent, "guard", [name], surface="mcp")
         return _core_render_guard_text(reminder)
     except Exception:
         return ""
@@ -1543,18 +1542,7 @@ def recall(
     if not clean_query:
         return json.dumps({"surface": "slim", "tool": "recall", "error": "query required"})
     payload = _query_link(query=clean_query, budget=clean_budget, project=clean_project)
-    memory_section = payload.get("memory")
-    packet_items = memory_section.get("items") if isinstance(memory_section, dict) else None
-    budget_section = payload.get("budget_report")
-    budget_report: dict = budget_section if isinstance(budget_section, dict) else {}
-    total = budget_report.get("packet_total")
-    _core_record_retrieval(
-        WIKI_DIR.parent, "query",
-        [str(item.get("name") or "") for item in (packet_items or []) if isinstance(item, dict)],
-        project=clean_project, surface="mcp",
-        tokens=int(total.get("estimated_tokens") or 0) if isinstance(total, dict) else 0,
-        truncated=any(bool(section.get("has_more")) for section in budget_report.values() if isinstance(section, dict)),
-    )
+    _core_record_query_packet(WIKI_DIR.parent, payload, project=clean_project, surface="mcp")
     payload["surface"] = "slim"
     payload["tool"] = "recall"
     payload["mode"] = "query"
@@ -2054,6 +2042,7 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
     _core_record_retrieval(
         WIKI_DIR.parent, "recall",
         [str(item.get("name") or "") for item in memories], project=project_name,
+        surface="mcp", tokens=_estimated_tokens_of(memories),
     )
     payload = {
         "query": query,

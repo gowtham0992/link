@@ -107,6 +107,32 @@ def record_retrieval(
         return False
 
 
+def estimated_tokens(value: object) -> int:
+    """Rough token count of what an agent receives (4 characters per token)."""
+    try:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return 0
+    return max(1, (len(text) + 3) // 4)
+
+
+def record_query_packet(root: Path, payload: Mapping[str, object], *, project: str = "", surface: str = "") -> bool:
+    """Record a query packet: the memories in it, its size, and whether a budget cut it."""
+    memory_section = payload.get("memory")
+    items = memory_section.get("items") if isinstance(memory_section, Mapping) else None
+    budget_section = payload.get("budget_report")
+    budget_report: Mapping[str, object] = budget_section if isinstance(budget_section, Mapping) else {}
+    total = budget_report.get("packet_total")
+    tokens = total.get("estimated_tokens") if isinstance(total, Mapping) else 0
+    return record_retrieval(
+        root, "query",
+        [str(item.get("name") or "") for item in (items if isinstance(items, list) else []) if isinstance(item, Mapping)],
+        project=project, surface=surface,
+        tokens=tokens if isinstance(tokens, int) else 0,
+        truncated=any(bool(section.get("has_more")) for section in budget_report.values() if isinstance(section, Mapping)),
+    )
+
+
 def _within(stamp: object, days: int, today: date) -> bool:
     text = str(stamp or "")[:10]
     try:
