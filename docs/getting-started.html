@@ -128,8 +128,8 @@ lnk seed . ~/link
 lnk query "what is this project about?" ~/link --budget small</code></pre>
         <p>Seeding does not create durable memories. It gives agents a cited project source to retrieve from; preferences and decisions should still go through reviewed memory proposals.</p>
 
-        <h2 id="install">4. Install Link For Your Agent</h2>
-        <p>From the cloned checkout, run the installer for the agent you use. Re-running the same installer updates code and instructions without replacing existing wiki data.</p>
+        <h2 id="install">4. Install Link For Your Agent (source checkouts)</h2>
+        <p>Skip this if you ran <code>lnk setup</code>: it already wired every agent it found. From a cloned checkout, the installers add the agent's instruction block and then call <code>lnk connect --write</code> for the MCP entry (plus session hooks for Claude Code, Codex and Cursor), which verifies the runtime, creates the config if it does not exist, and edits JSON-with-comments settings without losing comments. Re-running an installer updates code and instructions without replacing existing wiki data. The matching <code>uninstall.sh</code> calls <code>lnk disconnect --write</code>, which removes Link's MCP entry and hooks and nothing else.</p>
         <pre><code>bash integrations/codex/install.sh
 bash integrations/kiro/install.sh
 bash integrations/claude-code/install.sh
