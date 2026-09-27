@@ -52,7 +52,10 @@ class AnchorWiringTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_record_exposes_anchors(self):
-        self.assertEqual(memory_records(self.wiki)[0]["anchors"], ["src/app.py:4 parse_config"])
+        # The anchor names the repository it belongs to (its root commit).
+        anchors = memory_records(self.wiki)[0]["anchors"]
+        self.assertEqual(len(anchors), 1)
+        self.assertRegex(anchors[0], r"^src/app\.py:4 parse_config @[0-9a-f]{12}$")
 
     def test_lnk_stale_reports_a_removed_symbol(self):
         (self.repo / "src" / "app.py").write_text(SOURCE.replace("parse_config", "load_settings"), encoding="utf-8")

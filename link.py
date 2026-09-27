@@ -1278,7 +1278,9 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
     # Archived and expired memories are already out of the way; questioning
     # them would only add noise to a report that must stay quiet by default.
     records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
-    checker = StalenessChecker(repo_dir)
+    # History answers are cached per HEAD beside the workspace's other
+    # caches, so re-running `lnk stale` on a large repository is fast.
+    checker = StalenessChecker(repo_dir, cache_path=_resolve_link_root(target) / ".link-cache" / "staleness-v1.json")
     flagged: list[dict[str, object]] = []
     for record in records:
         text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
@@ -1301,6 +1303,7 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
             "lines": describe_findings(findings),
         })
     checked = len(records)
+    checker.save_cache()
     if json_output:
         # Same facts as the text report, for surfaces such as LinkBar that
         # show them without re-running git themselves.
@@ -2709,6 +2712,8 @@ def semantic(
                     _print_text(f"  {note}")
             if outcome.get("ready"):
                 rerun = [str(outcome["python"]), str(ROOT / "link.py"), "semantic", str(root), "--setup"]
+                if nli:
+                    rerun.append("--nli")
                 if json_output:
                     rerun.append("--json")
                 return subprocess.run(rerun, check=False, stdin=subprocess.DEVNULL).returncode

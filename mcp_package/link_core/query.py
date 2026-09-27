@@ -161,6 +161,7 @@ def _mark_stale_paths(
     compact: list[dict[str, object]],
     raw: Iterable[Mapping[str, object]],
     repo_root: Path | None,
+    cache_path: Path | None = None,
 ) -> None:
     """Flag recalled memories that name repository paths git no longer has.
 
@@ -170,12 +171,18 @@ def _mark_stale_paths(
     memories are checked, and git is consulted only for paths that do not
     exist on disk, so the common case costs a few stat calls. Nothing is
     added when there is nothing to say; an absent key is the normal packet.
-    """
-    if repo_root is None or not (Path(repo_root) / ".git").exists():
-        return
-    from .staleness import StalenessChecker
 
-    checker = StalenessChecker(repo_root)
+    The agent is waiting, so the checks share a time budget and a history
+    cache keyed by HEAD; a memory whose checks did not finish is left
+    unmarked rather than called verified or stale on partial evidence.
+    """
+    if repo_root is None or not _has_named_items(compact):
+        return
+    from .staleness import RECALL_BUDGET_SECONDS, StalenessChecker
+
+    checker = StalenessChecker(repo_root, budget_seconds=RECALL_BUDGET_SECONDS, cache_path=cache_path)
+    if not checker.is_repo:
+        return
     by_name = {str(item.get("name") or ""): item for item in compact}
     # Recall returns slimmed items without the body; read the full record.
     for record in raw:
@@ -205,6 +212,11 @@ def _mark_stale_paths(
                 "sha": verdict.get("sha", ""),
                 "references_checked": verdict.get("checked", 0),
             }
+    checker.save_cache()
+
+
+def _has_named_items(compact: list[dict[str, object]]) -> bool:
+    return any(str(item.get("name") or "") for item in compact)
 
 
 def _compact_memory(memory: Mapping[str, object]) -> dict[str, object]:
@@ -534,7 +546,8 @@ def query_link(
     close_call = selected_count > limits["memories"]
     memory_has_more = len(raw_memories) > selected_count
     memories = [_compact_memory(memory) for memory in raw_memories[:selected_count]]
-    _mark_stale_paths(memories, record_list, repo_root)
+    _mark_stale_paths(memories, record_list, repo_root,
+                      cache_path=wiki_dir.parent / ".link-cache" / "staleness-v1.json")
     # Only the review queue is needed here. Building a whole brief with the
     # query scored the corpus a second time (half of query_link's time on a
     # large store) to throw the ranking away.
@@ -592,15 +605,17 @@ def query_link(
     if any(memory.get("verified") for memory in memories):
         guidance.append(
             "Memories marked verified were checked against this repository at the "
-            "given sha: every file, script, dependency or setting they name still holds."
+            "given sha: the files, symbols, scripts, dependencies or settings they name "
+            "were found still in place, and nothing they name is gone."
         )
     if any(memory.get("stale_paths") for memory in memories):
         # A signal without an instruction is decoration. Same pattern as the
         # constraint guard: say what was found and what to do about it.
         guidance.insert(
             1,
-            "A recalled memory names a repository file git no longer has "
-            "(see its stale_paths); verify the memory against the current code "
+            "A recalled memory names something this repository no longer has - a "
+            "file, code symbol, script, dependency or setting (see its stale_paths "
+            "and their evidence); verify the memory against the current code "
             "before relying on it, and suggest the user review or update it.",
         )
     if memories and all(str(memory.get("confidence") or "") == "weak" for memory in memories):

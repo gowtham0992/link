@@ -302,7 +302,7 @@ class StalenessV2Tests(unittest.TestCase):
         }), encoding="utf-8")
         (self.repo / "Makefile").write_text("release:\n\techo release\nclean:\n\trm -rf out\n", encoding="utf-8")
         (self.repo / "config.py").write_text(
-            "import os\nKEY = os.environ['LEGACY_API_TOKEN']\nURL = 'https://staging.acme-internal.dev/api'\n",
+            "import os\nKEY = os.environ['LEGACY_API_TOKEN']\nURL = 'https://staging.acme.internal:8443/api'\n",
             encoding="utf-8")
         (self.repo / "package-lock.json").write_text("{}", encoding="utf-8")
         (self.repo / "pyproject.toml").write_text('[project]\nname="x"\nrequires-python = ">=3.10"\n', encoding="utf-8")
@@ -333,11 +333,11 @@ class StalenessV2Tests(unittest.TestCase):
     def test_removed_script_target_dependency_variable_and_url_are_flagged(self):
         found = self._kinds(
             "Deploy with `npm run deploy:staging`, then make release. We pad with `left-pad`. "
-            "Set LEGACY_API_TOKEN first. Staging lives at https://staging.acme-internal.dev/api."
+            "Set LEGACY_API_TOKEN first. Staging lives at https://staging.acme.internal:8443/api."
         )
         self.assertEqual(found, {
             ("script", "deploy:staging"), ("make_target", "release"), ("dependency", "left-pad"),
-            ("env_var", "LEGACY_API_TOKEN"), ("url", "staging.acme-internal.dev"),
+            ("env_var", "LEGACY_API_TOKEN"), ("url", "staging.acme.internal:8443"),
         })
 
     def test_things_that_still_exist_are_left_alone(self):
@@ -391,3 +391,129 @@ class VersionSpecTests(unittest.TestCase):
         ]
         for claimed, spec, expected in cases:
             self.assertEqual(_satisfies(claimed, spec), expected, (claimed, spec))
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Each case below was a false flag or a false `verified` in the 4.0 review."""
+
+    def _repo(self, files: dict[str, str], later: dict[str, str | None] | None = None) -> Path:
+        temp = tempfile.TemporaryDirectory(prefix="link-stale-review-")
+        self.addCleanup(temp.cleanup)
+        repo = Path(temp.name)
+        _git(repo, "init", "--initial-branch", "main")
+        for rounds in (files, later or {}):
+            if not rounds:
+                continue
+            for rel, text in rounds.items():
+                target = repo / rel
+                if text is None:
+                    target.unlink()
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "step")
+        return repo
+
+    def test_naming_things_the_repository_never_had_is_not_verified(self):
+        repo = self._repo({"README.md": "# app\n"})
+        checker = StalenessChecker(repo)
+        for text in (
+            "The webhook handler lives in src/server/handler.py and needs STRIPE_SECRET_KEY",
+            "We deploy with Python 3.9 to https://api.acme.internal:8443",
+            "Run make deploy-prod, then npm run release",
+        ):
+            self.assertEqual(checker.verdict(text)["verdict"], "unverifiable", text)
+
+    def test_history_and_prohibitions_are_not_current_claims(self):
+        repo = self._repo(
+            {"package.json": json.dumps({"engines": {"node": ">=20"}}), "package-lock.json": "{}",
+             "pyproject.toml": '[project]\nrequires-python = ">=3.11"\n'},
+            {"package-lock.json": None, "pnpm-lock.yaml": "lockfileVersion: 9\n"},
+        )
+        checker = StalenessChecker(repo)
+        for text in (
+            "Do not use npm in this repo; we use pnpm.",
+            "Install the CLI globally: npm install -g vercel",
+            "We upgraded from Node 16 to Node 20",
+            "We dropped Python 3.9 support",
+        ):
+            self.assertEqual(checker.findings(text), [], text)
+        self.assertEqual(checker.verdict("We upgraded from Node 16 to Node 20")["verdict"], "verified")
+
+    def test_version_specs_manifests_really_use(self):
+        from link_core.staleness import _satisfies
+        for claimed, spec, expected in [
+            ("3.12", "~=3.10", True), ("3.9", "~=3.10", False), ("4.0", "~=3.10", False),
+            ("3.10.5", "~=3.10.2", True), ("3.11", "~=3.10.2", False),
+            ("3.12.4", "==3.12.*", True), ("3.13", "==3.12.*", False),
+        ]:
+            self.assertEqual(_satisfies(claimed, spec), expected, (claimed, spec))
+        repo = self._repo({"go.mod": "module x\n\ngo 1.22\n"})
+        self.assertEqual(StalenessChecker(repo).findings("Build with Go 1.23."), [])
+        self.assertTrue(StalenessChecker(repo).findings("Build with Go 1.21."))
+
+    def test_make_and_just_targets_the_parser_used_to_miss(self):
+        repo = self._repo(
+            {"Makefile": "include tools/common.mk\nlint test: deps\n\techo\nold:\n\techo\n",
+             "tools/common.mk": "release:\n\techo\n",
+             "justfile": "@quiet:\n    echo\nbench *args:\n    echo\n"},
+            {"Makefile": "include tools/common.mk\nlint test: deps\n\techo\n"},
+        )
+        checker = StalenessChecker(repo)
+        self.assertEqual(checker.findings("run make lint, make test, make release, just quiet and just bench"), [])
+        self.assertEqual([f["reference"] for f in checker.findings("run make old")], ["old"])
+
+    def test_install_prose_is_not_a_dependency_list(self):
+        from link_core.staleness import symbol_references
+        deps = [ref for kind, ref in symbol_references("pip install httpx then restart the worker") if kind == "dependency"]
+        self.assertEqual(deps, ["httpx"])
+        repo = self._repo({"requirements.txt": "httpx\nthenable\n"}, {"requirements.txt": "httpx\n"})
+        self.assertEqual(StalenessChecker(repo).findings("pip install httpx then restart the worker"), [])
+
+    def test_workspace_manifests_count(self):
+        repo = self._repo(
+            {"package.json": json.dumps({"scripts": {"build": "tsc"}, "dependencies": {"zod": "3"}}),
+             "requirements.txt": "attrs\npyyaml\n"},
+            {"package.json": json.dumps({"private": True, "workspaces": ["packages/*"]}),
+             "packages/web/package.json": json.dumps({"scripts": {"build": "vite build"},
+                                                      "dependencies": {"zod": "3"}}),
+             "requirements.txt": "-r requirements/base.txt\n",
+             "requirements/base.txt": "attrs\nPyYAML\n"},
+        )
+        self.assertEqual(StalenessChecker(repo).findings(
+            "Build with npm run build, then pip install attrs pyyaml."), [])
+        self.assertEqual(StalenessChecker(repo).findings("npm install zod"), [])
+
+    def test_public_documentation_links_are_not_repository_claims(self):
+        repo = self._repo({"README.md": "See https://docs.python.org/3/library/os.html\n"}, {"README.md": "# app\n"})
+        self.assertEqual(StalenessChecker(repo).findings(
+            "Per https://docs.python.org/3/library/os.html, os.replace is atomic."), [])
+
+    def test_recall_budget_never_verifies_or_flags_on_partial_evidence(self):
+        repo = self._repo({"src/kept.py": "x = 1\n"})
+        slow = StalenessChecker(repo, budget_seconds=0.0001)
+        self.assertEqual(slow.verdict("see src/kept.py and LEGACY_TOKEN_NAME")["verdict"], "unverifiable")
+
+    def test_history_answers_are_cached_across_processes_by_head(self):
+        from unittest import mock
+        from link_core import staleness
+        repo = self._repo({"config.py": "KEY = 'LEGACY_TOKEN_NAME'\n"}, {"config.py": "KEY = 'NEW_TOKEN_NAME'\n"})
+        cache = repo.parent / (repo.name + "-staleness.json")
+        self.addCleanup(lambda: cache.unlink(missing_ok=True))
+        text = "Set LEGACY_TOKEN_NAME before deploying."
+        first = StalenessChecker(repo, cache_path=cache)
+        self.assertEqual([f["reference"] for f in first.findings(text)], ["LEGACY_TOKEN_NAME"])
+        first.save_cache()
+        self.assertTrue(cache.exists())
+        calls: list[list[str]] = []
+        real = staleness._git
+
+        def counting(root, arguments, runner=None, timeout=10):
+            calls.append(arguments)
+            return real(root, arguments, runner, timeout=timeout)
+
+        with mock.patch.object(staleness, "_git", counting):
+            second = StalenessChecker(repo, cache_path=cache)
+            self.assertEqual([f["reference"] for f in second.findings(text)], ["LEGACY_TOKEN_NAME"])
+        self.assertFalse([c for c in calls if c[:1] == ["log"]], calls)

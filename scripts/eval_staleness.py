@@ -106,7 +106,7 @@ V2_REMOVALS = {
     "make_target": "Cut a release with make release.",
     "dependency": "We pad strings with `left-pad`.",
     "env_var": "Export LEGACY_API_TOKEN before running.",
-    "url": "Staging is at https://staging.acme-internal.dev/api.",
+    "url": "Staging is at https://staging.acme.internal:8443/api.",
     "version": "We target Python 3.10.",
     "package_manager": "Always use npm install for dependencies.",
 }
@@ -122,7 +122,7 @@ def v2_track() -> dict[str, object]:
             "scripts": {"build": "tsc", "deploy:staging": "node d.js"},
             "dependencies": {"left-pad": "1", "express": "4"}}), encoding="utf-8")
         (repo / "Makefile").write_text("release:\n\ttrue\nclean:\n\ttrue\n", encoding="utf-8")
-        (repo / "app.py").write_text("T = 'LEGACY_API_TOKEN'\nU = 'https://staging.acme-internal.dev/api'\n", encoding="utf-8")
+        (repo / "app.py").write_text("T = 'LEGACY_API_TOKEN'\nU = 'https://staging.acme.internal:8443/api'\n", encoding="utf-8")
         (repo / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.10"\n', encoding="utf-8")
         (repo / "package-lock.json").write_text("{}", encoding="utf-8")
         _git(repo, "add", "-A")
