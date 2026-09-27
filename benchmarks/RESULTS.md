@@ -510,3 +510,49 @@ python3 scripts/eval_locomo.py /tmp/locomo10.json --mode off
 
 `--mode fake` runs a deterministic no-model embedder; CI uses it with a
 regression gate: hybrid may never score below lexical on any group metric.
+
+## Track 7: Behavioral A/B - with and without Link
+
+Retrieval scores say whether the right memory comes back. The question
+people ask is whether an agent with Link *does the right thing* more often
+than one without it. `scripts/eval_behavior_ab.py` answers the half Link
+controls, with no model in the loop, and gives you the switch for the
+other half.
+
+Twelve scenarios whose correct answer depends on something the user said in
+an earlier session: a deploy day, a branch rule, a package manager, a
+test command, a port, a secrets rule, an owner, an API rule, a logging
+choice, a style preference, and two decisions that were later reversed.
+Their memories share one store with 48 realistic distractors. Condition A
+is the task alone; condition B is what a connected agent actually has - the
+session-start brief plus the task's recall packet (budget micro). Answers
+are scored by fixed patterns: the current truth must appear, the stale or
+generic answer must not.
+
+In dry mode (CI) a deterministic oracle stands in for the model: it answers
+correctly only when the governing memory is in its context, and follows the
+earlier of two conflicting claims, the position bias real models show.
+
+| | without Link | with Link |
+|---|---|---|
+| scenarios answered right (dry oracle) | 0 / 12 | 10 / 12 |
+| governing memory in front of the agent | - | 10 / 12 |
+| mean context added | - | ~2,900 tokens |
+
+The two misses are published as known gaps rather than tuned away, and the
+gate fails on any new one:
+
+- a question about "the database client library" retrieves an unrelated
+  "logging library" memory ahead of the migration memory, and the micro
+  budget returns only one memory;
+- a standing preference about how to answer shares no words with the task,
+  and the five-memory session brief does not carry it.
+
+Honest limits: the oracle measures delivery, not obedience - a real model
+can ignore a memory it was given, or answer correctly without one. Run the
+live track to measure that with your own agent; Link makes no network
+calls, the command and its cost are yours:
+
+```bash
+python3 scripts/eval_behavior_ab.py --mode live --agent-command "claude -p --model claude-haiku-4-5" --yes
+```

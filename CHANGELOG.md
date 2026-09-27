@@ -24,6 +24,16 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   evidence ("package.json no longer defines scripts.deploy:staging").
   Memories also get a per-memory verdict against the checkout -
   `verified`, `stale`, or `unverifiable` when there is nothing to check.
+- **A with/without behavioral A/B.** `scripts/eval_behavior_ab.py` asks
+  whether an agent with Link does the right thing more often than one
+  without it, on twelve scenarios whose answer depends on an earlier
+  session. In CI a deterministic oracle measures delivery - is the memory
+  that should change the answer in front of the agent, ahead of any stale
+  one: 10 of 12 with Link, 0 of 12 without. The two misses are published
+  as known gaps (a ranking collision on a shared word; a standing style
+  preference the session brief does not carry). A live mode pipes each
+  prompt to an agent command you choose; Link makes no network calls, and
+  nothing runs without `--yes`.
 
 ### Security
 
