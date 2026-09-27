@@ -137,8 +137,16 @@ recall(query="formatting", memory_type="preference")</code></pre>
           <li>Use <code>admin</code> action <code>propose_memories</code> for transcripts, long notes, or uncertain context.</li>
           <li>If a write returns <code>duplicate_candidates</code>, update the existing memory instead of creating another one.</li>
           <li>If a write returns <code>conflict_candidates</code>, explain the conflict and ask the user before overriding.</li>
+          <li>If a write returns <code>possible_contradictions</code>, tell the user which stored memories the new one may contradict and offer to supersede or archive the old one. The memory is already saved; the flag asks for review, it does not block.</li>
           <li>Use <code>review_after</code> for memories that should be re-checked, and <code>expires_at</code> for temporary context.</li>
         </ul>
+        <p><strong>Contradiction flags (optional).</strong> Word rules catch contradictions that share structure, such as &ldquo;uses X&rdquo; against &ldquo;no longer uses X&rdquo;, or two different version numbers. After <code>lnk semantic &lt;dir&gt; --setup --nli</code>, a small local natural-language-inference model also reads meaning.</p>
+        <ul>
+          <li><strong>What it checks.</strong> On each <code>remember</code>, it scores the new claim against at most five stored memories whose subject words overlap with it by at least 30%. The overlap gate is what keeps it from reading two unrelated project rules as a contradiction.</li>
+          <li><strong>What it adds.</strong> A pair scored at 0.9 or higher gets a <code>review_note</code> on the new memory, and the write result includes <code>possible_contradictions</code>, with the <code>name</code>, <code>title</code> and <code>probability</code> of each flagged memory.</li>
+          <li><strong>What it never does.</strong> It never blocks a save and never runs during recall. A missing or failing model cannot break a write.</li>
+        </ul>
+        <p><code>LINK_NLI=off</code> turns it off.</p>
         <p>Proposals from transcripts and session-end captures are filtered before anything reaches the inbox. Only the user's own words are mined. Text the agent harness injects is dropped: system reminders, command output, sub-agent turns and compaction summaries. So are the shapes that were never memory:</p>
         <ul>
           <li>instructions for the work at hand (&ldquo;do not edit any files&rdquo;) with no standing-rule framing;</li>

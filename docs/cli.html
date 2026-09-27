@@ -188,6 +188,13 @@ lnk verify-mcp ~/link</code></pre>
         <p>Use <code>lnk recipes</code> to list saved procedure memories with their triggers, and <code>lnk recall "&lt;task&gt;" --type procedure</code> to recall only recipes. Consolidation plans also surface recurring themes across session captures — the review-gated way an agent learns your patterns: detection is automatic and deterministic, but turning a pattern into one durable memory is always proposed to you first. A scheduled idle-time agent session can run the plan as a "dream pass" and bring proposals to your next session.</p>
         <p>Use <code>lnk consolidate</code> when the capture or review backlog builds up. It is read-only: it counts pending captures and memories needing review, groups duplicate captures, and prints paste-safe accept/discard/review commands to run with the user. When the backlog crosses a threshold, the injected session-start brief nudges the agent to offer a consolidation pass, and MCP agents can request the same plan through <code>review(action="consolidate")</code>.</p>
         <p>Use <code>lnk semantic</code> to inspect or enable optional hybrid recall. Lexical recall is always the default and the fallback; running <code>lnk semantic --setup</code> once (or <code>python3 -m link_mcp --semantic-setup</code> for MCP-only installs) adds a small local embedding model so paraphrased queries also find memories phrased differently — on Homebrew installs, where the runtime Python refuses direct pip installs, setup provisions the extras into <code>~/.link-mcp-venv</code> automatically. Recall itself never touches the network — the model loads offline-only, embeddings live in plain JSON under <code>.link-cache/</code>, and semantic-only matches are labeled with capped confidence so agents verify before trusting them. Measured results and methodology live in <code>benchmarks/RESULTS.md</code>.</p>
+        <p>Contradiction flags are a separate opt-in. <code>lnk semantic --setup --nli</code> also downloads a small local natural-language-inference model (<code>Xenova/nli-deberta-v3-xsmall</code>, int8, about 87 MB), which needs the <code>onnxruntime</code> and <code>tokenizers</code> packages from the rerank extra.</p>
+        <ul>
+          <li>After that, <code>lnk remember</code> checks a new memory against the few stored memories that share its subject. A likely contradiction adds a review note and a <code>possible_contradictions</code> list to the result.</li>
+          <li>The save always goes through. The model is never used during recall and never contacts the network after setup.</li>
+          <li><code>lnk semantic --json</code> reports the state under <code>contradiction_flags</code> (<code>enabled</code>, <code>reason</code>, <code>model</code>, <code>threshold</code>).</li>
+          <li><code>LINK_NLI=off</code> disables it.</li>
+        </ul>
         <p>From a source checkout, use the synthetic large-wiki smoke when you want local scale evidence without touching your real wiki. The script prints the exact <code>lnk serve</code> command and graph URL for the generated fixture.</p>
         <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
 
@@ -229,7 +236,7 @@ lnk start [dir] [--task "task"] [--project slug]
 lnk brief "task" [--project slug]
 lnk memory-audit [--project slug]
 lnk consolidate [dir] [--project slug] [--limit N]
-lnk semantic [dir] [--setup] [--rebuild]
+lnk semantic [dir] [--setup] [--rebuild] [--nli] [--json]
 lnk recall "query" [--project slug] [--type TYPE] [--as-of YYYY-MM-DD] [--include-archived]
 lnk recipes [dir] [--project slug]
 lnk profile [--project slug]
