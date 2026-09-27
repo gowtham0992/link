@@ -114,8 +114,13 @@ an older integration or a power-user workflow needs every individual tool.
 New MCP configs should expose Link through six model-facing tools:
 
 1. `status(include_validation?)` checks readiness and safe next actions.
-2. `recall(query, budget?, project?, mode?, limit?)` is the one read tool for
-   briefs, answer-ready context packets, wiki search, and graph context.
+2. `recall(query, budget?, project?, mode?, limit?, as_of?, memory_type?)` is
+   the one read tool for briefs, answer-ready context packets, wiki search,
+   and graph context. `as_of` (YYYY-MM-DD) answers what was true on a past
+   date, and a time phrase in the query ("last quarter", "in March") does the
+   same. `memory_type` narrows recall to one kind of memory. Inside a git
+   checkout, recalled memories carry `verified` (checked at a commit sha) or
+   `stale_paths` (names something the repository no longer has).
 3. `remember(text, ...)` writes only explicit user-approved durable memories,
    including `memory_type="procedure"` recipes with a `trigger` phrase that
    return from recall with their steps, situational memories scoped with
@@ -231,7 +236,7 @@ Recommended slim tool set:
 | Tool | Description |
 |------|-------------|
 | `status(include_validation?)` | Readiness summary with package version, wiki path, content/page/memory counts, optional validation summary, warnings, and safe next actions. |
-| `recall(query?, budget?, project?, mode?, limit?)` | One read tool for startup briefs, focused memory recall, answer-ready context packets, wiki search, graph context, token budgets, and follow-up actions. |
+| `recall(query?, budget?, project?, mode?, limit?, as_of?, memory_type?)` | One read tool for startup briefs, focused memory recall, point-in-time and typed recall, answer-ready context packets, wiki search, graph context, token budgets, and follow-up actions. `context_packet` ranks references into `memory.items` and `wiki.pages`; `budget_report.packet_total` is the whole packet's size. |
 | `remember(text, ...)` | Save explicit user-approved local memory with duplicate/conflict checks, provenance, review state, visibility, optional `review_after`, and optional `expires_at`. |
 | `ingest(action?, strict?)` | Inspect pending raw sources, run validation, or rebuild ingest indexes/backlinks after source edits. |
 | `review(action?, ...)` | Memory inbox, profile, audit, log, wins, explain, reviewed, archive, restore, and forget workflows. |
