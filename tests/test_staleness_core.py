@@ -263,6 +263,22 @@ class RecallPacketMarkerTests(unittest.TestCase):
         # The marker must arrive with an instruction, or the agent has a flag and no idea what it means.
         self.assertTrue(any("stale_paths" in line for line in packet["agent_guidance"]))
 
+    def test_marks_a_memory_whose_references_all_hold_as_verified(self):
+        with tempfile.TemporaryDirectory() as repo_dir:
+            repo = Path(repo_dir)
+            _git(repo, "init", "--initial-branch", "main")
+            (repo / "src").mkdir()
+            (repo / "src" / "old.py").write_text("x\n", encoding="utf-8")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "seed")
+            sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+            packet = self._packet(repo)
+        item = packet["memory"]["items"][0]
+        self.assertNotIn("stale_paths", item)
+        self.assertTrue(sha.startswith(item["verified"]["sha"]))
+        self.assertGreaterEqual(item["verified"]["references_checked"], 1)
+        self.assertTrue(any("verified" in line for line in packet["agent_guidance"]))
+
     def test_no_marker_without_a_repository(self):
         with tempfile.TemporaryDirectory() as plain:
             packet = self._packet(Path(plain))          # exists, but no .git

@@ -183,11 +183,27 @@ def _mark_stale_paths(
         if item is None:
             continue
         text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
-        findings = checker.findings(text)
-        if findings:
+        verdict = checker.verdict(text)
+        findings = verdict.get("findings") or []
+        if verdict.get("verdict") == "stale" and findings:
             item["stale_paths"] = [
-                {"path": f["path"], "reason": f["reason"], "successor": f["successor"]} for f in findings
+                {
+                    "path": f.get("path", ""),
+                    "reason": f.get("reason", ""),
+                    "successor": f.get("successor", ""),
+                    **({"kind": f["kind"]} if f.get("kind") else {}),
+                    **({"evidence": f["evidence"]} if f.get("evidence") else {}),
+                }
+                for f in findings
             ]
+        elif verdict.get("verdict") == "verified":
+            # Everything the memory names still holds in this repository.
+            # Saying so is the other half of staleness: an agent can lean on
+            # a verified memory instead of re-reading the code to be sure.
+            item["verified"] = {
+                "sha": verdict.get("sha", ""),
+                "references_checked": verdict.get("checked", 0),
+            }
 
 
 def _compact_memory(memory: Mapping[str, object]) -> dict[str, object]:
@@ -550,6 +566,11 @@ def query_link(
             1,
             "The last two memories ranked almost equally; both are included. "
             "Decide from their content which one the task is about.",
+        )
+    if any(memory.get("verified") for memory in memories):
+        guidance.append(
+            "Memories marked verified were checked against this repository at the "
+            "given sha: every file, script, dependency or setting they name still holds."
         )
     if any(memory.get("stale_paths") for memory in memories):
         # A signal without an instruction is decoration. Same pattern as the
