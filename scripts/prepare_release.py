@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Prepare local files for a Link MCP release.
+"""Prepare local files for a Link release.
 
-This script updates version files and moves CHANGELOG.md Unreleased notes into a
-dated version section. It does not commit, tag, upload to PyPI, or publish to the
-MCP Registry.
+Updates the package version files, moves CHANGELOG.md Unreleased notes into a
+dated section, stamps the homepage banner (words required), and bumps LinkBar
+when asked. It does not commit, tag, upload to PyPI, or publish to the MCP
+Registry; it prints those steps, in the order that works with a protected
+main branch. The full procedure lives in packaging/RELEASE.md.
 """
 from __future__ import annotations
 
 import argparse
-import sys
 import json
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -195,7 +198,59 @@ def update_homepage(text: str, version: str, banner: str | None = None) -> str:
     return HOMEPAGE_TAG_RE.sub(rf"\g<1>{version}", text)
 
 
-def prepare_release(root: Path, version: str, release_date: str, dry_run: bool = False, banner: str | None = None) -> list[Path]:
+LINKBAR_SWIFT = "apps/LinkBar/Sources/LinkBar/DesignSystem.swift"
+LINKBAR_BUNDLE = "apps/LinkBar/Scripts/bundle.sh"
+LINKBAR_SWIFT_RE = re.compile(r'(static let version = ")(\d+\.\d+\.\d+)(")')
+LINKBAR_BUNDLE_RE = re.compile(r"(<key>CFBundle(?:ShortVersionString|Version)</key><string>)(\d+\.\d+\.\d+)(</string>)")
+
+
+def read_linkbar_version(root: Path) -> str | None:
+    path = root / LINKBAR_SWIFT
+    if not path.exists():
+        return None
+    match = LINKBAR_SWIFT_RE.search(path.read_text(encoding="utf-8"))
+    return match.group(2) if match else None
+
+
+def linkbar_changed_since_last_tag(root: Path) -> tuple[bool, str | None]:
+    """Did apps/LinkBar change since the last release tag, without a version bump?"""
+    def git(*args: str) -> str:
+        try:
+            return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
+                                  check=False, timeout=20).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    tag = git("describe", "--tags", "--abbrev=0", "--match", "v*")
+    if not tag:
+        return False, None
+    changed = bool(git("diff", "--name-only", f"{tag}..HEAD", "--", "apps/LinkBar/Sources", "apps/LinkBar/Scripts"))
+    shipped = git("show", f"{tag}:{LINKBAR_SWIFT}")
+    match = LINKBAR_SWIFT_RE.search(shipped)
+    return changed, match.group(2) if match else None
+
+
+def update_linkbar(root: Path, version: str) -> dict[Path, str]:
+    version = normalize_version(version)
+    updates: dict[Path, str] = {}
+    swift = root / LINKBAR_SWIFT
+    bundle = root / LINKBAR_BUNDLE
+    if swift.exists():
+        updates[swift] = LINKBAR_SWIFT_RE.sub(rf"\g<1>{version}\g<3>", swift.read_text(encoding="utf-8"))
+    if bundle.exists():
+        updates[bundle] = LINKBAR_BUNDLE_RE.sub(rf"\g<1>{version}\g<3>", bundle.read_text(encoding="utf-8"))
+    return updates
+
+
+def prepare_release(
+    root: Path,
+    version: str,
+    release_date: str,
+    dry_run: bool = False,
+    banner: str | None = None,
+    *,
+    keep_banner: bool = False,
+    linkbar_version: str | None = None,
+) -> list[Path]:
     files = release_files(root)
     version = normalize_version(version)
     release_date = normalize_date(release_date)
@@ -213,15 +268,26 @@ def prepare_release(root: Path, version: str, release_date: str, dry_run: bool =
     # The homepage is presentation, not a package artifact: update it when
     # present (the real repo), skip it in minimal trees/tests.
     if files.homepage.exists():
+        # 3.0.0 shipped announcing itself with 2.2's features because this
+        # was a warning. It is an error now: say what the release is, or say
+        # explicitly that the current words are already right.
+        if not banner and not keep_banner:
+            raise ValueError(
+                "the homepage banner needs this release's words: pass --banner \"three highlights\" "
+                "(or --keep-banner if docs/index.html already says the right thing)"
+            )
         updates[files.homepage] = update_homepage(
             files.homepage.read_text(encoding="utf-8"), version, banner=banner
         )
-        if not banner:
-            print(
-                "WARNING: homepage banner words were NOT updated - the banner will "
-                "announce the new version with the previous release's feature words. "
-                "Pass --banner \"three highlights of this release\" to stamp them.",
-                file=sys.stderr,
+    if linkbar_version:
+        updates.update(update_linkbar(root, linkbar_version))
+    else:
+        changed_app, shipped = linkbar_changed_since_last_tag(root)
+        current_app = read_linkbar_version(root)
+        if changed_app and shipped and current_app == shipped:
+            raise ValueError(
+                f"apps/LinkBar changed since the last release but is still {current_app}; "
+                "pass --linkbar-version X.Y.Z so the cask ships the new build"
             )
 
     changed = [path for path, text in updates.items() if path.read_text(encoding="utf-8") != text]
@@ -231,21 +297,56 @@ def prepare_release(root: Path, version: str, release_date: str, dry_run: bool =
     return changed
 
 
+RELEASE_VENV = "~/.link-release-venv"
+
+
 def release_commands(version: str) -> list[str]:
+    """Publish steps, in the order that works with a protected main.
+
+    Homebrew's Python refuses `pip install twine` (PEP 668), so build and
+    upload run from a dedicated venv; and main only accepts pull requests,
+    so the version bump travels on develop and the tag is cut on main after
+    the merge.
+    """
     version = normalize_version(version)
+    venv = RELEASE_VENV
     return [
-        "git switch main",
-        "git pull --ff-only",
+        f'git add -A && git commit -m "Release Link v{version}" && git push origin develop',
+        f'gh pr create --base main --head develop --title "Release Link v{version}"',
+        "# wait for CI, merge the PR (merge commit), then:",
+        "git switch main && git pull --ff-only origin main",
         f'git tag -a v{version} -m "v{version}"',
         f"git push origin v{version}",
+        f"test -x {venv}/bin/twine || (python3 -m venv {venv} && {venv}/bin/pip install -U build twine)",
         "cd mcp_package",
         'python3 -c "from pathlib import Path; import shutil; shutil.rmtree(\'dist\', ignore_errors=True); [shutil.rmtree(p, ignore_errors=True) for p in Path(\'.\').glob(\'*.egg-info\')]"',
-        "python3 -m build",
-        "python3 -m twine check dist/*",
-        f"TWINE_USERNAME=__token__ python3 -m twine upload dist/link_mcp-{version}*",
+        f"{venv}/bin/python -m build",
+        f"{venv}/bin/twine check dist/*",
+        f"TWINE_USERNAME=__token__ {venv}/bin/twine upload dist/link_mcp-{version}*",
         "mcp-publisher validate",
+        "mcp-publisher login github",
         "mcp-publisher publish",
     ]
+
+
+def tap_commands(version: str, linkbar_version: str | None) -> list[str]:
+    """The Homebrew tap bump: two formula lines, three cask lines."""
+    version = normalize_version(version)
+    tap = "/opt/homebrew/Library/Taps/gowtham0992/homebrew-link"
+    tarball = f"https://github.com/gowtham0992/link/archive/refs/tags/v{version}.tar.gz"
+    lines = [
+        f"SHA=$(curl -sL {tarball} | shasum -a 256 | cut -d' ' -f1)",
+        f"sed -i '' -E 's#refs/tags/v[0-9.]+\\.tar\\.gz#refs/tags/v{version}.tar.gz#; "
+        f"s#sha256 \"[0-9a-f]+\"#sha256 \"'$SHA'\"#' {tap}/Formula/link.rb",  # one url, one sha256 line; BSD sed
+    ]
+    if linkbar_version:
+        lines += [
+            "bash apps/LinkBar/Scripts/bundle.sh --release-zip   # prints the zip sha256",
+            f"gh release create v{version} apps/LinkBar/.build/LinkBar-{linkbar_version}.zip --title \"Link {version}\" --notes-file <notes> --latest",
+            f"# cask: version \"{linkbar_version}\", the zip's sha256, and download/v{version}/ in the url - three lines",
+        ]
+    lines += [f"cd {tap} && git diff && git commit -am \"link {version}\" && git push"]
+    return lines
 
 
 def main() -> int:
@@ -253,12 +354,18 @@ def main() -> int:
     parser.add_argument("version", help="new release version, e.g. 1.0.6")
     parser.add_argument("--date", default=date.today().isoformat(), help="release date in YYYY-MM-DD")
     parser.add_argument("--dry-run", action="store_true", help="validate and list files without writing")
-    parser.add_argument("--banner", default=None, help="the banner's feature words for this release (after 'is out'); omitting keeps the old words and warns")
+    parser.add_argument("--banner", default=None, help="the homepage banner's feature words for this release (required)")
+    parser.add_argument("--keep-banner", action="store_true",
+                        help="the banner words in docs/index.html already describe this release")
+    parser.add_argument("--linkbar-version", default=None,
+                        help="also bump LinkBar (DesignSystem.swift and bundle.sh) to this version")
     parser.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     try:
-        changed = prepare_release(args.root.resolve(), args.version, args.date, dry_run=args.dry_run, banner=args.banner)
+        changed = prepare_release(args.root.resolve(), args.version, args.date, dry_run=args.dry_run,
+                                  banner=args.banner, keep_banner=args.keep_banner,
+                                  linkbar_version=args.linkbar_version)
     except ValueError as exc:
         parser.exit(1, f"error: {exc}\n")
 
@@ -268,15 +375,14 @@ def main() -> int:
         print(f"- {path.relative_to(args.root.resolve())}")
 
     print("")
-    print("After the PR merges and CI passes, publish with:")
+    print("Publish (full procedure: packaging/RELEASE.md):")
     for command in release_commands(args.version):
         print(command)
     print("")
-    print(
-        "Then bump the Homebrew tap (gowtham0992/homebrew-link) to "
-        f"{normalize_version(args.version)} so `brew install` serves this "
-        "version — otherwise new users get an older Link than the docs describe."
-    )
+    print("Then the Homebrew tap, so `brew install` serves this version:")
+    linkbar = args.linkbar_version or read_linkbar_version(args.root.resolve())
+    for command in tap_commands(args.version, linkbar):
+        print(command)
     return 0
 
 

@@ -127,9 +127,50 @@ class PrepareReleaseTests(unittest.TestCase):
 
         self.assertIn('git tag -a v1.0.6 -m "v1.0.6"', commands)
         self.assertTrue(any("glob('*.egg-info')" in command for command in commands))
-        self.assertIn("TWINE_USERNAME=__token__ python3 -m twine upload dist/link_mcp-1.0.6*", commands)
+        self.assertTrue(any("twine upload dist/link_mcp-1.0.6*" in command and ".link-release-venv" in command
+                            for command in commands))
+        # Protected main: the bump goes through a PR before the tag.
+        self.assertLess(next(i for i, c in enumerate(commands) if "gh pr create" in c),
+                        next(i for i, c in enumerate(commands) if c.startswith("git tag")))
         self.assertIn("mcp-publisher validate", commands)
         self.assertIn("mcp-publisher publish", commands)
+
+
+
+class ReleaseGuardTests(unittest.TestCase):
+    def _root_with_homepage(self) -> Path:
+        root = make_release_root()
+        (root / "docs").mkdir(exist_ok=True)
+        (root / "docs" / "index.html").write_text(
+            'New \\u00b7 Link 1.0.5 is out \\u2014 old words <span>x</span> tag/v1.0.5\\"', encoding="utf-8")
+        return root
+
+    def test_missing_banner_words_are_an_error(self):
+        root = self._root_with_homepage()
+        with self.assertRaisesRegex(ValueError, "--banner"):
+            prepare_release.prepare_release(root, "1.0.6", "2026-09-26")
+        changed = prepare_release.prepare_release(root, "1.0.6", "2026-09-26", keep_banner=True, dry_run=True)
+        self.assertTrue(changed)
+
+    def test_linkbar_version_is_bumped_in_both_files(self):
+        root = make_release_root()
+        swift = root / prepare_release.LINKBAR_SWIFT
+        bundle = root / prepare_release.LINKBAR_BUNDLE
+        swift.parent.mkdir(parents=True)
+        bundle.parent.mkdir(parents=True)
+        swift.write_text('    static let version = "1.4.0"\n', encoding="utf-8")
+        bundle.write_text("<key>CFBundleShortVersionString</key><string>1.4.0</string>\n"
+                          "<key>CFBundleVersion</key><string>1.4.0</string>\n", encoding="utf-8")
+        prepare_release.prepare_release(root, "1.0.6", "2026-09-26", linkbar_version="1.5.0")
+        self.assertIn('"1.5.0"', swift.read_text(encoding="utf-8"))
+        self.assertEqual(bundle.read_text(encoding="utf-8").count("1.5.0"), 2)
+
+    def test_tap_commands_cover_formula_and_cask(self):
+        lines = prepare_release.tap_commands("4.0.0", "1.5.0")
+        joined = "\n".join(lines)
+        self.assertIn("refs/tags/v4.0.0.tar.gz", joined)
+        self.assertIn("LinkBar-1.5.0.zip", joined)
+        self.assertIn("three lines", joined)
 
 
 if __name__ == "__main__":

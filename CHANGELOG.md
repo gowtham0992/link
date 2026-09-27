@@ -89,6 +89,16 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   which creates the config, verifies the runtime and installs hooks; the old
   inline registration remains as the fallback when no Link CLI is found.
 
+- **Releases follow a written procedure.** `packaging/RELEASE.md` holds the
+  whole release in order; it used to live in a maintainer's private memory.
+  `scripts/prepare_release.py` now refuses to run without banner words
+  (3.0.0 shipped announcing 2.2's features after the warning was missed),
+  refuses when LinkBar changed without a version bump and can bump it
+  (`--linkbar-version`), and prints steps that work as they are: build and
+  upload from a release venv instead of Homebrew's pip-locked Python, the
+  version bump through a pull request because `main` is protected, and the
+  exact tap edits.
+
 ### Security
 
 - **Team memories arrive through your review gate.** `lnk team-sync`
