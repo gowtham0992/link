@@ -2,14 +2,17 @@
 
 The MCP server talks to its client over stdin/stdout. A child process that
 inherits that stdin hangs on Windows until its timeout; one `git rev-parse`
-in the recall path made every MCP recall time out on Windows CI. The package
-runs inside that server, so each spawn must pass `stdin=` or `input=`.
+in the recall path made every MCP recall time out on Windows CI. link_core
+and link_mcp run inside that server, so each spawn there must pass `stdin=`
+or `input=`. (The CLI copy the package build drops beside them is not
+scanned: interactive CLI spawns may inherit the terminal on purpose.)
 """
 import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SERVER_PACKAGES = (ROOT / "mcp_package" / "link_core", ROOT / "mcp_package" / "link_mcp")
 SPAWN_RE = re.compile(r"\bsubprocess\.(?:run|Popen|check_output|check_call|call)\(")
 
 
@@ -26,7 +29,7 @@ class SubprocessStdinTests(unittest.TestCase):
     def test_package_spawns_never_inherit_stdin(self):
         offenders = []
         checked = 0
-        for path in sorted((ROOT / "mcp_package").rglob("*.py")):
+        for path in sorted(path for package in SERVER_PACKAGES for path in package.rglob("*.py")):
             for line, call in spawn_calls(path.read_text(encoding="utf-8")):
                 checked += 1
                 if "stdin=" not in call and "input=" not in call:
