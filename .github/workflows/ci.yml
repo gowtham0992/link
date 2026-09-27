@@ -179,6 +179,47 @@ jobs:
       - name: Packaged LinkBar launches with no build paths present
         run: python scripts/smoke_linkbar_packaged.py
 
+  # The default semantic tier with the real model, not the fake embedder the
+  # test suite uses. setup is the one step allowed to download; everything
+  # after it must work from the local cache alone, and hybrid recall must
+  # never score below lexical recall (the eval exits non-zero if it does).
+  macos-semantic-real:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install link-mcp with the semantic extra
+        run: python -m pip install "./mcp_package[semantic]"
+
+      - name: One-time model fetch through the MCP entry point
+        run: |
+          python link.py demo "$RUNNER_TEMP/semantic-demo" --force
+          python -m link_mcp --semantic-setup --wiki "$RUNNER_TEMP/semantic-demo/wiki"
+
+      - name: Status reports the fast tier, offline and indexed
+        env:
+          HF_HUB_OFFLINE: "1"
+        run: |
+          python link.py semantic "$RUNNER_TEMP/semantic-demo" --json > "$RUNNER_TEMP/semantic.json"
+          python - "$RUNNER_TEMP/semantic.json" <<'EOF'
+          import json, sys
+          status = json.load(open(sys.argv[1]))
+          assert status["provider"] == "model2vec", status
+          assert status["model_available_offline"] is True, status
+          assert status["indexed_memories"] == status["memory_count"] > 0, status
+          assert status["mode"].startswith("hybrid"), status
+          print(status["provider"], status["model"], status["indexed_memories"], "memories indexed")
+          EOF
+
+      - name: Recall quality with the real model (offline)
+        env:
+          HF_HUB_OFFLINE: "1"
+        run: python scripts/eval_recall_quality.py --suite small --mode real
+
   # The same walk on Windows, where nobody has ever cold-walked by hand:
   # pip/source is the install path, venv layout is Scripts\python.exe.
   windows-cold-walk:
