@@ -50,6 +50,7 @@
         <a href="#promise">Contract promise</a>
         <a href="#loop">Agent loop</a>
         <a href="#tools">Core tools</a>
+        <a href="#receipt">Memory receipt</a>
         <a href="#time">Point-in-time recall</a>
         <a href="#writes">Write rules</a>
         <a href="#sharing">Sharing semantics</a>
@@ -99,7 +100,24 @@ Agent: recall(query="release plan", budget="small")</code></pre>
 
         <p>Recalled memories carry honest signals agents must respect: a <code>confidence</code> label (<code>strong</code>/<code>moderate</code>/<code>weak</code>) and, when the optional local semantic tier is installed, a <code>match</code> field (<code>lexical</code>/<code>hybrid</code>/<code>semantic</code>). Semantic-only matches are capped below strong confidence — verify them with the user before acting. When a brief reports a memory backlog, <code>review(action="consolidate")</code> (or <code>lnk consolidate</code>) returns a read-only plan; apply its actions only with per-item user approval.</p>
         <p>When recall runs inside a git checkout, each returned memory that names something in the repository is checked against it. A memory whose files, scripts, targets, dependencies, variables and URLs all still hold carries <code>verified</code>, with the commit <code>sha</code> it was checked at and <code>references_checked</code>. An agent can rely on that memory without re-reading the code. A memory that names something the repository once had and no longer has carries <code>stale_paths</code>, one entry per finding, with the <code>path</code>, the <code>reason</code>, the <code>successor</code> when git recorded a rename, and <code>evidence</code>. The packet's <code>agent_guidance</code> then tells the agent to check the memory against the current code before relying on it. Memories that name nothing checkable carry neither key; a missing key is normal, not a warning.</p>
+        <p>A memory written or updated inside a git checkout that names a repository file along with a code symbol found in that file gets <code>anchors</code>. Each anchor records where the symbol was, as <code>path:line symbol</code>, read from the file itself and never inferred. Recall re-reads anchored files. A symbol that moved within its file shows up in <code>stale_paths</code> with <code>kind: "anchor"</code>, <code>reason: "moved"</code> and the new location as <code>successor</code>. A symbol that is gone from the file, or whose file is gone, shows up with <code>reason: "removed"</code>. Anchors that all hold count toward <code>verified</code>, so a memory whose only checkable claims are anchors can still earn it. Preferences and decisions that name no code never get anchors. <code>LINK_ANCHORS=off</code> turns them off.</p>
         <p>Every recalled memory also reports a <code>recall.state</code>. A memory that arrived through <code>lnk team-sync</code> and has not been reviewed on this machine is <code>quarantined</code>. It is still your teammate's claim, not yours, so it stays out of recall, briefs and the write gates. It waits in the review inbox until you approve it there.</p>
+
+        <h2 id="receipt">Memory Receipt</h2>
+        <p>Link records that each brief and recall happened in <code>.link-usage.json</code> at the workspace root. That lets you see what actually reached your agent, not just what is stored. <code>lnk receipt</code> (or <code>review(action="receipt")</code> over MCP) groups those events into sessions: runs of retrievals with no gap longer than 30 minutes. For each session it shows:</p>
+        <ul>
+          <li>when the session started and ended;</li>
+          <li>the project;</li>
+          <li>the surfaces it came through (<code>hook</code>, <code>mcp</code>, <code>cli</code>);</li>
+          <li>each session brief, with how many memories it carried, roughly how many tokens it cost, and whether a budget cut it short;</li>
+          <li>how many recalls there were;</li>
+          <li>any guard reminders;</li>
+          <li>every memory the agent was given, with a count.</li>
+        </ul>
+        <p>Every memory in the receipt comes with the command to explain it and the command to forget it.</p>
+        <pre><code>lnk receipt ~/link --sessions 3
+lnk receipt ~/link --json</code></pre>
+        <p>The ledger never records query text, answers, or anything from the conversation, only that a memory was used and which one. It is machine-local, excluded from sync, capped at a ring of recent events, and switched off with <code>LINK_USAGE=off</code>. Events recorded before 4.0 have no surface or size, and the receipt says so instead of guessing.</p>
 
         <h2 id="time">Point-in-Time and Typed Recall</h2>
         <p>Every memory is a dated file with its lifecycle recorded (<code>date_captured</code>, <code>supersedes</code>, <code>superseded_by</code>, <code>archived_at</code>). That makes &ldquo;what was true then&rdquo; an exact reconstruction, not a guess. <code>recall</code> accepts two optional arguments:</p>
