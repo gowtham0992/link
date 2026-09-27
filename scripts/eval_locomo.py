@@ -91,6 +91,10 @@ def _turn_records(sample: dict) -> list[dict[str, object]]:
                 "tldr": date,
                 "tags": [],
                 "body": text,
+                # Real records carry the opening of their body as a snippet,
+                # and the rerank tier reads it. Without it the cross-encoder
+                # saw only "speaker (session n)" and a date.
+                "snippet": text,
                 "context": neighbor_text,
                 "status": "active",
                 "scope": "user",

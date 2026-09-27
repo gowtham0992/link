@@ -17,7 +17,7 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   requires `>=3.12`, "Node 18" when `engines.node` is `>=20`), and a package
   manager whose lockfile was replaced by another manager's. The precision
   rule is unchanged - a reference is reported only when history shows the
-  thing existed - and it holds: 0 false flags across 322 references in
+  thing existed - and it holds: 0 false flags across 345 references in
   Link's own documentation and 298 more across eight other real
   repositories, every real deletion caught, and every one of seven removal
   kinds caught in the eval's scratch repository. Findings carry the
@@ -48,9 +48,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   without it, on twelve scenarios whose answer depends on an earlier
   session. In CI a deterministic oracle measures delivery - is the memory
   that should change the answer in front of the agent, ahead of any stale
-  one: 10 of 12 with Link, 0 of 12 without. The two misses are published
-  as known gaps (a ranking collision on a shared word; a standing style
-  preference the session brief does not carry). A live mode pipes each
+  one: 11 of 12 with Link, 0 of 12 without. The one miss is published as
+  a known gap (a ranking collision on a shared word). A live mode pipes each
   prompt to an agent command you choose; Link makes no network calls, and
   nothing runs without `--yes`.
 - **Upgrading from 2.x is tested, not assumed.** A workspace written by
@@ -60,6 +59,102 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   and checks the details. Memory counts stay the same and review state
   carries over. The search cache is rebuilt in the current format, and the
   old log verifies and gets its first anchor on the next write.
+- **A memory receipt: what reached your agents, session by session.**
+  People could not see what their agent was given from memory. `lnk
+  receipt` (and MCP `review` action `receipt`) groups the local retrieval
+  ledger into sessions and shows the session brief (memories, approximate
+  tokens, whether it was cut to fit), recalls, guard reminders, every
+  memory the agent was given with its title and how often, the total size,
+  and how to explain or forget any of them. The ledger never records
+  queries, so neither does the receipt. Building it exposed two recording
+  gaps, both fixed: the session-start hook never recorded the brief it
+  delivers, and the default MCP surface recorded only brief-mode recalls,
+  so "never retrieved" counted memories agents had read. CLI agents'
+  `lnk recall`, `lnk query` and `lnk brief` are recorded under their own
+  surface, so a CLI-only session has a receipt too.
+- **Recalled memories say whether they still hold.** When recall runs in a
+  repository, each returned memory carries `verified` (every file, script,
+  dependency, setting and code anchor it names still holds, with the
+  commit it was checked at) or `stale_paths` (what moved or disappeared,
+  with evidence). Memories that name nothing checkable carry neither.
+- **Optional contradiction flags from a local NLI model.** `lnk semantic
+  <dir> --setup --nli` adds an ~87 MB int8 model (onnxruntime and
+  tokenizers, already in the rerank extra). When a memory is written it is
+  read against the few stored memories about the same subject; a likely
+  contradiction becomes a review note, never a refusal. It never runs on
+  the recall path and a model failure cannot break a save. Measured by
+  the new `scripts/eval_contradiction_flags.py` on 20 revisions and 216
+  unrelated pairs that share a subject word: the word rules catch 17 with 0
+  false alarms; the model alone raises 107 false alarms; as shipped, with a
+  30% subject-overlap gate, it raises 0 and adds 1 revision the rules miss.
+  A small gain, which is why the tier is opt-in.
+- **Point-in-time and typed recall over MCP.** The `recall` tool takes
+  `as_of` and `memory_type`, and a time phrase in the query ("in March",
+  "last quarter") resolves to a date, as `lnk recall` always did.
+- **LinkBar 1.5.0 shows the last session's receipt.** A "Last session"
+  card in the Inbox tab says how many memories your agent was given and in
+  how many recalls, through which surfaces, at roughly how many tokens,
+  with an amber note when a budget cut some context, and the memories
+  themselves with how often each was used. Clicking one opens it in the
+  Memory tab with its explanation expanded; a deleted memory is struck
+  through. Against an older CLI the card stays hidden.
+- **The rerank tier is measurable from the repo.** Both recall
+  benchmarks take `--rerank` and apply the cross-encoder exactly as recall
+  does. On LoCoMo it is the best configuration on every metric (hit@1
+  0.453, hit@10 0.826, up from 3.x's 0.794); on the bundled claim-shaped
+  benchmark it now adds little (hit@1 0.789 to 0.798), because 4.0's
+  ranking underneath took most of that gain.
+
+### Changed
+
+- **Lexical recall matches words, not substrings.** Query words were
+  tested against fields with substring checks ("main" scored "Maintain the
+  domain allowlist", "the" matched "theme") and question words counted as
+  content. Words now match as words or as another form of the same word;
+  question words are stopwords; rare words weigh more than common ones;
+  two-letter acronyms (CI, DB, PR, S3) are tokens; and the stemmer does
+  what its docstring said ("committing" and "commit" meet). On LoCoMo,
+  lexical hit@1 rises from 0.266 to 0.350 and hit@10 from 0.628 to
+  0.716, with no model and faster than before. It also changed which tier
+  wins where: without the rerank tier, the semantic tiers on LoCoMo now
+  trail lexical at hit@1 and hit@5 while still leading at hit@10. Scaling the semantic weight down
+  fixes LoCoMo and costs the bundled benchmark a third of its
+  pure-paraphrase recall, so the weight stays; RESULTS.md has the ablation.
+- **The current claim ranks first.** Point-in-time recall penalised the
+  right answer for being archived today; activity and age are now judged
+  on the date asked about. When two top results contradict each other the
+  older one is labelled `contradicted_by` and read second, and revisions
+  that name what they replaced ("moved from 8080 to 8443", "Buildkite
+  replaced Jenkins") are recognised. `lnk recall` prints the dispute
+  under the older result. In the hygiene benchmark, contradiction exposure
+  after a revision falls from 0.167 to 0 and point-in-time accuracy rises
+  from 0.917 to 1.00.
+- **Standing preferences reach every session.** A preference about how the
+  agent should answer ("keep answers short and cite the wiki page") applies
+  to every task but shares no words with any of them, so it fell out of the
+  session brief. Two slots are reserved for them, which closes one of the
+  behavioral A/B's two known gaps.
+- **The recall packet stops repeating itself.** The ranked list carried
+  every memory and page a second time, and over MCP every result was also
+  sent back as a duplicate structured copy. The ranked list is now
+  references, `budget_report.packet_total` gives the whole packet's size,
+  and tools declare read-only/destructive hints. Mean
+  packets are 13% smaller at micro (1,951 to 1,697 tokens) and 22% smaller
+  at large (4,835 to 3,752).
+- **Recall stays fast on large stores.** Records are parsed once per file
+  change, tokens once per field, and records that share no word with the
+  query are skipped before scoring; `query_link` no longer scores the
+  store twice. At
+  20,000 memories a full packet takes 0.7 s instead of 1.7 s, and a fresh
+  process's first packet 4.4 s instead of 5.8 s. Ranking alone costs about a
+  quarter more than 3.0 at that size, the price of whole-word matching; a
+  pre-release build was 4.4 times slower until the benchmark caught it.
+- **Session captures propose far less junk.** Instructions for the work at
+  hand ("Do not edit any files"), requests ("I want you to..."), goals for
+  the conversation, throwaways, hypotheticals, someone else's habits,
+  anything tied to today and Link's own brief lines are no longer proposed
+  as memory; numbered prompt lists are not recipes. On 12 real developer
+  sessions: 58 proposals to 6, both genuine keepers kept.
 
 ### Fixed
 
@@ -130,6 +225,35 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   upload from a release venv instead of Homebrew's pip-locked Python, the
   version bump through a pull request because `main` is protected, and the
   exact tap edits.
+- **Memory in any language, everywhere.** 3.0's multilingual recall did
+  not reach proposals, fingerprints, the duplicate gate or negation
+  detection, which still compacted non-Latin text to nothing: three
+  distinct Japanese proposals collapsed into one and unrelated claims
+  shared a fingerprint. Every path now keeps every script (ASCII
+  fingerprints unchanged), negation is recognised in major languages, and
+  voiced kana are no longer split mid-character.
+- **An update changes what recall shows.** `update-memory` appended the
+  new claim but left the summary and a claim-shaped title on the old one,
+  so agents kept reading "Python 3.11" after the update to 3.12.
+- **Contradiction detection sees value changes and more.** Version, port
+  and count changes were invisible (short tokens were dropped), facts were
+  never checked, "Never use Ruff" did not meet "Use Ruff for linting",
+  and "release notes" or "local development" read as branch policies and
+  archived unrelated memories through supersession.
+- **Unreviewed team imports stay out of recall** until reviewed
+  (`recall.state` "quarantined"); memories flagged stale are inactive on
+  every past date too.
+- **CLI.** Help says `lnk` on installs (it said `usage: link.py`);
+  `--project` implies project scope instead of being dropped; `lnk stale`
+  exits 1 when something is flagged and 2 when `--repo` is not a git
+  repository (it reported "no stale references" about any folder); and an
+  installed-but-unfetched reranker no longer prints errors and a download
+  bar on every recall.
+- **MCP.** The first response reported `needs_review: 0` always; brief
+  guidance named tools the default surface does not have; follow-up
+  suggestions were admin calls in a shape the tool rejected.
+- **Old full-text index files are removed** after an upgrade instead of
+  staying in `.link-cache`.
 
 ### Security
 

@@ -2,17 +2,25 @@
 
 Link's recall is measured, not asserted. This document holds the current
 numbers, exactly how they were produced, and how to reproduce them on your
-own machine. There are three tracks:
+own machine. Numbers are from 2026-09-26 on `develop` at 46a3c58 (the 4.0
+pre-release) unless a section says otherwise, with 3.x figures beside them
+where they changed.
 
-1. **Link recall benchmark** — our own deterministic, fully auditable
-   dataset (checked into this repo; no LLM, no network, no randomness).
-2. **LoCoMo third-party track** — the retrieval stage of the long-term
-   conversational memory benchmark the hosted-memory industry quotes
-   (Maharana et al., ACL 2024, Snap Research), using only its third-party
-   questions and evidence annotations.
-3. **Memory hygiene over time** — a multi-month session simulation measuring
-   whether the store stays trustworthy: junk rate, contradiction exposure,
-   store growth, and temporal accuracy, gated vs ungated.
+| track | question | headline |
+|---|---|---|
+| 1. Link recall benchmark | does recall find the right memory? (1,176 cases) | hit@1 0.671 lexical, 0.789 quality tier |
+| 2. LoCoMo retrieval | third-party questions over 5,882 conversation turns | hit@10 0.716 lexical, 0.826 with rerank |
+| 3. Memory hygiene | does the store stay clean over months? | 0 junk, 0 contradiction exposure |
+| 4. End-to-end QA | answers under mem0's own harness (pre-4.0) | 84.8% vs mem0 platform 83.2% |
+| 5. Memory poisoning | can an injected instruction become memory? | 0 of 18 unlabeled, across 4 channels |
+| 6. Token economics | what does a recall cost? | 1,697 tokens at micro, flat as the store grows |
+| 7. Behavioral A/B | does an agent with Link do the right thing? | 11 of 12, vs 0 of 12 without |
+| 8. Claim updates | does recall return the current value? | 0.94 current, 0 stale with lineage |
+| 9. Staleness | does `lnk stale` cry wolf? | 0 false flags in 345 references |
+| 10. Contradiction flags | what does the optional NLI tier add? | 0 false alarms, +1 revision caught |
+
+Tracks 1-3, 5-10 need no LLM and no network and run in CI or from one
+command each (see Reproduce).
 
 ## Semantic tiers
 
@@ -37,40 +45,80 @@ phrasing variants). Queries are grouped by *measured* overlap: a case counts
 as `zero-overlap` only if it provably shares no significant stemmed token
 with its target memory — pure paraphrases that token matching cannot reach.
 
-Full suite, Apple M4, macOS 26.5.1, Python 3.14, run 2026-07-08, Link
-`develop` (post-1.5.0). Reconfirmed against shipped 2.2.1: the lexical
-column reproduces exactly. **The lexical column is what a default
-`pip install link-mcp` gives you**; the fast and quality columns each
-require an optional extra and a one-time local model download. CI runs
-this suite to gate dataset integrity (corpus size, authored-case count,
-and that the zero-overlap group stays genuinely hard for lexical
+Full suite, Apple M4, macOS 26, Python 3.14, run 2026-09-26, Link
+`develop` at 46a3c58 (4.0 pre-release). **The lexical column is what a
+default `pip install link-mcp` gives you**; the fast and quality columns
+each require an optional extra and a one-time local model download. CI
+runs this suite to gate dataset integrity (corpus size, authored-case
+count, and that the zero-overlap group stays genuinely hard for lexical
 matching) - it does not pin the hit@1 scores themselves.
 
-### Token-overlap queries (800 cases)
+**The groups moved in 4.0, so compare with care.** Overlap is measured with
+Link's own stemmer, and 4.0's stemmer does what its docstring always said
+("committing" meets "commit", "licensed" meets "license"). 32 cases that
+3.x counted as pure paraphrases now share a stemmed word with their target,
+so the split is 832 / 344 instead of 800 / 376. The zero-overlap group got
+harder (lexical now scores exactly 0 at hit@1 on it), and a 3.x row and a
+4.0 row are not the same cases.
+
+### Token-overlap queries (832 cases)
 
 | metric | lexical | fast tier | quality tier |
 |---|---|---|---|
-| hit@1 | 0.589 | 0.703 | **0.749** |
-| hit@3 | 0.729 | 0.833 | **0.886** |
-| hit@5 | 0.815 | 0.880 | **0.926** |
-| MRR@5 | 0.668 | 0.769 | **0.818** |
+| hit@1 | 0.671 | 0.740 | **0.789** |
+| hit@3 | 0.827 | 0.885 | **0.936** |
+| hit@5 | 0.841 | 0.897 | **0.960** |
+| MRR@5 | 0.743 | 0.810 | **0.861** |
 
-### Zero-overlap queries — pure paraphrases (376 cases)
+### Zero-overlap queries — pure paraphrases (344 cases)
 
 | metric | lexical | fast tier | quality tier |
 |---|---|---|---|
-| hit@1 | 0.048 | 0.074 | **0.120** (2.5×) |
-| hit@3 | 0.064 | 0.136 | **0.255** (4.0×) |
-| hit@5 | 0.082 | 0.202 | **0.338** (4.1×) |
-| MRR@5 | 0.058 | 0.115 | **0.191** (3.3×) |
+| hit@1 | 0.000 | 0.044 | **0.154** |
+| hit@3 | 0.023 | 0.198 | **0.398** |
+| hit@5 | 0.058 | 0.311 | **0.503** |
+| MRR@5 | 0.019 | 0.133 | **0.281** |
+
+Lexical recall cannot reach these by construction; the quality tier finds
+half of them in the top 5.
+
+With the opt-in rerank tier on top of the quality tier, token-overlap hit@1
+is 0.798 and pure-paraphrase hit@5 0.535 (MRR@5 0.862 and 0.288), at 30 ms
+p50 on this corpus. On claim-shaped memories it adds little now: 3.x
+measured 0.749 to 0.839 at hit@1, and 4.0's better ranking underneath has
+taken most of that gain already. On conversation turns (Track 2) it is
+still the largest single lift.
 
 ### Latency (per recall, 62-memory corpus, model load excluded)
 
 | mode | p50 | mean |
 |---|---|---|
-| lexical | 1.3 ms | 1.3 ms |
-| fast tier | 2.8 ms | 2.8 ms |
-| quality tier | 9.3 ms | 10.0 ms |
+| lexical | 1.4 ms | 1.6 ms |
+| fast tier | 4.2 ms | 4.2 ms |
+| quality tier | 11.3 ms | 12.1 ms |
+
+### Latency on large stores (lexical, synthetic store)
+
+Recall stays usable as a store grows. Measured on a synthetic store of
+decision memories drawn from a 40-word engineering vocabulary, so a common
+query word matches about a third of the store (a worst case; real stores
+are sparser). `recall` is `lnk recall`'s ranking step; `query` is the full
+budgeted packet; `cold` is a fresh process's first packet, parsing
+included.
+
+| memories | recall (4.0) | recall (3.0) | query (4.0) | query (3.0) | cold (4.0) | cold (3.0) |
+|---|---|---|---|---|---|---|
+| 1,000 | 33 ms | 31 ms | 20 ms | 76 ms | 112 ms | 208 ms |
+| 5,000 | 158 ms | 142 ms | 76 ms | 385 ms | 615 ms | 1,166 ms |
+| 20,000 | 730 ms | 578 ms | 701 ms | 1,667 ms | 4,377 ms | 5,785 ms |
+
+4.0 matches whole words, weighs rare words and checks the top results for
+contradictions, which costs recall at the largest size about a quarter more
+time than 3.0's substring checks. Records parsed once per file change and a
+single scoring pass make the packet 2-5x faster. A pre-release build was
+4.4x slower than 3.0 at 20,000 memories; the benchmark caught it, and it was
+fixed before release (one regex per acronym per field, rebuilt word sets,
+full annotation of every candidate).
 
 ### Ablations we ran and rejected
 
@@ -110,13 +158,44 @@ query; we measure whether Link ranks the annotated evidence turns highly.
 third-party queries. No LLM anywhere: this isolates the retrieval stage with
 third-party queries and third-party gold labels.
 
-| metric | lexical | hybrid (quality tier) |
-|---|---|---|
-| any-evidence hit@1 | 0.266 | **0.329** |
-| any-evidence hit@5 | 0.537 | **0.609** |
-| any-evidence hit@10 | 0.628 | **0.737** |
-| evidence recall@10 | 0.560 | **0.660** |
-| latency p50 / mean | 28 ms | 58 ms / 75 ms |
+Run 2026-09-26 on `develop` at 46a3c58 (4.0 pre-release).
+
+| metric | lexical | fast tier | quality tier | quality + rerank | 3.x lexical | 3.x quality |
+|---|---|---|---|---|---|---|
+| any-evidence hit@1 | 0.350 | 0.296 | 0.329 | **0.453** | 0.266 | 0.329 |
+| any-evidence hit@5 | 0.628 | 0.536 | 0.594 | **0.753** | 0.537 | 0.609 |
+| any-evidence hit@10 | 0.716 | 0.720 | 0.779 | **0.826** | 0.628 | 0.737 |
+| evidence recall@10 | 0.643 | 0.650 | 0.705 | **0.756** | 0.560 | 0.660 |
+| latency p50 / mean | 20 / 20 ms | 34 / 34 ms | 49 / 69 ms | 296 / 334 ms | 28 ms | 58 / 75 ms |
+
+The rerank tier (opt-in: a local cross-encoder re-orders the top 50
+candidates, blended with the retrieval order) is the best configuration on
+every metric, and it applies only to explicit recall calls, never hooks or
+briefs. Its 3.x figures were hit@10 0.794 and recall@10 0.717.
+
+4.0's lexical changes (whole words, rare words weigh more, stopwords,
+acronyms, a stemmer that works) lift lexical hit@1 from 0.266 to 0.350 and
+hit@10 from 0.628 to 0.716, with no model and faster than before. They
+also changed which tier wins where. Without the reranker, the semantic
+tiers still lead at hit@10 and evidence recall@10, but at hit@1 and hit@5
+they now score **below** lexical: the semantic points that used to rescue a weak lexical top result
+now displace a strong one.
+
+We measured the obvious fix and declined it. Scaling the semantic
+contribution down fixes LoCoMo (quality tier at 0.3x: hit@1 0.378, hit@5
+0.712, hit@10 0.786, all above lexical) and costs Link's own claim-shaped
+benchmark exactly what the semantic tier exists for: pure-paraphrase hit@5
+falls from 0.503 to 0.334. Link stores claims, not chat turns, and LoCoMo
+has no held-out split to tune against, so the weight stays. If your store
+is a conversation archive and you do not run the rerank tier, lexical is
+the better default for top-5 precision today.
+
+Method fix in this run: the benchmark's turn records carried the turn text
+only in the body, while real memory records also carry it as a snippet,
+which is what the reranker reads. A first 4.0 rerank run therefore scored
+the speaker name and a date and collapsed to hit@1 0.160; the records now
+carry the snippet real records have, and nothing else about the benchmark
+changed (the other columns reproduce exactly).
 
 ### Precision: what recall alone cannot show
 
@@ -128,32 +207,39 @@ queries:
 | strategy | precision | evidence recall |
 |---|---|---|
 | return the whole store (588 turn-memories) | 0.0026 | **1.0000** |
-| Link, lexical, top-1 | **0.2663** | 0.2394 |
-| Link, fast tier, top-1 | **0.3086** | 0.2672 |
+| Link, lexical, top 10 | 0.0816 | 0.6430 |
+| Link, quality tier, top 10 | 0.0895 | 0.7047 |
+| Link, quality + rerank, top 10 | **0.0980** | 0.7561 |
+| Link, quality + rerank, top 1 | **0.4525** | - |
 
-A store dump wins recall outright and carries 0.26% signal. Link's top-1 packet
-carries ~117x that precision on the fast tier, and takes a real recall loss for
-it. Both halves belong in the table.
+A store dump wins recall outright and carries 0.26% signal. Link's top-10
+packet carries ~37x that precision with the rerank tier and its top result
+~170x, and takes a real recall loss for it. Both halves belong
+in the table.
 
 Raw precision@k needs its ceiling to be readable: LoCoMo evidence sets average
 1.53 turns, so no system can exceed precision@10 of 0.152.
 
-| metric | lexical | fast tier | ceiling |
-|---|---|---|---|
-| precision@1 | 0.2663 | **0.3086** | 1.0000 |
-| precision@5 | 0.1141 | **0.1207** | 0.2958 |
-| precision@10 | 0.0683 | **0.0757** | 0.1521 |
-| % of ceiling @10 | 44.9% | **49.8%** | - |
-| R-precision | 0.2598 | **0.2855** | 1.0000 |
+| metric | lexical | fast tier | quality tier | quality + rerank | ceiling |
+|---|---|---|---|---|---|
+| precision@1 | 0.3496 | 0.2962 | 0.3294 | **0.4525** | 1.0000 |
+| precision@5 | 0.1368 | 0.1134 | 0.1290 | **0.1703** | 0.2958 |
+| precision@10 | 0.0816 | 0.0810 | 0.0895 | **0.0980** | 0.1521 |
+| % of ceiling @10 | 53.6% | 53.3% | 58.8% | **64.4%** | - |
+| R-precision | 0.3288 | 0.2695 | 0.3096 | **0.4308** | 1.0000 |
 
 R-precision (precision at k = |gold|) is the figure to compare across systems:
-it does not depend on a chosen k. The quality tier is not measured here yet -
-its model is a separate opt-in download.
+it does not depend on a chosen k. In 3.x it was 0.2598 lexical and 0.2855 on
+the fast tier.
 
 Method note: this reports the retrieval stage only, with no LLM and no judging,
 which is what makes precision measurable at all. Answer-quality benchmarks
 cannot expose this gap, since a noisy candidate set still lets the model
 recover the answer (arXiv 2605.11325).
+
+**How the shipped configuration was chosen (measured on 3.x ranking).**
+The paragraphs below are the development history behind the ranking, with
+the numbers as they were measured at the time.
 
 **Context-window records.** Each turn record carries its ±1 dialogue
 neighbors in the record's `context` field — retrieval text that is not part
@@ -175,7 +261,7 @@ deterministic entity-activation layer), and HippoRAG-style one-step entity
 activation over a speaker/proper-noun graph (no measurable lift over its
 base fusion). The shipped ranking — field-weighted lexical scoring over
 claim + context, merged with standout-based semantic scores — remains the
-best configuration measured (0.737). **Rerank tier (opt-in).** A local cross-encoder
+best configuration measured (0.737). **Rerank tier (opt-in), as first measured.** A local cross-encoder
 (Xenova/ms-marco-MiniLM-L-6-v2, 0.08 GB ONNX) re-orders the top 50 recall
 candidates, blended with the retrieval order via reciprocal-rank fusion.
 On the default embedder this lifts any-evidence hit@10 0.737 → 0.794,
@@ -240,14 +326,16 @@ predicted:
   LLM-extraction memory does on every message. Maintainers of other systems
   are invited to run the same event stream through their pipelines.
 
-| metric | gated (Link) | ungated |
-|---|---|---|
-| junk stored (echo / self-brief / noise / question / pasted advice / repeat) | **0** (0.0%) | 31 (36.5%) |
-| contradiction exposure@3 after a revision | **0.167** | 0.750 |
-| active memories (ground truth: 54) | **42** | 85 |
-| as-of temporal accuracy (revised facts) | **0.917** | 1.00 |
-| temporal accuracy from plain language ("...in March", no ISO date) | **0.917** | 1.00 |
-| current-truth precision@1 | **0.881** | 0.738 |
+Run 2026-09-26 on `develop` at 46a3c58 (4.0 pre-release); 3.x in the last column.
+
+| metric | gated (Link) | ungated | gated in 3.x |
+|---|---|---|---|
+| junk stored (echo / self-brief / noise / question / pasted advice / repeat) | **0** (0.0%) | 30 (35.7%) | 0 |
+| contradiction exposure@3 after a revision | **0.000** | 0.750 | 0.167 |
+| active memories (42 facts, 12 of them revised along the way) | **42** | 84 | 42 |
+| as-of temporal accuracy (revised facts) | **1.00** | 1.00 | 0.917 |
+| temporal accuracy from plain language ("...in March", no ISO date) | **1.00** | 1.00 | 0.917 |
+| current-truth precision@1 | **0.857** | 0.833 | 0.881 |
 
 The ungated junk rate mirrors what users measure in production LLM-extraction
 systems (a public mem0 audit found 97.8% junk after 32 days, over half of it
@@ -255,40 +343,38 @@ the system's own prompt text re-ingested). Link's junk rate is zero **by
 construction**, and CI enforces it: the hygiene gate fails any change that
 stores junk or loses to the ungated baseline.
 
-Honest notes: gated contradiction exposure is 0.167, not zero — the
-deterministic detector now supersedes 10 of the 12 authored revision
-shapes. Getting there took three v2 fixes, each a general rule rather than
-a fixture patch: updates that add content tokens are no longer swallowed by
-the echo guard (echoes add framing, revisions add content); detailed
-original claims are matched at partial coverage (originals carry specifics
-a revision legitimately drops); and preference/decision classification
-jitter no longer blocks detection across the type/scope boundary. The two
-revisions that still expose in this table are lexically disjoint
-rephrasings ("SQLite with FTS" revised as "DuckDB files with the same
-no-service rule") — the honest limit of a token-based detector. When the
-optional local semantic tier is installed, a claim-vs-claim embedding pass
-(threshold 0.55; true revisions measured 0.60-0.69, unrelated pairs
-<= 0.18 with model2vec) catches exactly these as `semantic_revision`
-conflict candidates. The published table stays lexical-only on purpose:
-these numbers must be reproducible with no model download. As-of accuracy is 0.917, not 1.00: one
-historical reconstruction breaks when a topically-adjacent conflict
-auto-resolves against the wrong original — an artifact of this benchmark's
-blind auto-supersede loop; in the product, conflicts route to human review.
-Along the way v1's numbers turned out flattered twice over: it silently
-measured only 9 of its 12 revisions (3 revision texts never classified as
-memory at all), and its false-positive conflicts archived unrelated
-memories in ways that hid real exposure. As before, the detection rules
-were developed against this same authored set, so these are fit numbers,
-not blind scores — contributed revision cases the detector has never seen
-are the real test, and we welcome them. "Zero junk by construction" means
-zero *self-inflicted* junk through automatic capture (echoes, self-briefs,
+Honest notes: gated contradiction exposure is now 0: the detector
+supersedes all 12 authored revisions. 3.x missed two, both lexically
+disjoint rephrasings, and 4.0 catches them with general rules rather than
+fixture patches: revisions that name what they replaced ("moved from 8080
+to 8443", "Buildkite replaced Jenkins", "5 times instead of 3") and value
+changes to a stated claim (versions, ports, counts were invisible when short
+tokens were dropped). Point-in-time accuracy is 1.00 because the wrong-
+original auto-resolution that cost 3.x one reconstruction no longer happens.
+Current-truth precision@1 fell from 0.881 to 0.857 (one query): the 4.0
+ranking reads whole words and rare words, and one current fact now loses
+its top slot to a topically closer one. We publish the drop rather than
+tune it away.
+
+As before, the detection rules were developed with this authored set in
+view, so these are fit numbers, not blind scores. The claim-update slice
+below was written after the ranking changes it measures and is the better
+held-out check; contributed revision cases the detector has never seen are
+the real test, and we welcome them. "Zero junk by construction" means zero
+*self-inflicted* junk through automatic capture (echoes, self-briefs,
 noise, questions, pasted third-party advice, repeats); a user can still
-approve a bad memory — review gates shape what is proposed, not what humans
-decide. Current-truth precision no longer ties: the v2 extraction fixes
-lift the gated pipeline to 0.881 while the ungated store's duplicates
-dilute its top-1.
+approve a bad memory - review gates shape what is proposed, not what humans
+decide. When the optional local semantic tier is installed, a claim-vs-claim
+embedding pass adds `semantic_revision` conflict candidates, and the
+optional NLI tier (below) flags likely contradictions at write time; the
+published table stays lexical-only on purpose, so it reproduces with no
+model download.
 
 ## Track 4: End-to-end QA under mem0's own harness
+
+*Measured on Link 2.x-3.x retrieval and not repeated for 4.0: the run needs
+paid model calls for every answer and judgment. 4.0's retrieval changes are
+measured in Tracks 1-3 above.*
 
 Tracks 1–3 isolate retrieval and governance. This track runs the full
 question-answering pipeline — ingest, retrieve, answer, judge — under
@@ -354,9 +440,9 @@ answerer-limited, not memory-limited.
 
 ## Honest limitations
 
-- **Pure paraphrases are much better, not solved.** The quality tier
-  quadruples zero-overlap hit@3/hit@5 over lexical, yet roughly two thirds
-  of pure paraphrases still miss the top 5 on our corpus. Link labels every
+- **Pure paraphrases are much better, not solved.** Lexical recall cannot
+  reach them at all; the quality tier finds half of them in the top 5, so
+  the other half still miss on our corpus. Link labels every
   semantic-only match (`match: semantic`, capped confidence) so agents
   verify before trusting — we publish the miss rate rather than hiding it.
 - **Track 1 is self-authored.** It is deterministic, auditable, and gated
@@ -443,40 +529,45 @@ budget you ask for, not of how much you have remembered.
 `scripts/eval_token_economics.py` measures real packets through the real
 query path, serialized exactly as the agent receives them.
 
-| budget | mean tokens | worst case | CI ceiling |
-|---|---|---|---|
-| micro | 1,951 | 2,061 | 2,900 |
-| small | 2,912 | 4,184 | 5,900 |
-| medium | 3,886 | 7,131 | 10,200 |
-| large | 4,835 | 10,775 | 16,800 |
+Run 2026-09-26 on `develop` at 46a3c58 (4.0 pre-release); 3.x means in
+the last column.
+
+| budget | mean tokens | worst case | CI ceiling | 3.x mean |
+|---|---|---|---|---|
+| micro | 1,697 | 2,049 | 2,900 | 1,951 |
+| small | 2,408 | 3,242 | 5,900 | 2,912 |
+| medium | 3,130 | 5,249 | 10,200 | 3,886 |
+| large | 3,752 | 7,681 | 16,800 | 4,835 |
+
+4.0 stopped the packet repeating itself: the ranked list carried every
+memory and page a second time, and over MCP each result also went back as a
+duplicate structured copy. The ranked list is now references, which takes
+13% off a micro packet and 22% off a large one.
 
 The guarantee is the growth curve, not the absolute number:
 
 | store size | mean tokens (medium) | growth |
 |---|---|---|
-| 25 memories | 3,708 | — |
-| 100 memories | 4,991 | +35% |
-| 400 memories | 5,842 | +17% |
-| 1,600 memories | 5,860 | **+0.3%** |
+| 25 memories | 3,011 | — |
+| 100 memories | 4,066 | +35% |
+| 400 memories | 4,692 | +15% |
+| 1,600 memories | 4,708 | **+0.3%** |
 
-**A 64x larger store produces a 1.58x larger packet, and the final
+**A 64x larger store produces a 1.56x larger packet, and the final
 quadrupling moves it 0.3%.** Packet size climbs while the budget's slots
 fill, then stops. Both properties are CI-enforced: every budget's worst
 packet must stay under its ceiling, and the last quadrupling of the store
 must not move the packet more than 5%.
 
-**The MCP session brief is a separate, once-per-session cost - now
-bounded.** Link's first MCP tool response of a session carries a memory
-brief so that agents without session hooks still get memory pushed to
-them (see 2.2.0). When first measured, the full brief made that first
-recall cost **11,269 tokens** against a steady state of **1,954** on the
-benchmark corpus - the largest single packet Link sent. It is now a
-compact digest under a hard 4,000-character budget (typed claims, review
-counts, a pointer to recall for everything else), enforced in code and
-pinned by a test: the same first recall measures **2,313 tokens**, a
-brief overhead of ~360 tokens. The benchmark measures it on every run.
-Per-recall figures above exclude it by design: it is paid once per
-session, not per recall.
+**The MCP session brief is a separate, once-per-session cost - bounded.**
+Link's first MCP tool response of a session carries a memory brief so that
+agents without session hooks still get memory pushed to them. It is a
+compact digest under a hard 4,000-character budget, enforced in code and
+pinned by a test: the first recall measures **2,058 tokens** against a
+steady state of **1,693**, a brief overhead of ~365 tokens. (Before the
+digest, the full brief made that first recall cost 11,269 tokens.)
+Per-recall figures above exclude it by design: it is paid once per session,
+not per recall.
 
 Honest notes: token counts use the 4-chars-per-token approximation Link
 uses for its own budget reporting — exact counts vary by tokenizer, so
@@ -489,27 +580,6 @@ memory accumulates. One measured wrinkle worth stating: at the micro
 budget roughly a fifth of the packet is fixed scaffolding (agent guidance,
 follow-up actions, budget reporting) rather than retrieved content, which
 is the obvious place to look for further savings.
-
-## Reproduce
-
-```bash
-git clone https://github.com/gowtham0992/link && cd link
-
-# Track 1 (lexical baseline needs nothing):
-python3 scripts/eval_recall_quality.py --suite full --mode off
-python3 -m venv /tmp/linkbench
-/tmp/linkbench/bin/pip install model2vec            # fast tier
-/tmp/linkbench/bin/pip install fastembed            # quality tier (preferred when present)
-/tmp/linkbench/bin/python scripts/eval_recall_quality.py --suite full --mode real --allow-download
-
-# Track 2 (download the dataset yourself; CC BY-NC 4.0 © Snap Inc.):
-curl -L -o /tmp/locomo10.json https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json
-python3 scripts/eval_locomo.py /tmp/locomo10.json --mode off
-/tmp/linkbench/bin/python scripts/eval_locomo.py /tmp/locomo10.json --mode real
-```
-
-`--mode fake` runs a deterministic no-model embedder; CI uses it with a
-regression gate: hybrid may never score below lexical on any group metric.
 
 ## Track 7: Behavioral A/B - with and without Link
 
@@ -535,18 +605,18 @@ earlier of two conflicting claims, the position bias real models show.
 
 | | without Link | with Link |
 |---|---|---|
-| scenarios answered right (dry oracle) | 0 / 12 | 10 / 12 |
-| governing memory in front of the agent | - | 10 / 12 |
-| mean context added | - | ~2,900 tokens |
+| scenarios answered right (dry oracle) | 0 / 12 | 11 / 12 |
+| governing memory in front of the agent | - | 11 / 12 |
+| mean context added | - | ~2,850 tokens |
 
-The two misses are published as known gaps rather than tuned away, and the
-gate fails on any new one:
-
-- a question about "the database client library" retrieves an unrelated
-  "logging library" memory ahead of the migration memory, and the micro
-  budget returns only one memory;
-- a standing preference about how to answer shares no words with the task,
-  and the five-memory session brief does not carry it.
+3.x scored 10 of 12. 4.0 closed the standing-preference gap: a preference
+about how to answer shares no words with any task, so it fell out of the
+session brief, and the brief now reserves two slots for such preferences.
+The remaining miss is published as a known gap rather than tuned away, and
+the gate fails on any new one: a question about "the database client
+library" retrieves an unrelated "logging library" memory ahead of the
+migration memory on the shared word, and the micro budget returns only one
+memory.
 
 Honest limits: the oracle measures delivery, not obedience - a real model
 can ignore a memory it was given, or answer correctly without one. Run the
@@ -556,3 +626,110 @@ calls, the command and its cost are yours:
 ```bash
 python3 scripts/eval_behavior_ab.py --mode live --agent-command "claude -p --model claude-haiku-4-5" --yes
 ```
+
+## Track 8: Claim updates - does recall return the current value?
+
+LoCoMo asks about events in a conversation. Fact-update benchmarks ask
+something else: when a fact changed two or three times, does recall return
+the value that holds now? `scripts/eval_claim_updates.py` has 16 subjects
+(a rate limit, a port, a database, a deploy day, a CI provider, a runtime
+version, a preference, ...) with 36 versions, each queried in the claim's
+own words and as a paraphrase that shares little vocabulary. It runs twice:
+in a store where each update carries `supersedes` lineage (what the review
+flow writes) and in one where it does not (updates saved without review).
+It was written after the 4.0 ranking changes it measures and is gated in CI
+as a floor, not tuned against.
+
+| store | query | current value first | stale value first | miss |
+|---|---|---|---|---|
+| with lineage | direct | **0.94** | **0.00** | 0.06 |
+| with lineage | paraphrase | 0.31 | **0.00** | 0.69 |
+| no lineage | direct | 0.81 | 0.12 | 0.06 |
+| no lineage | paraphrase | 0.25 | 0.06 | 0.69 |
+
+Point-in-time recall between versions (`as_of`) returns the value that held
+on that date 0.94 of the time in both stores.
+
+With lineage, a superseded value never comes back first. Without it, recall
+still puts the newer value first four times in five on direct questions:
+4.0 recognises revisions that name what they replaced and reads the newer
+of two contradicting results first, labelling the older one
+`contradicted_by`. The paraphrase column is lexical-only and mostly misses,
+which is what the semantic tiers are for; stale answers stay rare either
+way.
+
+## Track 9: Does a memory still hold? (`lnk stale`)
+
+A memory about code goes wrong silently when the code changes. `lnk stale`
+checks what a memory names against the repository - files, package
+scripts, make and just targets, dependencies, environment variables, URLs,
+runtime versions, the package manager, and code anchors (`path:line symbol`)
+- and reports a reference only when git history shows it existed and no
+longer does. `scripts/eval_staleness.py`, run on this repository:
+
+| check | result |
+|---|---|
+| references in Link's own documentation | 345, **0 false flags** |
+| known deletions from history | 6 probed, **0 missed** |
+| prose that merely looks like a path | 3 probed, 0 flagged |
+| 4.0 removal kinds (scripts, targets, deps, env vars, URLs, versions, lockfiles) | 7 probed, **0 missed**; a still-true memory flagged 0 times |
+
+The precision rule is the product: a false "stale" flag trains people to
+ignore the flag. The same rule gave 0 false flags across 298 references in
+eight other real repositories during development.
+
+## Track 10: Contradiction flags at write time
+
+When a memory is written, word rules check it against stored memories for a
+contradiction. The optional NLI tier (`lnk semantic <dir> --setup --nli`, an
+~87 MB int8 model on onnxruntime) reads meaning instead of words.
+`scripts/eval_contradiction_flags.py` measures both on 20 revisions from the
+claim-update subjects (should flag) and 216 pairs of distinct memories from
+the recall corpus that share a subject word (should not):
+
+| detector | revisions caught | false alarms |
+|---|---|---|
+| word rules (always on) | **17 / 20** | **0 / 216** |
+| NLI model alone, threshold 0.9 | 17 / 20 | 107 / 216 |
+| NLI as shipped (30% subject-overlap gate) | 14 / 20 | **0 / 216** |
+
+The model alone is unusable: it reads two different project rules as
+mutually exclusive half the time. With the gate it raises no false alarms
+and adds one revision the word rules miss ("I now prefer short answers" after
+"I like detailed answers"). That is a small gain, and the tier is shipped as
+opt-in for exactly that reason: its flag is a review note on the new memory,
+never a refusal, it never runs on the recall path, and a model failure
+cannot break a save.
+
+## Reproduce
+
+```bash
+git clone https://github.com/gowtham0992/link && cd link
+
+# Track 1 (lexical baseline needs nothing):
+python3 scripts/eval_recall_quality.py --suite full --mode off
+python3 -m venv /tmp/linkbench
+/tmp/linkbench/bin/pip install model2vec            # fast tier
+/tmp/linkbench/bin/pip install fastembed            # quality tier (preferred when present)
+/tmp/linkbench/bin/python scripts/eval_recall_quality.py --suite full --mode real --allow-download
+/tmp/linkbench/bin/python scripts/eval_recall_quality.py --suite full --mode real --rerank --allow-download
+
+# Track 2 (download the dataset yourself; CC BY-NC 4.0 © Snap Inc.):
+curl -L -o /tmp/locomo10.json https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json
+python3 scripts/eval_locomo.py /tmp/locomo10.json --mode off
+/tmp/linkbench/bin/python scripts/eval_locomo.py /tmp/locomo10.json --mode real
+/tmp/linkbench/bin/python scripts/eval_locomo.py /tmp/locomo10.json --mode real --rerank
+
+# Tracks 3 and 5-10 need nothing beyond Link itself (Track 10's model rows
+# need `lnk semantic <dir> --setup --nli`):
+python3 scripts/eval_memory_hygiene.py
+python3 scripts/eval_memory_poisoning.py
+python3 scripts/eval_token_economics.py
+python3 scripts/eval_behavior_ab.py
+python3 scripts/eval_claim_updates.py
+python3 scripts/eval_staleness.py
+python3 scripts/eval_contradiction_flags.py
+```
+
+`--mode fake` runs a deterministic no-model embedder; CI uses it with a
+regression gate: hybrid may never score below lexical on any group metric.

@@ -26,11 +26,11 @@ NLI_MODEL_ENV = "LINK_NLI_MODEL"
 NLI_DISABLE_ENV = "LINK_NLI"
 DEFAULT_NLI_MODEL = "Xenova/nli-deberta-v3-xsmall"
 NLI_MODEL_FILE = "onnx/model_quantized.onnx"
-# Measured on the claim-update revisions and the recall dataset: at 0.9, with
-# pairs restricted to memories whose subject words overlap by 30% or more
-# (memory.NLI_MIN_SUBJECT_OVERLAP), 0 of 176 unrelated pairs are flagged and
-# 2 revisions the word rules miss are caught. Without that restriction the
-# model flagged 63 of the 176: it reads two different project rules as
+# Measured by scripts/eval_contradiction_flags.py: at 0.9, with pairs
+# restricted to memories whose subject words overlap by 30% or more
+# (memory.NLI_MIN_SUBJECT_OVERLAP), 0 of 216 unrelated pairs are flagged and
+# 1 of the 3 revisions the word rules miss is caught. Without that restriction
+# the model flags 107 of the 216: it reads two different rules as
 # contradicting each other. The overlap gate is not optional.
 CONTRADICTION_THRESHOLD = 0.9
 MAX_PAIR_TOKENS = 256

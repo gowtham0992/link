@@ -2270,11 +2270,11 @@ tags: {yaml_list(tag_values)}
 
 
 # Neighbours checked by the NLI model per write: the closest few, and only
-# when their subject words overlap enough to be about the same thing. Measured
-# on 20 real revisions and 176 unrelated pairs sharing at least one word: the
-# model alone flagged 63 of the unrelated pairs at 0.9 (it reads two different
-# project rules as mutually exclusive); requiring 30% subject overlap removed
-# every one of them and kept the revisions the word rules miss.
+# when their subject words overlap enough to be about the same thing.
+# scripts/eval_contradiction_flags.py measures it on 20 revisions and 216
+# unrelated pairs sharing a subject word: the model alone flags 107 of the
+# unrelated pairs at 0.9 (it reads two different rules as mutually
+# exclusive); requiring 30% subject overlap removes every one of them.
 NLI_NEIGHBOURS = 5
 NLI_MIN_SUBJECT_OVERLAP = 0.3
 

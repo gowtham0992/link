@@ -128,10 +128,10 @@ that have one everywhere:
 |---|---|---|
 | **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
-| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 36.5% |
+| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 35.7% |
 | **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
-| **Token economics** — real recall packets, measured through the query path | **1,951–4,835 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.58×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~360 tokens of overhead, measured) — see RESULTS.md |
-| **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.589**; `lnk setup` provisions the fast local tier by default: **0.703**; optional quality tier **0.749**, plus rerank **0.839** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
+| **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
+| **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 
 Every number ships with its config, judge model, caveats, and the
 experiments that *lost* — including LongMemEval end-to-end, where we
@@ -159,7 +159,8 @@ rails.
 reconstructed from the dated files and their supersede lineage — while
 the same question without the date returns today's truth. Deterministic:
 a regex and a calendar, no model. Point-in-time accuracy from plain
-language: 0.917, identical to asking with an ISO date.
+language: 1.00 on the hygiene benchmark's revised facts, identical to
+asking with an ISO date.
 
 **"Is my agent actually using this?"** The question most memory systems
 cannot answer about themselves. Link records retrievals locally — session
@@ -480,12 +481,14 @@ python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs
 ```
 
 Measured, not asserted: on the bundled 1,176-case benchmark, the quality
-tier lifts token-overlap hit@1 from 0.589 to 0.749 and pure-paraphrase
-(zero token overlap) hit@3/hit@5 by ~4×, at ~10 ms per recall with no
-service or vector database. On the third-party LoCoMo retrieval track
-(1,536 evidence-annotated questions over 5,882 conversation turns), hybrid
-recall lifts any-evidence hit@10 from 0.628 to 0.737 (0.794 with the
-opt-in rerank tier). Full methodology, honest limitations, and
+tier lifts token-overlap hit@1 from 0.671 to 0.789 and finds half of the
+pure paraphrases (zero token overlap) in the top 5, where lexical recall
+finds 6%, at ~11 ms per recall with no service or vector database. On the
+third-party LoCoMo retrieval track (1,536 evidence-annotated questions over
+5,882 conversation turns), hybrid recall lifts any-evidence hit@10 from
+0.716 to 0.779, and the opt-in rerank tier to 0.826 with hit@1 0.453.
+Without the reranker, lexical recall is the stronger top-5 on LoCoMo;
+RESULTS.md says why. Full methodology, honest limitations, and
 reproduction steps: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 <details>
