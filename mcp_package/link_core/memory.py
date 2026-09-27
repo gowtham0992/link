@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 import re
 import unicodedata
 import urllib.parse
@@ -2486,6 +2487,43 @@ def add_capture_review_to_brief(
     return result
 
 
+# How the agent should answer, format, cite or behave: preferences that hold
+# for every task rather than for a topic.
+_STANDING_PREFERENCE_RE = re.compile(
+    r"\b(?:answers?|repl(?:y|ies)|respon(?:d|ses?)|explain|explanations?|tone|concise|verbose|brief|"
+    r"short|terse|cite|citations?|sources?|format(?:ting)?|markdown|bullets?|emoji|language|english|"
+    r"ask (?:me|before)|confirm before|summar(?:y|ies|ize)|code comments?)\b",
+    re.IGNORECASE,
+)
+STANDING_BRIEF_SLOTS = 2
+
+
+def standing_preferences(
+    records: Iterable[Mapping[str, object]],
+    project: str | None = None,
+    limit: int = STANDING_BRIEF_SLOTS,
+) -> list[Mapping[str, object]]:
+    """Active, unconditional user preferences about how the agent behaves.
+
+    Reviewed ones first, then most recent. A preference fenced with
+    applies_when is conditional by definition and is left to task recall.
+    """
+    project_name = normalize_project(project)
+    found: list[Mapping[str, object]] = []
+    for record in recent_memories(list(records)):
+        if str(record.get("memory_type") or "") != "preference":
+            continue
+        if str(record.get("scope") or "user") != "user" or str(record.get("applies_when") or "").strip():
+            continue
+        if not is_active_memory(record) or not memory_visible_for_project(record, project_name):
+            continue
+        head = f"{record.get('title') or ''} {record.get('tldr') or ''}"
+        if _STANDING_PREFERENCE_RE.search(head):
+            found.append(record)
+    found.sort(key=lambda record: str(record.get("review_status") or "") != "reviewed")
+    return found[:limit]
+
+
 def memory_brief(
     records: Iterable[Mapping[str, object]],
     query: str = "",
@@ -2522,7 +2560,16 @@ def memory_brief(
     else:
         relevant = []
         seen: set[str] = set()
+        # Standing preferences first: how the user wants answers shaped
+        # applies to every task yet shares no words with any of them, so
+        # task recall never finds it and recency alone let it fall out of a
+        # five-item brief (found by the behavioral A/B harness).
+        for record in standing_preferences(record_list, project=project_name, limit=STANDING_BRIEF_SLOTS):
+            relevant.append(slim_memory(record))
+            seen.add(str(record.get("name") or ""))
         for memory_type in ("preference", "decision", "project"):
+            if len(relevant) >= limit:
+                break
             for record in recent_memories(record_list):
                 name = str(record.get("name") or "")
                 if name in seen:
@@ -2625,7 +2672,61 @@ def _field_has_exact_word(field_tokens: set[str], token: str) -> bool:
     return token in field_tokens or any(form in field_tokens for form in _plural_forms(token))
 
 
-def score_memory(record: Mapping[str, object], query: str) -> int:
+# Stores smaller than this carry too little signal for document frequency
+# to mean anything; every word is weighted 1.0 there.
+IDF_MIN_RECORDS = 20
+
+
+def query_word_weights(records: Sequence[Mapping[str, object]], query: str) -> dict[str, float]:
+    """How much each query word should count, from how rare it is here.
+
+    A word in nearly every memory ("service", "new", "library" in a small
+    store) says little about which memory is meant; a rare one ("database",
+    "vault") says a lot. Weights run from 0.5 for a word in every memory to
+    1.5 for a word in one. Computed per query over the candidate records,
+    offline and deterministic.
+    """
+    words = {token for token in re.split(r"\W+", query.lower()) if len(token) >= 3}
+    words |= significant_memory_tokens(query)
+    if len(records) < IDF_MIN_RECORDS or not words:
+        return {}
+    document_frequency = dict.fromkeys(words, 0)
+    for record in records:
+        present = _record_word_set(record)
+        for word in words:
+            if word in present or stem_memory_token(word) in present:
+                document_frequency[word] += 1
+    total = len(records)
+    scale = math.log(total + 1)
+    weights: dict[str, float] = {}
+    for word, frequency in document_frequency.items():
+        rarity = math.log((total + 1) / (frequency + 1)) / scale if scale else 0.0
+        weights[word] = 0.5 + min(1.0, max(0.0, rarity))
+    return weights
+
+
+def _record_tags(record: Mapping[str, object]) -> list[object]:
+    tags = record.get("tags")
+    return list(tags) if isinstance(tags, (list, tuple, set)) else []
+
+
+def _record_word_set(record: Mapping[str, object]) -> set[str]:
+    text = " ".join([
+        str(record.get("title") or ""), str(record.get("tldr") or ""),
+        " ".join(str(tag) for tag in _record_tags(record)),
+        str(record.get("trigger") or ""), str(record.get("body") or ""),
+        str(record.get("context") or ""),
+    ])
+    tokens = memory_tokens(text)
+    return tokens | stemmed_memory_tokens(tokens)
+
+
+def score_memory(
+    record: Mapping[str, object],
+    query: str,
+    word_weights: Mapping[str, float] | None = None,
+) -> int:
+    weight = word_weights or {}
     q = query.lower().strip()
     tokens = [token for token in re.split(r"\W+", q) if len(token) >= 3]
     significant_tokens = significant_memory_tokens(q)
@@ -2665,20 +2766,22 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
             continue
         # Exact words carry full weight; another form of the word ("required"
         # for "require") counts a little less, so an exact match wins a tie.
+        token_points = 0
         if _field_has_exact_word(title_tokens, token):
-            score += 6
+            token_points += 6
         elif _field_has_word(title_tokens, token):
-            score += 4
+            token_points += 4
         if _field_has_exact_word(tldr_tokens, token):
-            score += 4
+            token_points += 4
         elif _field_has_word(tldr_tokens, token):
-            score += 3
+            token_points += 3
         if _field_has_exact_word(tags_tokens, token):
-            score += 3
+            token_points += 3
         elif _field_has_word(tags_tokens, token):
-            score += 2
+            token_points += 2
         if token in body_tokens:
-            score += 1
+            token_points += 1
+        score += round(token_points * weight.get(token, 1.0))
     if significant_tokens:
         searchable = title_tokens | tldr_tokens | tags_tokens | body_tokens
         if significant_tokens <= searchable:
@@ -2853,7 +2956,9 @@ def recall_memories(
     scored: list[tuple[int, int, str, dict[str, object]]] = []
     severity_rank = {"high": 0, "medium": 1, "low": 2}
     records_by_name: dict[str, Mapping[str, object]] = {}
-    for record in records:
+    record_list = list(records)
+    word_weights = query_word_weights(record_list, q)
+    for record in record_list:
         records_by_name[str(record.get("name") or "")] = record
         if not memory_visible_for_project(record, project_name):
             continue
@@ -2866,7 +2971,7 @@ def recall_memories(
                 continue
         elif not include_archived and not is_active_memory(record):
             continue
-        lexical_score = score_memory(record, q)
+        lexical_score = score_memory(record, q, word_weights)
         semantic_match = None
         if semantic_scores:
             semantic_match = semantic_scores.get(str(record.get("name") or ""))

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from .memory import (
     memory_brief,
@@ -58,6 +58,32 @@ BUDGETS: dict[str, dict[str, int]] = {
         "capsule_chars": 950,
     },
 }
+
+
+# When the next memory ranks within this fraction of the last one the budget
+# allows, it comes along: a near-tie is a coin flip, and a packet that drops
+# the right memory on a coin flip costs more than a few extra tokens.
+NEAR_TIE_RATIO = 0.9
+# Only where the budget is a single memory: at larger budgets close ranks are
+# the norm, and extending every packet grew steady-state recall by ~30%.
+NEAR_TIE_BUDGETS = frozenset({"micro"})
+
+
+def _rank_value(memory: Mapping[str, object]) -> float:
+    value = memory.get("rank_score")
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _memory_selection_count(ranked: Sequence[Mapping[str, object]], budget_count: int, budget_name: str = "") -> int:
+    if budget_name not in NEAR_TIE_BUDGETS:
+        return min(len(ranked), budget_count)
+    if len(ranked) <= budget_count or budget_count < 1:
+        return min(len(ranked), budget_count)
+    last = _rank_value(ranked[budget_count - 1])
+    following = _rank_value(ranked[budget_count])
+    if last > 0 and following >= NEAR_TIE_RATIO * last:
+        return budget_count + 1
+    return budget_count
 
 
 def normalize_budget(value: object | None) -> str:
@@ -462,8 +488,10 @@ def query_link(
         project=project_name,
         semantic_scores=semantic_scores,
     )
-    memory_has_more = len(raw_memories) > limits["memories"]
-    memories = [_compact_memory(memory) for memory in raw_memories[: limits["memories"]]]
+    selected_count = _memory_selection_count(raw_memories, limits["memories"], budget_name)
+    close_call = selected_count > limits["memories"]
+    memory_has_more = len(raw_memories) > selected_count
+    memories = [_compact_memory(memory) for memory in raw_memories[:selected_count]]
     _mark_stale_paths(memories, record_list, repo_root)
     brief = memory_brief(
         record_list,
@@ -508,6 +536,12 @@ def query_link(
     review = _compact_review(brief.get("review", {}), limit=limits["memories"])
     if review.get("count"):
         guidance.insert(2, "Some memories need review; treat provisional memories carefully.")
+    if close_call:
+        guidance.insert(
+            1,
+            "The last two memories ranked almost equally; both are included. "
+            "Decide from their content which one the task is about.",
+        )
     if any(memory.get("stale_paths") for memory in memories):
         # A signal without an instruction is decoration. Same pattern as the
         # constraint guard: say what was found and what to do about it.

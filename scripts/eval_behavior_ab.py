@@ -172,8 +172,6 @@ SCENARIOS: tuple[Scenario, ...] = (
 KNOWN_GAPS: dict[str, str] = {
     "reversed-db": "an unrelated 'Logging library' memory outranks the migration memory on the shared word "
                    "'library', and the micro budget returns one memory",
-    "answer-style": "a standing how-to-answer preference shares no words with the task, and the five-memory "
-                    "session brief does not include it",
 }
 
 
