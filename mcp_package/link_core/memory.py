@@ -39,7 +39,7 @@ MEMORY_VISIBILITIES = ("private", "project", "team")
 MEMORY_REVIEW_STATUSES = ("pending", "reviewed", "needs_update")
 MEMORY_PROPOSAL_MIN_SCORE = 70
 MEMORY_RECALL_MIN_SCORE = 2
-MEMORY_CONFLICT_TYPES = {"preference", "decision", "project"}
+MEMORY_CONFLICT_TYPES = {"preference", "decision", "project", "fact"}
 MEMORY_STOPWORDS = {
     "about",
     "after",
@@ -94,7 +94,7 @@ NEGATION_TERMS = {
     "without",
 }
 CONFLICT_OPTION_GROUPS = {
-    "branch_policy": {"codex", "develop", "development", "direct", "feature", "main", "master", "release"},
+    "branch_policy": {"develop", "development", "direct", "feature", "main", "master", "release"},
     "storage_policy": {"cloud", "hosted", "local", "offline", "remote"},
     "theme": {"dark", "light", "system"},
     "install_method": {"brew", "global", "homebrew", "pipx", "system", "venv", "virtualenv"},
@@ -562,8 +562,25 @@ def procedure_steps_excerpt(body: str, max_chars: int = 800) -> str:
     return text
 
 
+def memory_quarantined(record: Mapping[str, object]) -> bool:
+    """An imported memory nobody on this machine has reviewed yet.
+
+    Team-sync brings teammates' memories in with `imported_from: team` and
+    `review_status: pending`. Until the user reviews one it is their
+    teammate's claim, not theirs: it shows in the review inbox, and recall,
+    briefs and the write gates leave it alone.
+    """
+    if not str(record.get("imported_from") or "").strip():
+        return False
+    return str(record.get("review_status") or "pending").lower() in {"pending", "needs_review"}
+
+
 def is_active_memory(record: Mapping[str, object]) -> bool:
-    return str(record.get("status") or "active").lower() not in {"archived", "stale"} and not memory_expired(record)
+    return (
+        str(record.get("status") or "active").lower() not in {"archived", "stale"}
+        and not memory_expired(record)
+        and not memory_quarantined(record)
+    )
 
 
 def _parse_date_field(value: object, field: str) -> date | None:
@@ -634,11 +651,18 @@ def memory_active_at(record: Mapping[str, object], as_of: str) -> bool:
     captured = _memory_date(record.get("date_captured"))
     if captured is not None and captured.date() > day:
         return False
-    if str(record.get("status") or "active").lower() == "archived":
+    status = str(record.get("status") or "active").lower()
+    if status == "archived":
         archived = _memory_date(record.get("archived_at"))
         if archived is None or archived.date() <= day:
             return False
+    elif status == "stale":
+        # Nothing records when a memory went stale, so it cannot be placed
+        # in time; like an undated archive, it is treated as inactive.
+        return False
     if memory_expired(record, today=as_of):
+        return False
+    if memory_quarantined(record):
         return False
     return True
 
@@ -718,6 +742,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "applies_when": str(meta.get("applies_when") or ""),
         "supersedes": str(meta.get("supersedes") or ""),
         "superseded_by": str(meta.get("superseded_by") or ""),
+        "imported_from": str(meta.get("imported_from") or "").strip(),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -1129,7 +1154,13 @@ def recall_state(
 ) -> dict[str, object]:
     default_enabled = is_active_memory(record)
     high_issues = [issue for issue in issues if str(issue.get("severity") or "") == "high"]
-    if not default_enabled:
+    if memory_quarantined(record):
+        state = "quarantined"
+        reason = (
+            f"Imported from {record.get('imported_from')} memory and not reviewed on this machine; "
+            "recall leaves it out until you review it."
+        )
+    elif not default_enabled:
         state = "disabled"
         if memory_expired(record):
             reason = f"Memory expired at {record.get('expires_at')}; default recall excludes expired memories."
@@ -1380,6 +1411,55 @@ def replace_markdown_body(text: str, body: str) -> str:
         if end != -1:
             return text[:end + 4] + "\n\n" + body.strip() + "\n"
     return body.strip() + "\n"
+
+
+def memory_summary_line(text: str) -> str:
+    """The one-line claim shown as a memory's TLDR (same rule as writes)."""
+    summary = text.strip().splitlines()[0].strip() if text.strip() else ""
+    if len(summary) > 180:
+        summary = summary[:177].rstrip() + "..."
+    return summary
+
+
+def title_restates_claim(title: str, claim: str) -> bool:
+    """Whether a memory's title is its old claim rather than a label.
+
+    Titles are derived from the first sentence when none is given, so most
+    titles say what the memory claimed ("We deploy with Python 3.11"). When
+    the claim changes, such a title would keep asserting the old value.
+    """
+    title_key = compact_memory_text(title)
+    claim_key = compact_memory_text(claim)
+    return bool(title_key) and bool(claim_key) and (
+        claim_key.startswith(title_key)
+        or title_key == compact_memory_text(memory_title(claim))
+    )
+
+
+def rewrite_memory_head(body: str, old_title: str, new_text: str) -> tuple[str, str | None]:
+    """Point a memory's TLDR (and a claim-shaped title) at its latest text.
+
+    Recall, briefs, duplicate and conflict checks all read the head, so an
+    update that only appended to the body left agents reading the old claim.
+    The full history stays in the Memory section.
+    """
+    summary = memory_summary_line(new_text)
+    if not summary:
+        return body, None
+    old_tldr = extract_tldr(body)
+    new_title: str | None = None
+    if title_restates_claim(old_title, old_tldr or old_title):
+        candidate = memory_title(new_text)
+        if candidate and candidate != old_title:
+            new_title = candidate
+    tldr_re = re.compile(r"(>\s*\*\*TLDR:\*\*\s*)(.+)")
+    if tldr_re.search(body):
+        body = tldr_re.sub(lambda match: match.group(1) + summary, body, count=1)
+    if new_title:
+        body = re.sub(
+            r"^#\s+.+$", lambda _match: f"# {new_title}", body, count=1, flags=re.MULTILINE
+        )
+    return body, new_title
 
 
 def append_memory_update(body: str, update_text: str, timestamp: str, source: str) -> str:
@@ -1697,12 +1777,17 @@ def update_memory_page(
     original = page_path.read_text(encoding="utf-8", errors="replace")
     _, body = parse_frontmatter(original)
     updated_body = append_memory_update(body, clean_text, timestamp, clean_source)
+    updated_body, new_title = rewrite_memory_head(
+        updated_body, str(record.get("title") or ""), clean_text
+    )
     updates = {
         "updated_at": f'"{timestamp}"',
         "update_count": str(next_update_count),
         "last_update_source": f'"{frontmatter_string(clean_source)}"',
         "review_status": "pending",
     }
+    if new_title:
+        updates["title"] = f'"{frontmatter_string(new_title)}"'
     updated_text = update_frontmatter_fields(original, updates, remove={"reviewed_at", "review_note"})
     with operation_journal(
         wiki_dir,
@@ -1723,7 +1808,7 @@ def update_memory_page(
                     "New review status: pending",
                     f"Update count: {next_update_count}",
                     f"Source: {clean_source}",
-                ],
+                ] + ([f"Title now: {new_title}"] if new_title else []),
             )
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
 
@@ -1832,9 +1917,7 @@ def write_memory_page(
     if not (derived_title and derived_title.strip()) and memory_type == "procedure" and clean_trigger:
         derived_title = clean_trigger
     memory_title_value = memory_title(clean_text, derived_title)
-    summary = clean_text.splitlines()[0].strip()
-    if len(summary) > 180:
-        summary = summary[:177].rstrip() + "..."
+    summary = memory_summary_line(clean_text)
     record_list = [dict(record) for record in records] if records is not None else memory_records(wiki_dir)
     superseded_path: Path | None = None
     superseded_record: dict[str, object] | None = None
@@ -3018,6 +3101,16 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 
+# Versions, ports, sizes, counts: the values a claim can change while its
+# subject stays the same. The tokenizer drops tokens shorter than three
+# characters, so "3.11" -> "3.12" was invisible to every lexical rule.
+_VALUE_RE = re.compile(r"(?<![\w.])v?(\d+(?:[.:]\d+)*)(?![\w])", re.IGNORECASE)
+
+
+def claim_values(text: str) -> set[str]:
+    return {match.group(1) for match in _VALUE_RE.finditer(text)}
+
+
 def memory_conflict_candidates(
     records: Iterable[Mapping[str, object]],
     text: str,
@@ -3045,6 +3138,7 @@ def memory_conflict_candidates(
     new_negated = has_negation(new_text)
     new_groups = _extract_option_groups(new_text)
     new_pairs = _extract_preference_pairs(new_text)
+    new_values = claim_values(new_text)
     project_name = normalize_project(project)
     excluded = {name for name in (exclude_names or []) if name}
     candidates: list[tuple[int, dict[str, object]]] = []
@@ -3078,9 +3172,30 @@ def memory_conflict_candidates(
         reasons: list[str] = []
         score = 0
 
-        if new_negated != has_negation(record_text) and len(overlap) >= 1 and overlap_ratio >= 0.45:
-            score = max(score, 92)
-            reasons.append("opposite_negation")
+        if new_negated != has_negation(record_text):
+            # The negation word is the difference under test, not shared
+            # subject; counting it kept short claims ("Never use Ruff" vs
+            # "Use Ruff for linting") below the overlap threshold.
+            new_subject = new_tokens - NEGATION_TERMS
+            record_subject = record_tokens - NEGATION_TERMS
+            subject_overlap = new_subject & record_subject
+            subject_union = new_subject | record_subject
+            subject_ratio = len(subject_overlap) / len(subject_union) if subject_union else 0.0
+            if subject_overlap and subject_ratio >= 0.45:
+                score = max(score, 92)
+                reasons.append("opposite_negation")
+
+        # Same subject, different value: "We deploy with Python 3.11" and
+        # "We deploy with Python 3.12", "API listens on 8080" and "on 9090".
+        # The subject must match closely (every rule above ignores numbers),
+        # and the values must be disjoint, so "Node 20 for the api" never
+        # meets "Node 18 for the worker".
+        record_values = claim_values(record_text)
+        if new_values and record_values and not (new_values & record_values):
+            subject = [token for token in overlap if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS]
+            if len(subject) >= 2 and overlap_ratio >= 0.5:
+                score = max(score, 89)
+                reasons.append("changed_value")
 
         # Revision shape: the new text carries a negation or revision cue
         # ("... does not X anymore; we now Y") and covers most of the
