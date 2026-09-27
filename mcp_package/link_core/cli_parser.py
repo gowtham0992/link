@@ -43,7 +43,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "compliance-export",
     )),
     ("Utilities", (
-        "version", "benchmark", "wins", "profile", "rebuild-index",
+        "version", "benchmark", "wins", "receipt", "profile", "rebuild-index",
         "rebuild-backlinks", "query-link", "stale",
     )),
 )
@@ -549,6 +549,14 @@ def build_cli_parser(
     rebuild_cmd = sub.add_parser("rebuild-backlinks", help="rebuild wiki/_backlinks.json")
     rebuild_cmd.add_argument("target", nargs="?", default=".")
 
+    receipt_cmd = sub.add_parser(
+        "receipt",
+        help="what reached your agents from memory, session by session",
+    )
+    receipt_cmd.add_argument("target", nargs="?", default=".", help="Link workspace")
+    receipt_cmd.add_argument("--sessions", type=int, default=3, help="how many recent sessions (default 3)")
+    receipt_cmd.add_argument("--json", action="store_true", help="machine-readable receipts")
+
     stale_cmd = sub.add_parser(
         "stale",
         help="list memories that name repository paths git no longer has",
@@ -1000,6 +1008,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["rebuild-index"](Path(args.target))
     if command == "rebuild-backlinks":
         return handlers["rebuild-backlinks"](Path(args.target))
+    if command == "receipt":
+        return handlers["receipt"](Path(args.target), sessions=int(args.sessions), json_output=bool(args.json))
     if command == "stale":
         return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json))
     if command == "verify-mcp":

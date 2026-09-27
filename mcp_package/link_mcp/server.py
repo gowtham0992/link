@@ -241,9 +241,13 @@ def _attach_session_brief(result: object) -> object:
             pass
         if not names and not pending_handoff:
             return result  # nothing to say; do not pad every first response
+        compact = _compact_session_brief(brief)
         if names:
-            _core_record_retrieval(WIKI_DIR.parent, "brief", names)
-        payload[BRIEF_ATTACH_KEY] = _compact_session_brief(brief)
+            _core_record_retrieval(
+                WIKI_DIR.parent, "brief", names, surface="mcp",
+                tokens=_estimated_tokens_of(compact), truncated=bool(compact.get("truncated")),
+            )
+        payload[BRIEF_ATTACH_KEY] = compact
         return json.dumps(payload, ensure_ascii=False)
     except Exception:
         return result
@@ -357,6 +361,14 @@ def _register_tool(fn, hints: dict[str, bool] | None):
         return mcp.tool()(fn)
 
 
+def _estimated_tokens_of(value: object) -> int:
+    """Rough token count of what an agent receives (4 chars per token)."""
+    try:
+        return max(1, (len(json.dumps(value, ensure_ascii=False)) + 3) // 4)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _surface_tool(surface: str):
     def decorator(fn):
         if MCP_SURFACE != surface:
@@ -433,7 +445,12 @@ from link_core.capture import (
     redact_capture_file as _core_redact_capture_file,
     write_session_capture as _core_write_session_capture,
 )
-from link_core.usage import record_retrieval as _core_record_retrieval
+from link_core.usage import (
+    load_usage as _core_load_usage,
+    memory_receipts as _core_memory_receipts,
+    record_retrieval as _core_record_retrieval,
+    usage_disabled as _core_usage_disabled,
+)
 from link_core.handoff import (
     handoff_brief_block as _core_handoff_brief_block,
     pending_handoffs as _core_pending_handoffs,
@@ -1430,7 +1447,10 @@ def _record_brief_retrieval(brief: object, project: str) -> None:
         for item in (relevant if isinstance(relevant, list) else [])
         if isinstance(item, dict)
     ]
-    _core_record_retrieval(WIKI_DIR.parent, "brief", names, project=project)
+    _core_record_retrieval(
+        WIKI_DIR.parent, "brief", names, project=project, surface="mcp",
+        tokens=_estimated_tokens_of(brief),
+    )
 
 
 @_slim_tool()
@@ -1497,6 +1517,12 @@ def recall(
             )
         except ValueError as exc:
             return json.dumps({"surface": "slim", "tool": "recall", "error": str(exc)})
+        # The default surface's memory and query modes were never recorded,
+        # so "never retrieved" counted memories agents had in fact read.
+        _core_record_retrieval(
+            WIKI_DIR.parent, "recall", [str(item.get("name") or "") for item in memories],
+            project=clean_project, surface="mcp", tokens=_estimated_tokens_of(memories),
+        )
         payload = {
             "surface": "slim",
             "tool": "recall",
@@ -1517,6 +1543,18 @@ def recall(
     if not clean_query:
         return json.dumps({"surface": "slim", "tool": "recall", "error": "query required"})
     payload = _query_link(query=clean_query, budget=clean_budget, project=clean_project)
+    memory_section = payload.get("memory")
+    packet_items = memory_section.get("items") if isinstance(memory_section, dict) else None
+    budget_section = payload.get("budget_report")
+    budget_report: dict = budget_section if isinstance(budget_section, dict) else {}
+    total = budget_report.get("packet_total")
+    _core_record_retrieval(
+        WIKI_DIR.parent, "query",
+        [str(item.get("name") or "") for item in (packet_items or []) if isinstance(item, dict)],
+        project=clean_project, surface="mcp",
+        tokens=int(total.get("estimated_tokens") or 0) if isinstance(total, dict) else 0,
+        truncated=any(bool(section.get("has_more")) for section in budget_report.values() if isinstance(section, dict)),
+    )
     payload["surface"] = "slim"
     payload["tool"] = "recall"
     payload["mode"] = "query"
@@ -1647,8 +1685,11 @@ def review(
 ) -> str:
     """Review, explain, and manage local memory lifecycle.
 
-    Supported actions: inbox, audit, profile, log, wins, explain, reviewed,
-    archive, restore, forget, consolidate. Prefer archive over forget unless
+    Supported actions: inbox, audit, profile, log, wins, receipt, explain,
+    reviewed, archive, restore, forget, consolidate. receipt shows, session
+    by session, which memories reached agents and what they cost; use it
+    when the user asks what the agent knew or why it said something.
+    Prefer archive over forget unless
     the user asks for permanent deletion. Use consolidate for a read-only plan
     when the capture or review backlog builds up; apply its actions only after
     the user approves each one.
@@ -1667,6 +1708,15 @@ def review(
             payload = _memory_log(limit=parsed_limit)
         elif clean_action == "wins":
             payload = _memory_wins(limit=parsed_limit, project=clean_project)
+        elif clean_action == "receipt":
+            titles = {str(r.get("name") or ""): str(r.get("title") or "") for r in _memory_records()}
+            receipts = _core_memory_receipts(_core_load_usage(WIKI_DIR.parent), sessions=min(parsed_limit, 10))
+            for item in receipts:
+                used_list = item.get("memories_used")
+                for used in used_list if isinstance(used_list, list) else []:
+                    if isinstance(used, dict):
+                        used["title"] = titles.get(str(used.get("name") or ""), "")
+            payload = {"recording": not _core_usage_disabled(), "sessions": receipts}
         elif clean_action == "explain":
             payload = _memory_explanation(identifier)
         elif clean_action in {"reviewed", "review", "mark_reviewed"}:

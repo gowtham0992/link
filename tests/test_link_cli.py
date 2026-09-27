@@ -279,7 +279,7 @@ class LinkCliTests(unittest.TestCase):
             str(target.resolve()),
             "--port",
             "3010",
-        ])
+        ], stdin=subprocess.DEVNULL)
 
     def test_serve_reports_missing_wiki(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-serve-test-"))

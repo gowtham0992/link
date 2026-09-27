@@ -5,7 +5,9 @@ the agent ever read it back — which makes "your agents have memory" a hope
 rather than a measurement. This module closes that gap the local-first way.
 
 What is recorded: a timestamp, which surface retrieved (session brief,
-recall, query), how many memories came back, and their names.
+recall, query), how many memories came back, their names, and - for the
+memory receipt - where it happened (hook, MCP, CLI), roughly how many
+tokens it cost and whether a budget cut anything.
 
 What is never recorded: the query text, the answer, the conversation, or
 anything about the machine. The ledger says *that* memory was used and
@@ -63,6 +65,9 @@ def record_retrieval(
     memories: Iterable[str] = (),
     *,
     project: str = "",
+    surface: str = "",
+    tokens: int = 0,
+    truncated: bool = False,
 ) -> bool:
     """Append one retrieval event. Returns False when disabled or unwritable.
 
@@ -77,13 +82,20 @@ def record_retrieval(
     names = [str(name).strip() for name in memories if str(name).strip()][:20]
     try:
         events = load_usage(root)
-        events.append({
+        event: dict[str, object] = {
             "at": _utc_now(),
             "kind": clean_kind,
             "count": len(names),
             "memories": names,
             "project": str(project or ""),
-        })
+        }
+        if surface:
+            event["surface"] = str(surface)[:20]
+        if tokens:
+            event["tokens"] = int(tokens)
+        if truncated:
+            event["truncated"] = True
+        events.append(event)
         path = usage_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -222,3 +234,90 @@ def usage_salience(events: list[dict[str, object]]) -> dict[str, int]:
         if boost:
             boosts[name] = boost
     return boosts
+
+
+# ── Memory receipt: what reached the agent, session by session ──────────
+# A session is a run of retrieval events with no gap longer than this.
+RECEIPT_SESSION_GAP_MINUTES = 30
+
+
+def _event_time(event: Mapping[str, object]) -> datetime | None:
+    stamp = str(event.get("at") or "")
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def memory_receipts(
+    events: Iterable[Mapping[str, object]],
+    *,
+    sessions: int = 3,
+    gap_minutes: int = RECEIPT_SESSION_GAP_MINUTES,
+) -> list[dict[str, object]]:
+    """The most recent sessions, newest first, as receipts.
+
+    Each receipt says what the agent was given from memory: the session
+    brief (how many memories, roughly how many tokens, whether it was cut
+    to fit), each recall, guard reminders, and every memory that reached the
+    agent with how many times. Built from the local ledger only; the ledger
+    never holds queries, so neither does the receipt.
+    """
+    timed = [
+        (moment, event) for event in events
+        if (moment := _event_time(event)) is not None
+        and str(event.get("kind") or "") in RETRIEVAL_KINDS
+    ]
+    timed.sort(key=lambda pair: pair[0])
+    grouped: list[list[tuple[datetime, Mapping[str, object]]]] = []
+    for moment, event in timed:
+        if grouped and (moment - grouped[-1][-1][0]).total_seconds() <= gap_minutes * 60:
+            grouped[-1].append((moment, event))
+        else:
+            grouped.append([(moment, event)])
+    receipts: list[dict[str, object]] = []
+    for group in reversed(grouped[-max(1, sessions):]):
+        used: dict[str, int] = {}
+        briefs: list[dict[str, object]] = []
+        recalls = 0
+        guards: list[str] = []
+        tokens = 0
+        truncated = False
+        surfaces: set[str] = set()
+        for _moment, event in group:
+            kind = str(event.get("kind") or "")
+            raw_names = event.get("memories")
+            names = [str(name) for name in raw_names if str(name)] if isinstance(raw_names, list) else []
+            for name in names:
+                used[name] = used.get(name, 0) + 1
+            event_tokens = event.get("tokens")
+            tokens += event_tokens if isinstance(event_tokens, int) else 0
+            truncated = truncated or bool(event.get("truncated"))
+            if event.get("surface"):
+                surfaces.add(str(event.get("surface")))
+            if kind == "brief":
+                briefs.append({
+                    "memories": len(names),
+                    "tokens": event_tokens if isinstance(event_tokens, int) else None,
+                    "truncated": bool(event.get("truncated")),
+                })
+            elif kind == "guard":
+                guards.extend(names)
+            else:
+                recalls += 1
+        receipts.append({
+            "started": str(group[0][1].get("at") or ""),
+            "ended": str(group[-1][1].get("at") or ""),
+            "project": str(group[-1][1].get("project") or ""),
+            "surfaces": sorted(surfaces),
+            "briefs": briefs,
+            "recalls": recalls,
+            "guard_reminders": guards,
+            "memories_used": [
+                {"name": name, "times": times}
+                for name, times in sorted(used.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "estimated_tokens": tokens,
+            "anything_truncated": truncated,
+        })
+    return receipts

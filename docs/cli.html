@@ -168,6 +168,7 @@ lnk benchmark "agent memory"
 lnk rebuild-index
 lnk rebuild-backlinks
 lnk stale
+lnk receipt
 lnk validate
 lnk verify-mcp</code></pre>
         <p>Use <code>lnk backup</code> before broad repair work. Use <code>lnk benchmark</code> when a wiki starts to feel slow or when you want to see how much broad wiki context the bounded packet avoided sending to an agent. <code>lnk status --validate</code> and <code>lnk benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
@@ -248,6 +249,7 @@ lnk validate [--strict]
 lnk rebuild-index
 lnk rebuild-backlinks
 lnk stale [dir] [--repo path] [--json]
+lnk receipt [dir] [--sessions N] [--json]
 lnk verify-mcp [--json]
 lnk connect &lt;agent&gt; [dir] [--write] [--config path] [--python python] [--hooks]
 lnk disconnect &lt;agent&gt; [--write] [--config path] [--hooks-settings path]

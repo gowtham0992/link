@@ -280,7 +280,10 @@ from link_core.agent_instructions import (
     refresh_instruction_file as _core_refresh_instruction_file,
 )
 from link_core.usage import (
+    load_usage as _core_load_usage,
+    memory_receipts as _core_memory_receipts,
     record_retrieval as _core_record_retrieval,
+    usage_disabled as _core_usage_disabled,
     usage_summary as _core_usage_summary,
 )
 from link_core.sync import (
@@ -1320,6 +1323,67 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
     # Exit 1 when anything is flagged, like a linter, so CI and scripts can
     # act on it; 2 is reserved for "could not check".
     return 1
+
+
+def receipt(target: Path, *, sessions: int = 3, json_output: bool = False) -> int:
+    """What reached the agents from memory, session by session.
+
+    Built from the local retrieval ledger, which never records queries: the
+    receipt says which memories an agent was given and what it cost, not
+    what was asked.
+    """
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    root = _resolve_link_root(target)
+    receipts = _core_memory_receipts(_core_load_usage(root), sessions=max(1, min(sessions, 20)))
+    titles = {str(record.get("name") or ""): str(record.get("title") or "") for record in _core_memory_records(wiki_dir)}
+    for item in receipts:
+        used_list = item.get("memories_used")
+        for used in used_list if isinstance(used_list, list) else []:
+            if isinstance(used, dict):
+                used["title"] = titles.get(str(used.get("name") or ""), "")
+                used["exists"] = str(used.get("name") or "") in titles
+    if json_output:
+        print(json.dumps({
+            "recording": not _core_usage_disabled(),
+            "sessions": receipts,
+        }, indent=2, ensure_ascii=False))
+        return 0
+    if _core_usage_disabled():
+        print("Link is not recording retrievals (LINK_USAGE=off), so there is no receipt to show.")
+        return 0
+    if not receipts:
+        print("No memory has reached an agent yet. Start a session with Link connected, then run this again.")
+        return 0
+    lines = [f"Link memory receipt - last {len(receipts)} session(s)", ""]
+    for item in receipts:
+        started = str(item["started"]).replace("T", " ").replace("Z", " UTC")
+        surfaces = ", ".join(item["surfaces"]) or "unknown surface"  # type: ignore[arg-type]
+        project_note = f" · project {item['project']}" if item["project"] else ""
+        lines.append(f"Session from {started}{project_note} · via {surfaces}")
+        for brief in item["briefs"]:  # type: ignore[union-attr]
+            size = f" · ~{brief['tokens']} tokens" if brief.get("tokens") else ""
+            cut = " · cut to fit" if brief.get("truncated") else ""
+            lines.append(f"  Session brief: {brief['memories']} memories{size}{cut}")
+        lines.append(f"  Recalls: {item['recalls']}")
+        if item["guard_reminders"]:
+            lines.append(f"  Guard reminders: {', '.join(item['guard_reminders'])}")  # type: ignore[arg-type]
+        used_list = item["memories_used"]
+        if used_list:
+            lines.append("  Memories your agent was given:")
+            for used in used_list:  # type: ignore[union-attr]
+                label = used.get("title") or used.get("name")
+                gone = "" if used.get("exists") else " (no longer in the store)"
+                lines.append(f"    - {label} [{used['name']}] x{used['times']}{gone}")
+        total = item["estimated_tokens"]
+        size_line = f"  About {total} tokens of memory in total" if total else "  Size not recorded (older events)"
+        lines.append(size_line + ("; something was cut to fit a budget." if item["anything_truncated"] else "."))
+        lines.append("")
+    lines.append(f"Why is a memory there? {_display_command(['lnk', 'explain-memory', '<name>', str(target)])}")
+    lines.append(f"Wrong? {_display_command(['lnk', 'forget-memory', '<name>', str(target), '--confirm'])}")
+    print("\n".join(lines))
+    return 0
 
 
 def rebuild_backlinks(target: Path) -> int:
@@ -2631,7 +2695,7 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                 rerun = [str(outcome["python"]), str(ROOT / "link.py"), "semantic", str(root), "--setup"]
                 if json_output:
                     rerun.append("--json")
-                return subprocess.run(rerun, check=False).returncode
+                return subprocess.run(rerun, check=False, stdin=subprocess.DEVNULL).returncode
             action_error = (
                 "Could not provision the semantic extras into ~/.link-mcp-venv. "
                 "Create it by hand: python3 -m venv ~/.link-mcp-venv && "
@@ -2802,6 +2866,15 @@ def _hook_session_start(
     if handoff_block:
         text = handoff_block + "\n\n" + text
     _emit_session_start(text, emit)
+    # The push path most sessions start from; it was never recorded, so the
+    # receipt and "never retrieved" counts missed every hook-delivered brief.
+    relevant_obj = brief_payload.get("relevant_memories")
+    _core_record_retrieval(
+        _resolve_link_root(target), "brief",
+        [str(item.get("name") or "") for item in (relevant_obj if isinstance(relevant_obj, list) else [])
+         if isinstance(item, dict)],
+        project=project_name or "", surface="hook", tokens=max(1, (len(text) + 3) // 4),
+    )
     return 0
 
 
@@ -3674,7 +3747,7 @@ def setup(
                             subprocess.run(
                                 [str(outcome["python"]), str(ROOT / "link.py"),
                                  "semantic", str(_resolve_link_root(target)), "--setup"],
-                                check=False,
+                                check=False, stdin=subprocess.DEVNULL,
                             )
         except Exception as exc:
             if not json_output:
@@ -3985,7 +4058,8 @@ def serve_wiki(target: Path, port: int = 3000) -> int:
         return 1
     try:
         return subprocess.run(
-            [sys.executable, str(serve_path), "--root", str(target), "--port", str(port)]
+            [sys.executable, str(serve_path), "--root", str(target), "--port", str(port)],
+            stdin=subprocess.DEVNULL,
         ).returncode
     except KeyboardInterrupt:
         return 130
@@ -4255,7 +4329,7 @@ _WORKSPACE_COMMANDS = {
     "semantic", "status", "sync", "digest", "import", "handoff", "handoffs", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
-    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale",
+    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale", "receipt",
     "verify-mcp", "connect",
 }
 
@@ -4392,6 +4466,7 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
             "stale": stale,
+            "receipt": receipt,
             "verify-mcp": verify_mcp,
             "connect": connect_mcp,
             "disconnect": disconnect_agent,
