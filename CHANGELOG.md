@@ -84,6 +84,12 @@ with proof of what actually arrived.
   reported, never rewritten. On eight public repositories: 604 checkable
   references, 0 false flags, 8 real findings.
 
+- **The site opens with the loop.** A new section plays Link's whole cycle
+  in five scenes - say it once, you approve it, every session knows,
+  checked against the code, held at the moment of action - using the real
+  proposal, brief, receipt, stale verdict and rule check. It pauses on
+  hover, can be paused, stepped with the keyboard or tapped, stays still
+  under reduced motion, and "See how it works" now starts there.
 - **LinkBar shows what a review turns on and what reached the agent.**
   Inbox rows list a memory's enforced rules ("asks · command: git push
   --force*") next to Approve, which runs the review; Edit opens the viewer's
