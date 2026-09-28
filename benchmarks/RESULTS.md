@@ -18,8 +18,10 @@ where they changed.
 | 8. Claim updates | does recall return the current value? | 0.94 current, 0 stale with lineage |
 | 9. Staleness | does `lnk stale` cry wolf? | 0 false flags in 345 references |
 | 10. Contradiction flags | what does the optional NLI tier add? | 0 false alarms, +1 revision caught |
+| 11. Instruction files | does `lnk stale --instructions` cry wolf on real repositories? | 0 false flags in 604 references; 8 of 8 findings true |
+| 12. Enforced rules | do reviewed rules stop the calls they name, and only those? | 17 of 17 caught, 0 of 34 ordinary calls stopped |
 
-Tracks 1-3, 5-10 need no LLM and no network and run in CI or from one
+Tracks 1-3, 5-12 need no LLM and no network and run in CI or from one
 command each (see Reproduce).
 
 ## Semantic tiers
@@ -701,10 +703,80 @@ opt-in for exactly that reason: its flag is a review note on the new memory,
 never a refusal, it never runs on the recall path, and a model failure
 cannot break a save.
 
+## Track 11: Instruction files (`lnk stale --instructions`)
+
+Measured 2026-09-28 on the 5.0.0 branch. AGENTS.md, CLAUDE.md and their
+kin go out of date like memories do, and they are loaded into every
+session. `scripts/eval_instructions.py` has two tracks.
+
+**Planted.** A scratch repository whose AGENTS.md, CLAUDE.md, Cursor rule
+and Windsurf rule name a script, a make target, a dependency, a variable and
+a runtime version the repository then removes, run past the Codex and
+Windsurf size limits, and contradict each other and a reviewed memory. It
+also carries a rule copied into both AGENTS.md and CLAUDE.md, rules that
+still hold, and history phrasing ("we dropped Python 3.9 support").
+
+| | result |
+|---|---|
+| planted findings caught | 9 of 9 |
+| quiet cases flagged (copies, still-true rules, history) | 0 |
+
+**Eight public repositories** with instruction files, cloned with three
+years of history (the engine's history window), every finding judged by
+hand against the repository:
+
+| repository (commit) | files | checkable references | findings | judged |
+|---|---|---|---|---|
+| openai/openai-agents-python (8e4350044c) | 1 | 59 | 1 size limit | true: AGENTS.md is 38,241 bytes, 5,473 past Codex's 32 KiB |
+| modelcontextprotocol/python-sdk (f1b6589088) | 2 | 30 | 0 | |
+| anthropics/anthropic-sdk-python (a7285e919a) | 1 | 71 | 1 guidance | true: CLAUDE.md is 368 lines |
+| getsentry/sentry-python (2a499ec49c) | 1 | 17 | 0 | |
+| astral-sh/uv (c9dab42beb) | 1 | 4 | 0 | |
+| biomejs/biome (ff89559eff) | 1 | 14 | 0 | |
+| denoland/deno (1b48a20f85) | 2 | 94 | 1 guidance | true: CLAUDE.md is 433 lines |
+| pydantic/pydantic-ai (10c5f9b0bd) | 18 | 315 | 2 stale, 3 size limit | true: two AGENTS.md files still say tests use `pytest-anyio`, a dependency removed on 2026-09-26; three nested AGENTS.md chains run 3,663-9,114 bytes past 32 KiB |
+| **total** | **27** | **604** | **8** | **8 true, 0 false** |
+
+No real repository produced a contradiction finding; the planted ones were
+all caught. The first run of this track found five false flags, all fixed
+before these numbers, and the fixes also apply to memories: a
+package-manager binary (`pnpm nx build`) read as a removed script, a
+backticked `@decorator` read as a scoped package, a word in a manifest
+comment read as a removed dependency, a just recipe with a default
+parameter missed, and bare example filenames ("run main.ts") read as
+references. Track 9 is unchanged by them: 0 false flags, 7 of 7 removals.
+
+## Track 12: Enforced rules before each tool call
+
+Measured 2026-09-28 on the 5.0.0 branch with `scripts/eval_enforcement.py`
+(pinned by `tests/test_enforcement_eval.py`). A store of 50 memories, 10 of
+them reviewed memories carrying 15 enforced rules, checked against the tool
+calls a coding agent makes:
+
+| | result |
+|---|---|
+| forbidden calls caught (inside `cd ... &&` chains, behind `sudo` and `env` prefixes, with extra flags, by absolute path) | 17 of 17 |
+| ordinary calls stopped (`rm -rf dist`, `git push origin feature/x`, `terraform plan`, reading `.envrc.example`, writing under `src/`) | 0 of 34 |
+| decision time, p95, in process | 0.149 ms |
+| hook command, median, end to end | 99 ms, almost all Python start-up |
+
+The hook reads a compiled rule index in `.link-cache/` that is rebuilt only
+when a memory changes. A rule's pattern does exactly what it says: `.env*`
+also matches `.envrc.example`, so the bundled rules name `.env` and
+`.env.*`.
+
 ## Reproduce
 
 ```bash
 git clone https://github.com/gowtham0992/link && cd link
+
+# Track 12:
+python3 scripts/eval_enforcement.py
+
+# Track 11 (planted track needs nothing; pass --repo for real checkouts with history):
+python3 scripts/eval_instructions.py
+git clone --shallow-since=2023-09-28 https://github.com/pydantic/pydantic-ai /tmp/pydantic-ai
+python3 scripts/eval_instructions.py --repo /tmp/pydantic-ai
 
 # Track 1 (lexical baseline needs nothing):
 python3 scripts/eval_recall_quality.py --suite full --mode off
