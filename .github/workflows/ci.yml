@@ -5,7 +5,7 @@ on:
   # develop is pushed to directly between releases, and a release tag must
   # carry its own CI record; pull_request alone covered neither.
   push:
-    branches: [develop, main]
+    branches: [develop, main, "5.0.0"]
     tags: ["v*"]
   workflow_dispatch:
 
