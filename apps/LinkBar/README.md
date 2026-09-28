@@ -13,6 +13,14 @@ instead of a chore.
 - Last session: what your agent was actually given (memories, how often,
   roughly how many tokens, and whether a budget cut anything), from
   `lnk receipt` (Link 4.0+). Click a memory to see why Link believes it
+- Approvals in the menu bar: memories that carry enforced rules show the
+  rules themselves (what they ask about or block) next to Approve, and a
+  notification with an Approve button arrives when one is waiting. Captures
+  from sessions that read web or MCP content are marked. Edit opens the
+  viewer, where changes get the same conflict checks (Link 5.0+)
+- The last-session card warns when the agent did not get all of its memory
+  (a brief cut short or never shown) and says how many tool calls enforced
+  rules asked about or blocked (Link 5.0+)
 - Backend: the `lnk` CLI's `--json` output. No server, no sockets, no new
   API surface. Workspace: chosen in Settings, or `LINK_WORKSPACE` for a
   launch, defaulting to `~/link`.

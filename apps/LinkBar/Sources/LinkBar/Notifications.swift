@@ -15,6 +15,11 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
     private let acceptAction = "LINK_ACCEPT"
     private let reviewAction = "LINK_REVIEW"
     private let captureCategory = "LINK_CAPTURE"
+    private let approveRuleAction = "LINK_APPROVE_RULE"
+    private let ruleCategory = "LINK_RULE"
+    /// Rule memories already announced (by name), primed like captures.
+    private var announcedRules: Set<String> = []
+    private var rulesPrimed = false
     private weak var store: LinkStore?
     /// Capture paths already announced, so a refresh burst never double-notifies.
     private var announced: Set<String> = []
@@ -36,7 +41,12 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
                                               actions: [accept, review],
                                               intentIdentifiers: [],
                                               options: [])
-        center.setNotificationCategories([category])
+        let approveRule = UNNotificationAction(identifier: approveRuleAction, title: "Approve rule", options: [])
+        let ruleCategoryDef = UNNotificationCategory(identifier: ruleCategory,
+                                                     actions: [approveRule, review],
+                                                     intentIdentifiers: [],
+                                                     options: [])
+        center.setNotificationCategories([category, ruleCategoryDef])
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             Task { @MainActor in self.authorized = granted }
         }
@@ -52,7 +62,33 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
 
     /// A workspace switch means a different inbox: forget what was announced
     /// so the first refresh seeds again instead of firing a banner per file.
+    /// A memory with enforced rules is waiting for review: until it is
+    /// reviewed its rules do nothing, so say what they would do.
+    func announceWaitingRules(_ items: [InboxItem]) {
+        guard authorized else { return }
+        guard rulesPrimed else {
+            announcedRules.formUnion(items.map(\.name))
+            rulesPrimed = true
+            return
+        }
+        for item in items where !announcedRules.contains(item.name) {
+            announcedRules.insert(item.name)
+            let content = UNMutableNotificationContent()
+            content.title = "A rule is waiting for your OK"
+            content.subtitle = item.title
+            content.body = item.rules.joined(separator: "\n")
+            content.categoryIdentifier = ruleCategory
+            content.userInfo = ["memory": item.name]
+            content.sound = nil
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "rule-\(item.name)", content: content, trigger: nil)
+            )
+        }
+    }
+
     func reprime() {
+        rulesPrimed = false
+        announcedRules = []
         primed = false
         announced = []
     }
@@ -123,6 +159,10 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
         switch response.actionIdentifier {
         case acceptAction:
             if let path { Task { @MainActor in self.store?.acceptCaptureByPath(path) } }
+        case approveRuleAction:
+            if let memory = response.notification.request.content.userInfo["memory"] as? String {
+                Task { @MainActor in self.store?.markReviewedByName(memory) }
+            }
         case reviewAction, UNNotificationDefaultActionIdentifier:
             NSApp.activate(ignoringOtherApps: true)
             PaletteController.shared.hide()

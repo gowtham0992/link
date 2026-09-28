@@ -215,6 +215,9 @@ final class LinkStore: ObservableObject {
                 if let caps = self.captures?.captures {
                     NotificationManager.shared.announceNewCaptures(caps)
                 }
+                if let waiting = self.inbox?.items.filter({ !$0.rules.isEmpty }) {
+                    NotificationManager.shared.announceWaitingRules(waiting)
+                }
             }
             // Health surfaces are heavier (each spawns a Python probe), so
             // refresh them at most every 15s and after the fast data is on
@@ -619,7 +622,14 @@ final class LinkStore: ObservableObject {
 
     /// Approve: mark the memory reviewed. The gate, one click.
     func markReviewed(_ item: InboxItem) {
-        act(["review-memory", item.name, LinkCLI.workspace], success: "Marked reviewed.")
+        act(["review-memory", item.name, LinkCLI.workspace],
+            success: item.rules.isEmpty ? "Marked reviewed." : "Reviewed \u{2014} its rules now apply to tool calls.")
+    }
+
+    /// Approve a waiting rule from its notification: the same review the
+    /// inbox's checkmark runs, by memory name.
+    func markReviewedByName(_ name: String) {
+        act(["review-memory", name, LinkCLI.workspace], success: "Reviewed \u{2014} its rules now apply to tool calls.")
     }
 
     /// Reject: archive the memory (never silent deletion).
