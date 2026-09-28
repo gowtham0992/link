@@ -330,12 +330,19 @@ class StalenessChecker:
                  limit: int = MAX_PATH_LOOKUPS, budget_seconds: float | None = None,
                  cache_path: Path | None = None) -> None:
         self._repo = _Repo(repo_root, runner=runner, budget_seconds=budget_seconds, cache_path=cache_path)
+        # Files whose mentions do not count as the repository "still having"
+        # a variable or endpoint: an instruction file that names a removed
+        # variable must not keep it alive by naming it.
+        self.exclude_from_mentions: list[str] = []
+        # "all": any bare filename is a reference (memories); "linked": only
+        # a markdown link target is (instruction files).
+        self.bare_filenames = "all"
         self.root = self._repo.root
         self._runner = runner
         self._limit = limit
         self._known: dict[str, bool] = {}
         self._moves: dict[str, str] | None = None
-        self._symbols = SymbolChecker(self.root, runner=runner, limit=limit, repo=self._repo)
+        self._symbols = SymbolChecker(self.root, runner=runner, limit=limit, repo=self._repo, owner=self)
         self._identity: set[str] | None = None
 
     @property
@@ -386,6 +393,9 @@ class StalenessChecker:
         for candidate in repo_path_references(text)[: self._limit]:
             if (self.root / candidate).exists():
                 confirmed += 1
+                continue
+            if "/" not in candidate and self.bare_filenames == "linked" and \
+                    not re.search(rf"\]\(\.?/?{re.escape(candidate)}(?:#[^)]*)?\)", text):
                 continue
             if not self._was_known(candidate):
                 continue  # never in the repository (or out of time): prose, not a stale reference
@@ -602,8 +612,10 @@ def symbol_references(text: str) -> list[tuple[str, str]]:
         # Distribution names (left-pad, @scope/pkg), not module names: an
         # underscore identifier in backticks is usually code, and code that
         # still exists is checked by the path rule, not this one.
-        if re.fullmatch(r"@?[a-z0-9][a-z0-9.-]*(?:/[a-z0-9.-]+)?", inner) and (
-            "-" in inner or "/" in inner or inner.startswith("@")
+        # A scoped package always has a slash (@scope/pkg); a bare
+        # `@deprecated` is a decorator.
+        if re.fullmatch(r"(?:@[a-z0-9][a-z0-9.-]*/[a-z0-9.-]+|[a-z0-9][a-z0-9.-]*(?:/[a-z0-9.-]+)?)", inner) and (
+            "-" in inner or "/" in inner
         ) and not re.search(r"\.(?:" + _CODE_SUFFIXES + r")$", inner):
             found.append(("dependency", inner))
     for name in _ENV_VAR_RE.findall(text):
@@ -769,6 +781,19 @@ def _json_scripts(text: str) -> set[str]:
     return set(scripts) if isinstance(scripts, dict) else set()
 
 
+def _json_dependencies(text: str) -> set[str]:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return set()
+    names: set[str] = set()
+    for key in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+        section = data.get(key) if isinstance(data, dict) else None
+        if isinstance(section, dict):
+            names |= {str(name).lower() for name in section}
+    return names
+
+
 def package_scripts(repo_root: Path, manifests: Iterable[str] | None = None) -> set[str] | None:
     """Scripts defined by every package.json given (default: the root one)."""
     paths = [rel for rel in (manifests or ["package.json"]) if rel.rsplit("/", 1)[-1] == "package.json"]
@@ -782,7 +807,8 @@ def package_scripts(repo_root: Path, manifests: Iterable[str] | None = None) -> 
 
 
 _MAKE_TARGET_LINE = re.compile(r"^([A-Za-z0-9_./-][^:#=\t]*?)\s*::?(?![=])", re.M)
-_JUST_RECIPE_LINE = re.compile(r"^@?([A-Za-z0-9_][\w-]*)(?:\s+[^:=\n]*)?\s*:(?!=)", re.M)
+# Parameters may have defaults (`gen *args='':`); an assignment is `name :=`.
+_JUST_RECIPE_LINE = re.compile(r"^@?([A-Za-z0-9_][\w-]*)(?:\s+[^:\n]*?)?\s*:(?!=)", re.M)
 _MAKE_INCLUDE = re.compile(r"^\s*-?s?include\s+(.+)$", re.M)
 _JUST_IMPORT = re.compile(r"^\s*(?:import\??|mod\??\s+\w+)\s+['\"]([^'\"]+)['\"]", re.M)
 
@@ -825,8 +851,10 @@ class SymbolChecker:
     """v2 checks, sharing git answers across many memories like v1."""
 
     def __init__(self, repo_root: Path, *, runner: Callable[..., object] | None = None,
-                 limit: int = MAX_SYMBOL_LOOKUPS, repo: _Repo | None = None) -> None:
+                 limit: int = MAX_SYMBOL_LOOKUPS, repo: _Repo | None = None,
+                 owner: StalenessChecker | None = None) -> None:
         self._repo = repo or _Repo(repo_root, runner=runner)
+        self._owner = owner
         self.root = self._repo.root
         self._runner = runner
         self._limit = limit
@@ -856,7 +884,8 @@ class SymbolChecker:
 
     def _tracked_mentions(self, needle: str) -> bool | None:
         if needle not in self._present:
-            output = self._git(["grep", "-I", "-l", "-w", "-F", "--", needle])
+            excluded = [f":(exclude){rel}" for rel in (self._owner.exclude_from_mentions if self._owner else [])]
+            output = self._git(["grep", "-I", "-l", "-w", "-F", "-e", needle, "--", ".", *excluded])
             if output is None:
                 return None
             self._present[needle] = bool(output.strip())
@@ -868,6 +897,43 @@ class SymbolChecker:
             "log", "--all", "-1", f"--since={HISTORY_WINDOW}", "-E", f"-G{regex}",
             "--format=%h %cs", "--", *pathspec,
         ])
+
+    def _was_a_script(self, name: str, sha: str) -> bool:
+        """Did a package.json that `sha` changed define `name` under scripts?
+
+        The history search finds any `"name":` key, and `"nx": "20.1.0"` in
+        devDependencies is not a script: `pnpm nx build` runs the binary.
+        """
+        changed = self._git(["show", "--name-only", "--format=", sha, "--", "package.json",
+                             ":(glob)**/package.json"]) or ""
+        for rel in changed.splitlines()[:20]:
+            for revision in (f"{sha}^", sha):
+                text = self._git(["show", f"{revision}:{rel}"]) or ""
+                if name in _json_scripts(text):
+                    return True
+        return False
+
+    def _was_declared(self, name: str, sha: str) -> bool:
+        """Was `name` a declared dependency in a manifest that `sha` changed?
+
+        A word in a manifest is not a dependency: a comment ("# the gh-aw
+        shim"), a script body or a description mention it too.
+        """
+        flexible = "".join("[-_.]" if char in "-_." else re.escape(char) for char in name)
+        declared = re.compile(
+            rf"""^\s*(?:["']{flexible}["']\s*:|["']?{flexible}(?:\[[^\]]*\])?\s*(?:[<>=!~;,"'\]]|$)|"""
+            rf"""{flexible}\s*=|gem\s+["']{flexible}["']|{flexible}\s+v?\d)""", re.I | re.M)
+        changed = self._git(["show", "--name-only", "--format=", sha, "--", *(f":(glob)**/{n}" for n in _MANIFEST_NAMES),
+                             ":(glob)**/requirements*.txt", ":(glob)**/requirements/*.txt"]) or ""
+        for rel in changed.splitlines()[:20]:
+            for revision in (f"{sha}^", sha):
+                text = self._git(["show", f"{revision}:{rel}"]) or ""
+                if rel.rsplit("/", 1)[-1] == "package.json":
+                    if name.lower() in _json_dependencies(text):
+                        return True
+                elif declared.search(text):
+                    return True
+        return False
 
     def _scripts_now(self) -> set[str] | None:
         if self._scripts is False:
@@ -919,7 +985,7 @@ class SymbolChecker:
                 return ("holds", None)
             seen = self._last_seen(f"script:{reference}", f'"{_ere_escape(reference)}"[[:space:]]*:',
                                    ("package.json", ":(glob)**/package.json"))
-            if not seen:
+            if not seen or not self._was_a_script(reference, seen.split()[0]):
                 return unknown
             return ("stale", self._finding(kind, reference, "removed",
                                            f"no package.json defines scripts.{reference} any more (changed in {seen})"))
@@ -930,7 +996,7 @@ class SymbolChecker:
             if reference in targets:
                 return ("holds", None)
             pathspec = (*_MAKE_FILES, ":(glob)**/*.mk", ":(glob)**/*.just")
-            definition = f"^@?([^:#=[:space:]]+[[:space:]]+)*{_ere_escape(reference)}([[:space:]][^:=]*)?:"
+            definition = f"^@?([^:#=[:space:]]+[[:space:]]+)*{_ere_escape(reference)}([[:space:]][^:]*)?:([^=]|$)"
             # Belt and braces: a target the parser missed but a tracked file
             # still defines is not gone.
             if (self._git(["grep", "-I", "-l", "-E", definition, "--", *pathspec]) or "").strip():
@@ -952,7 +1018,7 @@ class SymbolChecker:
                 return ("holds", None)
             manifest_specs = tuple(sorted({f":(glob)**/{rel.rsplit('/', 1)[-1]}" for rel in manifests}))
             seen = self._last_seen(f"dep:{reference.lower()}", _ere_word(reference, fold=True), manifest_specs)
-            if not seen:
+            if not seen or not self._was_declared(reference, seen.split()[0]):
                 return unknown
             return ("stale", self._finding(kind, reference, "removed",
                                            f"no dependency manifest lists {reference} any more (changed in {seen})"))
@@ -962,7 +1028,8 @@ class SymbolChecker:
                 return unknown
             if mentioned:
                 return ("holds", None)
-            seen = self._last_seen(f"{kind}:{reference}", _ere_word(reference))
+            excluded = tuple(f":(exclude){rel}" for rel in (self._owner.exclude_from_mentions if self._owner else []))
+            seen = self._last_seen(f"{kind}:{reference}", _ere_word(reference), ((".",) + excluded) if excluded else ())
             if not seen:
                 return unknown
             what = "environment variable" if kind == "env_var" else "URL"
