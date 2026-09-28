@@ -29,7 +29,8 @@ with proof of what actually arrived.
   `sudo` and `env` prefixes) or the path; hooks read a compiled index that
   is rebuilt only when a memory changes. Measured by the new
   `scripts/eval_enforcement.py`: 17 of 17 forbidden calls caught, 0 of 34
-  ordinary coding-agent calls stopped, 0.12 ms per decision.
+  ordinary coding-agent calls stopped, under 0.2 ms per decision (p95) and
+  about 100 ms per hook call, almost all of it Python start-up.
 - **Memories surface when the agent touches the code they describe.** When
   the agent reads or edits a file, the reviewed memories anchored to it
   (recorded when the memory was written inside the repository) are shown,
@@ -69,6 +70,17 @@ with proof of what actually arrived.
   contradictions between files and against reviewed memories. Findings are
   reported, never rewritten. On eight public repositories: 604 checkable
   references, 0 false flags, 8 real findings.
+
+- **LinkBar shows what a review turns on and what reached the agent.**
+  Inbox rows list a memory's enforced rules ("asks · command: git push
+  --force*") next to Approve, which runs the review; Edit opens the viewer's
+  inbox, where edits get the usual conflict checks. A notification with an
+  Approve action arrives when a memory with rules is waiting. Captures from
+  sessions that read web or MCP content carry an amber "check these are
+  your words" mark. The last-session card warns in amber when the agent did
+  not get all of its memory ("1 cut short · 1 never arrived") and counts
+  rule checks ("2 asked for your OK · 1 blocked"). Every new field is
+  optional, so LinkBar still works with a 4.0 CLI.
 
 ### Fixed
 
