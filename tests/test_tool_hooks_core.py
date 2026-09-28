@@ -70,9 +70,12 @@ class RuleTests(_Store):
 
     def test_a_named_command_is_suggested_and_a_file_is_not(self):
         self.assertEqual(suggest_enforce_rules("Never run `git push --force` on main."),
-                         ["ask command: git push --force*"])
+                         ["ask command: git push --force", "ask command: git push --force *"])
         self.assertEqual(suggest_enforce_rules("Never edit `src/app.py` by hand."), [])
         self.assertEqual(suggest_enforce_rules("We always use `pytest -q`."), [])
+        # The command the user wants run is never turned into a rule against it.
+        self.assertEqual(suggest_enforce_rules("Don't forget to run `make test`."), [])
+        self.assertEqual(suggest_enforce_rules("Never merge without running `pnpm lint`."), [])
 
     def test_a_rule_acts_only_after_review(self):
         self._memory("Never force-push to main.", ["ask command: git push --force*"], reviewed=False)
@@ -86,6 +89,60 @@ class RuleTests(_Store):
         self.assertIn("never-force-push-to-main", asked["reason"])
         denied = self._decide("Edit", file_path=str(self.base / "db" / "migrations" / "0001_init.py"))
         self.assertEqual(denied["decision"], "deny")
+
+    def test_disguised_commands_are_still_seen(self):
+        self._memory("Never force-push to main.", ["ask command: git push --force", "ask command: git push --force *"])
+        for command in (
+            "git push '--force'", 'git push "--force"', "sudo -u root git push --force", "env -i git push --force",
+            "sleep 1 & git push --force", "(git push --force)", "{ git push --force; }",
+            "if true; then git push --force; fi", "/usr/bin/git push --force", "timeout 5 git push --force",
+            "nice -n 5 git push --force", "echo main | xargs git push --force", 'bash -c "git push --force"',
+            "echo $(git push --force)", "eval 'git push --force origin main'", "cd api && git push --force origin main",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNotNone(self._decide("Bash", command=command))
+
+    def test_quoted_text_and_safer_forms_pass(self):
+        self._memory("Never force-push to main.", ["ask command: git push --force", "ask command: git push --force *"])
+        self._memory("Never delete build by hand.", ["ask command: rm -rf *"])
+        for command in (
+            'git commit -m "fix; rm -rf build"', "echo 'a && rm -rf /tmp/x'",
+            "git commit -F - <<EOF\nrm -rf build\nEOF", "git push --force-with-lease",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(self._decide("Bash", command=command))
+
+    def test_file_rules_apply_to_shell_reads_and_writes(self):
+        self._memory("Secrets stay out of the agent's context.", ["ask read: .env", "ask read: .env.*"])
+        self._memory("Migrations are generated.", ["deny write: migrations/**"])
+        self.assertEqual(self._decide("Bash", command="cat .ENV")["decision"], "ask")
+        self.assertEqual(self._decide("Bash", command="echo x > migrations/0002.sql")["decision"], "deny")
+        self.assertEqual(self._decide("Grep", pattern="KEY", path=str(self.base / ".env.local"))["decision"], "ask")
+
+    def test_link_governance_and_memory_files_ask_while_rules_exist(self):
+        self._memory("Never force-push to main.", ["ask command: git push --force"])
+        index = load_hook_index(self.wiki, self.base)
+        for event in (
+            {"tool_name": "Bash", "tool_input": {"command": "lnk enforce never-force-push-to-main --clear"}},
+            {"tool_name": "Bash", "tool_input": {"command": "python3 ~/link/link.py review-memory x"}},
+            {"tool_name": "Edit", "tool_input": {"file_path": str(self.wiki / "memories" / "x.md")}},
+        ):
+            with self.subTest(event=event):
+                decision = evaluate_tool_call(index, event, repo_root=self.base,
+                                              protected=[self.wiki / "memories"])
+                self.assertEqual(decision["decision"], "ask")
+
+    def test_a_hand_edit_to_a_nested_memory_refreshes_the_index(self):
+        nested = self.wiki / "memories" / "team"
+        nested.mkdir()
+        name = self._memory("Never force-push to main.", ["ask command: git push --force"])
+        page = self.wiki / "memories" / f"{name}.md"
+        moved = nested / page.name
+        page.rename(moved)
+        self.assertIsNotNone(self._decide("Bash", command="git push --force"))
+        moved.write_text(moved.read_text(encoding="utf-8").replace("status: active", "status: archived"),
+                         encoding="utf-8")
+        self.assertIsNone(self._decide("Bash", command="git push --force"))
 
     def test_unrelated_calls_pass(self):
         self._memory("Never force-push to main.", ["ask command: git push --force*"])
@@ -119,6 +176,7 @@ class RuleTests(_Store):
         event = {"tool_name": "Bash", "tool_input": {"command": "make seed"}}
         self.assertIsNotNone(evaluate_tool_call(index, event, project="api"))
         self.assertIsNone(evaluate_tool_call(index, event, project="web"))
+        self.assertIsNone(evaluate_tool_call(index, event, project=""), "outside any project it stays quiet")
 
 
 class PreToolHookTests(unittest.TestCase):
@@ -273,6 +331,12 @@ class SessionEvidenceTests(unittest.TestCase):
         self.assertIn("Waiting for the user's OK", brief)
         self.assertIn("session read web content", brief)
         self.assertIn("accept-capture", brief)
+        (capture,) = (self.ws / "raw" / "memory-captures").glob("*.md")
+        rel = capture.relative_to(self.ws).as_posix()
+        subprocess.run([*LINK, "accept-capture", rel, str(self.ws), "--index", "1"], check=True, capture_output=True)
+        after = _hook("session-start", self.ws, {"session_id": "e3", "source": "startup"})
+        self.assertNotIn("integration tests before merging", after.split("Waiting for the user's OK")[-1]
+                         if "Waiting for the user's OK" in after else "")
 
     def test_a_repeated_end_event_is_skipped(self):
         entries = [self._user("From now on we always squash-merge pull requests into develop and keep the "
@@ -281,6 +345,41 @@ class SessionEvidenceTests(unittest.TestCase):
         self._end(entries, "r1")
         again = self._end(entries, "r1")
         self.assertIn("already captured", again)
+
+
+
+class ProjectScopeHookTests(unittest.TestCase):
+    def test_a_project_rule_holds_in_subdirectories_and_nowhere_else(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            ws, repo, other = base / "ws", base / "acme", base / "elsewhere"
+            subprocess.run([*LINK, "demo", str(ws), "--force"], check=True, capture_output=True)
+            (repo / "src").mkdir(parents=True)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            other.mkdir()
+            subprocess.run([*LINK, "remember", "Never publish from a laptop", str(ws), "--project", "acme",
+                            "--enforce", "deny command: npm publish*"], check=True, capture_output=True)
+            name = next(page.stem for page in (ws / "wiki" / "memories").glob("never-publish*.md"))
+            subprocess.run([*LINK, "review-memory", name, str(ws)], check=True, capture_output=True)
+            call = {"tool_name": "Bash", "tool_input": {"command": "npm publish"}}
+            inside = _hook("pre-tool", ws, {**call, "cwd": str(repo / "src")})
+            self.assertEqual(json.loads(inside)["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertEqual(_hook("pre-tool", ws, {**call, "cwd": str(other)}), "")
+
+
+class ReceiptSessionTests(unittest.TestCase):
+    def test_overlapping_sessions_get_their_own_receipts(self):
+        events = [
+            {"at": "2026-09-28T10:00:00Z", "kind": "brief", "memories": ["a"], "session": "one", "surface": "hook"},
+            {"at": "2026-09-28T10:01:00Z", "kind": "brief", "memories": ["b"], "session": "two", "surface": "hook"},
+            {"at": "2026-09-28T10:02:00Z", "kind": "enforce", "memories": ["r"], "session": "one",
+             "decision": "deny", "surface": "hook"},
+            {"at": "2026-09-28T10:03:00Z", "kind": "recall", "memories": ["c"], "surface": "mcp"},
+        ]
+        receipts = memory_receipts(events, sessions=5)
+        self.assertEqual(len(receipts), 2)
+        one = next(item for item in receipts if any(used["name"] == "a" for used in item["memories_used"]))
+        self.assertEqual(one["rule_checks"], [{"decision": "deny", "memories": ["r"]}])
 
 
 if __name__ == "__main__":

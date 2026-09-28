@@ -1101,7 +1101,30 @@ def _memory_type_scope(memory_type: str, scope: str) -> tuple[str, str]:
     )
 
 
+def _refuse_rule_change(identifier: str, action: str) -> None:
+    """Rules are the person's to turn on and off, never the agent's.
+
+    Over MCP an agent could otherwise mark its own rule reviewed, or clear,
+    archive, forget or update (which resets review on) a rule that just
+    stopped it. Those changes stay with the person: the CLI, the viewer and
+    LinkBar make them.
+    """
+    from link_core.memory import resolve_memory_page as _resolve
+
+    _path, record, _error = _resolve(WIKI_DIR, _clean_text_input(identifier, max_len=300), records=_memory_records())
+    rules = record.get("enforce") if record else None
+    if isinstance(rules, list) and rules:
+        name = str(record.get("name") if record else identifier)
+        raise ValueError(
+            f"{name} enforces rules on tool calls ({'; '.join(str(rule) for rule in rules)}). "
+            f"Only the person can {action} it: ask them to run `lnk review-memory {name}`, "
+            f"`lnk enforce {name} --clear` or use the viewer or LinkBar."
+        )
+
+
 def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[str, object]:
+    if status != "active":
+        _refuse_rule_change(identifier, status.rstrip("d") if status.endswith("d") else status)
     result = _core_set_memory_status(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),
@@ -1131,6 +1154,7 @@ def _set_memory_visibility(identifier: str, visibility: str) -> dict[str, object
 
 
 def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
+    _refuse_rule_change(identifier, "forget")
     result = _core_forget_memory_page(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),
@@ -1146,6 +1170,7 @@ def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
 
 
 def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
+    _refuse_rule_change(identifier, "approve")
     result = _core_mark_memory_reviewed(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),
@@ -1936,7 +1961,16 @@ def admin(action: str, arguments: str = "{}") -> str:
         if clean_action in {"set_enforce", "set_memory_enforce"}:
             raw_rules = payload.get("rules")
             rules = [str(rule) for rule in raw_rules] if isinstance(raw_rules, list) else _split_rules(str(raw_rules or ""))
-            from link_core.memory import set_memory_enforce as _set_enforce
+            from link_core.memory import resolve_memory_page as _resolve, set_memory_enforce as _set_enforce
+            _path, current, _error = _resolve(WIKI_DIR, _str_arg(payload, "identifier"), records=_memory_records())
+            existing = current.get("enforce") if current else None
+            if isinstance(existing, list) and existing and (
+                _bool_arg(payload, "clear", False) or not set(map(str, existing)) <= set(rules)
+            ):
+                raise ValueError(
+                    "Removing rules is the person's call: ask them to run "
+                    f"`lnk enforce {current.get('name') if current else ''} --clear` (or edit the rules)."
+                )
             result = _set_enforce(
                 WIKI_DIR, _str_arg(payload, "identifier"), [] if _bool_arg(payload, "clear", False) else rules,
                 timestamp=_utc_timestamp(), records=_memory_records(), log_writer=_append_log,
@@ -2347,6 +2381,7 @@ def update_memory(
     the memory body, logged, and marked pending review.
     """
     try:
+        _refuse_rule_change(identifier, "update")
         result = _update_memory_page(
             identifier,
             memory,

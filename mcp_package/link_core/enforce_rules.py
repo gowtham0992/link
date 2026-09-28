@@ -62,8 +62,13 @@ def parse_enforce_rules(values: Iterable[object]) -> list[EnforceRule]:
 
 # A constraint that names a command in backticks: "Never run `git push
 # --force` on main". Its rule can be suggested without a model.
+# The backticked command must be what is forbidden, right after the negation
+# and at most a verb: "Never run `git push --force`", "don't use `npm`".
+# "Don't forget to run `make test`" and "never merge without running
+# `pnpm lint`" name a command the user wants run, and get no rule.
 _SUGGEST_RE = re.compile(
-    r"\b(?:never|don't|do not|must not|mustn't|avoid)\b[^.`]*?`(?P<command>[^`]{3,120})`",
+    r"\b(?:never|don't|do not|must not|mustn't|avoid)\s+(?:ever\s+)?"
+    r"(?:(?:run|use|call|execute|invoke|type|do)(?:ning)?\s+)?`(?P<command>[^`]{3,120})`",
     re.IGNORECASE,
 )
 _COMMAND_START_RE = re.compile(r"^(?:[\w.-]+/)*[a-z][\w.-]*(?:\s|$)")
@@ -79,7 +84,9 @@ def suggest_enforce_rules(text: str) -> list[str]:
         looks_like_file = "/" in first or (" " not in command and re.search(r"\.\w{1,5}$", first))
         if not _COMMAND_START_RE.match(command) or looks_like_file:
             continue
-        rule = f"ask command: {command}*"
-        if rule not in suggestions:
-            suggestions.append(rule)
-    return suggestions[:3]
+        # The command itself and with more arguments, but not a longer word:
+        # `git push --force*` would also catch the safer --force-with-lease.
+        for rule in (f"ask command: {command}", f"ask command: {command} *"):
+            if rule not in suggestions:
+                suggestions.append(rule)
+    return suggestions[:4]

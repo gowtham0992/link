@@ -30,7 +30,7 @@ import hashlib
 import json
 import re
 import secrets
-import shlex
+from datetime import date
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -40,12 +40,14 @@ from .memory import (
     is_active_memory,
     memory_quarantined,
     memory_records,
+    memory_applicability,
     memory_visible_for_project,
     normalize_project,
 )
+from .shell_parse import read_shell
 from .provenance import MAX_FILE_BYTES, locate, parse_anchor
 
-HOOK_INDEX_VERSION = 1
+HOOK_INDEX_VERSION = 2
 # At most this many anchored memories per touched file, each on one line:
 # a reminder, not a second brief.
 MAX_TOUCH_REMINDERS = 3
@@ -53,9 +55,8 @@ MAX_TOUCH_REMINDERS = 3
 # a warning; everything Link injects from a hook stays well under it.
 HOOK_OUTPUT_BUDGET = 9000
 
-_SHELL_SPLIT_RE = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
 _WRITE_TOOLS = {"write", "edit", "multiedit", "notebookedit", "str_replace_based_edit_tool", "create_file"}
-_READ_TOOLS = {"read", "view", "notebookread"}
+_READ_TOOLS = {"read", "view", "notebookread", "grep"}
 _SHELL_TOOLS = {"bash", "powershell", "shell", "run_shell_command", "terminal"}
 
 
@@ -64,15 +65,17 @@ def hook_index_path(link_root: Path) -> Path:
 
 
 def _memories_signature(wiki_dir: Path) -> str:
-    digest = hashlib.sha256()
+    # Every memory file, nested ones too (memory_records reads them), and
+    # today's date: an expires_at passing must retire its rules.
+    digest = hashlib.sha256(date.today().isoformat().encode())
     memories = wiki_dir / "memories"
     if memories.is_dir():
-        for path in sorted(memories.glob("*.md")):
+        for path in sorted(memories.rglob("*.md")):
             try:
                 stat = path.stat()
             except OSError:
                 continue
-            digest.update(f"{path.name}\0{stat.st_mtime_ns}\0{stat.st_size}\n".encode())
+            digest.update(f"{path.relative_to(memories)}\0{stat.st_mtime_ns}\0{stat.st_size}\n".encode())
     return digest.hexdigest()
 
 
@@ -98,6 +101,7 @@ def build_hook_index(wiki_dir: Path) -> dict[str, object]:
             "scope": str(record.get("scope") or "user"),
             "project": str(record.get("project") or ""),
             "visibility": str(record.get("visibility") or ""),
+            "applies_when": str(record.get("applies_when") or ""),
         }
         enforce = record.get("enforce")
         for rule in parse_enforce_rules(enforce if isinstance(enforce, list) else []):
@@ -135,46 +139,70 @@ def _applies_to_project(entry: Mapping[str, object], project: str | None) -> boo
     return memory_visible_for_project(entry, normalize_project(project or ""))
 
 
-def _shell_segments(command: str) -> list[str]:
-    segments = [" ".join(part.split()) for part in _SHELL_SPLIT_RE.split(command) if part.strip()]
-    whole = " ".join(command.split())
-    return [whole, *[segment for segment in segments if segment != whole]]
+def _rule_applies(rule: Mapping[str, object], project: str | None, context_path: str | None) -> bool:
+    """A project's rule applies only inside that project; a fenced memory only where it matches.
+
+    Outside any known project a project rule stays quiet: firing it in
+    every other repository is how a guard gets switched off.
+    """
+    if str(rule.get("scope") or "") == "project" and str(rule.get("project") or ""):
+        if normalize_project(project or "") != normalize_project(str(rule.get("project"))):
+            return False
+    if str(rule.get("applies_when") or "").strip():
+        verdict = memory_applicability(rule, project=project, context_path=context_path)
+        if verdict == "out_of_context":
+            return False
+    return True
 
 
-def _command_matches(pattern: str, command: str) -> bool:
-    wanted = " ".join(pattern.split())
-    for segment in _shell_segments(command):
-        # `sudo`/`env X=1` prefixes do not hide the command they run.
-        candidates = [segment]
-        try:
-            words = shlex.split(segment)
-        except ValueError:
-            words = segment.split()
-        while words and (words[0] in {"sudo", "env", "command", "exec", "nohup", "time"} or "=" in words[0]):
-            words = words[1:]
-            candidates.append(" ".join(words))
-        if any(fnmatch.fnmatchcase(candidate, wanted) for candidate in candidates):
-            return True
-    return False
-
-
-def _path_matches(pattern: str, file_path: str, repo_root: Path | None) -> bool:
+def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Path | None = None) -> bool:
     raw = str(file_path or "").strip()
     if not raw:
         return False
     candidates = {raw.replace("\\", "/")}
+    path = Path(raw).expanduser()
+    if not path.is_absolute() and base is not None:
+        path = base / path
     if repo_root is not None:
         try:
-            candidates.add(Path(raw).resolve().relative_to(repo_root.resolve()).as_posix())
+            candidates.add(path.resolve().relative_to(repo_root.resolve()).as_posix())
         except (OSError, ValueError):
             pass
-    wanted = pattern.replace("\\", "/")
-    for candidate in candidates:
-        if fnmatch.fnmatch(candidate, wanted) or fnmatch.fnmatch(candidate, f"*/{wanted}"):
+    # Case-insensitive: `.ENV` is `.env` on the default macOS and Windows disks.
+    wanted = pattern.replace("\\", "/").lower()
+    for candidate in (item.lower() for item in candidates):
+        if candidate.startswith("./"):
+            candidate = candidate[2:]
+        if fnmatch.fnmatchcase(candidate, wanted) or fnmatch.fnmatchcase(candidate, f"*/{wanted}"):
             return True
         # "migrations/**" also covers the directory's files at any depth.
         if wanted.endswith("/**") and (f"/{wanted[:-3]}/" in f"/{candidate}"):
             return True
+    return False
+
+
+# Link's own commands that approve, clear, retire or rewrite a memory: with a
+# rule active, an agent running them from the shell is asking the person.
+_GOVERNANCE_RE = re.compile(
+    r"^(?:lnk|link|python\S*\s+\S*link(?:_cli)?\.py)\s+"
+    r"(?:review-memory|enforce|archive-memory|forget-memory|update-memory|restore-backup)\b"
+)
+
+
+def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
+    path = Path(str(path_text or "")).expanduser()
+    if not path.is_absolute() and base is not None:
+        path = base / path
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in roots:
+        try:
+            resolved.relative_to(root.resolve())
+            return True
+        except (OSError, ValueError):
+            continue
     return False
 
 
@@ -205,36 +233,80 @@ def evaluate_tool_call(
     *,
     project: str | None = None,
     repo_root: Path | None = None,
+    context_path: str | None = None,
+    protected: Iterable[Path] = (),
 ) -> dict[str, object] | None:
-    """The decision for a tool call under the reviewed rules, or None to stay out of the way."""
+    """The decision for a tool call under the reviewed rules, or None to stay out of the way.
+
+    Shell commands are read as the shell will run them (shell_parse): every
+    command in a chain, past wrappers and quoting, plus the files they read
+    and write, so path rules hold for `cat .env` and `> migrations/x.sql` too.
+    While any rule is active, writing Link's own memory files from a tool
+    asks first: editing a rule out by hand would skip the review it needs.
+    """
     call = tool_call(event)
     if call is None:
         return None
     kind, value = call
-    matches: list[Mapping[str, object]] = []
+    commands: list[str] = []
+    reads: list[str] = []
+    writes: list[str] = []
+    if kind == "command":
+        reading = read_shell(value)
+        commands = [" ".join(words) for words in reading.commands]
+        reads, writes = reading.reads, reading.writes
+    elif kind == "read":
+        reads = [value]
+    else:
+        writes = [value]
+    base = Path(context_path) if context_path else None
     rule_values = index.get("rules")
-    for rule in rule_values if isinstance(rule_values, list) else []:
-        if not isinstance(rule, dict) or rule.get("kind") != kind or not _applies_to_project(rule, project):
+    rules = [rule for rule in (rule_values if isinstance(rule_values, list) else []) if isinstance(rule, dict)]
+    matches: list[Mapping[str, object]] = []
+    for rule in rules:
+        if not _rule_applies(rule, project, context_path):
             continue
+        rule_kind = str(rule.get("kind") or "")
         pattern = str(rule.get("pattern") or "")
-        hit = _command_matches(pattern, value) if kind == "command" else _path_matches(pattern, value, repo_root)
+        if rule_kind == "command":
+            wanted = " ".join(pattern.split())
+            hit = any(fnmatch.fnmatchcase(command, wanted) for command in commands)
+        elif rule_kind == "write":
+            hit = any(_path_matches(pattern, target, repo_root, base) for target in writes)
+        elif rule_kind == "read":
+            hit = any(_path_matches(pattern, target, repo_root, base) for target in reads)
+        else:
+            hit = False
         if hit:
             matches.append(rule)
+    roots = list(protected)
+    if not matches and rules and any(_GOVERNANCE_RE.match(command) for command in commands):
+        matches.append({
+            "name": "link-governance", "title": "Only the person approves, clears or retires rules",
+            "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|...",
+        })
+    if not matches and rules and roots and any(_under(target, roots, base) for target in writes):
+        matches.append({
+            "name": "link-memory-files", "title": "Link memory files change only through Link",
+            "action": "ask", "kind": "write", "pattern": "<Link memories>/**",
+        })
     if not matches:
         return None
     decision = "deny" if any(rule.get("action") == "deny" for rule in matches) else "ask"
     first = next((rule for rule in matches if rule.get("action") == decision), matches[0])
-    names = sorted({str(rule.get("name") or "") for rule in matches})
+    names = sorted({str(rule.get("name") or "") for rule in matches
+                    if rule.get("name") not in {"link-memory-files", "link-governance"}})
+    rule_kind = str(first.get("kind") or kind)
     verb = "blocked" if decision == "deny" else "needs the person's OK"
     reason = (
-        f"Link: this {kind} {verb} under a reviewed memory - \"{first.get('title')}\" ({first.get('name')}), "
-        f"rule \"{first.get('action')} {kind}: {first.get('pattern')}\"."
+        f"Link: this {rule_kind} {verb} under a reviewed memory - \"{first.get('title')}\" ({first.get('name')}), "
+        f"rule \"{first.get('action')} {rule_kind}: {first.get('pattern')}\"."
     )
     if decision == "ask":
         reason += " If the person approves, go ahead; otherwise follow the memory."
     else:
         reason += " Do not work around it; tell the person, who can edit the memory if it no longer holds."
-    return {"decision": decision, "reason": reason, "memories": names, "kind": kind}
+    return {"decision": decision, "reason": reason, "memories": names, "kind": rule_kind}
 
 
 def anchored_reminders(

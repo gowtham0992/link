@@ -351,12 +351,32 @@ def memory_receipts(
         and str(event.get("kind") or "") in RETRIEVAL_KINDS
     ]
     timed.sort(key=lambda pair: pair[0])
-    grouped: list[list[tuple[datetime, Mapping[str, object]]]] = []
+    by_gap: list[list[tuple[datetime, Mapping[str, object]]]] = []
     for moment, event in timed:
-        if grouped and (moment - grouped[-1][-1][0]).total_seconds() <= gap_minutes * 60:
-            grouped[-1].append((moment, event))
+        if by_gap and (moment - by_gap[-1][-1][0]).total_seconds() <= gap_minutes * 60:
+            by_gap[-1].append((moment, event))
         else:
-            grouped.append([(moment, event)])
+            by_gap.append([(moment, event)])
+    # Sessions that overlap in time (two agents at once) carry their own
+    # session ids: split on those, and give events without one (CLI, MCP) to
+    # the session active just before them.
+    grouped: list[list[tuple[datetime, Mapping[str, object]]]] = []
+    for group in by_gap:
+        ids = [str(event.get("session") or "") for _moment, event in group]
+        if len({item for item in ids if item}) <= 1:
+            grouped.append(group)
+            continue
+        parts: dict[str, list[tuple[datetime, Mapping[str, object]]]] = {}
+        order: list[str] = []
+        last = next(item for item in ids if item)
+        for pair, session in zip(group, ids):
+            key = session or last
+            last = key
+            if key not in parts:
+                parts[key] = []
+                order.append(key)
+            parts[key].append(pair)
+        grouped.extend(sorted((parts[key] for key in order), key=lambda part: part[0][0]))
     receipts: list[dict[str, object]] = []
     for group in reversed(grouped[-max(1, sessions):]):
         used: dict[str, int] = {}

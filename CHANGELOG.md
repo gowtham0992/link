@@ -19,15 +19,28 @@ with proof of what actually arrived.
   commands and file reads and writes (Claude Code; shell commands in
   Cursor). `ask` is the default: the call waits for your OK. `deny` blocks
   it. Every decision names the memory it came from. A rule acts only after
-  you review the memory, and adding one sends the memory back to review,
-  so an agent that writes a rule cannot make it block or allow anything on
-  its own. When a saved constraint names a command in backticks, `lnk
+  you review the memory, and adding one sends the memory back to review.
+  Turning rules on and off stays with you: over MCP an agent cannot mark a
+  rule-bearing memory reviewed, clear its rules, or archive, forget or
+  update it, and while any rule is active the hook asks before an agent
+  runs Link's review, enforce, archive or forget commands from the shell or
+  edits Link's memory files directly. When a saved constraint names a command in backticks, `lnk
   remember` suggests the rule for you to approve. `lnk enforce <memory>
   --rule ...` sets rules (`--clear`, `--suggest`), and `remember --enforce`,
-  MCP `remember(enforce=)` and admin `set_enforce` do the same. Matching is
-  a glob over the command (every segment of a `&&`/`;`/`|` chain, past
-  `sudo` and `env` prefixes) or the path; hooks read a compiled index that
-  is rebuilt only when a memory changes. Measured by the new
+  MCP `remember(enforce=)` and admin `set_enforce` do the same. Commands
+  are read the way the shell will run them: every command in a `&&`, `;`,
+  `|` or `&` chain, inside `( )`, `{ }`, `if`/`then`, `bash -c`, `eval`,
+  `$( )` and backticks, past quoting, assignments, `sudo`/`env`/`timeout`/
+  `nice`/`xargs` and their options, and with `/usr/bin/git` read as `git`;
+  quoted text such as a commit message is not a command. File rules also
+  cover what shell commands read and write (`cat .env`, `> migrations/x`)
+  and Grep, and paths compare case-insensitively. A project's rules apply
+  anywhere inside its repository and nowhere else, and a memory fenced
+  with `applies_when` enforces only where it applies. Hooks read a
+  compiled index rebuilt when any memory file changes or a day passes (so
+  expiry dates retire rules). What the reader cannot see - variables
+  expanded at run time, a script that does the forbidden thing inside -
+  it does not claim to. Measured by the new
   `scripts/eval_enforcement.py`: 17 of 17 forbidden calls caught, 0 of 34
   ordinary coding-agent calls stopped, under 0.2 ms per decision (p95) and
   about 100 ms per hook call, almost all of it Python start-up.
@@ -86,6 +99,14 @@ with proof of what actually arrived.
 
 - **A repeated session-end event is recognised.** The duplicate check
   stored the last proposal's fingerprint instead of the session's.
+- **`lnk compile` never rewrites a file it cannot read exactly.** A
+  non-UTF-8 or unreadable AGENTS.md, CLAUDE.md or Link-owned rule file is a
+  conflict with a reason, never replaced. In a file that mixes CRLF and LF
+  every existing line keeps its own ending, so appending a line after
+  Link's block does not show as drift.
+- **`lnk stale --instructions` finds nested instruction files under
+  non-ASCII folders**, and the staleness engine's manifest lookup reads
+  such names too.
 - **Staleness precision.** A package-manager binary (`pnpm nx build`) is not
   a removed script, a backticked `@decorator` is not a scoped package, a
   dependency counts as removed only when a manifest declared it, just

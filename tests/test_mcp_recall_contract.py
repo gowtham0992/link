@@ -79,10 +79,13 @@ class SlimRecallContractTests(unittest.TestCase):
             saved = json.loads(server.remember(text="Never run `git push --force` on main.",
                                                enforce="ask command: git push --force*"))
             self.assertEqual(saved["enforce"], ["ask command: git push --force*"])
+            # The agent cannot approve its own rule, or clear, archive or rewrite one.
+            approved = json.loads(server.review(action="reviewed", identifier=saved["name"]))
             cleared = json.loads(server.admin(action="set_enforce", arguments=json.dumps(
                 {"identifier": saved["name"], "clear": True})))
-        self.assertTrue(cleared["ok"])
-        self.assertEqual(cleared["enforce"], [])
+            archived = json.loads(server.review(action="archive", identifier=saved["name"]))
+        for refused in (approved, cleared, archived):
+            self.assertRegex(str(refused.get("error")), r"Only the person|the person's call")
 
     def test_first_response_reports_the_real_review_queue(self):
         with mcp_server(self.root) as server:

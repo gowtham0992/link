@@ -3371,12 +3371,16 @@ def _pending_approvals(target: Path, wiki_dir: Path, captures: Mapping[str, obje
     """
     root = _resolve_link_root(target)
     approvals: list[dict[str, object]] = []
+    records = _memory_records(wiki_dir)
     items = captures.get("items") if isinstance(captures.get("items"), list) else []
     for capture in items or []:
         if not isinstance(capture, dict):
             continue
         for index, proposal in enumerate(capture.get("proposals") or [], start=1):
             if not isinstance(proposal, dict) or len(approvals) >= 3:
+                continue
+            # Already accepted (or already remembered another way): not waiting.
+            if _core_is_existing_memory_echo(records, str(proposal.get("memory") or "")):
                 continue
             approvals.append({
                 "kind": "proposal",
@@ -3386,7 +3390,7 @@ def _pending_approvals(target: Path, wiki_dir: Path, captures: Mapping[str, obje
                     ["lnk", "accept-capture", str(capture.get("path")), str(root), "--index", str(index)]
                 ),
             })
-    for record in _memory_records(wiki_dir):
+    for record in records:
         if len(approvals) >= 5:
             break
         rules = record.get("enforce") or []
@@ -3401,10 +3405,19 @@ def _pending_approvals(target: Path, wiki_dir: Path, captures: Mapping[str, obje
 
 
 def _hook_project(target: Path, hook_event: dict[str, object], project: str | None) -> str:
+    """The project the agent is working in: its repository's, wherever in it the cwd is.
+
+    Tool hooks fire with the agent's current directory, which follows every
+    `cd`; naming the project from that directory alone left project rules
+    unscoped in any subdirectory.
+    """
     if project:
         return project
     project_dir = _hook_project_dir(hook_event)
-    return _default_project(Path(project_dir)) if project_dir else _default_project(target)
+    if not project_dir:
+        return ""
+    repo_root = _core_find_repo_root(Path(project_dir))
+    return _default_project(repo_root) if repo_root else ""
 
 
 def _hook_pre_tool(target: Path, hook_event: dict[str, object], project: str | None, emit: str) -> int:
@@ -3425,6 +3438,7 @@ def _hook_pre_tool(target: Path, hook_event: dict[str, object], project: str | N
     repo_root = _core_find_repo_root(Path(project_dir)) if project_dir else None
     decision = _core_evaluate_tool_call(
         index, hook_event, project=_hook_project(target, hook_event, project), repo_root=repo_root,
+        context_path=project_dir or None, protected=[wiki_dir / "memories"],
     )
     if decision is None:
         return allow()
@@ -3515,6 +3529,10 @@ def _verify_session_delivery(target: Path, hook_event: dict[str, object], transc
     except OSError:
         return {}
     results = _core_verify_deliveries(transcript, tokens)
+    if all(state == "missing" for state in results.values()) and '"hookEvent"' not in transcript:
+        # This agent's transcript does not record hook output at all, so
+        # absence proves nothing: say so instead of reporting a loss.
+        results = {token: "unverified" for token in results}
     _core_record_delivery(root, session, results)
     return results
 
