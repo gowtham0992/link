@@ -4,6 +4,82 @@ All notable changes to Link are tracked here.
 
 Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI and the MCP Registry. Keep `Unreleased` for work merged after the latest published version.
 
+## [5.0.0] - Unreleased
+
+Memory that holds at the moment of action. 4.0 made memory check itself
+against the code; 5.0 makes it act where the agent works: before a tool
+call, when a file is opened, in the files every agent already reads, and
+with proof of what actually arrived.
+
+### Added
+
+- **Reviewed memories can enforce rules on tool calls.** A memory can carry
+  `enforce` rules - `ask command: git push --force*`, `deny write:
+  migrations/**`, `ask read: .env` - checked before the agent's shell
+  commands and file reads and writes (Claude Code; shell commands in
+  Cursor). `ask` is the default: the call waits for your OK. `deny` blocks
+  it. Every decision names the memory it came from. A rule acts only after
+  you review the memory, and adding one sends the memory back to review,
+  so an agent that writes a rule cannot make it block or allow anything on
+  its own. When a saved constraint names a command in backticks, `lnk
+  remember` suggests the rule for you to approve. `lnk enforce <memory>
+  --rule ...` sets rules (`--clear`, `--suggest`), and `remember --enforce`,
+  MCP `remember(enforce=)` and admin `set_enforce` do the same. Matching is
+  a glob over the command (every segment of a `&&`/`;`/`|` chain, past
+  `sudo` and `env` prefixes) or the path; hooks read a compiled index that
+  is rebuilt only when a memory changes. Measured by the new
+  `scripts/eval_enforcement.py`: 17 of 17 forbidden calls caught, 0 of 34
+  ordinary coding-agent calls stopped, 0.12 ms per decision.
+- **Memories surface when the agent touches the code they describe.** When
+  the agent reads or edits a file, the reviewed memories anchored to it
+  (recorded when the memory was written inside the repository) are shown,
+  once per session, and never when the anchored symbol is gone from the
+  file. The memory does not need to share a single word with the task.
+- **Proof of delivery.** Everything a hook injects carries a short
+  `(link:...)` marker and stays under the size some hosts drop silently,
+  cut with a visible notice when it must be. At session end Link checks the
+  transcript, and `lnk receipt` says whether the brief and each reminder
+  arrived, arrived cut off, or never arrived, and lists the rule checks
+  (asked, blocked) and code reminders of each session.
+- **Approval in the flow of work.** The session brief lists what is waiting
+  for your OK - session proposals and rules awaiting review - with the
+  exact command for each; the agent runs one only after you say yes in
+  chat. A short session proposes memory only when you stated a standing
+  rule in it, and proposals from a session that read web pages or another
+  MCP server's output are marked so you can check the words were yours.
+- **`lnk compile` writes reviewed memory into the files each agent reads.**
+  A delimited Link block in AGENTS.md, CLAUDE.md, GEMINI.md and
+  copilot-instructions; path-scoped rules for Cursor, Claude Code, Copilot,
+  Windsurf and Kiro, derived from memories anchored to code in this
+  repository; and Agent Skills from procedure memories. Unreviewed,
+  quarantined, task-conditional, secret- or injection-flagged memories are
+  left out with a reason, private memories stay out unless you pass
+  `--include-private`, and every line outside Link's block is kept byte for
+  byte. Each target's size limit is respected (AGENTS.md 32 KiB, CLAUDE.md
+  200 lines, 12,000 characters per Windsurf rule, 500 lines per Cursor
+  rule), with lower-priority memories dropped first and every drop
+  reported. Output is deterministic: `--check` fails CI on drift and
+  `--dry-run` shows the diff. MCP admin `compile` previews unless asked to
+  write.
+- **`lnk stale --instructions` checks instruction files like memories.**
+  AGENTS.md, CLAUDE.md and GEMINI.md (nested ones too), `.claude/rules`,
+  Cursor, Windsurf, Kiro and Copilot files get the same history-backed
+  stale checks, size-limit overruns with the exact limit and overage
+  (counting the AGENTS.md chain from the root to each nested file), and
+  contradictions between files and against reviewed memories. Findings are
+  reported, never rewritten. On eight public repositories: 604 checkable
+  references, 0 false flags, 8 real findings.
+
+### Fixed
+
+- **A repeated session-end event is recognised.** The duplicate check
+  stored the last proposal's fingerprint instead of the session's.
+- **Staleness precision.** A package-manager binary (`pnpm nx build`) is not
+  a removed script, a backticked `@decorator` is not a scoped package, a
+  dependency counts as removed only when a manifest declared it, just
+  recipes with default parameters are recognised, and mentions inside
+  instruction files do not keep a removed variable "present".
+
 ## [Unreleased]
 
 ### Added
