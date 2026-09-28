@@ -1276,7 +1276,114 @@ def import_obsidian(
     return _emit_json_or_text(payload, json_output, _core_render_import_obsidian_text)
 
 
-def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) -> int:
+def _stale_instructions(target: Path, wiki_dir: Path, repo_dir: Path, *, json_output: bool = False) -> int:
+    """`lnk stale --instructions`: the repository's agent instruction files, checked like memories."""
+    from link_core.instruction_lint import lint_instructions
+    from link_core.nli import load_contradiction_scorer
+
+    # The contradiction model is used when it is already on disk; this
+    # command never downloads it (that is `lnk semantic --setup --nli`).
+    scorer = load_contradiction_scorer(allow_download=False)
+    report = lint_instructions(
+        repo_dir, _core_memory_records(wiki_dir),
+        cache_path=_resolve_link_root(target) / ".link-cache" / "staleness-v1.json", scorer=scorer,
+    )
+    if json_output:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 1 if report["flagged"] else 0
+    files = report["files"]
+    if not files:
+        print(f"No agent instruction files in {report['repo']}.")
+        return 0
+    for finding in report["findings"]:
+        where = f"{finding['file']}:{finding['line']}" if finding.get("line") else str(finding["file"])
+        label = {"stale": "stale", "budget": "too long" if finding.get("severity") == "truncated" else "long",
+                 "contradiction": "contradicts"}.get(str(finding["kind"]), str(finding["kind"]))
+        print(f"{where}  [{label}] {finding['reason']}")
+        if finding["kind"] == "contradiction":
+            print(f"    {finding.get('text', '')}\n    vs {finding.get('other_text', '')}")
+    names = ", ".join(sorted({str(f["path"]) for f in files})[:6]) + (" ..." if len(files) > 6 else "")
+    if not report["findings"]:
+        print(f"No problems in {len(files)} instruction files ({names}).")
+        return 0
+    guidance = len(report["findings"]) - int(report["flagged"])
+    print(f"\n{report['flagged']} finding(s) in {len(files)} instruction files"
+          + (f", plus {guidance} length warning(s) that do not fail the check" if guidance else "")
+          + ". Nothing was changed.")
+    if not report["contradiction_model"]:
+        print("Contradictions were checked with word rules; `lnk semantic --setup --nli` adds the local model.")
+    return 1 if report["flagged"] else 0
+
+
+def compile_memories(
+    target: Path,
+    *,
+    repo: Path = Path("."),
+    targets: str = "",
+    check: bool = False,
+    dry_run: bool = False,
+    include_private: bool = False,
+    project: str = "",
+    json_output: bool = False,
+) -> int:
+    """Render reviewed memories into this repository's agent instruction files."""
+    from link_core.compile import TARGET_KEYS, apply_plan, plan_changes, plan_compile, plan_diff, plan_summary
+
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    repo_dir = Path(repo).expanduser().resolve()
+    if not repo_dir.is_dir():
+        print(f"{repo_dir} is not a directory", file=sys.stderr)
+        return 2
+    chosen = [key.strip() for key in targets.split(",") if key.strip()] if targets else None
+    unknown = [key for key in chosen or [] if key not in TARGET_KEYS and key != "all"]
+    if unknown:
+        print(f"Unknown target(s): {', '.join(unknown)}. Choose from: {', '.join(TARGET_KEYS)}", file=sys.stderr)
+        return 2
+    plan = plan_compile(_core_memory_records(wiki_dir), repo_dir, project=project or None, targets=chosen,
+                        include_private=include_private)
+    changes = plan_changes(plan)
+    if not (check or dry_run):
+        apply_plan(plan)
+    summary = plan_summary(plan, changes)
+    summary["mode"] = "check" if check else "dry-run" if dry_run else "write"
+    if json_output:
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    elif check:
+        if changes:
+            print(f"Compiled agent files are out of date in {plan.repo} (run `lnk compile` to update):")
+            for change in changes:
+                print(f"  {change['action']:7} {change['path']}")
+        else:
+            print(f"Compiled agent files match the reviewed memories ({plan.repo}).")
+    else:
+        if dry_run:
+            diff = plan_diff(plan)
+            print(diff if diff else "No changes.")
+        else:
+            for change in changes:
+                print(f"{change['action']:7} {change['path']}")
+            if not changes:
+                print(f"Up to date: compiled agent files in {plan.repo} already match the reviewed memories.")
+        counts = {key: len(names) for key, names in plan.included.items()}
+        if counts:
+            print("\nCompiled: " + ", ".join(f"{key} {count}" for key, count in sorted(counts.items())))
+        for item in plan.dropped:
+            print(f"Left out of {item['path']} (size limit): {item['title'] or item['name']} - {item['reason']}")
+        for item in plan.conflicts:
+            print(f"Not touched: {item['path']} - {item['reason']}")
+        reasons: dict[str, int] = {}
+        for item in plan.excluded:
+            reasons[item["reason"]] = reasons.get(item["reason"], 0) + 1
+        for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+            print(f"Not compiled ({count}): {reason}")
+    if check:
+        return 1 if changes else 0
+    return 0
+
+
+def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False) -> int:
     """Report memories that name repository paths git no longer has.
 
     Read-only by design. A memory that mentions something that moved is a
@@ -1302,6 +1409,8 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
         else:
             print(message, file=sys.stderr)
         return 2
+    if instructions:
+        return _stale_instructions(target, wiki_dir, repo_dir, json_output=json_output)
     # Archived and expired memories are already out of the way; questioning
     # them would only add noise to a report that must stay quiet by default.
     records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
@@ -4855,6 +4964,7 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
             "stale": stale,
+            "compile": compile_memories,
             "receipt": receipt,
             "verify-mcp": verify_mcp,
             "connect": connect_mcp,

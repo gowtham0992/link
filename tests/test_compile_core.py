@@ -74,6 +74,7 @@ class CompileTests(unittest.TestCase):
         ]
 
     def compiled(self, **options):
+        options.setdefault("targets", ["all"])
         plan = plan_compile(self.records(), self.repo, **options)
         apply_plan(plan)
         return plan
@@ -95,8 +96,20 @@ class CompileTests(unittest.TestCase):
         self.assertIn("tasks", reasons["only-when-deploying"])
         self.assertIn("does not match", reasons["other-repo-only"])
         self.assertIn("secret", reasons["leaky"])
-        with_private = plan_compile(self.records(), self.repo, include_private=True)
+        with_private = plan_compile(self.records(), self.repo, include_private=True, targets=["all"])
         self.assertIn("dark mode", with_private.files["AGENTS.md"])
+
+    def test_default_targets_are_agents_md_and_agents_already_here(self):
+        plan = plan_compile(self.records(), self.repo)
+        self.assertEqual(sorted(plan.files), ["AGENTS.md"])
+        (self.repo / ".cursor").mkdir()
+        (self.repo / "CLAUDE.md").write_text("# Ours\n", encoding="utf-8")
+        plan = plan_compile(self.records(), self.repo)
+        written = sorted(plan.files)
+        self.assertIn("CLAUDE.md", written)
+        self.assertIn(".cursor/rules/link-config-parsing.mdc", written)
+        self.assertIn(".claude/skills/cut-a-release/SKILL.md", written)
+        self.assertFalse(any(rel.startswith((".kiro", ".windsurf", "GEMINI", ".github")) for rel in written))
 
     def test_shared_files_keep_everything_outside_the_block(self):
         (self.repo / "CLAUDE.md").write_text("# Team notes\n\nRun `make lint` before pushing.\n", encoding="utf-8")
@@ -130,8 +143,10 @@ class CompileTests(unittest.TestCase):
         self.assertIn('fileMatchPattern: ["src/app.py"]', kiro)
         windsurf, _ = parse_frontmatter(self.read(".windsurf/rules/link-config-parsing.md"))
         self.assertEqual(windsurf["trigger"], "glob")
-        # An anchored memory is scoped, not always-on.
-        self.assertNotIn("side-effect free", self.read("AGENTS.md"))
+        # Agents with path rules get it only there; AGENTS.md readers have
+        # none, so it is listed with its file instead.
+        self.assertNotIn("side-effect free", self.read("CLAUDE.md"))
+        self.assertIn("### When working on these files\n\n- `src/app.py`: `parse_config`", self.read("AGENTS.md"))
 
     def test_procedures_become_agent_skills(self):
         self.compiled()
@@ -144,12 +159,12 @@ class CompileTests(unittest.TestCase):
 
     def test_compile_is_deterministic_and_check_sees_drift(self):
         self.compiled()
-        again = plan_compile(self.records(), self.repo)
+        again = plan_compile(self.records(), self.repo, targets=["all"])
         self.assertEqual(plan_changes(again), [])
         self.assertEqual(plan_diff(again), "")
         edited = self.records()
         edited[0]["tldr"] = "We deploy the shop only on Thursdays."
-        drift = plan_compile(edited, self.repo)
+        drift = plan_compile(edited, self.repo, targets=["all"])
         self.assertIn({"path": "AGENTS.md", "action": "update"}, plan_changes(drift))
         self.assertIn("+- **Deploy day**: We deploy the shop only on Thursdays.", plan_diff(drift))
 
@@ -161,7 +176,7 @@ class CompileTests(unittest.TestCase):
         (self.repo / ".claude" / "skills" / "deploy" / "SKILL.md").write_text("---\nname: deploy\n---\nOurs.\n",
                                                                               encoding="utf-8")
         remaining = [r for r in self.records() if r["name"] not in {"config-parsing", "cut-a-release"}]
-        changes = apply_plan(plan_compile(remaining, self.repo))
+        changes = apply_plan(plan_compile(remaining, self.repo, targets=["all"]))
         removed = {c["path"] for c in changes if c["action"] == "remove"}
         self.assertIn(".cursor/rules/link-config-parsing.mdc", removed)
         self.assertIn(".claude/skills/cut-a-release/SKILL.md", removed)
@@ -214,7 +229,7 @@ class CompileTests(unittest.TestCase):
     def test_emptied_store_takes_the_block_and_owned_files_back_out(self):
         (self.repo / "GEMINI.md").write_text("# Ours\n", encoding="utf-8")
         self.compiled()
-        apply_plan(plan_compile([], self.repo))
+        apply_plan(plan_compile([], self.repo, targets=["all"]))
         self.assertEqual(self.read("GEMINI.md"), "# Ours\n")
         self.assertFalse((self.repo / "AGENTS.md").exists())  # it only ever held Link's block
         self.assertFalse((self.repo / ".windsurf" / "rules" / "link-memory.md").exists())
@@ -227,6 +242,34 @@ class CompileTests(unittest.TestCase):
         self.assertTrue(raw.startswith(b"# Ours\r\nKeep this.\r\n"))
         self.assertNotRegex(raw.decode("utf-8"), r"(?<!\r)\n")
         self.assertEqual(plan_changes(plan_compile(self.records(), self.repo, targets=["agents-md"])), [])
+
+
+
+class CompileCommandTests(unittest.TestCase):
+    def test_check_and_dry_run_exit_codes(self):
+        with tempfile.TemporaryDirectory(prefix="link-compile-cli-") as temp:
+            base = Path(temp)
+            link = [sys.executable, str(ROOT / "link.py")]
+
+            def run(*args: str) -> subprocess.CompletedProcess:
+                return subprocess.run([*link, *args], capture_output=True, text=True, check=False,
+                                      stdin=subprocess.DEVNULL)
+
+            self.assertEqual(run("init", str(base / "ws")).returncode, 0)
+            repo = base / "shop"
+            repo.mkdir()
+            self.assertEqual(run("remember", "We deploy the shop only on Tuesdays.", str(base / "ws"), "--title",
+                                 "Deploy day", "--type", "decision", "--scope", "project", "--project", "shop",
+                                 "--visibility", "project").returncode, 0)
+            self.assertEqual(run("review-memory", "deploy-day", str(base / "ws")).returncode, 0)
+            dry = run("compile", str(base / "ws"), "--repo", str(repo), "--dry-run")
+            self.assertEqual(dry.returncode, 0, dry.stderr)
+            self.assertIn("+- **Deploy day**", dry.stdout)
+            self.assertFalse((repo / "AGENTS.md").exists())
+            self.assertEqual(run("compile", str(base / "ws"), "--repo", str(repo), "--check").returncode, 1)
+            self.assertEqual(run("compile", str(base / "ws"), "--repo", str(repo)).returncode, 0)
+            self.assertEqual(run("compile", str(base / "ws"), "--repo", str(repo), "--check").returncode, 0)
+            self.assertEqual(run("compile", str(base / "ws"), "--repo", str(repo), "--targets", "nope").returncode, 2)
 
 
 if __name__ == "__main__":

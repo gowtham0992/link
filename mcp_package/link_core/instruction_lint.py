@@ -284,8 +284,9 @@ def _same_rule(a: str, b: str) -> bool:
 
 
 def _opposed(candidate: Mapping[str, object]) -> bool:
-    reasons = set(candidate.get("conflict_reasons") or [])  # type: ignore[arg-type]
-    return bool(reasons & OPPOSITION_REASONS) or any(str(r).startswith("different_") for r in reasons)
+    raw = candidate.get("conflict_reasons")
+    reasons = {str(r) for r in raw} if isinstance(raw, (list, tuple, set)) else set()
+    return bool(reasons & OPPOSITION_REASONS) or any(r.startswith("different_") for r in reasons)
 
 
 def _pseudo_record(rel: str, number: int, text: str) -> dict[str, object]:
@@ -342,27 +343,27 @@ def contradiction_findings(
 
     everything = [r for rel in files for r in records[rel]]
     if everything:
-        for record in memories:
-            if memory_quarantined(record) or not is_active_memory(record):
+        for memory in memories:
+            if memory_quarantined(memory) or not is_active_memory(memory):
                 continue
-            if str(record.get("review_status") or "") != "reviewed":
+            if str(memory.get("review_status") or "") != "reviewed":
                 continue
-            memory_type = str(record.get("memory_type") or "")
+            memory_type = str(memory.get("memory_type") or "")
             if memory_type not in MEMORY_CONFLICT_TYPES:
                 continue
-            title = str(record.get("title") or "")
-            claim = prose(f"{title}. {record.get('tldr') or record.get('snippet') or ''}")
-            label = f"memory {record.get('name')}"
+            title = str(memory.get("title") or "")
+            claim = prose(f"{title}. {memory.get('tldr') or memory.get('snippet') or ''}")
+            label = f"memory {memory.get('name')}"
             for candidate in memory_conflict_candidates(everything, claim, None, "decision", "global",
                                                         limit=3, embedder=_no_embedder):
                 if _opposed(candidate):
                     add(str(candidate["name"]), label, str(candidate.get("title") or ""),
-                        str(record.get("tldr") or title), "word rules",
+                        str(memory.get("tldr") or title), "word rules",
                         reasons=candidate.get("conflict_reasons", []))
             if scorer is not None:
                 for flag in nli_contradiction_flags(everything, claim, None, "decision", "global", None, scorer):
                     add(str(flag["name"]), label, str(flag.get("title") or ""),
-                        str(record.get("tldr") or title), "contradiction model",
+                        str(memory.get("tldr") or title), "contradiction model",
                         probability=flag.get("probability"))
     return results
 
@@ -394,7 +395,8 @@ def lint_instructions(
     findings.extend(contradiction_findings(claims, list(memories), scorer=scorer))
     checker.save_cache()
     order = {"stale": 0, "contradiction": 1, "budget": 2}
-    findings.sort(key=lambda f: (order.get(str(f["kind"]), 9), str(f["file"]), int(f["line"] or 0)))
+    findings.sort(key=lambda f: (order.get(str(f["kind"]), 9), str(f["file"]),
+                                 f["line"] if isinstance(f["line"], int) else 0))
     failing = [f for f in findings if f.get("severity") != "guidance"]
     return {
         "repo": str(root),

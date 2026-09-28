@@ -411,6 +411,26 @@ class McpContractTests(unittest.TestCase):
         self.assertTrue((self.target / "raw/project-seeds/client-app/project-context.md").exists())
         self.assertTrue((self.target / "wiki/sources/project-seed-client-app.md").exists())
 
+    def test_slim_admin_compile_previews_then_writes_on_request(self):
+        repo = self.target.parent / "shop"
+        repo.mkdir()
+        (repo / "AGENTS.md").write_text("# Shop\n", encoding="utf-8")
+        with redirect_stdout(StringIO()):
+            link_cli.remember(self.target, "We deploy the shop only on Tuesdays.", title="Deploy day",
+                              memory_type="decision", scope="project", project="shop", visibility="project")
+            link_cli.review_memory(self.target, "deploy-day")
+        self.server._clear_cache()
+        preview = json.loads(self.server.admin("compile", json.dumps({"repo": str(repo)})))
+        self.assertTrue(preview["ok"])
+        self.assertFalse(preview["written"])
+        self.assertIn("+- **Deploy day**: We deploy the shop only on Tuesdays.", preview["diff"])
+        self.assertEqual((repo / "AGENTS.md").read_text(encoding="utf-8"), "# Shop\n")
+        done = json.loads(self.server.admin("compile", json.dumps({"repo": str(repo), "write": True})))
+        self.assertTrue(done["written"])
+        self.assertIn("Tuesdays", (repo / "AGENTS.md").read_text(encoding="utf-8"))
+        bad = json.loads(self.server.admin("compile", json.dumps({"repo": str(repo), "targets": ["nope"]})))
+        self.assertFalse(bad["ok"])
+
     def test_missing_wiki_message_points_to_current_setup_paths(self):
         previous_argv = sys.argv[:]
         missing = Path(tempfile.mkdtemp(prefix="link-mcp-missing-")) / "missing" / "wiki"

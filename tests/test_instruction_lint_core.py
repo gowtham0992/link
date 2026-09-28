@@ -119,6 +119,19 @@ class InstructionRepositoryTests(unittest.TestCase):
         self.assertIn(("AGENTS.md", "agents-md"), discover_instruction_files(self.repo))
         self.assertEqual(report["flagged"], 2)
 
+    def test_command_reports_and_exits_like_stale(self):
+        import json
+        link = [sys.executable, str(ROOT / "link.py")]
+        workspace = self.repo.parent / (self.repo.name + "-ws")
+        subprocess.run([*link, "init", str(workspace)], capture_output=True, check=True, stdin=subprocess.DEVNULL)
+        result = subprocess.run([*link, "stale", str(workspace), "--repo", str(self.repo), "--instructions", "--json"],
+                                capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["flagged"], 2)
+        text = subprocess.run([*link, "stale", str(workspace), "--repo", str(self.repo), "--instructions"],
+                              capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL)
+        self.assertIn("web/AGENTS.md:3  [stale] scripts/old.sh is no longer in the repository", text.stdout)
+
     def test_the_planted_evaluation_passes(self):
         spec = importlib.util.spec_from_file_location("eval_instructions", ROOT / "scripts" / "eval_instructions.py")
         module = importlib.util.module_from_spec(spec)

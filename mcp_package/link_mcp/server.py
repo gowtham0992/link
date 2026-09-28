@@ -1393,6 +1393,38 @@ def link_review_prompt(topic: str = "") -> str:
     )
 
 
+def _compile_memories(payload: dict[str, object]) -> dict[str, object]:
+    """admin compile: preview (default) or write compiled agent files for a repository."""
+    from link_core.compile import TARGET_KEYS, apply_plan, plan_changes, plan_compile, plan_diff, plan_summary
+
+    repo = Path(_str_arg(payload, "repo") or str(Path.cwd())).expanduser().resolve()
+    if not repo.is_dir():
+        return {"surface": "slim", "tool": "admin", "action": "compile", "ok": False,
+                "error": f"{repo} is not a directory"}
+    raw_targets = payload.get("targets")
+    targets = [str(t) for t in raw_targets] if isinstance(raw_targets, list) else (
+        [t.strip() for t in str(raw_targets).split(",") if t.strip()] if raw_targets else None)
+    unknown = [t for t in targets or [] if t not in TARGET_KEYS and t != "all"]
+    if unknown:
+        return {"surface": "slim", "tool": "admin", "action": "compile", "ok": False,
+                "error": f"unknown targets: {', '.join(unknown)}", "supported_targets": list(TARGET_KEYS)}
+    plan = plan_compile(_memory_records(), repo, project=_str_arg(payload, "project") or None, targets=targets,
+                        include_private=_bool_arg(payload, "include_private", False))
+    changes = plan_changes(plan)
+    write = _bool_arg(payload, "write", False)
+    if write:
+        apply_plan(plan)
+    result = plan_summary(plan, changes)
+    result.update({"surface": "slim", "tool": "admin", "action": "compile", "ok": True,
+                   "written": write and bool(changes)})
+    if not write:
+        diff = plan_diff(plan)
+        result["diff"] = diff[:20_000]
+        result["diff_truncated"] = len(diff) > 20_000
+        result["next"] = "Show the user this preview; write it with arguments {\"write\": true} after they approve."
+    return result
+
+
 def _admin_arguments(arguments: str) -> dict[str, object]:
     text = _clean_text_input(arguments, max_len=4000) if isinstance(arguments, str) else ""
     if not text:
@@ -1779,8 +1811,10 @@ def admin(action: str, arguments: str = "{}") -> str:
     backup, migrate, validate, operations, search, context, pages, backlinks,
     graph_summary, graph, rebuild_index, rebuild_backlinks, seed_project, propose_memories,
     capture_session, session_end, capture_inbox, accept_capture, redact_capture,
-    delete_capture, update_memory, set_visibility, and set_enforce (identifier, rules;
-    only on the user's explicit request - new rules act after the user reviews them).
+    delete_capture, update_memory, set_visibility, set_enforce (identifier, rules;
+    only on the user's explicit request - new rules act after the user reviews them),
+    and compile (reviewed memories into the repository's AGENTS.md, CLAUDE.md,
+    rules and skills; a preview unless arguments has "write": true).
     """
     clean_action = (_clean_text_input(action, max_len=100) or "").lower().replace("-", "_")
     try:
@@ -1834,6 +1868,8 @@ def admin(action: str, arguments: str = "{}") -> str:
             return rebuild_index()
         if clean_action == "rebuild_backlinks":
             return rebuild_backlinks()
+        if clean_action == "compile":
+            return json.dumps(_compile_memories(payload), ensure_ascii=False)
         if clean_action in {"seed_project", "project_seed"}:
             project_root = Path(_str_arg(payload, "project_root") or _str_arg(payload, "path") or ".")
             seed_payload = _core_seed_project_context(
@@ -1920,7 +1956,7 @@ def admin(action: str, arguments: str = "{}") -> str:
             "search", "context", "pages", "backlinks", "graph_summary", "graph",
             "rebuild_index", "rebuild_backlinks", "seed_project", "propose_memories",
             "capture_session", "session_end", "capture_inbox", "accept_capture", "redact_capture",
-            "delete_capture", "dedup_captures", "update_memory", "set_visibility", "set_enforce",
+            "delete_capture", "dedup_captures", "update_memory", "set_visibility", "set_enforce", "compile",
         ],
     })
 

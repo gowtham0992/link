@@ -51,6 +51,8 @@
         <a href="#daily">Daily loop</a>
         <a href="#memory">Memory commands</a>
         <a href="#captures">Capture workflow</a>
+        <a href="#compile">Compile to agent files</a>
+        <a href="#instructions">Check instruction files</a>
         <a href="#maintenance">Maintenance</a>
         <a href="#all">All commands</a>
       </aside>
@@ -154,6 +156,41 @@ lnk recall "deploy process" --as-of 2026-03-31</code></pre>
         <pre><code>lnk sync --init --remote git@github.com:you/link-memory.git
 lnk sync                      # daily: commit, pull, resolve, gate secrets, push
 lnk sync --status</code></pre>
+
+        <h2 id="compile">Compile Memory into Agent Files</h2>
+        <pre><code>lnk compile ~/link --repo .
+lnk compile ~/link --repo . --dry-run
+lnk compile ~/link --repo . --check
+lnk compile ~/link --repo . --targets all</code></pre>
+        <p><code>lnk compile</code> writes your reviewed memories into the files each coding agent already reads, so they reach agents with no MCP connection or hooks. By default it writes AGENTS.md plus the agents the repository already has files for; <code>--targets all</code> or a comma-separated list chooses others.</p>
+        <table>
+          <thead><tr><th>Memory</th><th>Written to</th></tr></thead>
+          <tbody>
+            <tr><td>Preferences, decisions, facts, project context</td><td>A Link block in <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>GEMINI.md</code> and <code>.github/copilot-instructions.md</code>; <code>.windsurf/rules/link-memory.md</code> and <code>.kiro/steering/link-memory.md</code></td></tr>
+            <tr><td>Anchored to code in this repository</td><td>One rule per memory, loaded when the agent works on those files: <code>.cursor/rules/link-*.mdc</code> (<code>globs</code>), <code>.claude/rules/link-*.md</code> (<code>paths</code>), <code>.github/instructions/link-*.instructions.md</code> (<code>applyTo</code>), Windsurf (<code>trigger: glob</code>) and Kiro (<code>inclusion: fileMatch</code>). AGENTS.md and GEMINI.md, which have no path rules, list them with their files.</td></tr>
+            <tr><td>Procedures</td><td>Agent Skills: <code>.claude/skills/&lt;name&gt;/SKILL.md</code></td></tr>
+          </tbody>
+        </table>
+        <p>What it will and will not write:</p>
+        <ul>
+          <li>Only reviewed, active memories. Unreviewed ones, unreviewed team imports, and anything with a secret-shaped value or an injection-shaped instruction are left out and listed.</li>
+          <li>Private memories stay out of files a repository commits unless you pass <code>--include-private</code>. A memory fenced to a task stays in recall; one fenced to another project or directory is not written here.</li>
+          <li>In shared files only the block between the Link markers changes; everything else is kept byte for byte, including line endings. Link-owned files carry a generated-by line; a file without it is never overwritten and is reported instead. Stale Link-owned files are removed. Symlinked targets are refused.</li>
+          <li>Each file stays within what its agent reads: 32 KiB for AGENTS.md (Codex), 200 lines for CLAUDE.md, 12,000 characters per Windsurf rule, 500 lines per Cursor rule. When memories do not fit, notes go first, then facts, then decisions and preferences, older before newer, and every memory left out is listed with the reason.</li>
+          <li>Output is deterministic. Running it twice changes nothing, so <code>--check</code> can fail CI when the files drift from the reviewed memories, and <code>--dry-run</code> shows the diff first.</li>
+        </ul>
+        <p>Over MCP it is <code>admin(action="compile", arguments="{&quot;repo&quot;: &quot;/path/to/repo&quot;}")</code>. It returns a preview with the diff; add <code>&quot;write&quot;: true</code> after the user approves.</p>
+
+        <h2 id="instructions">Check Instruction Files</h2>
+        <pre><code>lnk stale ~/link --repo . --instructions
+lnk stale ~/link --repo . --instructions --json</code></pre>
+        <p><code>lnk stale --instructions</code> checks the repository's own agent instruction files the way <code>lnk stale</code> checks memories: every <code>AGENTS.md</code>, <code>CLAUDE.md</code> and <code>GEMINI.md</code> (nested ones too), <code>.claude/rules</code>, Cursor, Windsurf and Kiro rules, and Copilot's instruction files. It reports three things and changes none of them:</p>
+        <ul>
+          <li><strong>Stale references.</strong> Paths, scripts, make and just targets, dependencies, variables, local endpoints, runtime versions and package managers the repository once had and no longer does, with the same history rule as memories. In an instruction file a bare filename counts only as a link (<code>[CLAUDE.md](CLAUDE.md)</code>); &ldquo;run main.ts&rdquo; is an example. A nested file's links are resolved from its own folder.</li>
+          <li><strong>Size limits.</strong> Text an agent never reads: Codex stops after 32 KiB of AGENTS.md, counted along the chain from the repository root to each nested file; Windsurf reads 12,000 characters of a rule; Claude Code skips a CLAUDE.md over 4 MiB. Each finding gives the limit and how far over. Longer-than-recommended files (CLAUDE.md over 200 lines, a Cursor rule over 500) are reported as warnings that do not fail the check.</li>
+          <li><strong>Contradictions.</strong> Rules in two instruction files, or a rule and a reviewed memory, that cannot both hold (&ldquo;always use tabs&rdquo; and &ldquo;never use tabs&rdquo;; &ldquo;2 spaces&rdquo; and &ldquo;4 spaces&rdquo;). Copies of the same rule in AGENTS.md and CLAUDE.md are not contradictions, and words inside code, links or names do not count. With the local contradiction model on disk (<code>lnk semantic --setup --nli</code>) pairs the word rules miss are added.</li>
+        </ul>
+        <p>Link's own compiled block and Link-owned files are skipped: their content comes from memories, which <code>lnk stale</code> checks. Exit codes are the same as <code>lnk stale</code>: <code>0</code> nothing found, <code>1</code> something to fix, <code>2</code> could not check.</p>
 
         <h2 id="maintenance">Maintenance</h2>
         <pre><code>lnk backup
@@ -260,7 +297,8 @@ lnk migrate
 lnk validate [--strict]
 lnk rebuild-index
 lnk rebuild-backlinks
-lnk stale [dir] [--repo path] [--json]
+lnk stale [dir] [--repo path] [--instructions] [--json]
+lnk compile [dir] [--repo path] [--targets list|all] [--check] [--dry-run] [--include-private] [--project slug] [--json]
 lnk receipt [dir] [--sessions N] [--json]
 lnk verify-mcp [--json]
 lnk connect &lt;agent&gt; [dir] [--write] [--config path] [--python python] [--hooks]

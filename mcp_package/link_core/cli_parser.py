@@ -31,7 +31,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "set-memory-visibility", "enforce", "memory-log", "memory-audit",
     )),
     ("Agents & automation", (
-        "connect", "disconnect", "hook", "verify-mcp",
+        "connect", "disconnect", "hook", "verify-mcp", "compile",
     )),
     ("Workspace & health", (
         "status", "health", "doctor", "validate", "migrate", "backup",
@@ -595,7 +595,31 @@ def build_cli_parser(
         "--repo", default=".",
         help="repository to check the memories against (default: current directory)",
     )
+    stale_cmd.add_argument(
+        "--instructions", action="store_true",
+        help="check the repository's agent instruction files (AGENTS.md, CLAUDE.md, rules) instead of memories",
+    )
     stale_cmd.add_argument("--json", action="store_true", help="machine-readable report")
+
+    compile_cmd = sub.add_parser(
+        "compile",
+        help="write reviewed memories into this repository's agent instruction files, rules and skills",
+    )
+    compile_cmd.add_argument("target", nargs="?", default=".", help="Link workspace")
+    compile_cmd.add_argument("--repo", default=".", help="repository to write into (default: current directory)")
+    compile_cmd.add_argument(
+        "--targets", default="",
+        help="comma-separated: agents-md, claude-md, gemini-md, copilot, cursor-rules, claude-rules, "
+             "copilot-rules, windsurf, windsurf-rules, kiro, kiro-rules, claude-skills, or all "
+             "(default: AGENTS.md plus the agents this repository already has files for)",
+    )
+    compile_cmd.add_argument("--check", action="store_true",
+                             help="write nothing; exit 1 when the files differ from the reviewed memories (for CI)")
+    compile_cmd.add_argument("--dry-run", action="store_true", dest="dry_run", help="show the diff; write nothing")
+    compile_cmd.add_argument("--include-private", action="store_true", dest="include_private",
+                             help="also write private memories (these files are usually committed)")
+    compile_cmd.add_argument("--project", default="", help="project slug (default: the repository folder name)")
+    compile_cmd.add_argument("--json", action="store_true", help="machine-readable plan and result")
 
     verify_mcp_cmd = sub.add_parser(
         "verify-mcp",
@@ -1052,7 +1076,14 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "receipt":
         return handlers["receipt"](Path(args.target), sessions=int(args.sessions), json_output=bool(args.json))
     if command == "stale":
-        return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json))
+        return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json),
+                                 instructions=bool(args.instructions))
+    if command == "compile":
+        return handlers["compile"](
+            Path(args.target), repo=Path(args.repo), targets=str(args.targets), check=bool(args.check),
+            dry_run=bool(args.dry_run), include_private=bool(args.include_private), project=str(args.project),
+            json_output=bool(args.json),
+        )
     if command == "verify-mcp":
         from .mcp_connect import agent_alias_matches
 

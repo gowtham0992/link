@@ -74,31 +74,45 @@ class Target:
     budget_chars: int | None = None
     budget_note: str = ""
     alternates: tuple[str, ...] = ()  # other accepted locations; an existing one is used instead
+    # Paths whose presence shows the repository uses this agent. With no
+    # --targets, compile writes AGENTS.md plus the agents already present,
+    # instead of adding files for tools nobody here uses.
+    signs: tuple[str, ...] = ()
+    scoped_section: bool = False  # the agent has no path rules: list anchored memories in the block
 
 
 # Budgets are the vendors' documented limits; where a vendor documents
 # none, there is none here.
 TARGETS: tuple[Target, ...] = (
     Target("agents-md", "Codex and other AGENTS.md readers", "block", "AGENTS.md", budget_bytes=32 * 1024,
-           budget_note="Codex reads at most 32 KiB of AGENTS.md (project_doc_max_bytes) and silently drops the rest"),
+           budget_note="Codex reads at most 32 KiB of AGENTS.md (project_doc_max_bytes) and silently drops the rest",
+           signs=("",), scoped_section=True),
     Target("claude-md", "Claude Code", "block", "CLAUDE.md", budget_lines=200, alternates=(".claude/CLAUDE.md",),
-           budget_note="Claude Code's guidance keeps each CLAUDE.md under 200 lines; longer files are followed less"),
-    Target("gemini-md", "Gemini CLI", "block", "GEMINI.md"),
-    Target("copilot", "GitHub Copilot", "block", ".github/copilot-instructions.md"),
+           budget_note="Claude Code's guidance keeps each CLAUDE.md under 200 lines; longer files are followed less",
+           signs=("CLAUDE.md", ".claude")),
+    Target("gemini-md", "Gemini CLI", "block", "GEMINI.md", signs=("GEMINI.md", ".gemini"), scoped_section=True),
+    Target("copilot", "GitHub Copilot", "block", ".github/copilot-instructions.md",
+           signs=(".github/copilot-instructions.md", ".github/instructions")),
     Target("cursor-rules", "Cursor", "rules", ".cursor/rules", budget_lines=500,
-           budget_note="Cursor's guidance keeps each rule under 500 lines"),
+           budget_note="Cursor's guidance keeps each rule under 500 lines", signs=(".cursor", ".cursorrules")),
     Target("claude-rules", "Claude Code", "rules", ".claude/rules", budget_lines=200,
-           budget_note="Claude Code's guidance keeps each memory file under 200 lines"),
-    Target("copilot-rules", "GitHub Copilot", "rules", ".github/instructions"),
+           budget_note="Claude Code's guidance keeps each memory file under 200 lines", signs=("CLAUDE.md", ".claude")),
+    Target("copilot-rules", "GitHub Copilot", "rules", ".github/instructions",
+           signs=(".github/copilot-instructions.md", ".github/instructions")),
     Target("windsurf", "Windsurf", "always", ".windsurf/rules/link-memory.md", budget_chars=12_000,
-           budget_note="Windsurf reads at most 12,000 characters of each rule file"),
+           budget_note="Windsurf reads at most 12,000 characters of each rule file", signs=(".windsurf", ".windsurfrules")),
     Target("windsurf-rules", "Windsurf", "rules", ".windsurf/rules", budget_chars=12_000,
-           budget_note="Windsurf reads at most 12,000 characters of each rule file"),
-    Target("kiro", "Kiro", "always", ".kiro/steering/link-memory.md"),
-    Target("kiro-rules", "Kiro", "rules", ".kiro/steering"),
-    Target("claude-skills", "Claude Code", "skills", ".claude/skills"),
+           budget_note="Windsurf reads at most 12,000 characters of each rule file", signs=(".windsurf", ".windsurfrules")),
+    Target("kiro", "Kiro", "always", ".kiro/steering/link-memory.md", signs=(".kiro",)),
+    Target("kiro-rules", "Kiro", "rules", ".kiro/steering", signs=(".kiro",)),
+    Target("claude-skills", "Claude Code", "skills", ".claude/skills", signs=("CLAUDE.md", ".claude")),
 )
 TARGET_KEYS = tuple(target.key for target in TARGETS)
+
+
+def detected_targets(repo: Path) -> list[str]:
+    """AGENTS.md, plus every agent this repository already shows signs of using."""
+    return [t.key for t in TARGETS if any(sign == "" or (repo / sign).exists() for sign in t.signs)]
 
 
 @dataclass
@@ -261,8 +275,12 @@ def _render_list(records: list[Mapping[str, object]]) -> str:
     return "\n\n".join(parts)
 
 
-def render_block(records: list[Mapping[str, object]]) -> str:
+def render_block(records: list[Mapping[str, object]],
+                 scoped: list[tuple[Mapping[str, object], list[str]]] | None = None) -> str:
     body = _render_list(records)
+    if scoped:
+        lines = [f"- `{', '.join(globs)}`: {_claim(record)}" for record, globs in scoped]
+        body = (body + "\n\n" if body else "") + "### When working on these files\n\n" + "\n".join(lines)
     intro = ("Reviewed memory for this repository, compiled by Link. These are the user's standing "
              "decisions and preferences; follow them.")
     return f"{BLOCK_BEGIN}\n## Link memory\n\n{intro}\n\n{body}\n{BLOCK_END}\n"
@@ -430,7 +448,11 @@ def plan_compile(
     """Work out every file compile would write or remove. Writes nothing."""
     repo = Path(repo).expanduser().resolve()
     project_name = normalize_project(project or repo.name)
-    wanted = [t for t in TARGETS if targets is None or t.key in set(targets)]
+    if targets is None:
+        targets = detected_targets(repo)
+    elif "all" in set(targets):
+        targets = list(TARGET_KEYS)
+    wanted = [t for t in TARGETS if t.key in set(targets)]
     plan = Plan(repo=repo, project=project_name)
     memories, plan.excluded = select_memories(records, repo, project_name, include_private=include_private)
     identity = repo_identity(repo)
@@ -440,6 +462,11 @@ def plan_compile(
     always_on = [m for m in memories if str(m.get("memory_type") or "") in ALWAYS_ON_TYPES
                  and not anchored.get(str(m.get("name")))]
     path_scoped = [m for m in memories if anchored.get(str(m.get("name")))]
+
+    def _block_for(chosen: list[Mapping[str, object]]) -> str:
+        scoped_names = {str(m.get("name")) for m in path_scoped}
+        return render_block([m for m in chosen if str(m.get("name")) not in scoped_names],
+                            [(m, anchored[str(m.get("name"))]) for m in chosen if str(m.get("name")) in scoped_names])
 
     def note_budget(target: Target, rel: str, text: str) -> None:
         size, lines = _size(text)
@@ -485,13 +512,16 @@ def plan_compile(
                 else:
                     plan.removals.append(location)  # the file only ever held Link's block
 
-            if not always_on:
+            # Agents without path rules still get anchored memories, listed
+            # with their files; they are the first to go when space runs out.
+            entries = always_on + (path_scoped if target.scoped_section else [])
+            if not entries:
                 clear_block()
                 continue
 
             def whole(chosen: list[Mapping[str, object]], outside: str = outside) -> str:
-                return splice_block(outside or None, render_block(chosen))
-            kept, cut = _fit(target, always_on, whole)
+                return splice_block(outside or None, _block_for(chosen))
+            kept, cut = _fit(target, entries, whole)
             if cut and not _within(target, outside or ""):
                 own = _size(outside)
                 note = f"{target.budget_note}; the file's own content already uses {own[0]} bytes / {own[1]} lines"
@@ -504,7 +534,7 @@ def plan_compile(
                 clear_block()
                 continue
             try:
-                content = splice_block(existing, render_block(kept))
+                content = splice_block(existing, _block_for(kept))
             except ValueError as exc:
                 plan.conflicts.append({"target": target.key, "path": location, "reason": str(exc)})
                 continue
