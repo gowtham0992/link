@@ -85,9 +85,11 @@ def instruction_kind(rel: str) -> str | None:
 
 def discover_instruction_files(repo: Path) -> list[tuple[str, str]]:
     """(relative path, kind) for every instruction file git tracks or would track."""
-    output = _git(repo, ["ls-files", "--cached", "--others", "--exclude-standard"])
+    # -z: without it git quotes non-ASCII paths ("docs/\\303\\251/AGENTS.md")
+    # and a nested file with an accented folder name was skipped silently.
+    output = _git(repo, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
     found: list[tuple[str, str]] = []
-    for rel in sorted(set(output.splitlines())):
+    for rel in sorted(set(filter(None, output.split("\0")))):
         kind = instruction_kind(rel)
         if kind and (repo / rel).is_file() and not (repo / rel).is_symlink():
             found.append((rel, kind))

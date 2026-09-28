@@ -119,6 +119,14 @@ class InstructionRepositoryTests(unittest.TestCase):
         self.assertIn(("AGENTS.md", "agents-md"), discover_instruction_files(self.repo))
         self.assertEqual(report["flagged"], 2)
 
+    def test_nested_files_with_non_ascii_folders_are_found(self):
+        folder = self.repo / "docs" / "é"
+        folder.mkdir(parents=True)
+        (folder / "AGENTS.md").write_text("- Run scripts/old.sh first.\n", encoding="utf-8")
+        self.assertIn(("docs/é/AGENTS.md", "agents-md"), discover_instruction_files(self.repo))
+        found = [(f["file"], f["kind"]) for f in lint_instructions(self.repo)["findings"]]
+        self.assertIn(("docs/é/AGENTS.md", "stale"), found)
+
     def test_command_reports_and_exits_like_stale(self):
         import json
         link = [sys.executable, str(ROOT / "link.py")]

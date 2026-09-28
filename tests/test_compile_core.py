@@ -235,6 +235,29 @@ class CompileTests(unittest.TestCase):
         self.assertFalse((self.repo / ".windsurf" / "rules" / "link-memory.md").exists())
         self.assertNotIn(BLOCK_END, self.read("GEMINI.md"))
 
+    def test_a_file_link_cannot_read_exactly_is_never_rewritten(self):
+        latin = b"Team rules \x93quoted\x94\nKeep this line.\n"
+        (self.repo / "AGENTS.md").write_bytes(latin)
+        (self.repo / ".windsurf" / "rules").mkdir(parents=True)
+        (self.repo / ".windsurf" / "rules" / "link-memory.md").write_bytes(b"\xff\xfe not text\n")
+        plan = self.compiled(targets=["agents-md", "windsurf"])
+        self.assertEqual((self.repo / "AGENTS.md").read_bytes(), latin)
+        self.assertEqual((self.repo / ".windsurf" / "rules" / "link-memory.md").read_bytes(), b"\xff\xfe not text\n")
+        reasons = {c["path"]: c["reason"] for c in plan.conflicts}
+        self.assertIn("not UTF-8", reasons["AGENTS.md"])
+        self.assertIn("not UTF-8", reasons[".windsurf/rules/link-memory.md"])
+
+    def test_mixed_line_endings_keep_every_line_as_it_was(self):
+        original = b"a\r\nline two\nthree\r\n"
+        (self.repo / "CLAUDE.md").write_bytes(original)
+        self.compiled(targets=["claude-md"])
+        raw = (self.repo / "CLAUDE.md").read_bytes()
+        self.assertTrue(raw.startswith(original))
+        self.assertEqual(plan_changes(plan_compile(self.records(), self.repo, targets=["claude-md"])), [])
+        # The person appends an LF line after Link's block: still no drift.
+        (self.repo / "CLAUDE.md").write_bytes(raw + b"four\n")
+        self.assertEqual(plan_changes(plan_compile(self.records(), self.repo, targets=["claude-md"])), [])
+
     def test_crlf_files_keep_their_line_endings(self):
         (self.repo / "AGENTS.md").write_bytes(b"# Ours\r\nKeep this.\r\n")
         self.compiled(targets=["agents-md"])

@@ -369,17 +369,57 @@ def _fit(target: Target, records: list[Mapping[str, object]], render) -> tuple[l
 
 # ── files on disk ────────────────────────────────────────────────────────
 
-def _read(path: Path) -> str | None:
+class Unreadable(Exception):
+    """A file that exists but cannot be read exactly (not UTF-8, or an I/O error)."""
+
+
+def _read_strict(path: Path) -> str | None:
+    """The file's text, None when it does not exist, Unreadable when it cannot be read exactly.
+
+    A file Link cannot decode must never look missing: rewriting it from
+    "nothing" would replace the person's content with Link's block.
+    """
     try:
-        return path.read_bytes().decode("utf-8")
+        data = path.read_bytes()
     except FileNotFoundError:
         return None
-    except (OSError, UnicodeDecodeError):
+    except IsADirectoryError as exc:
+        raise Unreadable("is a directory") from exc
+    except OSError as exc:
+        raise Unreadable(f"could not be read ({exc.strerror or exc})") from exc
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise Unreadable("is not UTF-8 text; Link will not rewrite a file it cannot read exactly") from exc
+
+
+def _read(path: Path) -> str | None:
+    """Lenient read for reports and diffs; planning uses _read_strict."""
+    try:
+        return _read_strict(path)
+    except Unreadable:
         return None
 
 
-def splice_block(existing: str | None, block: str) -> str:
-    """Put the Link block into a shared file, keeping everything else byte for byte."""
+def newline_of(text: str | None) -> str:
+    """The line ending a file mostly uses; LF for new files."""
+    if not text:
+        return "\n"
+    crlf = text.count("\r\n")
+    return "\r\n" if crlf and crlf >= text.count("\n") - crlf else "\n"
+
+
+def _with_newline(text: str, newline: str) -> str:
+    return text.replace("\n", newline) if newline != "\n" else text
+
+
+def splice_block(existing: str | None, block: str, newline: str = "\n") -> str:
+    """Put the Link block into a shared file, keeping everything else byte for byte.
+
+    Only Link's block, and the blank line placed before it, take `newline`;
+    every existing line keeps its own ending, even in a file that mixes them.
+    """
+    block = _with_newline(block, newline)
     if existing is None or not existing.strip():
         return block
     begin = existing.find(BLOCK_BEGIN)
@@ -393,11 +433,16 @@ def splice_block(existing: str | None, block: str) -> str:
         return existing[:begin] + block + tail
     if begin >= 0 or end >= 0:
         raise ValueError("has a Link memory marker without its partner; fix or remove the marker by hand")
-    separator = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
+    if existing.endswith(("\n\n", "\r\n\r\n", "\n\r\n")):
+        separator = ""
+    elif existing.endswith("\n"):
+        separator = newline
+    else:
+        separator = newline + newline
     return existing + separator + block
 
 
-def remove_block(existing: str) -> str:
+def remove_block(existing: str, newline: str = "\n") -> str:
     begin = existing.find(BLOCK_BEGIN)
     end = existing.find(BLOCK_END)
     if begin < 0 or end < begin:
@@ -406,14 +451,24 @@ def remove_block(existing: str) -> str:
     head = existing[:begin].rstrip("\r\n")
     if not head:
         return tail
-    return head + ("\n\n" + tail if tail else "\n")
+    return head + (newline * 2 + tail if tail else newline)
 
 
-def _like(existing: str | None, content: str) -> str:
-    """`content` in the line-ending style of the file it replaces."""
-    if existing is not None and "\r\n" in existing:
-        return re.sub(r"(?<!\r)\n", "\r\n", content)
-    return content
+def _owned_file_refusal(repo: Path, rel: str, taken: str = "exists and was not written by Link; left alone") -> str | None:
+    """Why Link may not write its own file at `rel`, or None when it may.
+
+    Symlinked, unreadable and hand-written files are all left alone.
+    """
+    refusal = _guard_path(repo, rel)
+    if refusal:
+        return refusal
+    try:
+        existing = _read_strict(repo / rel)
+    except Unreadable as exc:
+        return str(exc)
+    if existing is not None and not _owned(existing):
+        return taken
+    return None
 
 
 def _owned(text: str | None) -> bool:
@@ -485,18 +540,23 @@ def plan_compile(
             location = target.path
             if not (repo / location).exists():
                 location = next((alt for alt in target.alternates if (repo / alt).is_file()), location)
-            existing = _read(repo / location)
             refusal = _guard_path(repo, location)
             if refusal:
                 plan.conflicts.append({"target": target.key, "path": location, "reason": refusal})
                 continue
+            try:
+                existing = _read_strict(repo / location)
+            except Unreadable as exc:
+                plan.conflicts.append({"target": target.key, "path": location, "reason": str(exc)})
+                continue
+            newline = newline_of(existing)
             if existing and (BLOCK_BEGIN in existing or BLOCK_END in existing):
                 try:
                     splice_block(existing, "")  # a lone marker is the user's to fix, not ours to guess
                 except ValueError as exc:
                     plan.conflicts.append({"target": target.key, "path": location, "reason": str(exc)})
                     continue
-            outside = remove_block(existing) if existing else ""
+            outside = remove_block(existing, newline) if existing else ""
 
             def clear_block(existing: str | None = existing, location: str = location) -> None:
                 """No memories for this file any more: take Link's block out."""
@@ -507,8 +567,8 @@ def plan_compile(
                 except ValueError as exc:
                     plan.conflicts.append({"target": target.key, "path": location, "reason": str(exc)})
                     return
-                if remove_block(existing).strip():
-                    plan.files[location] = _like(existing, remove_block(existing))
+                if remove_block(existing, newline).strip():
+                    plan.files[location] = remove_block(existing, newline)
                 else:
                     plan.removals.append(location)  # the file only ever held Link's block
 
@@ -519,8 +579,8 @@ def plan_compile(
                 clear_block()
                 continue
 
-            def whole(chosen: list[Mapping[str, object]], outside: str = outside) -> str:
-                return splice_block(outside or None, _block_for(chosen))
+            def whole(chosen: list[Mapping[str, object]], outside: str = outside, newline: str = newline) -> str:
+                return splice_block(outside or None, _block_for(chosen), newline)
             kept, cut = _fit(target, entries, whole)
             if cut and not _within(target, outside or ""):
                 own = _size(outside)
@@ -534,19 +594,17 @@ def plan_compile(
                 clear_block()
                 continue
             try:
-                content = splice_block(existing, _block_for(kept))
+                content = splice_block(existing, _block_for(kept), newline)
             except ValueError as exc:
                 plan.conflicts.append({"target": target.key, "path": location, "reason": str(exc)})
                 continue
-            plan.files[location] = _like(existing, content)
+            plan.files[location] = content
             plan.included[target.key] = [str(r.get("name")) for r in kept]
             note_budget(target, location, content)
         elif target.kind == "always":
-            refusal = _guard_path(repo, target.path)
-            existing = _read(repo / target.path)
-            if refusal or (existing is not None and not _owned(existing)):
-                plan.conflicts.append({"target": target.key, "path": target.path,
-                                       "reason": refusal or "exists and was not written by Link; left alone"})
+            refusal = _owned_file_refusal(repo, target.path)
+            if refusal:
+                plan.conflicts.append({"target": target.key, "path": target.path, "reason": refusal})
                 continue
             kept, cut = _fit(target, always_on, lambda chosen, t=target: render_always_file(t, chosen))
             drop(target, target.path, cut)
@@ -560,11 +618,9 @@ def plan_compile(
             names: list[str] = []
             for record in path_scoped:
                 rel = f"{target.path}/{OWNED_PREFIX}{_slug(str(record.get('name')))}{suffix}"
-                existing = _read(repo / rel)
-                refusal = _guard_path(repo, rel)
-                if refusal or (existing is not None and not _owned(existing)):
-                    plan.conflicts.append({"target": target.key, "path": rel,
-                                           "reason": refusal or "exists and was not written by Link; left alone"})
+                refusal = _owned_file_refusal(repo, rel)
+                if refusal:
+                    plan.conflicts.append({"target": target.key, "path": rel, "reason": refusal})
                     continue
                 content = render_rule_file(target, record, anchored[str(record.get("name"))])
                 if not _within(target, content):
@@ -580,11 +636,10 @@ def plan_compile(
             for record in procedures:
                 name = _slug(str(record.get("name")))
                 rel = f"{target.path}/{name}/SKILL.md"
-                existing = _read(repo / rel)
-                refusal = _guard_path(repo, rel)
-                if refusal or (existing is not None and not _owned(existing)):
-                    plan.conflicts.append({"target": target.key, "path": rel,
-                                           "reason": refusal or "a skill with this name exists and was not written by Link; left alone"})
+                refusal = _owned_file_refusal(
+                    repo, rel, "a skill with this name exists and was not written by Link; left alone")
+                if refusal:
+                    plan.conflicts.append({"target": target.key, "path": rel, "reason": refusal})
                     continue
                 plan.files[rel] = render_skill(record, name)
                 names.append(str(record.get("name")))

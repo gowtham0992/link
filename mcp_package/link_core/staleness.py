@@ -870,9 +870,9 @@ class SymbolChecker:
 
     def _tracked_files(self) -> list[str]:
         if self._manifests is None:
-            output = self._git(["ls-files"]) or ""
+            output = self._git(["ls-files", "-z"]) or ""  # -z: non-ASCII paths unquoted
             self._manifests = []
-            for rel in output.splitlines():
+            for rel in filter(None, output.split("\0")):
                 name = rel.rsplit("/", 1)[-1]
                 if name in _MANIFEST_NAMES or _MANIFEST_RE.search(rel):
                     self._manifests.append(rel)
