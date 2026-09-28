@@ -256,6 +256,7 @@ def write_session_capture(
     decision_trail: list[str] | None = None,
     conversation_id: str | None = None,
     source_type: str = "conversation",
+    untrusted_inputs: list[str] | None = None,
 ) -> dict[str, object]:
     """Persist proposal-only session notes under raw/memory-captures.
 
@@ -326,6 +327,10 @@ def write_session_capture(
     # contained a key - rotate it", after the value itself is gone.
     redacted_line = (f'redacted_secrets: "{frontmatter_string(", ".join(secret_warnings))}"\n'
                      if secret_warnings else "")
+    # The session read outside content (web pages, other MCP servers): its
+    # proposals may carry words the user never said, so review says so.
+    outside = sorted({str(item) for item in untrusted_inputs or [] if str(item) in {"web", "mcp"}})
+    redacted_line += f'untrusted_inputs: "{", ".join(outside)}"\n' if outside else ""
 
     atomic_write_text(
         capture_path,
@@ -835,6 +840,8 @@ def capture_records(
             "proposal_count": len(proposal_items),
             "proposals": proposal_previews,
             "decision_trail": capture_decision_trail(text),
+            "untrusted_inputs": [part.strip() for part in str(meta.get("untrusted_inputs") or "").split(",")
+                                 if part.strip()],
             "mined_from_user_turns": capture_proposal_source(text) is not None,
             "commands": command_builder(rel),
         })

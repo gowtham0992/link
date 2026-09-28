@@ -597,6 +597,22 @@ def render_session_start_hook_text(payload: Mapping[str, object]) -> tuple[int, 
             "No project context or relevant memory yet. To seed source-backed project context "
             f"from this repo's docs, suggest: {display_command(['lnk', 'seed', '.', target])}",
         ])
+    approvals_value = payload.get("approvals")
+    approvals: list[object] = list(approvals_value) if isinstance(approvals_value, list) else []
+    if approvals:
+        lines.extend(["", "Waiting for the user's OK (show these at a natural pause; run a command only "
+                      "after the user says yes to that item in chat):"])
+        for number, item in enumerate(approvals, start=1):
+            if not isinstance(item, Mapping):
+                continue
+            label = "Rule" if item.get("kind") == "rule" else "Memory"
+            outside = item.get("untrusted") or []
+            warning = (
+                f" [session read {' and '.join(str(x) for x in outside)} content: check the user said this]"
+                if outside else ""
+            )
+            lines.append(f"{number}. {label}: {item.get('text')}{warning}")
+            lines.append(f"   yes -> {item.get('command')}")
     backlog = payload.get("backlog") if isinstance(payload.get("backlog"), Mapping) else {}
     if backlog.get("backlog"):
         lines.extend([

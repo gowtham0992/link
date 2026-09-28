@@ -17,6 +17,7 @@ from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
 from .nli import CONTRADICTION_THRESHOLD, ContradictionScorer, load_contradiction_scorer
 from .provenance import add_anchors_to_page
+from .enforce_rules import MAX_ENFORCE_RULES, parse_enforce_rule, suggest_enforce_rules
 from .semantic import semantic_confidence_cap, semantic_match_points
 from .security import looks_like_password_note, secret_value_warnings
 from .frontmatter import (
@@ -872,6 +873,8 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         # file:line anchors added when the memory was written inside a repo
         # (provenance.py); checked by lnk stale and the recall packet.
         "anchors": _frontmatter_string_list(meta.get("anchors")),
+        # Reviewed rules checked before the agent's tool calls (tool_hooks).
+        "enforce": _frontmatter_string_list(meta.get("enforce")),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -959,6 +962,17 @@ def memory_review_issues(
             "message": f"Unknown review_status: {review_status}.",
             "suggested_action": "Use pending, reviewed, or needs_update.",
         })
+    enforce_value = record.get("enforce")
+    for rule in enforce_value if isinstance(enforce_value, list) else []:
+        try:
+            parse_enforce_rule(str(rule))
+        except ValueError as exc:
+            issues.append({
+                "code": "invalid_enforce_rule",
+                "severity": "high",
+                "message": f"Enforce rule {rule!r} is not valid and is ignored: {exc}",
+                "suggested_action": "Fix or remove it with `lnk enforce <memory> ...`.",
+            })
     review_after = str(record.get("review_after") or "").strip()
     if review_after:
         try:
@@ -1772,6 +1786,70 @@ def set_memory_visibility(
     }
 
 
+
+def set_memory_enforce(
+    wiki_dir: Path,
+    identifier: str,
+    rules: Iterable[str],
+    timestamp: str,
+    records: Iterable[Mapping[str, object]] | None = None,
+    log_writer: MemoryLogWriter | None = None,
+) -> dict[str, object]:
+    """Set (or with no rules, clear) the rules a memory enforces on tool calls.
+
+    New or changed rules put the memory back into review: a rule only acts
+    after a person has approved it, so an agent that writes one cannot make
+    it block or allow anything on its own. Clearing rules needs no review.
+    """
+    page_path, record, error = resolve_memory_page(wiki_dir, identifier, records=records)
+    if error:
+        raise ValueError(error)
+    assert page_path is not None and record is not None
+    if memory_quarantined(record) or not is_active_memory(record):
+        raise ValueError("only an active memory you have reviewed can enforce rules")
+    clean = [parse_enforce_rule(str(rule)).text() for rule in rules if str(rule).strip()]
+    if len(clean) > MAX_ENFORCE_RULES:
+        raise ValueError(f"at most {MAX_ENFORCE_RULES} enforce rules per memory")
+    enforce_value = record.get("enforce")
+    previous = [str(rule) for rule in enforce_value] if isinstance(enforce_value, list) else []
+    changed = clean != previous
+    needs_review = changed and bool(set(clean) - set(previous))
+    if changed:
+        with operation_journal(
+            wiki_dir,
+            "set-memory-enforce",
+            str(record["title"]),
+            timestamp=timestamp,
+            paths=[f"wiki/memories/{page_path.name}", "wiki/log.md"],
+        ):
+            text = page_path.read_text(encoding="utf-8", errors="replace")
+            updates: dict[str, object] = {"enforce": clean} if clean else {}
+            remove = set() if clean else {"enforce"}
+            if needs_review:
+                updates["review_status"] = "pending"
+                remove |= {"reviewed_at"}
+            atomic_write_text(page_path, update_frontmatter_fields(text, updates, remove=remove))
+            if log_writer:
+                log_writer(
+                    timestamp,
+                    "set-memory-enforce",
+                    str(record["title"]),
+                    [f"Updated: memories/{page_path.name}"]
+                    + [f"Rule: {rule}" for rule in clean]
+                    + ([] if clean else ["Rules cleared"])
+                    + (["New review status: pending (rules act after review)"] if needs_review else []),
+                )
+    return {
+        "updated": changed,
+        "name": record["name"],
+        "path": record["path"],
+        "title": record["title"],
+        "enforce": clean,
+        "previous_enforce": previous,
+        "review_status": "pending" if needs_review else record.get("review_status", "pending"),
+        "active": bool(clean) and not needs_review and str(record.get("review_status")) == "reviewed",
+    }
+
 def forget_memory_page(
     wiki_dir: Path,
     identifier: str,
@@ -2054,6 +2132,8 @@ def write_memory_page(
     allow_secret: bool = False,
     log_writer: MemoryLogWriter | None = None,
     rebuild_backlinks: BacklinkRebuilder | None = None,
+    # Rules checked before the agent's tool calls once the memory is reviewed.
+    enforce: Iterable[str] | None = None,
     # A ContradictionScorer, None to skip, or "auto" to use the local model
     # when it is set up. Typed loosely for callers that pass keyword dicts.
     contradiction_scorer: object = "auto",
@@ -2076,6 +2156,9 @@ def write_memory_page(
     clean_context = " ".join(str(context or "").split())
     if len(clean_context) > 600:
         clean_context = clean_context[:600].rsplit(" ", 1)[0].strip()
+    clean_enforce = [parse_enforce_rule(str(rule)).text() for rule in (enforce or []) if str(rule).strip()]
+    if len(clean_enforce) > MAX_ENFORCE_RULES:
+        raise ValueError(f"at most {MAX_ENFORCE_RULES} enforce rules per memory")
     clean_applies_when = " ".join(str(applies_when or "").split())
     if clean_applies_when:
         if len(clean_applies_when) > 200:
@@ -2295,6 +2378,8 @@ tags: {yaml_list(tag_values)}
         paths=journal_paths,
     ):
         page = add_anchors_to_page(page, f"{clean_text}\n{clean_context}")
+        if clean_enforce:
+            page = update_frontmatter_fields(page, {"enforce": clean_enforce})
         atomic_write_text(page_path, page)
         if superseded_path is not None and superseded_record is not None:
             # Supersession is one atomic story: the successor records what it
@@ -2330,6 +2415,10 @@ tags: {yaml_list(tag_values)}
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
     return {
         "created": True,
+        "enforce": clean_enforce,
+        # A constraint naming a command can become an enforced rule; the
+        # person decides (lnk enforce), Link never enables one on its own.
+        "enforce_suggestions": [] if clean_enforce else suggest_enforce_rules(clean_text),
         "scope_inferred_from_project": scope_inferred,
         "supersedes": superseded_name,
         "name": page_name,

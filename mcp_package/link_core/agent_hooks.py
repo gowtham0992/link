@@ -29,6 +29,10 @@ SESSION_START_TIMEOUT_SECONDS = 30
 SESSION_END_TIMEOUT_SECONDS = 60
 # The guard runs on every prompt: it must be fast or absent.
 GUARD_TIMEOUT_SECONDS = 10
+# Tool hooks run on every tool call and read a compiled index.
+TOOL_HOOK_TIMEOUT_SECONDS = 10
+PRE_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Read"
+POST_TOOL_MATCHER = "Read|Edit|Write|MultiEdit"
 
 _HOOK_SCRIPT_MARKER = "link.py"
 
@@ -48,6 +52,13 @@ class AgentHookConfig:
     # Per-prompt guard (constraint reminders). Only agents with a
     # prompt-submit hook event support it.
     guard_event: str | None = None
+    # Before a tool call: reviewed rules ask or block (tool_hooks).
+    pre_tool_event: str | None = None
+    pre_tool_matcher: str | None = None
+    pre_tool_emit: str = "text"
+    # After a file read or edit: memories anchored to that file.
+    post_tool_event: str | None = None
+    post_tool_matcher: str | None = None
     restart_hint: str = "Restart the agent; new sessions will start with the Link memory brief."
 
 
@@ -58,6 +69,10 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         aliases=("claude-code", "claude", "claude-code-cli"),
         default_settings="~/.claude/settings.json",
         guard_event="UserPromptSubmit",
+        pre_tool_event="PreToolUse",
+        pre_tool_matcher=PRE_TOOL_MATCHER,
+        post_tool_event="PostToolUse",
+        post_tool_matcher=POST_TOOL_MATCHER,
     ),
     AgentHookConfig(
         name="codex",
@@ -80,6 +95,10 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         end_event="sessionEnd",
         start_matcher=None,
         start_emit="cursor",
+        # Cursor asks its hooks before shell commands; file edits have no
+        # before-event there, so only command rules apply.
+        pre_tool_event="beforeShellExecution",
+        pre_tool_emit="cursor",
     ),
 )
 
@@ -146,7 +165,7 @@ def _is_link_hook_command(command: object, event: str) -> bool:
     return bool(launcher) and f" hook {event}" in command
 
 
-LINK_HOOK_EVENTS = ("session-start", "session-end", "prompt-check")
+LINK_HOOK_EVENTS = ("session-start", "session-end", "prompt-check", "pre-tool", "post-tool")
 
 
 def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, object]:
@@ -285,6 +304,26 @@ def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, 
                 GUARD_TIMEOUT_SECONDS,
             ),
         })
+    if config.pre_tool_event:
+        plan.append({
+            "event_name": config.pre_tool_event,
+            "event": "pre-tool",
+            "matcher": config.pre_tool_matcher,
+            "entry": make_entry(
+                _hook_command(python_cmd, runtime_script, "pre-tool", target, emit=config.pre_tool_emit),
+                TOOL_HOOK_TIMEOUT_SECONDS,
+            ),
+        })
+    if config.post_tool_event:
+        plan.append({
+            "event_name": config.post_tool_event,
+            "event": "post-tool",
+            "matcher": config.post_tool_matcher,
+            "entry": make_entry(
+                _hook_command(python_cmd, runtime_script, "post-tool", target),
+                TOOL_HOOK_TIMEOUT_SECONDS,
+            ),
+        })
     return plan
 
 
@@ -363,6 +402,16 @@ def build_agent_hooks_payload(
         behavior.append(
             f"{config.display_name} has no session-end hook event; end sessions with `lnk session-end` "
             "or the MCP session_end action to capture memory proposals."
+        )
+    if config.pre_tool_event:
+        behavior.append(
+            f"{config.pre_tool_event}: reviewed memories with enforce rules ask before (or block) the "
+            "tool calls they name; nothing is checked until a rule has been reviewed."
+        )
+    if config.post_tool_event:
+        behavior.append(
+            f"{config.post_tool_event}: when a file is read or edited, the reviewed memories anchored to it "
+            "are shown once per session."
         )
     if config.name in {"codex", "cursor"}:
         behavior.append(
@@ -589,3 +638,40 @@ def extract_transcript_text(
     if head and tail:
         return "\n\n".join(head) + "\n\n… (middle of the session omitted) …\n\n" + "\n\n".join(tail)
     return "\n\n".join(head or tail)
+
+
+# Tools whose output is someone else's text: a web page, a search result, or
+# another MCP server. A session that read them can carry instructions the
+# user never gave into its proposals, so the capture says so for review.
+_WEB_TOOL_NAMES = {"webfetch", "websearch", "web_search", "web_fetch", "fetch", "browser"}
+
+
+def transcript_untrusted_inputs(transcript_path: Path) -> list[str]:
+    """"web" and/or "mcp" when the session's agent read outside content."""
+    found: set[str] = set()
+    try:
+        handle = transcript_path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    with handle:
+        for line in handle:
+            if '"tool_use"' not in line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            message = entry.get("message") if isinstance(entry, dict) else None
+            content = message.get("content") if isinstance(message, dict) else None
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = str(block.get("name") or "")
+                lowered = name.lower()
+                if lowered.startswith("mcp__"):
+                    server = lowered.split("__")[1] if lowered.count("__") >= 2 else ""
+                    if server != "link":
+                        found.add("mcp")
+                elif lowered in _WEB_TOOL_NAMES:
+                    found.add("web")
+    return sorted(found)

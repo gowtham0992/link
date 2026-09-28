@@ -74,6 +74,16 @@ class SlimRecallContractTests(unittest.TestCase):
         self.assertIn("error", payload)
         self.assertIn("preference", payload["error"])
 
+    def test_remember_can_carry_rules_that_wait_for_review(self):
+        with mcp_server(self.root) as server:
+            saved = json.loads(server.remember(text="Never run `git push --force` on main.",
+                                               enforce="ask command: git push --force*"))
+            self.assertEqual(saved["enforce"], ["ask command: git push --force*"])
+            cleared = json.loads(server.admin(action="set_enforce", arguments=json.dumps(
+                {"identifier": saved["name"], "clear": True})))
+        self.assertTrue(cleared["ok"])
+        self.assertEqual(cleared["enforce"], [])
+
     def test_first_response_reports_the_real_review_queue(self):
         with mcp_server(self.root) as server:
             brief = json.loads(server.recall(query="", mode="brief"))["brief"]

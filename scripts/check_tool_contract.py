@@ -26,6 +26,7 @@ EXPECTED_CLI_COMMANDS = {
     "digest",
     "doctor",
     "end",
+    "enforce",
     "explain-memory",
     "forget-memory",
     "graph-summary",

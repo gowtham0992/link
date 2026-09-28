@@ -56,10 +56,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Callable
 
@@ -151,6 +152,7 @@ from link_core.memory import (
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
+    set_memory_enforce as _core_set_memory_enforce,
     set_memory_visibility as _core_set_memory_visibility,
     top_tags as _core_top_tags,
     update_memory_page as _core_update_memory_page,
@@ -279,8 +281,23 @@ from link_core.agent_instructions import (
     instruction_file_status as _core_instruction_file_status,
     refresh_instruction_file as _core_refresh_instruction_file,
 )
+from link_core.tool_hooks import (
+    anchored_reminders as _core_anchored_reminders,
+    cached_repo_identity as _core_cached_repo_identity,
+    evaluate_tool_call as _core_evaluate_tool_call,
+    find_repo_root as _core_find_repo_root,
+    load_hook_index as _core_load_hook_index,
+    load_shown as _core_load_shown,
+    new_delivery_id as _core_new_delivery_id,
+    remember_shown as _core_remember_shown,
+    render_touch_text as _core_render_touch_text,
+    tool_call as _core_tool_call,
+    verify_deliveries as _core_verify_deliveries,
+    wrap_for_delivery as _core_wrap_for_delivery,
+)
 from link_core.usage import (
     load_usage as _core_load_usage,
+    record_delivery as _core_record_delivery,
     memory_receipts as _core_memory_receipts,
     estimated_tokens as _core_estimated_tokens,
     record_query_packet as _core_record_query_packet,
@@ -332,6 +349,7 @@ from link_core.agent_hooks import (
     extract_transcript_text as _core_extract_transcript_text,
     hook_supported_agents as _core_hook_supported_agents,
     supports_agent_hooks as _core_supports_agent_hooks,
+    transcript_untrusted_inputs as _core_transcript_untrusted_inputs,
 )
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
@@ -775,6 +793,7 @@ def _write_memory_page(
     supersedes: str | None = None,
     context: str | None = None,
     project_explicit: bool = False,
+    enforce: list[str] | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -790,7 +809,7 @@ def _write_memory_page(
         supersedes=supersedes,
         context=context,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
-        allow_secret=allow_secret, project_explicit=project_explicit,
+        allow_secret=allow_secret, project_explicit=project_explicit, enforce=enforce,
         **options,
     )
 
@@ -1376,13 +1395,32 @@ def receipt(target: Path, *, sessions: int = 3, json_output: bool = False) -> in
         surfaces = ", ".join(item["surfaces"]) or "unknown surface"  # type: ignore[arg-type]
         project_note = f" · project {item['project']}" if item["project"] else ""
         lines.append(f"Session from {started}{project_note} · via {surfaces}")
+        arrival = {"delivered": "arrived", "truncated": "ARRIVED CUT OFF", "missing": "DID NOT ARRIVE",
+                   "unverified": "arrival not checked"}
         for brief in item["briefs"]:  # type: ignore[union-attr]
             size = f" · ~{brief['tokens']} tokens" if brief.get("tokens") else ""
             cut = " · cut to fit" if brief.get("truncated") else ""
-            lines.append(f"  Session brief: {brief['memories']} memories{size}{cut}")
+            landed = f" · {arrival.get(str(brief['delivery']), brief['delivery'])}" if brief.get("delivery") else ""
+            lines.append(f"  Session brief: {brief['memories']} memories{size}{cut}{landed}")
         lines.append(f"  Recalls: {item['recalls']}")
         if item["guard_reminders"]:
             lines.append(f"  Guard reminders: {', '.join(item['guard_reminders'])}")  # type: ignore[arg-type]
+        reminders = item.get("code_reminders") or []
+        if reminders:
+            named = sorted({name for entry in reminders for name in entry.get("memories", [])})  # type: ignore[union-attr]
+            lines.append(f"  Shown when the agent opened anchored code: {', '.join(named)}")
+        checks = item.get("rule_checks") or []
+        if checks:
+            asked = sum(1 for check in checks if check.get("decision") == "ask")  # type: ignore[union-attr]
+            blocked = sum(1 for check in checks if check.get("decision") == "deny")  # type: ignore[union-attr]
+            lines.append(f"  Rules enforced on tool calls: {asked} asked for your OK, {blocked} blocked")
+        delivery = item.get("delivery") or {}
+        if item.get("anything_undelivered"):
+            lines.append(
+                "  Warning: the transcript shows "
+                f"{delivery.get('missing', 0)} injection(s) never arrived and {delivery.get('truncated', 0)} "  # type: ignore[union-attr]
+                "arrived cut off; the agent worked without some of that memory."
+            )
         used_list = item["memories_used"]
         if used_list:
             lines.append("  Memories your agent was given:")
@@ -1455,6 +1493,7 @@ def remember(
     applies_when: str | None = None,
     supersedes: str | None = None,
     context: str | None = None,
+    enforce: list[str] | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -1487,6 +1526,7 @@ def remember(
             applies_when=applies_when,
             supersedes=supersedes,
             context=context,
+            enforce=enforce,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
@@ -1635,6 +1675,7 @@ def session_end(
     conversation_id: str | None = None,
     exclude_fingerprints: Collection[str] = (),
     json_output: bool = False,
+    untrusted_inputs: list[str] | None = None,
 ) -> int:
     target = target.expanduser().resolve()
     root = _resolve_link_root(target)
@@ -1659,6 +1700,7 @@ def session_end(
         proposal_text=proposal_text,
         decision_trail=decision_trail,
         conversation_id=conversation_id,
+        untrusted_inputs=untrusted_inputs,
     )
     rel_path = str(capture_record["path"])
     # The raw capture keeps the full session for review context, but memory
@@ -2139,6 +2181,64 @@ def update_memory(
         json_output,
         lambda payload: _core_render_update_memory_text(payload, target=target),
     )
+
+
+def enforce_memory(
+    target: Path,
+    identifier: str,
+    rules: list[str] | None = None,
+    clear: bool = False,
+    suggest: bool = False,
+    json_output: bool = False,
+) -> int:
+    """Set, clear or suggest the rules a memory enforces on tool calls."""
+    wiki_dir, records = _memory_runtime(target)
+    if suggest:
+        page_path, record, error = _core_resolve_memory_page(wiki_dir, identifier, records=records)
+        if error or record is None:
+            print(f"Could not suggest rules: {error}", file=sys.stderr)
+            return 1
+        from link_core.enforce_rules import suggest_enforce_rules
+
+        suggestions = suggest_enforce_rules(f"{record.get('title')}\n{record.get('tldr')}")
+        payload = {"name": record["name"], "title": record["title"], "suggestions": suggestions,
+                   "enforce": list(record.get("enforce") or [])}
+        if json_output:
+            print(json.dumps(payload, indent=2))
+            return 0
+        if not suggestions:
+            print(f"No rule to suggest for {record['name']}: it names no command in backticks.")
+            return 0
+        print(f"Rules Link can enforce for {record['name']}:")
+        for rule in suggestions:
+            print("  " + _display_command(["lnk", "enforce", str(record["name"]), "--rule", rule]))
+        return 0
+    if not clear and not rules:
+        print("Give at least one --rule, or --clear, or --suggest.", file=sys.stderr)
+        return 1
+    try:
+        result = _core_set_memory_enforce(
+            wiki_dir, identifier, [] if clear else list(rules or []),
+            timestamp=_utc_timestamp(), records=records, log_writer=_log_writer_for(wiki_dir),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Could not set rules: {exc}", file=sys.stderr)
+        return 1
+    if json_output:
+        print(json.dumps(result, indent=2))
+        return 0
+    if not result["enforce"]:
+        print(f"{result['name']}: no rules." if not result["updated"] else f"{result['name']}: rules cleared.")
+        return 0
+    print(f"{result['name']}:")
+    for rule in result["enforce"]:
+        print(f"  {rule}")
+    if result["review_status"] == "pending":
+        print("These rules act after you review the memory: "
+              + _display_command(["lnk", "review-memory", str(result["name"]), str(_resolve_link_root(target))]))
+    print("Install the tool hook once so agents are checked: "
+          + _display_command(["lnk", "connect", "claude-code", str(_resolve_link_root(target)), "--hooks", "--write"]))
+    return 0
 
 
 def set_memory_visibility(
@@ -2901,7 +3001,9 @@ def _hook_session_start(
     )
     _, brief_text = _core_render_brief_text(brief_payload, query="", project=project_name)
     captures_payload = brief_payload.get("captures") if isinstance(brief_payload.get("captures"), dict) else {}
+    approvals = _pending_approvals(target, wiki_dir, captures_payload)
     _, text = _core_render_session_start_hook_text({
+        "approvals": approvals,
         "target": str(target),
         "project": project_name,
         "status": status_payload,
@@ -2912,6 +3014,10 @@ def _hook_session_start(
     })
     if handoff_block:
         text = handoff_block + "\n\n" + text
+    # Delivery tokens let session end check the brief actually arrived, and
+    # the budget keeps it under the size some hosts silently drop.
+    delivery_id = _core_new_delivery_id()
+    text, cut = _core_wrap_for_delivery(text, delivery_id)
     _emit_session_start(text, emit)
     # The push path most sessions start from; it was never recorded, so the
     # receipt and "never retrieved" counts missed every hook-delivered brief.
@@ -2921,8 +3027,20 @@ def _hook_session_start(
         [str(item.get("name") or "") for item in (relevant_obj if isinstance(relevant_obj, list) else [])
          if isinstance(item, dict)],
         project=project_name or "", surface="hook", tokens=max(1, (len(text) + 3) // 4),
+        truncated=cut, session=str(hook_event.get("session_id") or hook_event.get("conversation_id") or ""),
+        delivery=delivery_id,
     )
     return 0
+
+
+# The user's own messages a session needs before it may propose memory,
+# unless one of them states a standing rule outright.
+MIN_SESSION_USER_TURNS = 3
+_STANDING_RULE_RE = re.compile(
+    r"\b(?:from now on|going forward|always|never|by default|as a rule|every time|"
+    r"we decided|we agreed|i prefer|we prefer|remember that|don't ever|do not ever)\b",
+    re.IGNORECASE,
+)
 
 
 def _session_end_hook_state_path(target: Path) -> Path:
@@ -2950,6 +3068,13 @@ def _hook_session_end(
         _trace("no transcript_path in the hook event; nothing to capture.")
         return 0
     transcript_path = Path(transcript_value).expanduser()
+    delivery = _verify_session_delivery(target, hook_event, transcript_path)
+    if delivery:
+        missed = sorted(key for key, state in delivery.items() if state != "delivered")
+        _trace(
+            f"Checked {len(delivery)} injection(s) against the transcript: "
+            + ("all arrived." if not missed else f"{len(missed)} did not arrive whole (see lnk receipt).")
+        )
     extraction_stats: dict[str, int] = {}
     notes = _core_extract_transcript_text(transcript_path, stats=extraction_stats)
     _trace(
@@ -2967,10 +3092,29 @@ def _hook_session_end(
     # still keeps the full transcript for review context.
     # Mine from a head+tail window so an opening standing rule ("from now on…")
     # survives even in a long session, where a recency-only window would drop it.
+    user_stats: dict[str, int] = {}
     user_notes = _core_extract_transcript_text(
-        transcript_path, roles=("user",), max_chars=9000, keep_head=True
+        transcript_path, roles=("user",), max_chars=9000, keep_head=True, stats=user_stats,
     )
     _trace("Mined memory only from your own turns — the assistant's prose is never proposed as your preference.")
+    # Evidence before proposing: a short exchange is where one-off
+    # instructions dominate, so it proposes only when the user's own words
+    # say they set a standing rule ("from now on", "we decided", "never").
+    if (
+        int(user_stats.get("kept_messages") or 0) < MIN_SESSION_USER_TURNS
+        and not _STANDING_RULE_RE.search(user_notes)
+    ):
+        _trace(
+            f"skipped: fewer than {MIN_SESSION_USER_TURNS} of your own messages and no standing rule "
+            "stated — too little to propose from."
+        )
+        return 0
+    untrusted = _core_transcript_untrusted_inputs(transcript_path)
+    if untrusted:
+        _trace(
+            "This session read outside content (" + ", ".join(untrusted) + "); its proposals are marked so "
+            "you can check each one came from you, not from a page or tool output."
+        )
     # Skip duplicate firings for the same conversation content (e.g. /clear
     # immediately followed by exit, or repeated end events).
     state_path = _session_end_hook_state_path(target)
@@ -3024,12 +3168,14 @@ def _hook_session_end(
         if _core_is_existing_memory_echo(records, str(proposal.get("memory") or "")):
             _trace(f"dropped '{title}': restates an existing memory (echo guard, layer 2).")
             continue
-        fingerprint = _core_proposal_fingerprint(str(proposal.get("memory") or ""))
-        if fingerprint in dismissed:
+        # Its own name: reusing `fingerprint` overwrote the session's, so the
+        # duplicate-end-event check stored the last proposal's instead.
+        proposal_fingerprint = _core_proposal_fingerprint(str(proposal.get("memory") or ""))
+        if proposal_fingerprint in dismissed:
             _trace(f"dropped '{title}': you already dismissed this proposal.")
             continue
-        if fingerprint in pending:
-            _trace(f"dropped '{title}': already waiting for review in {pending[fingerprint]}.")
+        if proposal_fingerprint in pending:
+            _trace(f"dropped '{title}': already waiting for review in {pending[proposal_fingerprint]}.")
             continue
         injection_labels = _core_injected_instruction_warnings(str(proposal.get("memory") or ""))
         if injection_labels:
@@ -3056,6 +3202,7 @@ def _hook_session_end(
         decision_trail=trail,
         conversation_id=conversation_id,
         exclude_fingerprints=dismissed | set(pending),
+        untrusted_inputs=untrusted,
     )
     if code == 0:
         try:
@@ -3086,17 +3233,181 @@ def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str
         # work - one reminder is a guard, ten is a nag.
         if _core_recently_guarded(root, str(reminder.get("name") or "")):
             return 0
+        delivery_id = _core_new_delivery_id()
         _core_record_retrieval(
             root, "guard", [str(reminder.get("name") or "")],
             project=project_name or "", surface="hook",
+            session=str(hook_event.get("session_id") or ""), delivery=delivery_id,
         )
-        print(_core_render_guard_text(reminder))
+        print(_core_wrap_for_delivery(_core_render_guard_text(reminder), delivery_id)[0])
         return 0
     # No constraint in play - but a stop/switch announcement is the moment
     # the handoff should suggest itself.
     if _core_switch_intent(prompt):
         print(_core_render_switch_nudge())
     return 0
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _pending_approvals(target: Path, wiki_dir: Path, captures: Mapping[str, object]) -> list[dict[str, object]]:
+    """What is waiting for the person's OK, with the exact command for each.
+
+    Proposals from session captures (newest first) and enforce rules that do
+    nothing until their memory is reviewed. The agent shows them at a pause
+    and runs a command only when the person says yes in chat.
+    """
+    root = _resolve_link_root(target)
+    approvals: list[dict[str, object]] = []
+    items = captures.get("items") if isinstance(captures.get("items"), list) else []
+    for capture in items or []:
+        if not isinstance(capture, dict):
+            continue
+        for index, proposal in enumerate(capture.get("proposals") or [], start=1):
+            if not isinstance(proposal, dict) or len(approvals) >= 3:
+                continue
+            approvals.append({
+                "kind": "proposal",
+                "text": _clip(str(proposal.get("memory") or proposal.get("title") or ""), 200),
+                "untrusted": list(capture.get("untrusted_inputs") or []),
+                "command": _display_command(
+                    ["lnk", "accept-capture", str(capture.get("path")), str(root), "--index", str(index)]
+                ),
+            })
+    for record in _memory_records(wiki_dir):
+        if len(approvals) >= 5:
+            break
+        rules = record.get("enforce") or []
+        if rules and str(record.get("review_status") or "") != "reviewed" and _core_is_active_memory(record):
+            approvals.append({
+                "kind": "rule",
+                "text": f"{record.get('title')}: " + "; ".join(str(rule) for rule in rules),
+                "untrusted": [],
+                "command": _display_command(["lnk", "review-memory", str(record.get("name")), str(root)]),
+            })
+    return approvals
+
+
+def _hook_project(target: Path, hook_event: dict[str, object], project: str | None) -> str:
+    if project:
+        return project
+    project_dir = _hook_project_dir(hook_event)
+    return _default_project(Path(project_dir)) if project_dir else _default_project(target)
+
+
+def _hook_pre_tool(target: Path, hook_event: dict[str, object], project: str | None, emit: str) -> int:
+    """Reviewed rules ask before (or block) the tool calls they name."""
+    def allow() -> int:
+        if emit == "cursor":
+            print(json.dumps({"permission": "allow"}))
+        return 0
+
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return allow()
+    root = _resolve_link_root(target)
+    index = _core_load_hook_index(wiki_dir, root)
+    if not index.get("rules"):
+        return allow()
+    project_dir = _hook_project_dir(hook_event)
+    repo_root = _core_find_repo_root(Path(project_dir)) if project_dir else None
+    decision = _core_evaluate_tool_call(
+        index, hook_event, project=_hook_project(target, hook_event, project), repo_root=repo_root,
+    )
+    if decision is None:
+        return allow()
+    _core_record_retrieval(
+        root, "enforce", [str(name) for name in decision["memories"]],  # type: ignore[union-attr]
+        project=_hook_project(target, hook_event, project), surface="hook",
+        session=str(hook_event.get("session_id") or hook_event.get("conversation_id") or ""),
+        decision=str(decision["decision"]),
+    )
+    if emit == "cursor":
+        print(json.dumps({
+            "permission": decision["decision"],
+            "userMessage": decision["reason"],
+            "agentMessage": decision["reason"],
+        }))
+        return 0
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision["decision"],
+        "permissionDecisionReason": decision["reason"],
+    }}))
+    return 0
+
+
+def _hook_post_tool(target: Path, hook_event: dict[str, object], project: str | None) -> int:
+    """After a file is read or edited, the reviewed memories anchored to it."""
+    call = _core_tool_call(hook_event)
+    if call is None or call[0] not in {"read", "write"}:
+        return 0
+    file_path = Path(call[1]).expanduser()
+    if not file_path.is_absolute():
+        project_dir = _hook_project_dir(hook_event)
+        file_path = Path(project_dir or ".") / file_path
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return 0
+    root = _resolve_link_root(target)
+    index = _core_load_hook_index(wiki_dir, root)
+    anchors = index.get("anchors") if isinstance(index.get("anchors"), dict) else {}
+    if not anchors:
+        return 0
+    repo_root = _core_find_repo_root(file_path)
+    if repo_root is None:
+        return 0
+    try:
+        rel = file_path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return 0
+    if rel not in anchors:  # type: ignore[operator]
+        return 0  # the common case, decided before any git call
+    session = str(hook_event.get("session_id") or "")
+    entries = _core_anchored_reminders(
+        index, str(file_path), repo_root=repo_root, identity=_core_cached_repo_identity(root, repo_root),
+        project=_hook_project(target, hook_event, project),
+        already_shown=_core_load_shown(root, session) if session else (),
+    )
+    if not entries:
+        return 0
+    names = [str(entry.get("name") or "") for entry in entries]
+    delivery_id = _core_new_delivery_id()
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "additionalContext": _core_render_touch_text(entries, rel, delivery_id),
+    }}))
+    if session:
+        _core_remember_shown(root, session, names)
+    _core_record_retrieval(
+        root, "touch", names, project=_hook_project(target, hook_event, project), surface="hook",
+        session=session, delivery=delivery_id,
+    )
+    return 0
+
+
+def _verify_session_delivery(target: Path, hook_event: dict[str, object], transcript_path: Path) -> dict[str, str]:
+    """Did this session's hook injections reach the agent? Checked in its transcript."""
+    session = str(hook_event.get("session_id") or hook_event.get("conversation_id") or "")
+    if not session:
+        return {}
+    root = _resolve_link_root(target)
+    tokens = [
+        str(event.get("delivery")) for event in _core_load_usage(root)
+        if str(event.get("session") or "") == session and event.get("delivery")
+    ]
+    if not tokens:
+        return {}
+    try:
+        transcript = transcript_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    results = _core_verify_deliveries(transcript, tokens)
+    _core_record_delivery(root, session, results)
+    return results
 
 
 def run_agent_hook(
@@ -3113,6 +3424,10 @@ def run_agent_hook(
             return _hook_session_end(target, hook_event, limit, project, explain=explain)
         if event == "prompt-check":
             return _hook_prompt_check(target, hook_event, project)
+        if event == "pre-tool":
+            return _hook_pre_tool(target, hook_event, project, emit)
+        if event == "post-tool":
+            return _hook_post_tool(target, hook_event, project)
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
@@ -4395,7 +4710,7 @@ _WORKSPACE_COMMANDS = {
     "remember", "recall", "recipes", "query", "query-link", "brief", "start",
     "session-end", "end", "propose-memories", "capture-session",
     "capture-inbox", "accept-capture", "redact-capture", "delete-capture",
-    "dedup-captures", "update-memory", "set-memory-visibility",
+    "dedup-captures", "update-memory", "set-memory-visibility", "enforce",
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
@@ -4516,6 +4831,7 @@ def main(argv: list[str] | None = None) -> int:
             "dedup-captures": dedup_captures,
             "update-memory": update_memory,
             "set-memory-visibility": set_memory_visibility,
+            "enforce": enforce_memory,
             "recall": recall,
             "query": query,
             "graph-summary": graph_summary,

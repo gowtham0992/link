@@ -29,6 +29,7 @@ import argparse
 import functools
 import json
 import os
+import re
 import sys
 import time
 from collections.abc import Collection
@@ -1078,6 +1079,11 @@ def _rebuild_memory_backlinks() -> bool:
     return bool(rebuilt.get("rebuilt"))
 
 
+def _split_rules(value: str) -> list[str]:
+    """Enforce rules given as one string: separated by ";" or new lines."""
+    return [part.strip() for part in re.split(r"[;\n]", str(value or "")) if part.strip()]
+
+
 def _memory_mutation_options(project: str = "") -> dict[str, object]:
     return {
         "timestamp": _utc_timestamp(),
@@ -1182,6 +1188,7 @@ def _write_mcp_memory_page(
     project: str = "",
     visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
     applies_when: str = "", supersedes: str = "", context: str = "",
+    enforce: list[str] | None = None,
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -1203,6 +1210,7 @@ def _write_mcp_memory_page(
         # Only a project the agent named makes the memory project-scoped;
         # the resolved default project is always present.
         project_explicit=bool(_clean_text_input(project)),
+        enforce=enforce,
         **options,
     )
     if result.get("created"):
@@ -1587,6 +1595,7 @@ def remember(
     applies_when: str = "",
     supersedes: str = "",
     context: str = "",
+    enforce: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     allow_secret: bool = False,
@@ -1602,6 +1611,11 @@ def remember(
     Field rule: trigger helps recall FIND a recipe; applies_when FENCES a
     memory to a context; scope/project/visibility say whose memory it is;
     supersedes REPLACES an old claim with lineage. When unsure, omit them.
+    enforce: only when the user asks Link to stop or check an action - rules
+    like "ask command: git push --force*" or "deny write: migrations/**"
+    (several separated by ";"). They act on tool calls after the user
+    reviews the memory; a result's enforce_suggestions are for the user to
+    accept, never to apply on your own.
     """
     if not memory_type.strip():
         # Same cue-based inference as the CLI: "I prefer X" is a preference,
@@ -1628,6 +1642,7 @@ def remember(
             applies_when=applies_when,
             supersedes=supersedes,
             context=context,
+            enforce=_split_rules(enforce),
         )
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})
@@ -1764,7 +1779,8 @@ def admin(action: str, arguments: str = "{}") -> str:
     backup, migrate, validate, operations, search, context, pages, backlinks,
     graph_summary, graph, rebuild_index, rebuild_backlinks, seed_project, propose_memories,
     capture_session, session_end, capture_inbox, accept_capture, redact_capture,
-    delete_capture, update_memory, and set_visibility.
+    delete_capture, update_memory, set_visibility, and set_enforce (identifier, rules;
+    only on the user's explicit request - new rules act after the user reviews them).
     """
     clean_action = (_clean_text_input(action, max_len=100) or "").lower().replace("-", "_")
     try:
@@ -1881,6 +1897,16 @@ def admin(action: str, arguments: str = "{}") -> str:
             )
         if clean_action in {"set_visibility", "set_memory_visibility"}:
             return set_memory_visibility(_str_arg(payload, "identifier"), _str_arg(payload, "visibility"))
+        if clean_action in {"set_enforce", "set_memory_enforce"}:
+            raw_rules = payload.get("rules")
+            rules = [str(rule) for rule in raw_rules] if isinstance(raw_rules, list) else _split_rules(str(raw_rules or ""))
+            from link_core.memory import set_memory_enforce as _set_enforce
+            result = _set_enforce(
+                WIKI_DIR, _str_arg(payload, "identifier"), [] if _bool_arg(payload, "clear", False) else rules,
+                timestamp=_utc_timestamp(), records=_memory_records(), log_writer=_append_log,
+            )
+            _clear_cache()
+            return json.dumps({"surface": "slim", "tool": "admin", "action": clean_action, "ok": True, **result})
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "admin", "ok": False, "action": clean_action, "error": str(exc)})
     return json.dumps({
@@ -1894,7 +1920,7 @@ def admin(action: str, arguments: str = "{}") -> str:
             "search", "context", "pages", "backlinks", "graph_summary", "graph",
             "rebuild_index", "rebuild_backlinks", "seed_project", "propose_memories",
             "capture_session", "session_end", "capture_inbox", "accept_capture", "redact_capture",
-            "delete_capture", "dedup_captures", "update_memory", "set_visibility",
+            "delete_capture", "dedup_captures", "update_memory", "set_visibility", "set_enforce",
         ],
     })
 

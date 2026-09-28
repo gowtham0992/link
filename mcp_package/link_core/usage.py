@@ -33,8 +33,13 @@ from .files import atomic_write_text_unlocked, file_lock
 USAGE_FILE = ".link-usage.json"
 USAGE_DISABLE_ENV = "LINK_USAGE"
 MAX_EVENTS = 500
-# Surfaces that count as "an agent read memory back".
-RETRIEVAL_KINDS = ("brief", "recall", "query", "guard")
+# Surfaces that count as "an agent read memory back": the session brief,
+# recalls, guard reminders, reminders when the agent touched anchored code,
+# and reviewed rules checked against a tool call.
+RETRIEVAL_KINDS = ("brief", "recall", "query", "guard", "touch", "enforce")
+# Whether each hook injection arrived, checked against the transcript at
+# session end (delivered / truncated / missing). Not a retrieval.
+DELIVERY_KIND = "delivery"
 
 
 def usage_disabled() -> bool:
@@ -70,6 +75,9 @@ def record_retrieval(
     surface: str = "",
     tokens: int = 0,
     truncated: bool = False,
+    session: str = "",
+    delivery: str = "",
+    decision: str = "",
 ) -> bool:
     """Append one retrieval event. Returns False when disabled or unwritable.
 
@@ -96,6 +104,34 @@ def record_retrieval(
             event["tokens"] = int(tokens)
         if truncated:
             event["truncated"] = True
+        if session:
+            event["session"] = str(session)[:80]
+        if delivery:
+            event["delivery"] = str(delivery)[:16]
+        if decision:
+            event["decision"] = str(decision)[:10]
+        return _append_event(root, event)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def record_delivery(root: Path, session: str, results: Mapping[str, str]) -> bool:
+    """Record whether each injection of a session reached the agent's context."""
+    if usage_disabled() or not results:
+        return False
+    try:
+        return _append_event(root, {
+            "at": _utc_now(),
+            "kind": DELIVERY_KIND,
+            "session": str(session or "")[:80],
+            "results": {str(key)[:16]: str(value)[:10] for key, value in results.items()},
+        })
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _append_event(root: Path, event: dict[str, object]) -> bool:
+    try:
         path = usage_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
         # Read, append and replace under one lock: a hook, an MCP server and
@@ -291,9 +327,24 @@ def memory_receipts(
     Each receipt says what the agent was given from memory: the session
     brief (how many memories, roughly how many tokens, whether it was cut
     to fit), each recall, guard reminders, and every memory that reached the
-    agent with how many times. Built from the local ledger only; the ledger
-    never holds queries, so neither does the receipt.
+    agent with how many times. Rule checks say what a reviewed rule asked
+    or blocked, and each hook injection says whether the transcript shows it
+    arrived whole, cut off, or not at all. Built from the local ledger only;
+    the ledger never holds queries, so neither does the receipt.
     """
+    events = list(events)
+    delivered: dict[str, str] = {}
+    for event in events:
+        results = event.get("results")
+        if str(event.get("kind") or "") == DELIVERY_KIND and isinstance(results, dict):
+            delivered.update({str(k): str(v) for k, v in results.items()})
+
+    def delivery_state(event: Mapping[str, object]) -> str | None:
+        token = str(event.get("delivery") or "")
+        if not token:
+            return None
+        return delivered.get(token, "unverified")
+
     timed = [
         (moment, event) for event in events
         if (moment := _event_time(event)) is not None
@@ -315,7 +366,13 @@ def memory_receipts(
         tokens = 0
         truncated = False
         surfaces: set[str] = set()
+        rule_checks: list[dict[str, object]] = []
+        code_reminders: list[dict[str, object]] = []
+        deliveries: dict[str, int] = {}
         for _moment, event in group:
+            state = delivery_state(event)
+            if state:
+                deliveries[state] = deliveries.get(state, 0) + 1
             kind = str(event.get("kind") or "")
             raw_names = event.get("memories")
             names = [str(name) for name in raw_names if str(name)] if isinstance(raw_names, list) else []
@@ -327,13 +384,20 @@ def memory_receipts(
             if event.get("surface"):
                 surfaces.add(str(event.get("surface")))
             if kind == "brief":
-                briefs.append({
+                brief: dict[str, object] = {
                     "memories": len(names),
                     "tokens": event_tokens if isinstance(event_tokens, int) else None,
                     "truncated": bool(event.get("truncated")),
-                })
+                }
+                if state:
+                    brief["delivery"] = state
+                briefs.append(brief)
             elif kind == "guard":
                 guards.extend(names)
+            elif kind == "enforce":
+                rule_checks.append({"decision": str(event.get("decision") or "ask"), "memories": names})
+            elif kind == "touch":
+                code_reminders.append({"memories": names, **({"delivery": state} if state else {})})
             else:
                 recalls += 1
         receipts.append({
@@ -350,5 +414,11 @@ def memory_receipts(
             ],
             "estimated_tokens": tokens,
             "anything_truncated": truncated,
+            "rule_checks": rule_checks,
+            "code_reminders": code_reminders,
+            # delivered / truncated / missing per hook injection; "unverified"
+            # when the agent gave no transcript to check against.
+            "delivery": deliveries,
+            "anything_undelivered": bool(deliveries.get("missing") or deliveries.get("truncated")),
         })
     return receipts

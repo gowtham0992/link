@@ -28,7 +28,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
         "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
-        "set-memory-visibility", "memory-log", "memory-audit",
+        "set-memory-visibility", "enforce", "memory-log", "memory-audit",
     )),
     ("Agents & automation", (
         "connect", "disconnect", "hook", "verify-mcp",
@@ -317,6 +317,11 @@ def build_cli_parser(
     remember_cmd.add_argument("--applies-when", default=None, dest="applies_when", help='scoping conditions, e.g. "project:link, task:cutting a release, path:*repo*" (OR semantics)')
     remember_cmd.add_argument("--supersedes", default=None, help="name of the active memory this one replaces; the old memory is archived with lineage")
     remember_cmd.add_argument("--context", default=None, help="surrounding text from the memory's origin; helps recall find it, never part of the claim (600 chars max)")
+    remember_cmd.add_argument(
+        "--enforce", action="append", default=None, metavar="RULE",
+        help="rule checked before the agent's tool calls once you review the memory, e.g. "
+             "\"ask command: git push --force*\" or \"deny write: migrations/**\" (repeatable)",
+    )
     remember_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
     remember_cmd.add_argument("--allow-secret", action="store_true", help="save even if the text looks like a credential (memory is plain files read by every agent)")
     remember_cmd.add_argument("--allow-conflict", action="store_true", help="create a memory even if it may conflict with an active memory")
@@ -401,6 +406,23 @@ def build_cli_parser(
     visibility_cmd.add_argument("target", nargs="?", default=".")
     visibility_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
+    enforce_cmd = sub.add_parser(
+        "enforce",
+        help="set the rules a memory enforces on the agent's tool calls (they act after review)",
+        epilog=(
+            "rules: [ask|deny] command|write|read: <glob>. ask is the default: the agent's tool "
+            "call waits for your OK. deny blocks it. New rules put the memory back into review."
+        ),
+    )
+    enforce_cmd.add_argument("identifier", help="memory page name, title, or path")
+    enforce_cmd.add_argument("target", nargs="?", default=".")
+    enforce_cmd.add_argument("--rule", action="append", default=None, dest="rules", metavar="RULE",
+                             help='e.g. "ask command: git push --force*" (repeatable)')
+    enforce_cmd.add_argument("--clear", action="store_true", help="remove every rule from the memory")
+    enforce_cmd.add_argument("--suggest", action="store_true",
+                             help="show rules Link can derive from the memory's text, without changing it")
+    enforce_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
+
     recall_cmd = sub.add_parser("recall", help="search local agent memories")
     recall_cmd.add_argument("query", help="memory query")
     recall_cmd.add_argument("target", nargs="?", default=".")
@@ -448,7 +470,10 @@ def build_cli_parser(
     start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
 
     hook_cmd = sub.add_parser("hook", help="run an agent session hook (invoked by installed agent hooks)")
-    hook_cmd.add_argument("event", choices=["session-start", "session-end", "prompt-check"], help="agent session lifecycle event")
+    hook_cmd.add_argument(
+        "event", choices=["session-start", "session-end", "prompt-check", "pre-tool", "post-tool"],
+        help="agent session lifecycle event",
+    )
     hook_cmd.add_argument("target", nargs="?", default=".")
     hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
     hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
@@ -811,6 +836,16 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
             allow_secret=args.allow_secret,
+            enforce=args.enforce,
+            json_output=args.json,
+        )
+    if command == "enforce":
+        return handlers["enforce"](
+            Path(args.target),
+            args.identifier,
+            rules=args.rules or [],
+            clear=args.clear,
+            suggest=args.suggest,
             json_output=args.json,
         )
     if command == "propose-memories":
