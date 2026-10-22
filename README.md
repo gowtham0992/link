@@ -307,7 +307,7 @@ longer has — all running on the same reviewed `lnk` commands as the CLI.
 Pick the workspace in Settings; it defaults to `~/link`.
 
 <p align="center">
-  <img src="docs/assets/linkbar-tour.gif" alt="LinkBar cycling through its tabs: review inbox with live agent pulse and capture previews, memory browser, status dashboard, and settings" width="424">
+  <img src="docs/assets/linkbar-tour.gif" alt="LinkBar cycling through its tabs: the review inbox showing the rule a memory will enforce before you approve it and the last session's receipt, the memory browser, and settings" width="424">
 </p>
 
 ```bash

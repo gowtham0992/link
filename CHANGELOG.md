@@ -478,7 +478,12 @@ measured in benchmarks/RESULTS.md, losses included.
   real folder (`wiki/memories/`), the real fields, and an enforce rule.
   The three replayed terminals under "How it works" are gone; the loop
   section above them tells the same story with the real artifacts. The
-  hero and the LinkBar copy describe what 5.0 adds.
+  hero's decorative node graph is now a still of the loop: the brief, the
+  force-push, the rule check. The design-principles section is gone (the
+  page said each of them already). The hero and the LinkBar copy describe
+  what 5.0 adds, and the LinkBar tour is re-recorded from LinkBar 1.5: the
+  inbox shows the rule a memory will enforce and the last session's
+  receipt.
 
 ### Security
 
