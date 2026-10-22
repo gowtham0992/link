@@ -2,7 +2,7 @@
 
 Link's recall is measured, not asserted. This document holds the current
 numbers, exactly how they were produced, and how to reproduce them on your
-own machine. Numbers are from 2026-09-26 on `develop` at 46a3c58 (the 4.0
+own machine. Numbers are from 2026-09-26 on `develop` at 46a3c58 (the 5.0
 pre-release) unless a section says otherwise, with 3.x figures beside them
 where they changed.
 
@@ -11,7 +11,7 @@ where they changed.
 | 1. Link recall benchmark | does recall find the right memory? (1,176 cases) | hit@1 0.671 lexical, 0.789 quality tier |
 | 2. LoCoMo retrieval | third-party questions over 5,882 conversation turns | hit@10 0.716 lexical, 0.826 with rerank |
 | 3. Memory hygiene | does the store stay clean over months? | 0 junk, 0 contradiction exposure |
-| 4. End-to-end QA | answers under mem0's own harness (pre-4.0) | 84.8% vs mem0 platform 83.2% |
+| 4. End-to-end QA | answers under mem0's own harness (pre-5.0) | 84.8% vs mem0 platform 83.2% |
 | 5. Memory poisoning | can an injected instruction become memory? | 0 of 18 unlabeled, across 4 channels |
 | 6. Token economics | what does a recall cost? | 1,697 tokens at micro, flat as the store grows |
 | 7. Behavioral A/B | does an agent with Link do the right thing? | 11 of 12, vs 0 of 12 without |
@@ -48,20 +48,20 @@ as `zero-overlap` only if it provably shares no significant stemmed token
 with its target memory — pure paraphrases that token matching cannot reach.
 
 Full suite, Apple M4, macOS 26, Python 3.14, run 2026-09-26, Link
-`develop` at 46a3c58 (4.0 pre-release). **The lexical column is what a
+`develop` at 46a3c58 (5.0 pre-release). **The lexical column is what a
 default `pip install link-mcp` gives you**; the fast and quality columns
 each require an optional extra and a one-time local model download. CI
 runs this suite to gate dataset integrity (corpus size, authored-case
 count, and that the zero-overlap group stays genuinely hard for lexical
 matching) - it does not pin the hit@1 scores themselves.
 
-**The groups moved in 4.0, so compare with care.** Overlap is measured with
-Link's own stemmer, and 4.0's stemmer does what its docstring always said
+**The groups moved in 5.0, so compare with care.** Overlap is measured with
+Link's own stemmer, and 5.0's stemmer does what its docstring always said
 ("committing" meets "commit", "licensed" meets "license"). 32 cases that
 3.x counted as pure paraphrases now share a stemmed word with their target,
 so the split is 832 / 344 instead of 800 / 376. The zero-overlap group got
 harder (lexical now scores exactly 0 at hit@1 on it), and a 3.x row and a
-4.0 row are not the same cases.
+5.0 row are not the same cases.
 
 ### Token-overlap queries (832 cases)
 
@@ -87,7 +87,7 @@ half of them in the top 5.
 With the opt-in rerank tier on top of the quality tier, token-overlap hit@1
 is 0.798 and pure-paraphrase hit@5 0.535 (MRR@5 0.862 and 0.288), at 30 ms
 p50 on this corpus. On claim-shaped memories it adds little now: 3.x
-measured 0.749 to 0.839 at hit@1, and 4.0's better ranking underneath has
+measured 0.749 to 0.839 at hit@1, and 5.0's better ranking underneath has
 taken most of that gain already. On conversation turns (Track 2) it is
 still the largest single lift.
 
@@ -108,13 +108,13 @@ are sparser). `recall` is `lnk recall`'s ranking step; `query` is the full
 budgeted packet; `cold` is a fresh process's first packet, parsing
 included.
 
-| memories | recall (4.0) | recall (3.0) | query (4.0) | query (3.0) | cold (4.0) | cold (3.0) |
+| memories | recall (5.0) | recall (3.0) | query (5.0) | query (3.0) | cold (5.0) | cold (3.0) |
 |---|---|---|---|---|---|---|
 | 1,000 | 33 ms | 31 ms | 20 ms | 76 ms | 112 ms | 208 ms |
 | 5,000 | 158 ms | 142 ms | 76 ms | 385 ms | 615 ms | 1,166 ms |
 | 20,000 | 730 ms | 578 ms | 701 ms | 1,667 ms | 4,377 ms | 5,785 ms |
 
-4.0 matches whole words, weighs rare words and checks the top results for
+5.0 matches whole words, weighs rare words and checks the top results for
 contradictions, which costs recall at the largest size about a quarter more
 time than 3.0's substring checks. Records parsed once per file change and a
 single scoring pass make the packet 2-5x faster. A pre-release build was
@@ -160,7 +160,7 @@ query; we measure whether Link ranks the annotated evidence turns highly.
 third-party queries. No LLM anywhere: this isolates the retrieval stage with
 third-party queries and third-party gold labels.
 
-Run 2026-09-26 on `develop` at 46a3c58 (4.0 pre-release).
+Run 2026-09-26 on `develop` at 46a3c58 (5.0 pre-release).
 
 | metric | lexical | fast tier | quality tier | quality + rerank | 3.x lexical | 3.x quality |
 |---|---|---|---|---|---|---|
@@ -175,7 +175,7 @@ candidates, blended with the retrieval order) is the best configuration on
 every metric, and it applies only to explicit recall calls, never hooks or
 briefs. Its 3.x figures were hit@10 0.794 and recall@10 0.717.
 
-4.0's lexical changes (whole words, rare words weigh more, stopwords,
+5.0's lexical changes (whole words, rare words weigh more, stopwords,
 acronyms, a stemmer that works) lift lexical hit@1 from 0.266 to 0.350 and
 hit@10 from 0.628 to 0.716, with no model and faster than before. They
 also changed which tier wins where. Without the reranker, the semantic
@@ -194,7 +194,7 @@ the better default for top-5 precision today.
 
 Method fix in this run: the benchmark's turn records carried the turn text
 only in the body, while real memory records also carry it as a snippet,
-which is what the reranker reads. A first 4.0 rerank run therefore scored
+which is what the reranker reads. A first 5.0 rerank run therefore scored
 the speaker name and a date and collapsed to hit@1 0.160; the records now
 carry the snippet real records have, and nothing else about the benchmark
 changed (the other columns reproduce exactly).
@@ -328,7 +328,7 @@ predicted:
   LLM-extraction memory does on every message. Maintainers of other systems
   are invited to run the same event stream through their pipelines.
 
-Run 2026-09-26 on `develop` at 46a3c58 (4.0 pre-release); 3.x in the last column.
+Run 2026-09-26 on `develop` at 46a3c58 (5.0 pre-release); 3.x in the last column.
 
 | metric | gated (Link) | ungated | gated in 3.x |
 |---|---|---|---|
@@ -347,13 +347,13 @@ stores junk or loses to the ungated baseline.
 
 Honest notes: gated contradiction exposure is now 0: the detector
 supersedes all 12 authored revisions. 3.x missed two, both lexically
-disjoint rephrasings, and 4.0 catches them with general rules rather than
+disjoint rephrasings, and 5.0 catches them with general rules rather than
 fixture patches: revisions that name what they replaced ("moved from 8080
 to 8443", "Buildkite replaced Jenkins", "5 times instead of 3") and value
 changes to a stated claim (versions, ports, counts were invisible when short
 tokens were dropped). Point-in-time accuracy is 1.00 because the wrong-
 original auto-resolution that cost 3.x one reconstruction no longer happens.
-Current-truth precision@1 fell from 0.881 to 0.857 (one query): the 4.0
+Current-truth precision@1 fell from 0.881 to 0.857 (one query): the 5.0
 ranking reads whole words and rare words, and one current fact now loses
 its top slot to a topically closer one. We publish the drop rather than
 tune it away.
@@ -374,8 +374,8 @@ model download.
 
 ## Track 4: End-to-end QA under mem0's own harness
 
-*Measured on Link 2.x-3.x retrieval and not repeated for 4.0: the run needs
-paid model calls for every answer and judgment. 4.0's retrieval changes are
+*Measured on Link 2.x-3.x retrieval and not repeated for 5.0: the run needs
+paid model calls for every answer and judgment. 5.0's retrieval changes are
 measured in Tracks 1-3 above.*
 
 Tracks 1–3 isolate retrieval and governance. This track runs the full
@@ -489,7 +489,7 @@ die in the pipeline: dropped, flagged, or defanged — none unlabeled.
 CI-enforced — any change that lets an attack reach the inbox without a
 label, or flags a legitimate directive, fails the build.
 
-**The other ways in (added in 4.0).** A review found three channels into a
+**The other ways in (added in 5.0).** A review found three channels into a
 session that the layers above never saw, so the same 18 attacks now go
 through each of them too:
 
@@ -499,7 +499,7 @@ through each of them too:
 | handoff | left as a session handoff, pushed to the top of the next session on any agent | 13 of 18 labelled in the brief; 0 injection-shaped attacks unlabeled; 0 credentials left unredacted |
 | team import | shared as a teammate's `visibility: team` memory | 14 of 18 rejected at import, 4 quarantined for review, 0 active |
 
-Before 4.0 the harness channel turned a subagent's report into a proposal
+Before 5.0 the harness channel turned a subagent's report into a proposal
 attributed to the user, a handoff carried a prose password verbatim, and a
 team import became active memory with no review at all. Each of those is a
 CI failure now. The five unlabeled handoffs are the attacks the detector
@@ -531,7 +531,7 @@ budget you ask for, not of how much you have remembered.
 `scripts/eval_token_economics.py` measures real packets through the real
 query path, serialized exactly as the agent receives them.
 
-Run 2026-09-26 on `develop` at 46a3c58 (4.0 pre-release); 3.x means in
+Run 2026-09-26 on `develop` at 46a3c58 (5.0 pre-release); 3.x means in
 the last column.
 
 | budget | mean tokens | worst case | CI ceiling | 3.x mean |
@@ -541,7 +541,7 @@ the last column.
 | medium | 3,130 | 5,249 | 10,200 | 3,886 |
 | large | 3,752 | 7,681 | 16,800 | 4,835 |
 
-4.0 stopped the packet repeating itself: the ranked list carried every
+5.0 stopped the packet repeating itself: the ranked list carried every
 memory and page a second time, and over MCP each result also went back as a
 duplicate structured copy. The ranked list is now references, which takes
 13% off a micro packet and 22% off a large one.
@@ -611,7 +611,7 @@ earlier of two conflicting claims, the position bias real models show.
 | governing memory in front of the agent | - | 11 / 12 |
 | mean context added | - | ~2,850 tokens |
 
-3.x scored 10 of 12. 4.0 closed the standing-preference gap: a preference
+3.x scored 10 of 12. 5.0 closed the standing-preference gap: a preference
 about how to answer shares no words with any task, so it fell out of the
 session brief, and the brief now reserves two slots for such preferences.
 The remaining miss is published as a known gap rather than tuned away, and
@@ -639,7 +639,7 @@ version, a preference, ...) with 36 versions, each queried in the claim's
 own words and as a paraphrase that shares little vocabulary. It runs twice:
 in a store where each update carries `supersedes` lineage (what the review
 flow writes) and in one where it does not (updates saved without review).
-It was written after the 4.0 ranking changes it measures and is gated in CI
+It was written after the 5.0 ranking changes it measures and is gated in CI
 as a floor, not tuned against.
 
 | store | query | current value first | stale value first | miss |
@@ -654,7 +654,7 @@ on that date 0.94 of the time in both stores.
 
 With lineage, a superseded value never comes back first. Without it, recall
 still puts the newer value first four times in five on direct questions:
-4.0 recognises revisions that name what they replaced and reads the newer
+5.0 recognises revisions that name what they replaced and reads the newer
 of two contradicting results first, labelling the older one
 `contradicted_by`. The paraphrase column is lexical-only and mostly misses,
 which is what the semantic tiers are for; stale answers stay rare either
@@ -674,7 +674,7 @@ longer does. `scripts/eval_staleness.py`, run on this repository:
 | references in Link's own documentation | 345, **0 false flags** |
 | known deletions from history | 6 probed, **0 missed** |
 | prose that merely looks like a path | 3 probed, 0 flagged |
-| 4.0 removal kinds (scripts, targets, deps, env vars, URLs, versions, lockfiles) | 7 probed, **0 missed**; a still-true memory flagged 0 times |
+| 5.0 removal kinds (scripts, targets, deps, env vars, URLs, versions, lockfiles) | 7 probed, **0 missed**; a still-true memory flagged 0 times |
 
 The precision rule is the product: a false "stale" flag trains people to
 ignore the flag. The same rule gave 0 false flags across 298 references in

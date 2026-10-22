@@ -76,12 +76,13 @@ agents instead of locked inside one vendor profile.
 
 ## How It Works
 
-Link gives agents four simple moves:
+Link gives agents five simple moves:
 
 1. **Capture** notes, transcripts, docs, screenshots, and project context in `raw/`.
 2. **Structure** source-backed pages under `wiki/`.
 3. **Remember** explicit preferences, decisions, facts, and project context as reviewable memory.
 4. **Retrieve** compact query packets through the CLI, MCP, official skills, or the local web viewer.
+5. **Hold** what you approved: rules are enforced before a tool call, memories about code are checked against the repository, and a receipt shows what each session was given.
 
 Most agent sessions start from zero. You re-explain preferences, repo decisions,
 project constraints, and why something matters. Link turns that repeated context
@@ -93,6 +94,9 @@ into local memory agents can query.
 | Notes are private or messy. | Keep raw sources local, then turn them into source-backed Markdown. |
 | Context windows are expensive. | Return compact query packets with provenance and follow-up actions. |
 | Memory needs trust. | Every page and memory can be inspected, reviewed, archived, or forgotten. |
+| Agents read a rule and break it anyway. | A reviewed memory can carry a rule that asks for your OK, or blocks the call, before it runs. |
+| Memory goes stale as the code moves on. | Memories that name files, scripts, dependencies or functions are checked against the repository and flagged, not believed. |
+| You cannot tell what the agent was given. | `lnk receipt` lists every memory that reached a session and whether it arrived whole. |
 
 Link follows Andrej Karpathy's
 [LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
@@ -102,7 +106,7 @@ compound over time.
 ## Why Link Is Different
 
 Every other agent-memory system stores memory as embeddings in a vector
-database or as an LLM-extracted graph. Link made four architectural
+database or as an LLM-extracted graph. Link made five architectural
 commitments those designs cannot bolt on:
 
 1. **Memory you can read.** Every memory is a plain Markdown file — open it,
@@ -114,6 +118,13 @@ commitments those designs cannot bolt on:
    in the write path.
 4. **Provably local.** CI blocks outbound network code in the runtime, and the
    optional semantic models load offline-only after one explicit setup.
+5. **Memory that holds when the agent acts.** A memory you reviewed can carry a
+   rule (`ask command: git push --force`, `deny write: migrations/**`) that is
+   checked before the agent's tool call, with no model and under a
+   millisecond. Memories about code are re-read against your repository and
+   flagged when the code moved on. Memories surface when the agent opens the
+   file they describe, `lnk compile` writes reviewed memory into the files
+   every agent already reads, and a receipt proves what reached each session.
 
 And the claims are measured, not asserted — see the benchmarks below. Named
 comparisons against Mem0/OpenMemory, Zep/Graphiti, and Letta:
@@ -131,6 +142,8 @@ that have one everywhere:
 | **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 35.7% |
 | **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
 | **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
+| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
+| **Staleness checks** — memories and instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) checked against the repository | **0 false flags** across 345 references in Link's docs and 604 more in eight public repositories; every planted deletion caught | a reference is reported only when git history shows the thing existed |
 | **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 
 Every number ships with its config, judge model, caveats, and the
@@ -598,6 +611,7 @@ model-facing tools. CLI and skill workflows call the same core behavior through
   the user instead of trusting them.
 - `remember`: durable local memory only after explicit user approval, with
   duplicate/conflict checks, provenance, review state, visibility, optional
+  enforce rules that act on tool calls once you review the memory, optional
   `review_after`, and optional `expires_at`.
 - `ingest`: exact next steps for raw files, source safety, stale ingest
   detection, validation, and rebuild checks.

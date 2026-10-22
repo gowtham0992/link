@@ -117,7 +117,7 @@ Agent: recall(query="release plan", budget="small")</code></pre>
         <p>Every memory in the receipt comes with the command to explain it and the command to forget it.</p>
         <pre><code>lnk receipt ~/link --sessions 3
 lnk receipt ~/link --json</code></pre>
-        <p>The ledger never records query text, answers, or anything from the conversation, only that a memory was used and which one. It is machine-local, excluded from sync, capped at a ring of recent events, and switched off with <code>LINK_USAGE=off</code>. Events recorded before 4.0 have no surface or size, and the receipt says so instead of guessing.</p>
+        <p>The ledger never records query text, answers, or anything from the conversation, only that a memory was used and which one. It is machine-local, excluded from sync, capped at a ring of recent events, and switched off with <code>LINK_USAGE=off</code>. Events recorded before 5.0 have no surface or size, and the receipt says so instead of guessing.</p>
 
         <h2 id="time">Point-in-Time and Typed Recall</h2>
         <p>Every memory is a dated file with its lifecycle recorded (<code>date_captured</code>, <code>supersedes</code>, <code>superseded_by</code>, <code>archived_at</code>). That makes &ldquo;what was true then&rdquo; an exact reconstruction, not a guess. <code>recall</code> accepts two optional arguments:</p>

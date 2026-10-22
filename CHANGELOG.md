@@ -4,12 +4,18 @@ All notable changes to Link are tracked here.
 
 Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI and the MCP Registry. Keep `Unreleased` for work merged after the latest published version.
 
-## [5.0.0] - Unreleased
+## [Unreleased]
 
-Memory that holds at the moment of action. 4.0 made memory check itself
-against the code; 5.0 makes it act where the agent works: before a tool
-call, when a file is opened, in the files every agent already reads, and
-with proof of what actually arrived.
+Memory that checks itself against the code, and holds at the moment the
+agent acts. Two lines of work ship together. First, memory that keeps
+itself honest: it verifies what it says about files, scripts, dependencies
+and code against your repository, ranks the current truth first, works in
+any language, and shows you a receipt of what reached each agent. Second,
+memory that acts where the agent works: rules you approved are enforced
+before a tool call, memories surface when the agent opens the code they
+describe, reviewed memory is compiled into the files every agent already
+reads, and every injection is checked for arrival. Every claim here is
+measured in benchmarks/RESULTS.md, losses included.
 
 ### Added
 
@@ -99,30 +105,7 @@ with proof of what actually arrived.
   your words" mark. The last-session card warns in amber when the agent did
   not get all of its memory ("1 cut short · 1 never arrived") and counts
   rule checks ("2 asked for your OK · 1 blocked"). Every new field is
-  optional, so LinkBar still works with a 4.0 CLI.
-
-### Fixed
-
-- **A repeated session-end event is recognised.** The duplicate check
-  stored the last proposal's fingerprint instead of the session's.
-- **`lnk compile` never rewrites a file it cannot read exactly.** A
-  non-UTF-8 or unreadable AGENTS.md, CLAUDE.md or Link-owned rule file is a
-  conflict with a reason, never replaced. In a file that mixes CRLF and LF
-  every existing line keeps its own ending, so appending a line after
-  Link's block does not show as drift.
-- **`lnk stale --instructions` finds nested instruction files under
-  non-ASCII folders**, and the staleness engine's manifest lookup reads
-  such names too.
-- **Staleness precision.** A package-manager binary (`pnpm nx build`) is not
-  a removed script, a backticked `@decorator` is not a scoped package, a
-  dependency counts as removed only when a manifest declared it, just
-  recipes with default parameters are recognised, and mentions inside
-  instruction files do not keep a removed variable "present".
-
-## [Unreleased]
-
-### Added
-
+  optional, so LinkBar still works with an older CLI.
 - **`lnk stale` checks far more than file paths.** 3.0 questioned a memory
   only when it named a file git no longer has. It now also notices package
   scripts (`npm run deploy:staging`), make and just targets, dependencies,
@@ -235,8 +218,8 @@ with proof of what actually arrived.
   benchmarks take `--rerank` and apply the cross-encoder exactly as recall
   does. On LoCoMo it is the best configuration on every metric (hit@1
   0.453, hit@10 0.826, up from 3.x's 0.794); on the bundled claim-shaped
-  benchmark it now adds little (hit@1 0.789 to 0.798), because 4.0's
-  ranking underneath took most of that gain.
+  benchmark it now adds little (hit@1 0.789 to 0.798), because this
+  release's ranking underneath took most of that gain.
 
 ### Changed
 
@@ -295,6 +278,21 @@ with proof of what actually arrived.
 
 ### Fixed
 
+- **A repeated session-end event is recognised.** The duplicate check
+  stored the last proposal's fingerprint instead of the session's.
+- **`lnk compile` never rewrites a file it cannot read exactly.** A
+  non-UTF-8 or unreadable AGENTS.md, CLAUDE.md or Link-owned rule file is a
+  conflict with a reason, never replaced. In a file that mixes CRLF and LF
+  every existing line keeps its own ending, so appending a line after
+  Link's block does not show as drift.
+- **`lnk stale --instructions` finds nested instruction files under
+  non-ASCII folders**, and the staleness engine's manifest lookup reads
+  such names too.
+- **Staleness precision.** A package-manager binary (`pnpm nx build`) is not
+  a removed script, a backticked `@decorator` is not a scoped package, a
+  dependency counts as removed only when a manifest declared it, just
+  recipes with default parameters are recognised, and mentions inside
+  instruction files do not keep a removed variable "present".
 - **MCP on Windows no longer hangs when Link runs git.** Inside the MCP
   server, stdin is the connection to the agent. Child processes (git for
   sync, project seeding and repository checks, and Python for runtime
