@@ -233,10 +233,245 @@
     targets.forEach(function (el) { observer.observe(el); });
   }
 
+  // --- Docs chrome: sidebar toggle, on-this-page highlight, search ---------
+  // The sidebar and the search index are stamped by scripts/sync_docs_site.py;
+  // this only makes them behave. Search is client-side over a checked-in JSON
+  // file, so the docs work from a file:// URL with no service behind them.
+
+  function initSidebarToggle() {
+    var toggle = document.querySelector(".docs-sidebar-toggle");
+    var sidebar = document.querySelector(".docs-sidebar");
+    if (!toggle || !sidebar) {
+      return;
+    }
+    toggle.addEventListener("click", function () {
+      var open = sidebar.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  }
+
+  function initOnThisPage() {
+    var toc = document.querySelector(".toc");
+    if (!toc) {
+      return;
+    }
+    var links = {};
+    toc.querySelectorAll('a[href^="#"]').forEach(function (a) {
+      links[a.getAttribute("href").slice(1)] = a;
+    });
+    var headings = Array.prototype.slice.call(document.querySelectorAll(".doc-content h2[id]"))
+      .filter(function (h) { return links[h.id]; });
+    if (!headings.length) {
+      return;
+    }
+    var current = null;
+    function update() {
+      var top = window.scrollY + 110;
+      var active = headings[0];
+      headings.forEach(function (h) {
+        if (h.offsetTop <= top) {
+          active = h;
+        }
+      });
+      if (current === active.id) {
+        return;
+      }
+      current = active.id;
+      Object.keys(links).forEach(function (key) {
+        links[key].classList.toggle("active", key === current);
+      });
+    }
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    update();
+  }
+
+  var SEARCH_INDEX = null;
+  var SEARCH_LOADING = null;
+
+  function loadSearchIndex() {
+    if (SEARCH_INDEX) {
+      return Promise.resolve(SEARCH_INDEX);
+    }
+    if (!SEARCH_LOADING) {
+      SEARCH_LOADING = fetch("assets/search-index.json").then(function (response) {
+        return response.json();
+      }).then(function (data) {
+        SEARCH_INDEX = data;
+        return data;
+      });
+    }
+    return SEARCH_LOADING;
+  }
+
+  function tokens(text) {
+    return String(text || "").toLowerCase().split(/[^a-z0-9_.-]+/).filter(function (t) { return t.length > 1; });
+  }
+
+  function scoreEntry(terms, fields) {
+    var score = 0;
+    terms.forEach(function (term) {
+      var hit = false;
+      fields.forEach(function (field) {
+        var haystack = String(field.text || "").toLowerCase();
+        var at = haystack.indexOf(term);
+        if (at !== -1) {
+          hit = true;
+          score += field.weight * (at === 0 || /[^a-z0-9]/.test(haystack.charAt(at - 1)) ? 2 : 1);
+        }
+      });
+      if (!hit) {
+        score = -1e9;
+      }
+    });
+    return score;
+  }
+
+  function searchResults(index, query) {
+    var terms = tokens(query);
+    if (!terms.length) {
+      return [];
+    }
+    var results = [];
+    index.forEach(function (page) {
+      var pageScore = scoreEntry(terms, [
+        { text: page.title, weight: 6 }, { text: page.label, weight: 6 },
+        { text: page.eyebrow, weight: 2 }, { text: page.lead, weight: 1 }
+      ]);
+      if (pageScore > 0) {
+        results.push({ href: page.page, title: page.title, where: page.label, snippet: page.lead, score: pageScore + 1 });
+      }
+      page.sections.forEach(function (section) {
+        var score = scoreEntry(terms, [
+          { text: section.heading, weight: 4 }, { text: section.body || section.text, weight: 1 }, { text: page.label, weight: 1 }
+        ]);
+        if (score > 0) {
+          results.push({ href: page.page + "#" + section.id, title: section.heading,
+            where: section.under ? page.label + " \u00b7 " + section.under : page.label, snippet: section.text, score: score });
+        }
+      });
+    });
+    results.sort(function (a, b) { return b.score - a.score; });
+    return results.slice(0, 12);
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function initSearch() {
+    var button = document.querySelector(".site-search");
+    if (!button) {
+      return;
+    }
+    var overlay = document.createElement("div");
+    overlay.className = "search-overlay";
+    overlay.setAttribute("hidden", "");
+    overlay.innerHTML =
+      '<div class="search-box" role="dialog" aria-label="Search the docs">' +
+      '<input type="search" class="search-input" placeholder="Search the docs: commands, concepts, fields" autocomplete="off" spellcheck="false">' +
+      '<div class="search-results" role="listbox"></div>' +
+      '<div class="search-hint"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></div>' +
+      "</div>";
+    document.body.appendChild(overlay);
+    var input = overlay.querySelector(".search-input");
+    var list = overlay.querySelector(".search-results");
+    var selected = 0;
+    var current = [];
+
+    function render() {
+      if (!input.value.trim()) {
+        list.innerHTML = '<div class="search-empty">Type to search every docs page. Try <em>enforce</em>, <em>receipt</em>, <em>review_after</em> or <em>team-sync</em>.</div>';
+        current = [];
+        return;
+      }
+      if (!current.length) {
+        list.innerHTML = '<div class="search-empty">Nothing matches “' + escapeHtml(input.value) + '”.</div>';
+        return;
+      }
+      list.innerHTML = current.map(function (r, i) {
+        return '<a class="search-result' + (i === selected ? " selected" : "") + '" href="' + escapeHtml(r.href) + '" role="option">' +
+          '<span class="search-result-title">' + escapeHtml(r.title) + '</span>' +
+          '<span class="search-result-where">' + escapeHtml(r.where) + '</span>' +
+          (r.snippet ? '<span class="search-result-snippet">' + escapeHtml(r.snippet) + '</span>' : "") +
+          "</a>";
+      }).join("");
+    }
+
+    function update() {
+      loadSearchIndex().then(function (index) {
+        current = searchResults(index, input.value);
+        selected = 0;
+        render();
+      }).catch(function () {
+        list.innerHTML = '<div class="search-empty">Search is unavailable on this copy of the docs.</div>';
+      });
+    }
+
+    function open() {
+      overlay.removeAttribute("hidden");
+      document.body.classList.add("search-open");
+      input.value = "";
+      render();
+      input.focus();
+      loadSearchIndex().catch(function () {});
+    }
+
+    function close() {
+      overlay.setAttribute("hidden", "");
+      document.body.classList.remove("search-open");
+      button.focus();
+    }
+
+    button.addEventListener("click", open);
+    overlay.addEventListener("click", function (event) {
+      if (event.target === overlay) {
+        close();
+      }
+    });
+    input.addEventListener("input", update);
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "ArrowDown" && current.length) {
+        selected = (selected + 1) % current.length;
+        render();
+        event.preventDefault();
+      } else if (event.key === "ArrowUp" && current.length) {
+        selected = (selected - 1 + current.length) % current.length;
+        render();
+        event.preventDefault();
+      } else if (event.key === "Enter" && current[selected]) {
+        var href = current[selected].href;
+        if (href.split("#")[0] === PAGE) {
+          close();
+        }
+        window.location.href = href;
+      }
+    });
+    document.addEventListener("keydown", function (event) {
+      var target = event.target;
+      var typing = /^(input|textarea|select)$/i.test((target && target.tagName) || "") || (target && target.isContentEditable);
+      var hidden = overlay.hasAttribute("hidden");
+      if (event.key === "Escape" && !hidden) {
+        close();
+      } else if (event.key === "/" && !typing && hidden) {
+        event.preventDefault();
+        open();
+      } else if ((event.metaKey || event.ctrlKey) && String(event.key).toLowerCase() === "k" && hidden) {
+        event.preventDefault();
+        open();
+      }
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     addCopyButtons();
     captureOutboundClicks();
     initScrollReveal();
+    initSidebarToggle();
+    initOnThisPage();
+    initSearch();
     loadPostHog();
   });
 })();

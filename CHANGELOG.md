@@ -124,6 +124,14 @@ measured in benchmarks/RESULTS.md, losses included.
   entries and `lnk hook pre-tool`. The installer README says what
   `lnk connect --write --hooks` adds and that the PowerShell installers do
   not call it.
+- **The docs read like a docs site.** Every page now carries a sidebar
+  with all fifteen pages in four groups, an on-this-page column that
+  follows the scroll, and search (`/` or ⌘K) over every heading and
+  section, served from a checked-in index with no service behind it. One
+  script (`scripts/sync_docs_site.py`) stamps the shared chrome into the
+  pages and writes the index; a test fails when a page is added without a
+  sidebar entry or the copies drift. The two replayed terminals at the top
+  of Getting started are gone, so the first command is above the fold.
 - **The site opens with the loop.** A new section plays Link's whole cycle
   in five scenes - say it once, you approve it, every session knows,
   checked against the code, held at the moment of action - using the real
