@@ -31,7 +31,7 @@ SESSION_END_TIMEOUT_SECONDS = 60
 GUARD_TIMEOUT_SECONDS = 10
 # Tool hooks run on every tool call and read a compiled index.
 TOOL_HOOK_TIMEOUT_SECONDS = 10
-PRE_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Read"
+PRE_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep"
 POST_TOOL_MATCHER = "Read|Edit|Write|MultiEdit"
 
 _HOOK_SCRIPT_MARKER = "link.py"

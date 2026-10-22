@@ -84,7 +84,10 @@ class SlimRecallContractTests(unittest.TestCase):
             cleared = json.loads(server.admin(action="set_enforce", arguments=json.dumps(
                 {"identifier": saved["name"], "clear": True})))
             archived = json.loads(server.review(action="archive", identifier=saved["name"]))
-        for refused in (approved, cleared, archived):
+            added = json.loads(server.admin(action="set_enforce", arguments=json.dumps(
+                {"identifier": saved["name"],
+                 "rules": ["ask command: git push --force*", "ask command: git reset --hard*"]})))
+        for refused in (approved, cleared, archived, added):
             self.assertRegex(str(refused.get("error")), r"Only the person|the person's call")
 
     def test_first_response_reports_the_real_review_queue(self):

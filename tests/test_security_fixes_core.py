@@ -382,6 +382,36 @@ class TeamDeletionTests(unittest.TestCase):
             self.assertEqual(export_team_memories(wiki, team_wiki), [])
             self.assertFalse((team_wiki / "memories" / "deploy-window.md").exists())
 
+    def test_a_forgotten_shared_memory_is_retracted_and_never_comes_back(self):
+        from link_core.memory import forget_memory_page, set_memory_status
+
+        with tempfile.TemporaryDirectory(prefix="link-sec-team-forget-") as temp:
+            base = Path(temp)
+            team_wiki = base / "team" / "wiki"
+            (team_wiki / "memories").mkdir(parents=True)
+            root = base / "me"
+            root.mkdir()
+            wiki = _workspace(root)
+            ledger = root / ".link-team-imports.json"
+            _memory(wiki, "deploy-window", "Deploys happen on Tuesdays.", "team")
+            _memory(wiki, "review-rule", "Two approvals before merging.", "team")
+            self.assertEqual(export_team_memories(wiki, team_wiki, ledger_path=ledger), ["deploy-window", "review-rule"])
+            # Forgotten here: retracted from the shared repo, never re-imported.
+            forget_memory_page(wiki, "deploy-window", confirm=True, timestamp="2026-09-20T00:00:00Z")
+            self.assertEqual(export_team_memories(wiki, team_wiki, ledger_path=ledger), [])
+            self.assertFalse((team_wiki / "memories" / "deploy-window.md").exists())
+            (team_wiki / "memories" / "deploy-window.md").write_text(
+                (wiki / "memories" / "review-rule.md").read_text(encoding="utf-8"), encoding="utf-8")
+            report = import_team_memories(team_wiki, wiki, ledger_path=ledger)
+            self.assertIn("deploy-window", report["skipped_forgotten"])
+            self.assertFalse((wiki / "memories" / "deploy-window.md").exists())
+            # Archived here: stays shared for teammates, is not re-imported, is not a conflict.
+            set_memory_status(wiki, "review-rule", "archived", "", timestamp="2026-09-21T00:00:00Z")
+            export_team_memories(wiki, team_wiki, ledger_path=ledger)
+            self.assertTrue((team_wiki / "memories" / "review-rule.md").exists())
+            report = import_team_memories(team_wiki, wiki, ledger_path=ledger)
+            self.assertNotIn("review-rule", report["imported"] + report["conflicts"])
+
     def test_an_edited_import_is_not_exported_or_reported_as_a_conflict(self):
         from link_core.memory import mark_memory_reviewed, memory_records, update_memory_page
 

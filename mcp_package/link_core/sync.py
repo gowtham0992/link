@@ -867,7 +867,9 @@ def _refuse_symlinked_dirs(*paths: Path) -> None:
         )
 
 
-def export_team_memories(wiki_dir: Path, team_wiki: Path) -> list[str]:
+def export_team_memories(
+    wiki_dir: Path, team_wiki: Path, *, ledger_path: Path | None = None,
+) -> list[str]:
     """Mirror local active visibility:team memories into the team repo.
 
     Only memories authored here are shared. A page carrying
@@ -875,13 +877,32 @@ def export_team_memories(wiki_dir: Path, team_wiki: Path) -> list[str]:
     imported; exporting it undid the teammate's deletion (and pushed the
     local pending-review copy back). To re-share one deliberately, remove
     `imported_from` from its frontmatter.
+
+    Every page shared from here is noted in the team ledger, so a memory
+    you later forget is retracted from the shared repo (when it still holds
+    what you shared) and never comes back as a teammate's import.
     """
     exported: list[str] = []
     source_dir = wiki_dir / "memories"
     target_dir = team_wiki / "memories"
     _refuse_symlinked_dirs(team_wiki, target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
+    ledger_file = ledger_path or (wiki_dir.parent / TEAM_IMPORT_LEDGER)
+    ledger = _load_import_ledger(ledger_file)
+    changed_ledger = False
+    # Retract what this machine shared and has since forgotten.
+    for name, entry in list(ledger.items()):
+        shared = str(entry.get("exported_sha256") or "")
+        if not shared or (source_dir / f"{name}.md").exists() or entry.get("retracted"):
+            continue
+        copy = target_dir / f"{name}.md"
+        if copy.is_file() and not copy.is_symlink() and _sha256(copy.read_text(encoding="utf-8", errors="replace")) == shared:
+            copy.unlink()
+        ledger[name] = {**entry, "retracted": "yes"}
+        changed_ledger = True
     if not source_dir.exists():
+        if changed_ledger:
+            _save_import_ledger(ledger_file, ledger)
         return exported
     for path in sorted(source_dir.glob("*.md")):
         # A symlink is not a memory someone reviewed; and writing through a
@@ -897,9 +918,16 @@ def export_team_memories(wiki_dir: Path, team_wiki: Path) -> list[str]:
         if target.is_symlink():
             continue
         if target.exists() and target.read_text(encoding="utf-8", errors="replace") == content:
+            if ledger.get(path.stem, {}).get("exported_sha256") != _sha256(content):
+                ledger[path.stem] = {"exported_sha256": _sha256(content)}
+                changed_ledger = True
             continue
         target.write_text(content, encoding="utf-8")
+        ledger[path.stem] = {"exported_sha256": _sha256(content)}
+        changed_ledger = True
         exported.append(path.stem)
+    if changed_ledger:
+        _save_import_ledger(ledger_file, ledger)
     return exported
 
 
@@ -983,18 +1011,21 @@ def import_team_memories(
         previous = ledger.get(name)
         if not target.exists():
             if previous:
-                # Imported before and gone now: the person forgot or moved it.
+                # Imported or shared from here before and gone now: the
+                # person forgot it, and a forgotten memory stays forgotten.
                 skipped_forgotten.append(name)
                 continue
             gated = update_frontmatter_fields(content, {
                 "review_status": "pending",
                 "imported_from": "team",
-            }, remove={"reviewed_at"})
+            }, remove={"reviewed_at", "enforce_active"})  # a teammate's approval is not yours
             target.write_text(gated, encoding="utf-8")
             ledger[name] = {"team_sha256": team_hash}
             changed_ledger = True
             imported.append(name)
             continue
+        if previous and previous.get("exported_sha256"):
+            continue  # your own shared page (perhaps archived here): nothing to import
         if previous and previous.get("team_sha256") != team_hash:
             # The teammate changed it since you imported it; yours stays.
             conflicts.append(name)
@@ -1027,7 +1058,7 @@ def team_sync_workspace(
     # append (or log merge) write into that file.
     _refuse_symlinks(_symlinks_under(team_root), str(team_root))
 
-    exported = export_team_memories(wiki_dir, team_wiki)
+    exported = export_team_memories(wiki_dir, team_wiki, ledger_path=root / TEAM_IMPORT_LEDGER)
     if exported:
         append_log(
             team_wiki, utc_timestamp(), "team-export",

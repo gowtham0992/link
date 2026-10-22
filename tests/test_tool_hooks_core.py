@@ -160,6 +160,23 @@ class RuleTests(_Store):
         mark_memory_reviewed(self.wiki, name, None, "2026-09-28T01:01:00Z")
         self.assertEqual(self._decide("Bash", command="git push --force")["decision"], "ask")
 
+    def test_adding_a_rule_keeps_the_approved_one_in_force(self):
+        from link_core.memory import update_memory_page
+
+        name = self._memory("Never force-push to main.", ["ask command: git push --force"])
+        set_memory_enforce(self.wiki, name, ["ask command: git push --force", "ask command: git reset --hard*"],
+                           "2026-09-28T01:00:00Z")
+        self.assertIsNotNone(self._decide("Bash", command="git push --force"), "approved rule still acts")
+        self.assertIsNone(self._decide("Bash", command="git reset --hard origin/main"), "new rule waits")
+        mark_memory_reviewed(self.wiki, name, None, "2026-09-28T01:01:00Z")
+        self.assertIsNotNone(self._decide("Bash", command="git reset --hard origin/main"))
+        (record,) = memory_records(self.wiki)
+        self.assertEqual(record["enforce_active"], [])
+        # An update to the claim sends it back to review the same way.
+        update_memory_page(self.wiki, name, "Never force-push to main or release branches.", "test",
+                           "2026-09-28T01:02:00Z", records=memory_records(self.wiki))
+        self.assertIsNotNone(self._decide("Bash", command="git push --force"))
+
     def test_a_malformed_rule_is_ignored_and_reported(self):
         name = self._memory("Never force-push to main.")
         page = self.wiki / "memories" / f"{name}.md"

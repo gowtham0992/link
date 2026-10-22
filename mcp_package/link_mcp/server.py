@@ -1964,12 +1964,14 @@ def admin(action: str, arguments: str = "{}") -> str:
             from link_core.memory import resolve_memory_page as _resolve, set_memory_enforce as _set_enforce
             _path, current, _error = _resolve(WIKI_DIR, _str_arg(payload, "identifier"), records=_memory_records())
             existing = current.get("enforce") if current else None
-            if isinstance(existing, list) and existing and (
-                _bool_arg(payload, "clear", False) or not set(map(str, existing)) <= set(rules)
-            ):
+            held = current.get("enforce_active") if current else None
+            if (isinstance(existing, list) and existing) or (isinstance(held, list) and held):
+                # Any change to a rule-bearing memory is the person's call:
+                # adding a rule sends it back to review, and that must not
+                # be a way for an agent to touch rules it is subject to.
                 raise ValueError(
-                    "Removing rules is the person's call: ask them to run "
-                    f"`lnk enforce {current.get('name') if current else ''} --clear` (or edit the rules)."
+                    "This memory already enforces rules; changing them is the person's call. Ask them to run "
+                    f"`lnk enforce {current.get('name') if current else ''} --rule ...` or `--clear`."
                 )
             result = _set_enforce(
                 WIKI_DIR, _str_arg(payload, "identifier"), [] if _bool_arg(payload, "clear", False) else rules,

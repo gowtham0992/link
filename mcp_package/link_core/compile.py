@@ -44,7 +44,7 @@ from pathlib import Path
 
 from .files import atomic_write_bytes
 from .memory import is_active_memory, memory_quarantined, memory_visible_for_project, normalize_project, parse_applies_when
-from .provenance import parse_anchor
+from .provenance import MAX_FILE_BYTES, locate, parse_anchor
 from .security import injected_instruction_warnings, secret_value_warnings
 from .staleness import repo_identity, safe_relative_path
 
@@ -220,6 +220,16 @@ def select_memories(
     return chosen, excluded
 
 
+def _symbol_present(path: Path, symbol: str) -> bool:
+    try:
+        if path.stat().st_size > MAX_FILE_BYTES:
+            return True  # too big to read: not a verdict, keep the rule
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    return locate(lines, symbol) is not None
+
+
 def _anchor_globs(record: Mapping[str, object], identity: set[str], repo: Path) -> list[str]:
     """Repository file globs for a memory's anchors in this repository."""
     anchors = record.get("anchors")
@@ -233,6 +243,8 @@ def _anchor_globs(record: Mapping[str, object], identity: set[str], repo: Path) 
             continue  # anchored in another repository
         if not safe_relative_path(rel) or not (repo / rel).is_file():
             continue  # gone: `lnk stale` reports it; a rule for a missing file helps no one
+        if not _symbol_present(repo / rel, _symbol):
+            continue  # the symbol left the file: stale, and the hook stops showing it too
         if rel not in files:
             files.append(rel)
     by_dir: dict[str, list[str]] = {}

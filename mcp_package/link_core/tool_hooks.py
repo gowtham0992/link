@@ -43,6 +43,7 @@ from .memory import (
     memory_applicability,
     memory_visible_for_project,
     normalize_project,
+    rules_in_force,
 )
 from .shell_parse import read_shell
 from .provenance import MAX_FILE_BYTES, locate, parse_anchor
@@ -80,7 +81,7 @@ def _memories_signature(wiki_dir: Path) -> str:
 
 
 def _eligible(record: Mapping[str, object]) -> bool:
-    """Only reviewed, active, unquarantined memories may act on tool calls."""
+    """Reviewed, active, unquarantined memories act on tool calls (anchors and reviewed rules)."""
     return (
         is_active_memory(record)
         and not memory_quarantined(record)
@@ -92,7 +93,7 @@ def build_hook_index(wiki_dir: Path) -> dict[str, object]:
     rules: list[dict[str, object]] = []
     anchors: dict[str, list[dict[str, object]]] = {}
     for record in memory_records(wiki_dir, include_body=False):
-        if not _eligible(record):
+        if not _eligible(record) and not rules_in_force(record):
             continue
         head = {
             "name": str(record.get("name") or ""),
@@ -103,10 +104,11 @@ def build_hook_index(wiki_dir: Path) -> dict[str, object]:
             "visibility": str(record.get("visibility") or ""),
             "applies_when": str(record.get("applies_when") or ""),
         }
-        enforce = record.get("enforce")
-        for rule in parse_enforce_rules(enforce if isinstance(enforce, list) else []):
+        # Rules the person approved keep acting while a change to the memory
+        # waits for review (memory.rules_in_force); new ones wait with it.
+        for rule in parse_enforce_rules(rules_in_force(record)):
             rules.append({**head, "action": rule.action, "kind": rule.kind, "pattern": rule.pattern})
-        anchor_values = record.get("anchors")
+        anchor_values = record.get("anchors") if _eligible(record) else []
         for anchor in anchor_values if isinstance(anchor_values, list) else []:
             parsed = parse_anchor(str(anchor))
             if parsed is None or not parsed[3]:

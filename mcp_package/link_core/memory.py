@@ -875,6 +875,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "anchors": _frontmatter_string_list(meta.get("anchors")),
         # Reviewed rules checked before the agent's tool calls (tool_hooks).
         "enforce": _frontmatter_string_list(meta.get("enforce")),
+        "enforce_active": _frontmatter_string_list(meta.get("enforce_active")),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -1787,6 +1788,34 @@ def set_memory_visibility(
 
 
 
+def rules_in_force(record: Mapping[str, object]) -> list[str]:
+    """The rules a memory enforces right now.
+
+    A reviewed memory enforces `enforce`. One sent back to review (a rule
+    added, a claim updated) keeps enforcing the rules the person already
+    approved, kept in `enforce_active`, until they review again: a change
+    that waits for review must never switch off what was reviewed.
+    """
+    if memory_quarantined(record) or not is_active_memory(record):
+        return []
+    status = str(record.get("review_status") or "").lower()
+    if status == "reviewed":
+        value = record.get("enforce")
+    else:
+        value = record.get("enforce_active")
+    return [str(rule) for rule in value if str(rule).strip()] if isinstance(value, list) else []
+
+
+def _keep_rules_active(record: Mapping[str, object], updates: dict[str, object], remove: set[str]) -> None:
+    """Sending a reviewed, rule-bearing memory back to review keeps its rules in force."""
+    if updates.get("review_status") != "pending":
+        return
+    active = rules_in_force(record)
+    if active:
+        updates["enforce_active"] = active
+        remove.discard("enforce_active")
+
+
 def set_memory_enforce(
     wiki_dir: Path,
     identifier: str,
@@ -1797,9 +1826,9 @@ def set_memory_enforce(
 ) -> dict[str, object]:
     """Set (or with no rules, clear) the rules a memory enforces on tool calls.
 
-    New or changed rules put the memory back into review: a rule only acts
-    after a person has approved it, so an agent that writes one cannot make
-    it block or allow anything on its own. Clearing rules needs no review.
+    A new rule puts the memory back into review: it acts only after a
+    person approves it. Rules the person already approved keep acting
+    meanwhile. Removing rules needs no review.
     """
     page_path, record, error = resolve_memory_page(wiki_dir, identifier, records=records)
     if error:
@@ -1824,10 +1853,18 @@ def set_memory_enforce(
         ):
             text = page_path.read_text(encoding="utf-8", errors="replace")
             updates: dict[str, object] = {"enforce": clean} if clean else {}
-            remove = set() if clean else {"enforce"}
+            remove = {"enforce", "enforce_active"} if not clean else set()
             if needs_review:
                 updates["review_status"] = "pending"
                 remove |= {"reviewed_at"}
+                _keep_rules_active(record, updates, remove)
+            elif clean:
+                # Only removals: whatever still holds is the new list.
+                active = [rule for rule in rules_in_force(record) if rule in clean]
+                if str(record.get("review_status") or "").lower() != "reviewed" and active:
+                    updates["enforce_active"] = active
+                else:
+                    remove.add("enforce_active")
             atomic_write_text(page_path, update_frontmatter_fields(text, updates, remove=remove))
             if log_writer:
                 log_writer(
@@ -1837,8 +1874,10 @@ def set_memory_enforce(
                     [f"Updated: memories/{page_path.name}"]
                     + [f"Rule: {rule}" for rule in clean]
                     + ([] if clean else ["Rules cleared"])
-                    + (["New review status: pending (rules act after review)"] if needs_review else []),
+                    + (["New review status: pending (new rules act after review; approved ones keep acting)"]
+                       if needs_review else []),
                 )
+    _, updated, _ = resolve_memory_page(wiki_dir, str(record["name"]))
     return {
         "updated": changed,
         "name": record["name"],
@@ -1846,6 +1885,7 @@ def set_memory_enforce(
         "title": record["title"],
         "enforce": clean,
         "previous_enforce": previous,
+        "in_force": rules_in_force(updated or record),
         "review_status": "pending" if needs_review else record.get("review_status", "pending"),
         "active": bool(clean) and not needs_review and str(record.get("review_status")) == "reviewed",
     }
@@ -1959,7 +1999,7 @@ def mark_memory_reviewed(
             paths=[f"wiki/memories/{page_path.name}", "wiki/log.md"],
         ):
             text = page_path.read_text(encoding="utf-8", errors="replace")
-            atomic_write_text(page_path, update_frontmatter_fields(text, updates))
+            atomic_write_text(page_path, update_frontmatter_fields(text, updates, remove={"enforce_active"}))
             if log_writer:
                 log_lines = [
                     f"Reviewed: memories/{page_path.name}",
@@ -2047,7 +2087,7 @@ def update_memory_page(
         updated_body, new_title = rewrite_memory_head(
             updated_body, str(record.get("title") or ""), clean_text
         )
-    updates = {
+    updates: dict[str, object] = {
         "updated_at": f'"{timestamp}"',
         "update_count": str(next_update_count),
         "last_update_source": f'"{frontmatter_string(clean_source)}"',
@@ -2056,6 +2096,7 @@ def update_memory_page(
     if new_title:
         updates["title"] = f'"{frontmatter_string(new_title)}"'
     remove = {"reviewed_at", "review_note"}
+    _keep_rules_active(record, updates, remove)
     imported_from = str(record.get("imported_from") or "").strip()
     if imported_from:
         # The person reviewed this import and is now changing it: it is their
