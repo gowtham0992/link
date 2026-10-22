@@ -75,6 +75,11 @@ TITLE_RE = re.compile(r"<title>(.*?)</title>", re.DOTALL)
 EYEBROW_RE = re.compile(r'<span class="eyebrow">(.*?)</span>', re.DOTALL)
 LEAD_RE = re.compile(r'<header class="page-hero">.*?<p>(.*?)</p>', re.DOTALL)
 TOC_RE = re.compile(r'<aside class="toc">.*?</aside>', re.DOTALL)
+# Browsers (and GitHub Pages' ten-minute cache) hold on to a stylesheet by
+# its URL, so a page that changed and a stylesheet that did not render as the
+# unstyled mess of a half-deployed site. The URL carries the file's hash.
+VERSIONED_ASSETS = ("assets/site.css", "assets/site.js")
+ASSET_REF_RE = re.compile(r'((?:href|src)=")(assets/site\.(?:css|js))(?:\?v=[0-9a-f]+)?(")')
 
 
 def all_pages() -> list[tuple[str, str]]:
@@ -159,7 +164,17 @@ def index_entry(page: str, label: str, content: str) -> dict[str, object]:
     }
 
 
+def asset_versions() -> dict[str, str]:
+    import hashlib
+    return {name: hashlib.sha256((DOCS / name).read_bytes()).hexdigest()[:10] for name in VERSIONED_ASSETS}
+
+
+def version_assets(content: str, versions: dict[str, str]) -> str:
+    return ASSET_REF_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}?v={versions[m.group(2)]}{m.group(3)}", content)
+
+
 def stamp(content: str, page: str) -> str:
+    content = version_assets(content, asset_versions())
     if not NAV_RE.search(content):
         raise SystemExit(f"{page}: no <nav class=\"site-nav\"> to replace")
     content = NAV_RE.sub(lambda _: render_nav(page), content, count=1)
@@ -184,6 +199,20 @@ def build() -> tuple[dict[str, str], str]:
     return pages, index
 
 
+# The landing page is a pre-rendered bundle whose markup lives in one escaped
+# string; its LinkBar tour is the one image there that gets re-recorded.
+LANDING = DOCS / "index.html"
+LANDING_GIF = "linkbar-tour.gif"
+LANDING_GIF_RE = re.compile(r'(assets\\u002F' + re.escape(LANDING_GIF) + r')(?:\?v=[0-9a-f]+)?')
+
+
+def landing_with_versioned_gif() -> str:
+    import hashlib
+    content = LANDING.read_text(encoding="utf-8")
+    digest = hashlib.sha256((DOCS / "assets" / LANDING_GIF).read_bytes()).hexdigest()[:10]
+    return LANDING_GIF_RE.sub(lambda m: f"{m.group(1)}?v={digest}", content)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="report pages that are out of date; write nothing")
@@ -194,6 +223,7 @@ def main() -> int:
         print(f"docs pages missing from the sidebar: {', '.join(unlisted)}")
         return 1
     pages, index = build()
+    pages[LANDING.name] = landing_with_versioned_gif()
     stale = [page for page, content in pages.items() if (DOCS / page).read_text(encoding="utf-8") != content]
     if not INDEX_PATH.exists() or INDEX_PATH.read_text(encoding="utf-8") != index:
         stale.append(INDEX_PATH.name)

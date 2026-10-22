@@ -21,7 +21,7 @@ class DocsSiteTests(unittest.TestCase):
         all_refs = []
         for page in pages:
             html = page.read_text(encoding="utf-8")
-            all_refs.extend(re.findall(r'(?:src|href)="(assets/[^"]+)"', html))
+            all_refs.extend(ref.split("?")[0] for ref in re.findall(r'(?:src|href)="(assets/[^"]+)"', html))
             for local_page in re.findall(r'href="([^":#]+\.html)"', html):
                 self.assertTrue((ROOT / "docs" / local_page).exists(), f"{page.name} -> {local_page}")
 
@@ -90,7 +90,8 @@ class DocsSiteTests(unittest.TestCase):
             if page == index:
                 continue
 
-            self.assertIn('<script src="assets/site.js" defer></script>', html)
+            self.assertRegex(html, r'<script src="assets/site\.js\?v=[0-9a-f]{10}" defer></script>')
+            self.assertRegex(html, r'<link rel="stylesheet" href="assets/site\.css\?v=[0-9a-f]{10}">')
             self.assertNotIn("<script>", lower)
 
     def test_docs_chrome_and_search_index_are_in_sync(self):

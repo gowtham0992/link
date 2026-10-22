@@ -132,6 +132,8 @@ measured in benchmarks/RESULTS.md, losses included.
   pages and writes the index; a test fails when a page is added without a
   sidebar entry or the copies drift. The two replayed terminals at the top
   of Getting started are gone, so the first command is above the fold.
+  Stylesheet, script and tour links carry the file's hash, so a returning
+  visitor never sees a new page with a cached old stylesheet.
 - **The site opens with the loop.** A new section plays Link's whole cycle
   in five scenes - say it once, you approve it, every session knows,
   checked against the code, held at the moment of action - using the real
