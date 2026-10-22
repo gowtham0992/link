@@ -79,7 +79,7 @@ def _atomic_write_bytes_unlocked(path: Path, data: bytes) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     try:
-        os.replace(tmp_name, target)
+        _replace_with_retry(tmp_name, target)
         _fsync_directory(target.parent)
     except Exception:
         try:
@@ -87,6 +87,27 @@ def _atomic_write_bytes_unlocked(path: Path, data: bytes) -> None:
         except OSError:
             pass
         raise
+
+
+# On Windows a file that another process (an antivirus scanner, an indexer,
+# a reader that has not closed yet) holds open cannot be replaced for a
+# moment; os.replace raises PermissionError and the write was lost when the
+# caller treated it as best-effort. Retry briefly before giving up.
+_REPLACE_RETRY_SECONDS = 2.0
+
+
+def _replace_with_retry(source: str, target: Path) -> None:
+    deadline = time.monotonic() + _REPLACE_RETRY_SECONDS
+    delay = 0.01
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.2)
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:

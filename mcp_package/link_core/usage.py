@@ -33,6 +33,10 @@ from .files import atomic_write_text_unlocked, file_lock
 USAGE_FILE = ".link-usage.json"
 USAGE_DISABLE_ENV = "LINK_USAGE"
 MAX_EVENTS = 500
+# Hooks, an MCP server and the CLI can all record at once, and every write
+# is serialized behind one lock. A waiter that gives up loses its event, so
+# it waits long enough for a slow disk to drain a burst of writers.
+LEDGER_LOCK_TIMEOUT_SECONDS = 60.0
 # Surfaces that count as "an agent read memory back": the session brief,
 # recalls, guard reminders, reminders when the agent touched anchored code,
 # and reviewed rules checked against a tool call.
@@ -137,7 +141,7 @@ def _append_event(root: Path, event: dict[str, object]) -> bool:
         # Read, append and replace under one lock: a hook, an MCP server and
         # the CLI record at the same moment, and an unlocked read-modify-write
         # kept only the last writer's events.
-        with file_lock(path):
+        with file_lock(path, timeout=LEDGER_LOCK_TIMEOUT_SECONDS):
             events = load_usage(root)
             events.append(event)
             atomic_write_text_unlocked(
