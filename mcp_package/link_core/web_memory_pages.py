@@ -5,6 +5,8 @@ import html
 import urllib.parse
 from collections.abc import Callable, Iterable, Mapping
 
+from .mcp_verify import display_command
+
 from .web_ingest import copy_button
 from .web_layout import render_stat_grid
 from .web_memory import (
@@ -302,7 +304,7 @@ def render_captures_page(inbox: Mapping[str, object], *, layout: PageLayout) -> 
             '<div class="memory-next"><strong>Needs redaction</strong>'
             f'<p>{warning_count} raw capture'
             f'{"s contain" if warning_count != 1 else " contains"} secret-looking values.</p>'
-            '<code>python3 link.py redact-capture raw/memory-captures/&lt;capture&gt;.md .</code></div>'
+            f'<code>{html.escape(display_command(["link", "redact-capture", "raw/memory-captures/<capture>.md", "."]))}</code></div>'
         )
     read_warning_html = ""
     read_warnings = _dict_list(inbox.get("read_warnings"))

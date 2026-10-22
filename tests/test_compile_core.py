@@ -111,6 +111,17 @@ class CompileTests(unittest.TestCase):
         self.assertIn(".claude/skills/cut-a-release/SKILL.md", written)
         self.assertFalse(any(rel.startswith((".kiro", ".windsurf", "GEMINI", ".github")) for rel in written))
 
+    def test_bullets_do_not_repeat_a_title_the_claim_starts_with(self):
+        from link_core.compile import render_block
+        text = render_block([
+            memory("force-push", "Never force-push to main or release branches.",
+                   title="Never force-push to main or release\u2026"),
+            memory("deploy", "We deploy on Tuesdays.", title="Deploy day"),
+        ])
+        self.assertIn("- Never force-push to main or release branches.\n", text)
+        self.assertNotIn("**Never force-push", text)
+        self.assertIn("- **Deploy day**: We deploy on Tuesdays.", text)
+
     def test_shared_files_keep_everything_outside_the_block(self):
         (self.repo / "CLAUDE.md").write_text("# Team notes\n\nRun `make lint` before pushing.\n", encoding="utf-8")
         self.compiled()

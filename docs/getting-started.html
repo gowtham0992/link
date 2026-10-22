@@ -138,7 +138,7 @@ bash integrations/copilot/install.sh
 bash integrations/vscode/install.sh
 bash integrations/antigravity/install.sh</code></pre>
         <p>Use <code>--project</code> for a repo-local Link install. Project-scoped memory then stays separate from other project memory while still allowing broad user memory to be recalled.</p>
-        <p>On Windows PowerShell, use the matching <code>install.ps1</code> script:</p>
+        <p>On Windows PowerShell, use the matching <code>install.ps1</code> script. The PowerShell installers add the instruction block and scaffold the workspace but do not call <code>lnk connect</code> or install hooks, so run <code>lnk connect &lt;agent&gt; ~/link --hooks --write</code> after one:</p>
         <pre><code>.\integrations\codex\install.ps1
 .\integrations\kiro\install.ps1
 .\integrations\claude-code\install.ps1
@@ -205,7 +205,7 @@ lnk verify-mcp</code></pre>
         <pre><code>query Link for first Link memory</code></pre>
         <p>If the answer comes from Link, local agent memory is working.</p>
               <h2 id="hooks">9. Make The Loop Automatic (Session Hooks)</h2>
-        <p>Agents with session-hook support — Claude Code, Codex, and Cursor — can run the memory loop without being asked. <code>--hooks</code> installs hooks that inject a bounded memory brief at the start of every new session and store proposal-only session notes at session end. Empty sessions are skipped, duplicate end events are deduplicated, and durable memory still requires your approval. When the review backlog grows, the injected brief nudges the agent to offer a read-only <code>lnk consolidate</code> pass.</p>
+        <p>Agents with session-hook support — Claude Code, Codex, and Cursor — can run the memory loop without being asked. <code>--hooks</code> installs hooks that inject a bounded memory brief at the start of every new session and store proposal-only session notes at session end. Empty sessions are skipped, duplicate end events are deduplicated, and durable memory still requires your approval. When the review backlog grows, the injected brief nudges the agent to offer a read-only <code>lnk consolidate</code> pass. On Claude Code the hooks also run before shell and file tool calls: a reviewed memory\'s enforced rules are checked there (asking for your OK or blocking), and memories anchored to the file being read or edited are surfaced at that moment. On Cursor the shell-command check runs the same way. <code>lnk receipt</code> shows what actually arrived in each session.</p>
         <pre><code>lnk connect claude-code ~/link --hooks --write
 lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no session-end event)
 lnk connect cursor ~/link --hooks --write</code></pre>

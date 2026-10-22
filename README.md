@@ -461,9 +461,13 @@ the brief is injected at session start and proposal-only notes are captured at
 session end, so memory no longer depends on the agent remembering to call
 Link. Empty sessions and duplicate end events are skipped, and when the
 backlog builds up the brief nudges the agent to offer a read-only
-`lnk consolidate` pass. Durable memory still requires your approval. Codex and
-Cursor hook support is new (wired to their documented schemas — report
-issues).
+`lnk consolidate` pass. On Claude Code the hooks also run before shell and
+file tool calls: a reviewed memory's enforced rules are checked there, and
+memories anchored to the file being read or edited are surfaced at that
+moment; on Cursor the shell-command check runs the same way. `lnk receipt`
+shows what actually arrived in each session. Durable memory still requires
+your approval. Codex and Cursor hook support is new (wired to their
+documented schemas — report issues).
 
 ```bash
 lnk connect claude-code ~/link --hooks --write

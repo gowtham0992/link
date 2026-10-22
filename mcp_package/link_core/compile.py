@@ -264,7 +264,10 @@ def _anchor_globs(record: Mapping[str, object], identity: set[str], repo: Path) 
 def _line(record: Mapping[str, object]) -> str:
     title = str(record.get("title") or record.get("name") or "").strip()
     claim = _claim(record)
-    if claim.lower().rstrip(".") == title.lower().rstrip("."):
+    # Titles are often the claim's first words, sometimes cut short with an
+    # ellipsis; repeating them before the claim read as a stutter.
+    bare = title.lower().rstrip(". \u2026").rstrip(".").strip()
+    if not bare or claim.lower().startswith(bare) or claim.lower().rstrip(".") == title.lower().rstrip("."):
         return f"- {claim}"
     return f"- **{title}**: {claim}"
 

@@ -70,7 +70,7 @@ open http://127.0.0.1:3000/onboard</code></pre>
         <p>The onboard page does not run MCP for you and does not need to stay open. It is a guided local setup screen; CLI commands, official skills, and MCP clients keep working after you close the browser because they read the same local Markdown wiki directly.</p>
 
         <h2 id="reading">Reading Pages</h2>
-        <p>Link's local viewer is document-first. Common paths stay in the top navigation, advanced tools live under <code>more</code>, and sectioned wiki pages get a contents outline so long source-backed pages remain scannable. Page footers include related pages from inbound and forward graph links, so reading can continue without opening the full graph.</p>
+        <p>Link's local viewer is document-first. Common paths, including the review inbox, stay in the top navigation; advanced tools live under <code>more</code>, and sectioned wiki pages get a contents outline so long source-backed pages remain scannable. Page footers include related pages from inbound and forward graph links, so reading can continue without opening the full graph.</p>
 
         <h2 id="catalog">Catalog And Search</h2>
         <p>The home page shows recently updated pages so you can resume work quickly. The All Pages catalog groups visible pages by type and includes clickable type chips for narrowing large wikis. Search results use the same page-type grouping and include an in-page refinement form, so a broad query can be narrowed to concepts, sources, memories, or other page types without leaving the local viewer.</p>
@@ -83,6 +83,17 @@ open http://127.0.0.1:3000/onboard</code></pre>
           <article class="panel"><h3>Check health</h3><p>The health page shows readiness, validation, interrupted writes, memory review state, and copyable repair commands.</p></article>
           <article class="panel"><h3>Validate after writes</h3><p>Run validation from the CLI or MCP after ingest and broad repairs so dead links, missing sections, and stale graph indexes do not linger.</p></article>
         </div>
+
+        <h2 id="inbox">Review Inbox</h2>
+        <p>The inbox is where memory becomes trusted, so it is built to be fast and to show everything that a review turns on.</p>
+        <ul>
+          <li><strong>Keyboard.</strong> <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>r</kbd> reviews, <kbd>a</kbd> archives, <kbd>x</kbd> selects, <kbd>e</kbd> opens the edit form. Focus moves to the next memory without a reload.</li>
+          <li><strong>Inline edit.</strong> Change the claim or the visibility in place. The claim goes through <code>update-memory</code>, so duplicate and conflict checks still run, and nothing is sent unless it changed.</li>
+          <li><strong>Rules before approval.</strong> A memory that carries enforced rules lists them under its claim in the words the hook uses (<em>asks</em>, <em>blocks</em>). Reviewing it activates those rules for the agent's tool calls, so the request must acknowledge the rules it displayed; the server refuses otherwise.</li>
+          <li><strong>Bulk review skips rules.</strong> Select several memories and review or archive them at once. Memories with enforced rules are skipped and reported, so rules are never switched on in a batch.</li>
+          <li><strong>Outside content is marked.</strong> On the captures page, proposals from a session that read web pages or MCP tool output say so, so you can check the words are yours before accepting.</li>
+        </ul>
+        <p>The wins page carries a <strong>Last session</strong> card mirroring <code>lnk receipt</code>: which memories the agent was given, whether every brief arrived whole, how many tool calls the enforced rules asked about or blocked, and how many code reminders fired.</p>
 
         <h2 id="graph">Graph At Scale</h2>
         <p>The graph opens as a bounded overview on large wikis. Search, legend chips, type filters, and focused neighborhoods can pull from the full graph data without forcing the browser to render every node at once. Large graphs start in deterministic page-type clusters so the first view stays readable.</p>

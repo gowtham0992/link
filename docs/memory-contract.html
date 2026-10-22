@@ -74,6 +74,7 @@
           <li>Call <code>recall(query, budget="micro")</code> before broad file reads or asking the user to repeat durable context.</li>
           <li>Call <code>ingest</code> after the user drops files into <code>raw/</code>, then follow its guided plan.</li>
           <li>Use <code>remember</code> only after the user explicitly asks to remember something or approves a proposal.</li>
+          <li>When a brief opens with a <strong>Waiting for the user's OK</strong> block, list those proposals and rules to the user and act on one only after they reply in chat; never approve from the block itself.</li>
           <li>Use <code>review</code> for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows.</li>
           <li>Use <code>admin</code> for backup, migration, graph export, captures, rebuilds, and advanced maintenance.</li>
         </ol>
@@ -112,7 +113,10 @@ Agent: recall(query="release plan", budget="small")</code></pre>
           <li>each session brief, with how many memories it carried, roughly how many tokens it cost, and whether a budget cut it short;</li>
           <li>how many recalls there were;</li>
           <li>any guard reminders;</li>
-          <li>every memory the agent was given, with a count.</li>
+          <li>every memory the agent was given, with a count;</li>
+          <li>for each hook injection, whether it arrived whole, was cut off, or never arrived (and <code>unverified</code> when the agent left no transcript to check);</li>
+          <li>the enforced-rule checks that ran before tool calls, and whether each asked for the user's OK or blocked the call;</li>
+          <li>the code reminders: memories surfaced because the agent read or edited the file they describe.</li>
         </ul>
         <p>Every memory in the receipt comes with the command to explain it and the command to forget it.</p>
         <pre><code>lnk receipt ~/link --sessions 3
@@ -139,6 +143,7 @@ recall(query="formatting", memory_type="preference")</code></pre>
           <li>If a write returns <code>conflict_candidates</code>, explain the conflict and ask the user before overriding.</li>
           <li>If a write returns <code>possible_contradictions</code>, tell the user which stored memories the new one may contradict and offer to supersede or archive the old one. The memory is already saved; the flag asks for review, it does not block.</li>
           <li>Use <code>review_after</code> for memories that should be re-checked, and <code>expires_at</code> for temporary context.</li>
+          <li>Never review, clear, archive or update a memory that carries enforced rules. Only the user does that, in the viewer or the CLI, after seeing the rules; the MCP surface refuses, and the hook asks before an agent runs those commands itself.</li>
         </ul>
         <p><strong>Contradiction flags (optional).</strong> Word rules catch contradictions that share structure, such as &ldquo;uses X&rdquo; against &ldquo;no longer uses X&rdquo;, or two different version numbers. After <code>lnk semantic &lt;dir&gt; --setup --nli</code>, a small local natural-language-inference model also reads meaning.</p>
         <ul>

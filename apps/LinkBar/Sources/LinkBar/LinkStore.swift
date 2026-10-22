@@ -37,7 +37,7 @@ final class LinkStore: ObservableObject {
     @Published var mcp: MCPVerify?
     @Published var semantic: SemanticStatus?
     /// Which of Link's hooks an agent has: none, the session hooks only
-    /// (a 4.x install), or session plus the pre-tool hook that enforces
+    /// (a 3.x install), or session plus the pre-tool hook that enforces
     /// rules and surfaces code reminders.
     enum HookState { case none, sessionOnly, full }
     @Published var claudeHooksWired: HookState?

@@ -669,6 +669,20 @@ class ServeTests(unittest.TestCase):
         self.assertIn("data-memory-anchors", body)
         self.assertIn("src/app.py:4 parse_config", body)
 
+    def test_viewer_commands_use_the_resolved_runtime_not_python3_link_py(self):
+        wiki = self.make_wiki()
+        captures = wiki.parent / "raw" / "memory-captures"
+        captures.mkdir(parents=True, exist_ok=True)
+        (captures / "20261021T120000Z-session-end.md").write_text(
+            "---\ntype: capture\ntitle: \"Session end\"\ndate_captured: 2026-10-21T12:00:00Z\nsource: session-end\n"
+            "---\n\n# Session end\n\nThe token is ghp_" + "a" * 36 + " for staging.\n", encoding="utf-8")
+        reset_wiki(wiki)
+        for path in ("/captures", "/memory", "/api/memory-dashboard"):
+            status, body = run_handler_text("GET", path) if not path.startswith("/api") else \
+                (lambda s_p: (s_p[0], json.dumps(s_p[1])))(run_handler("GET", path))
+            self.assertEqual(status, 200, path)
+            self.assertNotIn("python3 link.py", body, path)
+
     def test_captures_page_marks_sessions_that_read_outside_content(self):
         wiki = self.make_wiki()
         captures = wiki.parent / "raw" / "memory-captures"
@@ -699,6 +713,9 @@ class ServeTests(unittest.TestCase):
         status, body = run_handler_text("GET", "/wins")
         self.assertEqual(status, 200)
         self.assertIn("Last session", body)
+        # The ledger exists, so the page must not claim tracking is off (it
+        # did: the summary was never passed to the wins payload).
+        self.assertNotIn("LINK_USAGE=off", body)
         self.assertIn('href="/page/deploy-day"', body)
         self.assertIn("did not get all of its memory: 1 cut short", body)
         self.assertIn("<strong>Enforced rules:</strong> 1 blocked", body)

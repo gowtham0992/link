@@ -65,6 +65,7 @@ from link_core.memory_wins import (
 from link_core.usage import (
     load_usage as _core_load_usage,
     memory_receipts as _core_memory_receipts,
+    usage_summary as _core_usage_summary,
 )
 from link_core.markdown import (
     markdown_to_html as _core_markdown_to_html,
@@ -91,6 +92,7 @@ from link_core.version import (
     LINK_VERSION,
 )
 from link_core.mcp_verify import (
+    display_command as _core_display_command,
     set_link_command_override as _core_set_link_command_override,
 )
 from link_core.web_assets import CSS  # noqa: F401 - kept as serve.CSS for tests and compatibility
@@ -716,9 +718,9 @@ def _capture_review_summary(project: str | None = None, limit: int = 3) -> dict[
         commands_for=lambda rel_path: _core_cli_capture_commands(rel_path, WIKI_DIR.parent),
     )
     project_query = f"?project={urllib.parse.quote(project_name, safe='')}" if project_name else ""
-    project_arg = f' --project "{project_name}"' if project_name else ""
     summary["href"] = f"/captures{project_query}"
-    summary["command"] = f'python3 link.py capture-inbox "{WIKI_DIR.parent}"{project_arg}'
+    summary["command"] = _core_display_command(
+        ["link", "capture-inbox", str(WIKI_DIR.parent), *(["--project", project_name] if project_name else [])])
     return summary
 
 
@@ -816,11 +818,18 @@ def _memory_log(limit: int = 50, include_captures: bool = True) -> dict[str, obj
 
 
 def _memory_wins(limit: int = 6, project: str | None = None) -> dict[str, object]:
+    records = _memory_records()
     return _core_memory_wins_payload(
         WIKI_DIR,
         limit=max(1, min(limit, 50)),
         project=project,
-        records=_memory_records(),
+        records=records,
+        # Without the ledger summary the page said retrieval tracking was
+        # off, right above the Last session card built from that ledger.
+        usage=_core_usage_summary(
+            WIKI_DIR.parent, days=30,
+            records=[r for r in records if str(r.get("status") or "active") == "active"],
+        ),
     )
 
 

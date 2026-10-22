@@ -50,7 +50,16 @@ query Link for what you know about this project
 3. Installs or upgrades `link-mcp`, using `~/.link-mcp-venv` when system Python is externally managed.
 4. Writes `.link-mcp-python` so clients can use the Python that actually has `link-mcp`.
 5. Adds a short `lnk` command wrapper for global installs, so checks are short: `lnk health`.
-6. Prints next prompts and verification commands for your install mode.
+6. Calls `lnk connect <agent> --write` to register the MCP server, and for
+   Claude Code, Codex and Cursor adds `--hooks`: the session-start brief and
+   session-end capture, plus on Claude Code the pre-tool and post-tool hooks
+   that check enforced rules and surface memories anchored to the file in
+   hand. (`--project` installs leave global hooks and MCP settings alone.)
+7. Prints next prompts and verification commands for your install mode.
+
+The PowerShell installers (`install.ps1`) do steps 1-5 only: they do not call
+`lnk connect` or install hooks. Run `lnk connect <agent> ~/link --hooks --write`
+after one.
 
 The instruction file is intentionally small. It tells the agent to check
 `status`, call `recall` once at the first substantive turn, use `recall` for

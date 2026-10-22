@@ -95,6 +95,9 @@ query Link for the release process</code></pre>
           <article class="feature"><h3>Explain</h3><p>Show why a memory exists, whether it is recall-ready, and what graph links support it.</p></article>
           <article class="feature"><h3>Re-check</h3><p>Use <code>review_after</code> when a memory should come back to the inbox after a date instead of staying trusted forever.</p></article>
           <article class="feature"><h3>Expire</h3><p>Use <code>expires_at</code> for temporary context that should leave default recall after a date while staying inspectable.</p></article>
+          <article class="feature"><h3>Enforce</h3><p>Give a reviewed memory a rule (<code>ask</code> or <code>deny</code> on a command, read or write) and the session hook checks it before the agent's tool call; only you can turn a rule on.</p></article>
+          <article class="feature"><h3>Check against the repository</h3><p>Memories that name files, scripts, dependencies or code are re-read against the checkout and marked <code>verified</code> or <code>stale</code> in recall; <code>lnk stale</code> lists what moved on.</p></article>
+          <article class="feature"><h3>Compile</h3><p><code>lnk compile</code> writes reviewed memory into the instruction files, rules and skills every agent already reads, and <code>--check</code> fails CI when they drift.</p></article>
         </div>
 
         <h2 id="query">Smart Query Packets</h2>

@@ -94,8 +94,11 @@ lnk backup --include-raw
 lnk doctor --fix</code></pre>
         <p>Run a backup before broad repair work or large generated changes.</p>
 
+        <h2 id="rules">Enforced Rules</h2>
+        <p>A reviewed memory can carry rules that are checked before the agent's tool calls. Because a rule changes what an agent may do, only a person turns one on or off. Over MCP an agent cannot approve, clear, archive or update a memory that carries rules; the viewer activates rules only when the review request repeats the rules it displayed, and never in bulk. The session hook also asks for your OK before an agent runs Link's own review, enforce, archive or forget commands, or edits a memory file directly, so an agent cannot quietly loosen its own constraints.</p>
+
         <h2 id="team">Team Review</h2>
-        <p>For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed <code>wiki/</code> pages can be shared through Git when the team explicitly wants shared memory.</p>
+        <p>For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed <code>wiki/</code> pages can be shared through Git when the team explicitly wants shared memory. Teammates' memories arrive through your own review gate: <code>lnk team-sync</code> imports them as pending, and nothing a teammate wrote is recalled, briefed or compiled for you until you review it.</p>
         <p><a class="button" href="team-security.html">Open the team security checklist</a></p>
 
         <h2 id="share">Before Sharing A Repo Or Wiki</h2>
