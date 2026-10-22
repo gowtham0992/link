@@ -90,6 +90,16 @@ measured in benchmarks/RESULTS.md, losses included.
   reported, never rewritten. On eight public repositories: 604 checkable
   references, 0 false flags, 8 real findings.
 
+- **The viewer shows rules before they act, and the last session.** The
+  review inbox lists a memory's enforced rules under its claim in the words
+  the hook uses (asks / blocks), and the server activates a rule-bearing
+  memory only when the review request repeats the exact rules it showed:
+  a single Review does, bulk review never does, so bulk skips those
+  memories and says so. Captures from sessions that read web or MCP
+  content are marked, a memory's page shows its rules and the code it is
+  anchored to, and /wins gains a "Last session" section mirroring `lnk
+  receipt` (memories given, delivery, rule checks, code reminders). The
+  inbox moves into the primary navigation, since approvals route there.
 - **The site opens with the loop.** A new section plays Link's whole cycle
   in five scenes - say it once, you approve it, every session knows,
   checked against the code, held at the moment of action - using the real
@@ -278,6 +288,12 @@ measured in benchmarks/RESULTS.md, losses included.
 
 ### Fixed
 
+- **LinkBar says when rules are not enforced.** Its Hooks row tells a
+  session-only hook install from one with the rule hooks, and shows "rules
+  not enforced" with the connect command when only the session hook is
+  present; Cursor gets the same row when it has a hooks file. Stale help
+  names scripts and code, the receipt line says "Enforced rules", and the
+  budget note no longer reads like the delivery warning.
 - **A repeated session-end event is recognised.** The duplicate check
   stored the last proposal's fingerprint instead of the session's.
 - **`lnk compile` never rewrites a file it cannot read exactly.** A

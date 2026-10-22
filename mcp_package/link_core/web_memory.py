@@ -163,7 +163,8 @@ def render_memory_card(
         meta_parts.append(f'review after {record["review_after"]}')
     if record.get("expires_at"):
         meta_parts.append(f'expires {record["expires_at"]}')
-    rules = [str(rule) for rule in record.get("enforce") or [] if str(rule).strip()]
+    enforce_value = record.get("enforce")
+    rules = [str(rule) for rule in enforce_value if str(rule).strip()] if isinstance(enforce_value, list) else []
     if rules:
         meta_parts.append(f'{len(rules)} enforced rule{"" if len(rules) == 1 else "s"}')
     meta = " · ".join(part for part in meta_parts if part)
@@ -254,7 +255,8 @@ def render_capture_card(capture: dict[str, object]) -> str:
         )
     # A session that read web pages or MCP tool output can carry their
     # words into a proposal; the person accepting it should know.
-    outside = [str(item) for item in capture.get("untrusted_inputs") or [] if str(item)]
+    untrusted_value = capture.get("untrusted_inputs")
+    outside = [str(item) for item in untrusted_value if str(item)] if isinstance(untrusted_value, list) else []
     if outside:
         sources = "/".join("MCP" if item == "mcp" else item for item in outside)
         warning_html += (

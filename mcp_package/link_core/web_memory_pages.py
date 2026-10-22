@@ -212,7 +212,7 @@ def render_profile_page(
         f'{_counts_line("Types", _mapping(profile.get("by_type")))}'
         f'{_counts_line("Scopes", _mapping(profile.get("by_scope")))}'
         f'{_counts_line("Status", _mapping(profile.get("by_status")))}'
-        f'{_render_empty_profile_actions(project) if not int(profile.get("memory_count") or 0) else ""}'
+        f'{_render_empty_profile_actions(project) if not _count(profile.get("memory_count")) else ""}'
         f'{_profile_section("Recent memories", _dict_list(profile.get("recent")), page_href=page_href)}'
         f'{_profile_section("Preferences", _dict_list(profile.get("preferences")), page_href=page_href)}'
         f'{_profile_section("Decisions", _dict_list(profile.get("decisions")), page_href=page_href)}'
@@ -290,7 +290,7 @@ def render_memory_audit_page(
 
 
 def render_captures_page(inbox: Mapping[str, object], *, layout: PageLayout) -> str:
-    warning_count = int(inbox.get("warning_count") or 0)
+    warning_count = _count(inbox.get("warning_count"))
     stats = render_stat_grid([
         (inbox.get("count", 0), "captures"),
         (warning_count, "warnings"),
@@ -640,7 +640,7 @@ def render_last_session(session: Mapping[str, object], *, page_href: PageHref) -
         return "<h2>Last session</h2><p>No session recorded yet. Start an agent session with Link connected.</p>"
     used = _dict_list(session.get("memories_used"))
     briefs = _dict_list(session.get("briefs"))
-    recalls = int(session.get("recalls") or 0)
+    recalls = _count(session.get("recalls"))
     surfaces = ", ".join({"hook": "session hook", "mcp": "MCP", "cli": "CLI"}.get(str(s), str(s))
                          for s in _list(session.get("surfaces")))
     tokens = session.get("estimated_tokens")
@@ -655,9 +655,9 @@ def render_last_session(session: Mapping[str, object], *, page_href: PageHref) -
     delivery = _mapping(session.get("delivery"))
     if session.get("anything_undelivered"):
         parts = []
-        if int(delivery.get("truncated") or 0):
+        if _count(delivery.get("truncated")):
             parts.append(f"{delivery['truncated']} cut short")
-        if int(delivery.get("missing") or 0):
+        if _count(delivery.get("missing")):
             parts.append(f"{delivery['missing']} never arrived")
         notes.append('<div class="verify-note">The agent did not get all of its memory: '
                      + html.escape(" · ".join(parts) or "see lnk receipt") + "</div>")
@@ -727,6 +727,14 @@ def _counts_line(title: str, counts: Mapping[str, object]) -> str:
 
 def _project_line(project: str) -> str:
     return f"<p><strong>Project:</strong> {html.escape(project)}</p>" if project else ""
+
+
+def _count(value: object) -> int:
+    """A count from a payload field that mypy only knows as object."""
+    try:
+        return int(value) if isinstance(value, (int, float, str)) and str(value).strip() else 0
+    except ValueError:
+        return 0
 
 
 def _mapping(value: object) -> Mapping[str, object]:
