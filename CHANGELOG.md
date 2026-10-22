@@ -476,6 +476,9 @@ measured in benchmarks/RESULTS.md, losses included.
 - Compiled bullets no longer repeat a title the claim already starts with.
 - The landing page's memory card shows a memory as Link writes it: the
   real folder (`wiki/memories/`), the real fields, and an enforce rule.
+  The three replayed terminals under "How it works" are gone; the loop
+  section above them tells the same story with the real artifacts. The
+  hero and the LinkBar copy describe what 5.0 adds.
 
 ### Security
 
