@@ -106,6 +106,24 @@ measured in benchmarks/RESULTS.md, losses included.
   review, clear, archive or update a rule-bearing memory, how to treat the
   brief's "Waiting for the user's OK" list and a `stale_paths` memory, and
   what `lnk receipt` and `lnk compile` are for.
+  The project instruction file now carries the same handoff, session-end
+  and rules paragraphs as the global one.
+- **The docs describe 5.0.** The viewer page covers the inbox: keyboard
+  review, inline edit, rules shown before approval, bulk review that skips
+  rule-bearing memories, outside-content marks, and the Last session card.
+  The architecture page lists the five commitments. The memory contract's
+  receipt section covers delivery, rule checks and code reminders; its
+  write rules say agents never review, clear, archive or update a memory
+  with rules; its agent loop covers the waiting-for-OK block. Getting
+  started and the README say what the Claude Code hooks check before shell
+  and file tool calls, that Cursor checks shell commands, and that
+  `lnk receipt` shows what arrived. Security gains an Enforced Rules
+  section and the team import gate; the team checklist says team-sync
+  exports only `visibility: team`. Concepts adds enforce, repository checks
+  and compile to the memory lifecycle; troubleshooting covers the hook
+  entries and `lnk hook pre-tool`. The installer README says what
+  `lnk connect --write --hooks` adds and that the PowerShell installers do
+  not call it.
 - **The site opens with the loop.** A new section plays Link's whole cycle
   in five scenes - say it once, you approve it, every session knows,
   checked against the code, held at the moment of action - using the real
@@ -447,6 +465,17 @@ measured in benchmarks/RESULTS.md, losses included.
   venv's `lnk` was first on PATH. They now say `lnk`, or name the file that
   is actually running; `lnk connect` and `verify-mcp` print an init command
   that exists on pip installs. Present since 3.0.
+
+- **The viewer's wins page knows the ledger.** It said retrieval
+  tracking was off while showing a Last session card built from that very
+  ledger; the usage summary now reaches the wins payload, as it did on the
+  CLI.
+- Copyable commands on the viewer's dashboard and captures pages use the
+  runtime the viewer was started with (`lnk`, or this checkout's
+  `link.py`) instead of a hard-coded `python3 link.py`.
+- Compiled bullets no longer repeat a title the claim already starts with.
+- The landing page's memory card shows a memory as Link writes it: the
+  real folder (`wiki/memories/`), the real fields, and an enforce rule.
 
 ### Security
 
