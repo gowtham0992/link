@@ -276,6 +276,10 @@ How the answer was derived. Which pages were consulted. What connections were ma
 
 ## Operations
 
+### Enforced rules, approvals and receipts
+
+Some reviewed memories carry **enforce rules**. With Link's tool hooks installed, a tool call that matches one waits for the user's OK or is blocked, and the decision names the memory: follow it, never work around it. Never review, clear, archive, forget or update a memory that carries rules - only the user does that, in `lnk`, the viewer or LinkBar. Add a rule only when the user asks (`lnk enforce <memory> --rule "ask command: ..."`, or MCP `remember(enforce=...)`); it acts after the user reviews the memory. A session brief may end with **Waiting for the user's OK**: show those items at a natural pause and run a listed command only after the user says yes to that item in chat. Recalled memories may carry `verified` or `stale_paths` (checked against the repository): treat a stale one as possibly wrong and say so. `lnk receipt` shows what memory reached each session and whether it arrived whole; `lnk compile` writes reviewed memory into the files agents read; `lnk stale --instructions` checks those files.
+
 ### 1. Remember
 
 When the human says to remember something, capture it as local memory. Prefer the built-in command when `link.py` is available:

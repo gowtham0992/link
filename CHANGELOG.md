@@ -100,6 +100,12 @@ measured in benchmarks/RESULTS.md, losses included.
   anchored to, and /wins gains a "Last session" section mirroring `lnk
   receipt` (memories given, delivery, rule checks, code reminders). The
   inbox moves into the primary navigation, since approvals route there.
+- **The instructions every agent reads cover the new loop.** The installed
+  instruction block, `LINK.md`, the MCP instructions resource and the CLI
+  skills now tell agents what enforce rules do, that only the user may
+  review, clear, archive or update a rule-bearing memory, how to treat the
+  brief's "Waiting for the user's OK" list and a `stale_paths` memory, and
+  what `lnk receipt` and `lnk compile` are for.
 - **The site opens with the loop.** A new section plays Link's whole cycle
   in five scenes - say it once, you approve it, every session knows,
   checked against the code, held at the moment of action - using the real
@@ -439,7 +445,8 @@ measured in benchmarks/RESULTS.md, losses included.
 - **pip installs suggest next steps that run.** The CLI's suggested
   commands named a `link.py` that pip installs do not ship, even when the
   venv's `lnk` was first on PATH. They now say `lnk`, or name the file that
-  is actually running. Present since 3.0.
+  is actually running; `lnk connect` and `verify-mcp` print an init command
+  that exists on pip installs. Present since 3.0.
 
 ### Security
 

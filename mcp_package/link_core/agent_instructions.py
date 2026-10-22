@@ -44,7 +44,7 @@ AGENT_INSTRUCTION_FILES: dict[str, str] = {
 INSTRUCTIONS_TEMPLATE = """\
 ## Link — Local Agent Memory
 
-Local agent memory lives at `~/link/`. It has raw sources in `~/link/raw/`, compiled wiki pages in `~/link/wiki/`, and direct memories in `~/link/wiki/memories/`.
+Local agent memory lives at `~/link/`. It has raw sources in `~/link/raw/`, wiki pages built from them in `~/link/wiki/`, and direct memories in `~/link/wiki/memories/`.
 
 If you are unsure whether Link is ready, use MCP `status` when available, or run `lnk health`.
 
@@ -86,6 +86,8 @@ When a new memory contradicts an existing one, do not force both to coexist: wit
 Recalled memories may carry an `applicability` label: `matched` means the memory's declared conditions fit this context; `out_of_context` means they do not — do not apply that memory here without asking the user. When saving a memory that only applies in specific situations, set scoping conditions (for example `applies_when: "project:acme, task:deploying"`).
 
 After completing a notable multi-step task (a release, a tricky deploy, a recovery), offer to save it as a reusable recipe: propose a `procedure` memory with a short `trigger` phrase describing when it applies, and save it only after the user approves. When starting a recurring task, recall first — approved procedures return with their steps.
+
+Some reviewed memories carry **enforce rules**. With Link's tool hooks installed, a tool call that matches one waits for the user's OK or is blocked, and the decision names the memory: follow it, never work around it. Never review, clear, archive, forget or update a memory that carries rules - only the user does that, in `lnk`, the viewer or LinkBar. Add a rule only when the user asks (`lnk enforce <memory> --rule "ask command: ..."`, or MCP `remember(enforce=...)`); it acts after the user reviews the memory. A session brief may end with **Waiting for the user's OK**: show those items at a natural pause and run a listed command only after the user says yes to that item in chat. Recalled memories may carry `verified` or `stale_paths` (checked against the repository): treat a stale one as possibly wrong and say so. `lnk receipt` shows what memory reached each session and whether it arrived whole; `lnk compile` writes reviewed memory into the files agents read; `lnk stale --instructions` checks those files.
 
 Otherwise, keep working normally after the cheap first recall; do not save durable memory unless the user asks or approves it.
 """

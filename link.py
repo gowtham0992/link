@@ -2316,11 +2316,16 @@ def enforce_memory(
             print(json.dumps(payload, indent=2))
             return 0
         if not suggestions:
-            print(f"No rule to suggest for {record['name']}: it names no command in backticks.")
+            current = [str(rule) for rule in record.get("enforce") or []]
+            if current:
+                print(f"{record['name']} already enforces: " + "; ".join(current))
+            else:
+                print(f"No rule to suggest for {record['name']}: it names no command in backticks.")
             return 0
         print(f"Rules Link can enforce for {record['name']}:")
         for rule in suggestions:
-            print("  " + _display_command(["lnk", "enforce", str(record["name"]), "--rule", rule]))
+            print("  " + _display_command(["lnk", "enforce", str(record["name"]), str(_resolve_link_root(target)),
+                                            "--rule", rule]))
         return 0
     if not clear and not rules:
         print("Give at least one --rule, or --clear, or --suggest.", file=sys.stderr)
@@ -3704,7 +3709,7 @@ def verify_mcp(
     status = _core_build_mcp_verify_status(
         target=target,
         wiki_dir=wiki_dir,
-        init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+        init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
         expected_version=LINK_VERSION,
         python_cmd=python_cmd,
         default_python=sys.executable,
@@ -3787,7 +3792,7 @@ def connect_mcp(
         wiki_dir=wiki_dir,
         agent=agent,
         expected_version=LINK_VERSION,
-        init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+        init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
         python_cmd=python_cmd,
         default_python=sys.executable,
         config_path=config_path,
@@ -4382,7 +4387,7 @@ def onboard(
                 wiki_dir=wiki_dir,
                 agent=agent,
                 expected_version=LINK_VERSION,
-                init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+                init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
                 default_python=sys.executable,
                 write=write,
             )

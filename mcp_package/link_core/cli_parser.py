@@ -298,7 +298,7 @@ def build_cli_parser(
         epilog=(
             "one rule for the knobs: finding it -> --trigger · fencing it -> --applies-when · "
             "owning it -> --scope/--project/--visibility · replacing it -> --supersedes (name or title) · "
-            "aging it -> --review-after/--expires-at. When in doubt, use none; every knob can be added later."
+            "aging it -> --review-after/--expires-at · holding it -> --enforce (a rule checked before the agent's tool calls, after review). When in doubt, use none; every knob can be added later."
         ),
     )
     remember_cmd.add_argument("text", help="memory text to save")
@@ -634,7 +634,7 @@ def build_cli_parser(
     verify_mcp_cmd.add_argument("--python", default=None, help="Python executable to verify")
 
     connect_cmd = sub.add_parser("connect", help="print or write MCP config for a local agent")
-    connect_cmd.add_argument("agent", help="agent to connect: codex, kiro, claude-code, cursor, antigravity, vscode, copilot")
+    connect_cmd.add_argument("agent", help="agent to connect: codex, kiro, claude-code, cursor, antigravity, windsurf, zed, vscode, copilot")
     connect_cmd.add_argument("target", nargs="?", default=".")
     connect_cmd.add_argument("--write", action="store_true", help="update the detected agent config file")
     connect_cmd.add_argument("--config", default=None, help="override the agent config file path")
@@ -642,7 +642,7 @@ def build_cli_parser(
     connect_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also configure session hooks so new sessions start with the Link brief (Claude Code, Codex, Cursor)",
+        help="also install hooks: the session brief at start, proposals at end, and on Claude Code (shell commands on Cursor) enforce rules checked before tool calls and memories surfaced when the agent opens anchored code",
     )
     connect_cmd.add_argument(
         "--hooks-settings",
