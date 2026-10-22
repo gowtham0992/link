@@ -62,6 +62,10 @@ from link_core.memory_log import (
 from link_core.memory_wins import (
     memory_wins_payload as _core_memory_wins_payload,
 )
+from link_core.usage import (
+    load_usage as _core_load_usage,
+    memory_receipts as _core_memory_receipts,
+)
 from link_core.markdown import (
     markdown_to_html as _core_markdown_to_html,
 )
@@ -545,6 +549,16 @@ def _memory_explanation(identifier: str) -> dict[str, object]:
 
 def _memory_profile(limit: int = 10, project: str | None = None) -> dict[str, object]:
     return _core_memory_profile(_memory_records(), limit=limit, review_command="review-memory", project=project)
+
+
+def _enforced_rules_for(identifier: str) -> list[str]:
+    """The enforce rules of the memory an identifier names (by name, title or path)."""
+    wanted = _clean_text_input(identifier, max_len=300)
+    for record in _memory_records():
+        if wanted in {str(record.get("name") or ""), str(record.get("title") or ""), str(record.get("path") or "")}:
+            raw = record.get("enforce")
+            return [str(rule) for rule in raw if str(rule).strip()] if isinstance(raw, list) else []
+    return []
 
 
 def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
@@ -1133,9 +1147,26 @@ def _render_memory_log():
     return _core_render_memory_log_page(_memory_log(limit=100), layout=_layout)
 
 
+def _last_session_receipt() -> dict[str, object]:
+    """The newest session from the retrieval ledger, with memory titles filled in."""
+    receipts = _core_memory_receipts(_core_load_usage(WIKI_DIR.parent), sessions=1)
+    if not receipts:
+        return {}
+    session = receipts[0]
+    titles = {str(r.get("name") or ""): str(r.get("title") or "") for r in _memory_records()}
+    for used in session.get("memories_used") or []:
+        if isinstance(used, dict):
+            name = str(used.get("name") or "")
+            used["title"] = titles.get(name, "")
+            used["exists"] = name in titles
+    return session
+
+
 def _render_memory_wins(project: str | None = None):
+    payload = dict(_memory_wins(limit=8, project=project))
+    payload["last_session"] = _last_session_receipt()
     return _core_render_memory_wins_page(
-        _memory_wins(limit=8, project=project),
+        payload,
         page_href=_page_href,
         layout=_layout,
     )
@@ -1600,6 +1631,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             try:
                 if path == "/api/review-memory":
+                    # Reviewing a memory with enforced rules turns them on for
+                    # the agent's tool calls. The viewer is the one place a
+                    # person does that, and only after seeing the rules: the
+                    # request must repeat the exact rules it displayed. Bulk
+                    # review never sends them, so it can never activate rules.
+                    rules = _enforced_rules_for(identifier)
+                    raw_ack = payload.get("acknowledge_rules")
+                    acknowledged = {str(r) for r in raw_ack} if isinstance(raw_ack, list) else set()
+                    if rules and acknowledged != set(rules):
+                        self._json({
+                            "updated": False,
+                            "error": "this memory carries enforced rules; review it on its own, with its rules "
+                                     "in view, so they are acknowledged before they act on the agent's tool calls",
+                            "rules": rules,
+                        }, status=409)
+                        return
                     result = _mark_memory_reviewed(
                         identifier,
                         note=_clean_text_input(payload.get("note"), max_len=500),

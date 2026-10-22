@@ -116,6 +116,7 @@ def render_header_html() -> str:
     <a href="/onboard">onboard</a>
     <a href="/brief">brief</a>
     <a href="/memory">memory</a>
+    <a href="/inbox">inbox</a>
     <a href="/ingest">ingest</a>
     <a href="/graph">graph</a>
     <a href="/health">health</a>
@@ -125,7 +126,6 @@ def render_header_html() -> str:
         <a href="/prompts">prompts</a>
         <a href="/propose">propose</a>
         <a href="/audit">audit</a>
-        <a href="/inbox">inbox</a>
         <a href="/captures">captures</a>
         <a href="/profile">profile</a>
         <a href="/wins">wins</a>

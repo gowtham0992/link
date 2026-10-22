@@ -857,10 +857,21 @@ INBOX_JS = """
     if (!items().length) { list.insertAdjacentHTML('afterend', '<p>Inbox is clear.</p>'); }
     syncBulk();
   }
+  // The rules a row displays, exactly as rendered; the server activates a
+  // rule-bearing memory only when the request acknowledges those rules.
+  function rulesShown(item) {
+    return Array.prototype.map.call(item.querySelectorAll('[data-inbox-rules] [data-rule]'), function (li) {
+      return li.getAttribute('data-rule');
+    });
+  }
   async function act(item, action) {
     if (!item) return;
     var payload = {memory: item.getAttribute('data-memory')};
     if (action === 'archive') payload.reason = 'archived from the inbox';
+    if (action === 'review') {
+      var rules = rulesShown(item);
+      if (rules.length) payload.acknowledge_rules = rules;
+    }
     say(action === 'review' ? 'Marking reviewed...' : 'Archiving...');
     try {
       await post(endpoints[action], payload);
@@ -911,7 +922,17 @@ INBOX_JS = """
     button.addEventListener('click', async function() {
       var action = button.getAttribute('data-inbox-bulk');
       var chosen = selected();
-      for (var i = 0; i < chosen.length; i++) { await act(chosen[i], action); }
+      var skipped = 0;
+      for (var i = 0; i < chosen.length; i++) {
+        // Bulk review never activates rules: those memories are reviewed one
+        // at a time, with their rules in view. (The server refuses them too.)
+        if (action === 'review' && rulesShown(chosen[i]).length) { skipped += 1; continue; }
+        await act(chosen[i], action);
+      }
+      if (skipped) {
+        say(skipped + ' selected memor' + (skipped === 1 ? 'y carries' : 'ies carry') +
+            ' enforced rules; review them one at a time.');
+      }
     });
   });
   list.addEventListener('change', function(event) {

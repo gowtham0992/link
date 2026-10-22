@@ -163,6 +163,9 @@ def render_memory_card(
         meta_parts.append(f'review after {record["review_after"]}')
     if record.get("expires_at"):
         meta_parts.append(f'expires {record["expires_at"]}')
+    rules = [str(rule) for rule in record.get("enforce") or [] if str(rule).strip()]
+    if rules:
+        meta_parts.append(f'{len(rules)} enforced rule{"" if len(rules) == 1 else "s"}')
     meta = " · ".join(part for part in meta_parts if part)
     issues_html = ""
     if include_issues and record.get("issues"):
@@ -248,6 +251,15 @@ def render_capture_card(capture: dict[str, object]) -> str:
             '<p class="summary"><strong>Secret-looking values:</strong> '
             + html.escape(", ".join(warnings))
             + "</p>"
+        )
+    # A session that read web pages or MCP tool output can carry their
+    # words into a proposal; the person accepting it should know.
+    outside = [str(item) for item in capture.get("untrusted_inputs") or [] if str(item)]
+    if outside:
+        sources = "/".join("MCP" if item == "mcp" else item for item in outside)
+        warning_html += (
+            f'<div class="verify-note" data-untrusted-inputs>Session read {html.escape(sources)} content '
+            '- check these are your words before accepting.</div>'
         )
 
     # What Accept will save, and how Link decided — the pipeline made reviewable.

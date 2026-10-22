@@ -272,7 +272,7 @@ struct PopoverView: View {
                             .background(store.memoryFilterStale ? AnyShapeStyle(LinkBrand.amber) : AnyShapeStyle(LinkBrand.amber.opacity(0.14)), in: Capsule())
                         }
                         .buttonStyle(.plain)
-                        .help("Memories that name files \(stale.repoName) no longer has")
+                        .help("Memories that name files, scripts or code \(stale.repoName) no longer has")
                     }
                     ForEach(["preference", "decision", "note", "project", "procedure", "fact"], id: \.self) { t in
                         filterChip(t, t)
@@ -924,14 +924,14 @@ struct PopoverView: View {
                               "`lnk receipt` lists which brief or reminder was affected.")
                 }
                 if let rules = session.ruleChecks, let label = session.ruleCheckLabel {
-                    Label("Rules: \(label)", systemImage: "hand.raised")
+                    Label("Enforced rules: \(label)", systemImage: "hand.raised")
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
                         .padding(.top, 1)
-                        .help("Enforced rules checked the agent's tool calls \(rules.count) time(s) last session")
+                        .help("Enforced rules (lnk enforce) checked the agent's tool calls \(rules.count) time(s) last session")
                 }
                 if session.anythingTruncated == true {
-                    Label("A budget cut some context", systemImage: "scissors")
+                    Label("A size budget left some memories out", systemImage: "scissors")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(LinkBrand.amber)
                         .padding(.horizontal, 6)

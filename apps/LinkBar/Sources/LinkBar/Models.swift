@@ -535,7 +535,7 @@ struct HandoffsPayload: Decodable {
     let handoffs: [Handoff]
 }
 
-/// `lnk receipt --json` (Link 4.0): what each recent session's agent was
+/// `lnk receipt --json` (Link 5.0): what each recent session's agent was
 /// actually given - briefs, recalls, the memories in them, and whether a
 /// budget cut anything. Older CLIs lack the command; the card then hides.
 struct MemoryReceipt: Decodable {

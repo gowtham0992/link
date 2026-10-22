@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import html
 import urllib.parse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 from .web_ingest import copy_button
 from .web_layout import render_stat_grid
@@ -432,6 +432,7 @@ def render_memory_wins_page(
         f'{render_stat_grid([(wins_payload.get("active_count", 0), "active"), (wins_payload.get("reviewed_active_count", 0), "reviewed"), (wins_payload.get("review_count", 0), "review"), (wins_payload.get("project_count", 0), "projects")])}'
         f'<p>{html.escape(str(wins_payload.get("honest_note") or ""))}</p>'
         f'<section class="memory-grid">{win_cards}</section>'
+        f'{render_last_session(_mapping(wins_payload.get("last_session")), page_href=page_href)}'
         f'{recent_html}'
         '<h2>Try the value loop</h2>'
         f'<ul class="memory-issues">{prompts}</ul>'
@@ -558,9 +559,37 @@ def _render_memory_win_card(win: Mapping[str, object]) -> str:
     )
 
 
+def _rule_parts(rule: str) -> tuple[str, str]:
+    """("asks" | "blocks", "command: git push --force*") for one enforce rule."""
+    action, _, rest = str(rule).strip().partition(" ")
+    return ("blocks" if action.lower() == "deny" else "asks"), rest.strip()
+
+
+def render_rules(rules: Iterable[object]) -> str:
+    """The enforced rules a memory carries, shown before anyone activates them.
+
+    Reviewing a memory with rules turns them on for the agent's tool calls,
+    so the rules are listed where the Review button is, in the words the
+    hook will use: asks (the agent must get the user's OK) or blocks.
+    """
+    items = "".join(
+        f'<li data-rule="{html.escape(str(rule), quote=True)}">'
+        f'<span class="severity">{_rule_parts(str(rule))[0]}</span> '
+        f'<code>{html.escape(_rule_parts(str(rule))[1])}</code></li>'
+        for rule in rules if str(rule).strip()
+    )
+    if not items:
+        return ""
+    return (
+        '<p class="summary"><strong>Enforced rules</strong> (active once reviewed):</p>'
+        f'<ul class="memory-issues memory-rules" data-inbox-rules>{items}</ul>'
+    )
+
+
 def _render_inbox_item(item: Mapping[str, object], *, page_href: PageHref) -> str:
     name = str(item.get("name") or "")
     summary = item.get("tldr") or item.get("snippet") or ""
+    rules_html = render_rules(_list(item.get("enforce")))
     meta = f'{item.get("memory_type", "")} · {item.get("scope", "")} · {item.get("status", "")}'
     issues = "".join(
         f'<li><span class="severity">{html.escape(str(issue.get("severity") or ""))}</span> '
@@ -597,10 +626,69 @@ def _render_inbox_item(item: Mapping[str, object], *, page_href: PageHref) -> st
         f'<div class="memory-meta">{html.escape(meta)}</div>'
         f'<div class="memory-meta"><a href="/explain-memory?memory={urllib.parse.quote(name, safe="")}">explain</a></div>'
         f'{f"<small>{html.escape(str(summary))}</small>" if summary else ""}'
+        f'{rules_html}'
         f'<ul class="memory-issues">{issues}</ul>'
         f'{primary_html}'
         f'{edit_html}'
         f'{render_memory_action_commands(_dict_list(item.get("actions")))}</li>'
+    )
+
+
+def render_last_session(session: Mapping[str, object], *, page_href: PageHref) -> str:
+    """What the last session's agent was given (the `lnk receipt` card, for the viewer)."""
+    if not session:
+        return "<h2>Last session</h2><p>No session recorded yet. Start an agent session with Link connected.</p>"
+    used = _dict_list(session.get("memories_used"))
+    briefs = _dict_list(session.get("briefs"))
+    recalls = int(session.get("recalls") or 0)
+    surfaces = ", ".join({"hook": "session hook", "mcp": "MCP", "cli": "CLI"}.get(str(s), str(s))
+                         for s in _list(session.get("surfaces")))
+    tokens = session.get("estimated_tokens")
+    facts = [f"{len(used)} memor{'y' if len(used) == 1 else 'ies'} given", f"{recalls} recall{'' if recalls == 1 else 's'}"]
+    if briefs:
+        facts.append(f"{len(briefs)} brief{'' if len(briefs) == 1 else 's'}")
+    if surfaces:
+        facts.append(f"via {surfaces}")
+    if isinstance(tokens, int) and tokens > 0:
+        facts.append(f"about {tokens:,} tokens")
+    notes: list[str] = []
+    delivery = _mapping(session.get("delivery"))
+    if session.get("anything_undelivered"):
+        parts = []
+        if int(delivery.get("truncated") or 0):
+            parts.append(f"{delivery['truncated']} cut short")
+        if int(delivery.get("missing") or 0):
+            parts.append(f"{delivery['missing']} never arrived")
+        notes.append('<div class="verify-note">The agent did not get all of its memory: '
+                     + html.escape(" · ".join(parts) or "see lnk receipt") + "</div>")
+    checks = _dict_list(session.get("rule_checks"))
+    if checks:
+        asked = sum(1 for c in checks if str(c.get("decision")) == "ask")
+        blocked = sum(1 for c in checks if str(c.get("decision")) == "deny")
+        parts = [p for p in (f"{asked} asked for your OK" if asked else "", f"{blocked} blocked" if blocked else "") if p]
+        notes.append(f'<p class="summary"><strong>Enforced rules:</strong> {html.escape(" · ".join(parts))}</p>')
+    reminders = _dict_list(session.get("code_reminders"))
+    if reminders:
+        notes.append(f'<p class="summary"><strong>Code reminders:</strong> {len(reminders)} '
+                     f'(memories surfaced when the agent touched the code they describe)</p>')
+    if session.get("anything_truncated"):
+        notes.append('<p class="summary">A size budget left some memories out of a brief or recall.</p>')
+    rows = "".join(
+        (f'<li><a href="{html.escape(page_href(str(m.get("name") or "")), quote=True)}">'
+         f'{html.escape(str(m.get("title") or m.get("name") or ""))}</a>'
+         if m.get("exists", True) else f'<li><s>{html.escape(str(m.get("title") or m.get("name") or ""))}</s>')
+        + (f' <span class="memory-meta">×{int(m.get("times") or 1)}</span>' if int(m.get("times") or 1) > 1 else "")
+        + "</li>"
+        for m in used
+    )
+    return (
+        "<h2>Last session</h2>"
+        f'<p class="summary">{html.escape(" · ".join(facts))}'
+        + (f' <span class="memory-meta">ended {html.escape(str(session.get("ended") or ""))}</span>' if session.get("ended") else "")
+        + "</p>"
+        + "".join(notes)
+        + (f'<ul class="page-list">{rows}</ul>' if rows else "")
+        + '<p class="memory-meta">From the local retrieval ledger (<code>lnk receipt</code>); it never records what you asked.</p>'
     )
 
 

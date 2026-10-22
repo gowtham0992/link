@@ -36,7 +36,13 @@ final class LinkStore: ObservableObject {
     // Status dashboard: the health of every Link surface.
     @Published var mcp: MCPVerify?
     @Published var semantic: SemanticStatus?
-    @Published var claudeHooksWired: Bool?
+    /// Which of Link's hooks an agent has: none, the session hooks only
+    /// (a 4.x install), or session plus the pre-tool hook that enforces
+    /// rules and surfaces code reminders.
+    enum HookState { case none, sessionOnly, full }
+    @Published var claudeHooksWired: HookState?
+    /// Cursor's hooks, when Cursor is installed (its hooks.json exists).
+    @Published var cursorHooksWired: HookState?
     @Published var viewerRunning = false
     @Published var activeSessions: [AgentSession] = []
     @Published var memories: [MemoryPage] = []
@@ -254,7 +260,8 @@ final class LinkStore: ObservableObject {
     private struct HealthSnapshot {
         var mcp: MCPVerify?
         var semantic: SemanticStatus?
-        var hooks: Bool
+        var hooks: HookState
+        var cursorHooks: HookState?
         var viewer: Bool
         var digest: DigestPayload?
         var sync: SyncStatus?
@@ -272,9 +279,10 @@ final class LinkStore: ObservableObject {
         async let sync = fetch(SyncStatus.self, ["sync", workspace, "--status", "--json"])
         async let stale = fetchStale(workspace, repo: staleRepo)
         let hooks = claudeHooksAreWired()
+        let cursorHooks = cursorHooksState()
         let viewer = await viewerResponds()
-        return await HealthSnapshot(mcp: mcp, semantic: semantic, hooks: hooks, viewer: viewer,
-                                    digest: digest, sync: sync, stale: stale)
+        return await HealthSnapshot(mcp: mcp, semantic: semantic, hooks: hooks, cursorHooks: cursorHooks,
+                                    viewer: viewer, digest: digest, sync: sync, stale: stale)
     }
 
     nonisolated private static func fetchStale(_ workspace: String, repo: String?) async -> StaleReport? {
@@ -299,6 +307,7 @@ final class LinkStore: ObservableObject {
         staleFailed = probeFailed && !staleUnsupported && snapshot.semantic != nil
         if let digest = snapshot.digest { NotificationManager.shared.announceWeeklyDigest(digest) }
         claudeHooksWired = snapshot.hooks
+        cursorHooksWired = snapshot.cursorHooks
         viewerRunning = snapshot.viewer
         lastHealthAt = Date()
     }
@@ -398,10 +407,21 @@ final class LinkStore: ObservableObject {
     /// Read Claude Code's settings.json directly to see whether Link's
     /// session hooks are wired (the flagship agent; other agents live in
     /// their own configs and are added as the dashboard grows).
-    nonisolated private static func claudeHooksAreWired() -> Bool {
+    nonisolated private static func claudeHooksAreWired() -> HookState {
         let path = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/settings.json")
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return false }
-        return text.contains("SessionStart") && text.contains("hook session-start")
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return .none }
+        guard text.contains("SessionStart") && text.contains("hook session-start") else { return .none }
+        // 5.0: enforced rules and code reminders run from the pre-tool hook.
+        // A session-only install looks wired while the rules do nothing.
+        return text.contains("PreToolUse") && text.contains("hook pre-tool") ? .full : .sessionOnly
+    }
+
+    /// Cursor keeps a flat hooks.json; nil when Cursor has no hooks file at all.
+    nonisolated private static func cursorHooksState() -> HookState? {
+        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".cursor/hooks.json")
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        guard text.contains("hook session-start") else { return HookState.none }
+        return text.contains("beforeShellExecution") && text.contains("hook pre-tool") ? .full : .sessionOnly
     }
 
     /// The live dashboard rows, most-critical surfaces first.
@@ -464,17 +484,34 @@ final class LinkStore: ObservableObject {
             rows.append(.init(icon: "point.3.connected.trianglepath.dotted", name: "MCP", level: .info, detail: "checking…"))
         }
 
-        // Hooks (Claude Code)
+        // Hooks (Claude Code, and Cursor when it has a hooks file)
         switch claudeHooksWired {
-        case .some(true):
+        case .some(.full):
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .ok,
-                              detail: "Claude Code: session capture wired"))
-        case .some(false):
+                              detail: "Claude Code: session + rule hooks wired"))
+        case .some(.sessionOnly):
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .warn,
-                              detail: "Claude Code: not wired — no automatic capture",
+                              detail: "Claude Code: rules not enforced — run lnk connect claude-code --hooks --write",
+                              fix: .init(label: "Wire") { [weak self] in self?.wireClaudeHooks() }))
+        case .some(.none):
+            rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .warn,
+                              detail: "Claude Code: not wired — no automatic capture, no enforced rules",
                               fix: .init(label: "Wire") { [weak self] in self?.wireClaudeHooks() }))
         case .none:
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .info, detail: "checking…"))
+        }
+        switch cursorHooksWired {
+        case .some(.full):
+            rows.append(.init(icon: "bolt.horizontal", name: "Cursor hooks", level: .ok,
+                              detail: "session + rule hooks wired"))
+        case .some(.sessionOnly):
+            rows.append(.init(icon: "bolt.horizontal", name: "Cursor hooks", level: .warn,
+                              detail: "rules not enforced — run lnk connect cursor --hooks --write"))
+        case .some(.none):
+            rows.append(.init(icon: "bolt.horizontal", name: "Cursor hooks", level: .warn,
+                              detail: "not wired — run lnk connect cursor --hooks --write"))
+        case .none:
+            break
         }
 
         // Stale references — memories that name files the repo no longer has.
@@ -870,10 +907,12 @@ final class LinkStore: ObservableObject {
             await MainActor.run {
                 self.busy = false
                 self.claudeHooksWired = wired
-                self.showFlash(wired
-                    ? "Hooks wired — new sessions capture automatically."
+                self.showFlash(wired == .full
+                    ? "Hooks wired — new sessions capture automatically and reviewed rules apply."
+                    : wired == .sessionOnly
+                    ? "Session hooks wired, but not the rule hook — update Link and run lnk connect claude-code --hooks --write."
                     : "Couldn't wire hooks" + (reason.map { ": \($0)" } ?? " — check Claude Code settings."),
-                    tone: wired ? .success : .info)
+                    tone: wired == .full ? .success : .info)
                 self.refreshHealth()
             }
         }

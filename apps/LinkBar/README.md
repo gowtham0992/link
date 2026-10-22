@@ -9,10 +9,11 @@ instead of a chore.
 - Quick recall ("What do I know about…") with honest abstention — when the
   memory has nothing reliable, it says so
 - Status dashboard: every Link surface's health, including memories that
-  name files your repository no longer has (`lnk stale`, Link 3.0+)
+  name files, scripts or code your repository no longer has (`lnk stale`,
+  Link 3.0+)
 - Last session: what your agent was actually given (memories, how often,
   roughly how many tokens, and whether a budget cut anything), from
-  `lnk receipt` (Link 4.0+). Click a memory to see why Link believes it
+  `lnk receipt` (Link 5.0+). Click a memory to see why Link believes it
 - Approvals in the menu bar: memories that carry enforced rules show the
   rules themselves (what they ask about or block) next to Approve, and a
   notification with an Approve button arrives when one is waiting. Captures

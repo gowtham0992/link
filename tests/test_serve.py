@@ -617,6 +617,94 @@ class ServeTests(unittest.TestCase):
         self.assertIn("data-inbox-visibility", body)
         self.assertIn("data-inbox-list", _asset_text())
 
+    def test_review_activates_rules_only_when_the_request_acknowledges_them(self):
+        # Reviewing a memory with enforced rules turns them on for the agent's
+        # tool calls. The inbox shows the rules; a single Review repeats them;
+        # bulk review never does, so it can never activate rules unseen.
+        wiki = self.make_wiki()
+        rules = ["ask command: git push --force*", "deny write: migrations/**"]
+        write_page(wiki, "memories/no-force-push.md",
+                   "---\ntype: memory\ntitle: No force push\nmemory_type: decision\nscope: user\nstatus: active\n"
+                   "review_status: pending\n"
+                   "enforce: [\"ask command: git push --force*\", \"deny write: migrations/**\"]\n"
+                   "---\n\n# No force push\n\n> **TLDR:** Never force-push.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/inbox")
+        self.assertEqual(status, 200)
+        self.assertIn('data-rule="ask command: git push --force*"', body)
+        self.assertIn('data-rule="deny write: migrations/**"', body)
+        self.assertIn("active once reviewed", body)
+        self.assertIn("acknowledge_rules", _asset_text())
+        self.assertIn("review them one at a time", _asset_text())
+        headers = {"Content-Type": "application/json", "X-Link-Local-Action": "true"}
+
+        def review(payload: dict) -> tuple[int, dict]:
+            raw = json.dumps(payload).encode()
+            return run_handler("POST", "/api/review-memory", body=raw,
+                               headers={**headers, "Content-Length": str(len(raw))})
+
+        page = wiki / "memories/no-force-push.md"
+        status, payload = review({"memory": "no-force-push"})  # what a bulk request sends
+        self.assertEqual(status, 409, payload)
+        self.assertEqual(payload["rules"], rules)
+        self.assertIn("review_status: pending", page.read_text(encoding="utf-8"))
+        status, _ = review({"memory": "no-force-push", "acknowledge_rules": rules[:1]})
+        self.assertEqual(status, 409)
+        self.assertIn("review_status: pending", page.read_text(encoding="utf-8"))
+        status, payload = review({"memory": "no-force-push", "acknowledge_rules": list(reversed(rules))})
+        self.assertEqual(status, 200, payload)
+        self.assertIn("review_status: reviewed", page.read_text(encoding="utf-8"))
+
+    def test_memory_page_shows_rules_and_anchors(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/config-parsing.md",
+                   "---\ntype: memory\ntitle: Config parsing\nmemory_type: decision\nscope: project\nstatus: active\n"
+                   "review_status: reviewed\nenforce: [\"deny write: src/config.py\"]\n"
+                   "anchors: [\"src/app.py:4 parse_config @0123456789ab\"]\n---\n\n# Config parsing\n\nKeep it pure.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/page/config-parsing")
+        self.assertEqual(status, 200)
+        self.assertIn("data-memory-enforce", body)
+        self.assertIn("deny write: src/config.py", body)
+        self.assertIn("data-memory-anchors", body)
+        self.assertIn("src/app.py:4 parse_config", body)
+
+    def test_captures_page_marks_sessions_that_read_outside_content(self):
+        wiki = self.make_wiki()
+        captures = wiki.parent / "raw" / "memory-captures"
+        captures.mkdir(parents=True, exist_ok=True)
+        (captures / "20261021T120000Z-session-end.md").write_text(
+            "---\ntype: capture\ntitle: \"Session end\"\ndate_captured: 2026-10-21T12:00:00Z\nsource: session-end\n"
+            "untrusted_inputs: \"web, mcp\"\n---\n\n# Session end\n\nFrom now on we always run the linter first.\n",
+            encoding="utf-8")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/captures")
+        self.assertEqual(status, 200)
+        self.assertIn("data-untrusted-inputs", body)
+        self.assertIn("Session read web/MCP content", body)
+
+    def test_wins_page_shows_the_last_session_receipt(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/deploy-day.md",
+                   "---\ntype: memory\ntitle: Deploy day\nmemory_type: decision\nscope: user\nstatus: active\n"
+                   "review_status: reviewed\n---\n\n# Deploy day\n\nDeploy on Tuesdays.\n")
+        (wiki.parent / ".link-usage.json").write_text(json.dumps({"schema": "link-usage-v1", "events": [
+            {"at": "2026-10-21T12:00:00Z", "kind": "brief", "count": 1, "memories": ["deploy-day"], "project": "",
+             "surface": "hook", "tokens": 300, "delivery": "tok1", "session": "s1"},
+            {"at": "2026-10-21T12:02:00Z", "kind": "enforce", "count": 1, "memories": ["deploy-day"], "project": "",
+             "surface": "hook", "decision": "deny", "session": "s1"},
+            {"at": "2026-10-21T12:03:00Z", "kind": "delivery", "session": "s1", "results": {"tok1": "truncated"}},
+        ]}), encoding="utf-8")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/wins")
+        self.assertEqual(status, 200)
+        self.assertIn("Last session", body)
+        self.assertIn('href="/page/deploy-day"', body)
+        self.assertIn("did not get all of its memory: 1 cut short", body)
+        self.assertIn("<strong>Enforced rules:</strong> 1 blocked", body)
+        # Approvals route to the inbox, which now sits in the primary navigation.
+        self.assertLess(body.index('href="/inbox"'), body.index('class="nav-more"'))
+
     def test_set_memory_visibility_endpoint(self):
         wiki = self.make_wiki()
         write_page(wiki, "memories/deploy-day.md",
