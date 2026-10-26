@@ -6,6 +6,14 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Fixed
+
+- LinkBar builds without warnings: the two hook-state switches spelt the
+  "still checking" case as `.none`, which Swift read as the Optional's nil
+  (the intended meaning) while warning it could mean `HookState.none`.
+
 ## [5.0.0] - 2026-10-25
 
 Memory that checks itself against the code, and holds at the moment the

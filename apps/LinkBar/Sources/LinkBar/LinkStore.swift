@@ -497,7 +497,7 @@ final class LinkStore: ObservableObject {
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .warn,
                               detail: "Claude Code: not wired — no automatic capture, no enforced rules",
                               fix: .init(label: "Wire") { [weak self] in self?.wireClaudeHooks() }))
-        case .none:
+        case nil:
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .info, detail: "checking…"))
         }
         switch cursorHooksWired {
@@ -510,7 +510,7 @@ final class LinkStore: ObservableObject {
         case .some(.none):
             rows.append(.init(icon: "bolt.horizontal", name: "Cursor hooks", level: .warn,
                               detail: "not wired — run lnk connect cursor --hooks --write"))
-        case .none:
+        case nil:
             break
         }
 
