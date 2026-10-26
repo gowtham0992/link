@@ -164,15 +164,19 @@ def index_entry(page: str, label: str, content: str) -> dict[str, object]:
     }
 
 
-def _content_hash(path: Path) -> str:
-    # Hash the text, not the bytes: a Windows checkout rewrites line endings,
-    # and the version must not change with the machine that stamped it.
+def _content_hash(path: Path, *, text: bool) -> str:
+    # Hash text by its lines, not its bytes: a Windows checkout rewrites line
+    # endings, and the version must not change with the machine that stamped
+    # it. Binaries are hashed as they are.
     import hashlib
-    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:10]
+    data = path.read_bytes()
+    if text:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()[:10]
 
 
 def asset_versions() -> dict[str, str]:
-    return {name: _content_hash(DOCS / name) for name in VERSIONED_ASSETS}
+    return {name: _content_hash(DOCS / name, text=True) for name in VERSIONED_ASSETS}
 
 
 def version_assets(content: str, versions: dict[str, str]) -> str:
@@ -214,7 +218,7 @@ LANDING_GIF_RE = re.compile(r'(assets\\u002F' + re.escape(LANDING_GIF) + r')(?:\
 
 def landing_with_versioned_gif() -> str:
     content = LANDING.read_text(encoding="utf-8")
-    digest = _content_hash(DOCS / "assets" / LANDING_GIF)
+    digest = _content_hash(DOCS / "assets" / LANDING_GIF, text=False)
     return LANDING_GIF_RE.sub(lambda m: f"{m.group(1)}?v={digest}", content)
 
 
