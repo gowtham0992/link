@@ -105,7 +105,13 @@ class QueryCoreTests(unittest.TestCase):
         self.assertEqual(payload["wiki"]["search_results"][0]["provenance"]["path"], "wiki/concepts/agent-memory.md")
         self.assertLessEqual(len(payload["context_packet"]), 4)
         self.assertIn("why_selected", payload["context_packet"][0])
-        self.assertIn("provenance", payload["context_packet"][0])
+        # The ranked list points at its content; provenance travels with the
+        # content, once, in the section it names.
+        first = payload["context_packet"][0]
+        section = payload["wiki"]["pages"] if first["see"] == "wiki.pages" else payload["memory"]["items"]
+        target = next(item for item in section if item["name"] == first["name"])
+        self.assertIn("provenance", target)
+        self.assertNotIn("text", first)
         self.assertIn("recall_capsule", payload)
         self.assertGreater(payload["recall_capsule"]["estimated_tokens"], 0)
         self.assertIn("hybrid", payload["recall_capsule"]["ranking"])
@@ -115,7 +121,8 @@ class QueryCoreTests(unittest.TestCase):
         self.assertGreater(payload["budget_report"]["context_packet"]["estimated_chars"], 0)
         self.assertGreater(payload["budget_report"]["context_packet"]["estimated_tokens"], 0)
         self.assertEqual(payload["follow_up"][0]["tool"], "admin")
-        self.assertEqual(payload["follow_up"][0]["arguments"], {"action": "context", "topic": "agent-memory"})
+        self.assertEqual(payload["follow_up"][0]["arguments"]["action"], "context")
+        self.assertEqual(json.loads(payload["follow_up"][0]["arguments"]["arguments"]), {"topic": "agent-memory"})
 
     def test_query_link_flags_weak_only_memory_matches(self):
         root = Path(tempfile.mkdtemp(prefix="link-query-weak-"))
@@ -198,9 +205,11 @@ class QueryCoreTests(unittest.TestCase):
         )
         (wiki / "_backlinks.json").write_text(json.dumps(build_backlinks(wiki)), encoding="utf-8")
 
+        # "oauth setup", not "auth setup": "auth" used to match inside
+        # "oauth" by substring, which is also how "main" matched "domain".
         payload = query_link(
             wiki,
-            "auth setup",
+            "oauth setup",
             build_wiki_cache(wiki),
             memory_records(wiki),
             budget="micro",
@@ -307,7 +316,8 @@ class QueryCoreTests(unittest.TestCase):
             )
         )
         self.assertEqual(payload["follow_up"][0]["tool"], "admin")
-        self.assertEqual(payload["follow_up"][0]["arguments"], {"action": "context", "topic": "agent-memory-0"})
+        self.assertEqual(payload["follow_up"][0]["arguments"]["action"], "context")
+        self.assertEqual(json.loads(payload["follow_up"][0]["arguments"]["arguments"]), {"topic": "agent-memory-0"})
 
 
 if __name__ == "__main__":

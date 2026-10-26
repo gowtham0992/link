@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import socketserver
 import tempfile
@@ -47,6 +48,48 @@ def write_page(wiki_dir: Path, rel: str, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _run_html_with_headers(path: str):
+    handler = object.__new__(serve.Handler)
+    handler.command = "GET"
+    handler.path = path
+    handler.request_version = "HTTP/1.1"
+    handler.requestline = f"GET {path} HTTP/1.1"
+    handler.client_address = ("127.0.0.1", 0)
+    handler.server = None
+    handler.headers = {"Host": "127.0.0.1"}
+    handler.rfile = BytesIO(b"")
+    handler.wfile = BytesIO()
+    handler.do_GET()
+    header_bytes, _, body_bytes = handler.wfile.getvalue().partition(b"\r\n\r\n")
+    lines = header_bytes.decode("latin-1").splitlines()
+    headers = {k.strip(): v.strip() for k, _, v in (line.partition(":") for line in lines[1:]) if k}
+    return int(lines[0].split()[1]), body_bytes.decode("utf-8", errors="replace"), headers
+
+
+def _asset_text() -> str:
+    """The viewer's CSS and JS, which are served as files, not inlined."""
+    return "".join(text for text, _ in serve._core_viewer_assets().values())
+
+
+def run_handler_text(method: str, path: str, headers: dict[str, str] | None = None):
+    """GET an HTML route; returns (status, decoded body)."""
+    handler = object.__new__(serve.Handler)
+    handler.command = method
+    handler.path = path
+    handler.request_version = "HTTP/1.1"
+    handler.requestline = f"{method} {path} HTTP/1.1"
+    handler.client_address = ("127.0.0.1", 0)
+    handler.server = None
+    handler.headers = {"Host": "127.0.0.1", **(headers or {})}
+    handler.rfile = BytesIO(b"")
+    handler.wfile = BytesIO()
+    handler.do_GET()
+    raw = handler.wfile.getvalue()
+    header_bytes, _, body_bytes = raw.partition(b"\r\n\r\n")
+    status = int(header_bytes.splitlines()[0].decode("ascii").split()[1])
+    return status, body_bytes.decode("utf-8", errors="replace")
 
 
 def run_handler(method: str, path: str, body: bytes = b"", headers: dict[str, str] | None = None):
@@ -166,7 +209,7 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(serve._plural_type_label("memory"), "memories")
 
     def test_layout_handles_search_enter_key(self):
-        html = serve._layout("Test", "<p>Body</p>")
+        html = serve._layout("Test", "<p>Body</p>") + _asset_text()
 
         self.assertIn("document.activeElement.id === 'search-input'", html)
         self.assertIn("window.location.href = '/search?q=' + encodeURIComponent(q);", html)
@@ -483,6 +526,221 @@ class ServeTests(unittest.TestCase):
         self.assertEqual(second_payload["error"], "local mutation rate limit exceeded")
         self.assertGreaterEqual(second_payload["retry_after_seconds"], 1)
         self.assertEqual(second_headers["Retry-After"], str(second_payload["retry_after_seconds"]))
+
+    def test_blind_cross_origin_posts_cannot_lock_the_viewer(self):
+        self.make_wiki()
+        serve._mutation_rate_limiter = serve._CoreLocalRateLimiter(max_events=5, window_seconds=60)
+        # A hostile page can send simple form posts (no preflight). None of
+        # them carry the local-action header, so none may count.
+        for _ in range(20):
+            run_handler("POST", "/api/nothing", body=b"x=1",
+                        headers={"Content-Type": "application/x-www-form-urlencoded", "Content-Length": "3"})
+            run_handler("POST", "/api/archive-memory", body=b"x=1",
+                        headers={"Content-Type": "application/x-www-form-urlencoded", "Content-Length": "3"})
+        status, payload = run_handler("POST", "/api/rebuild-backlinks", body=b"{}", headers={
+            "Content-Type": "application/json", "Content-Length": "2", "X-Link-Local-Action": "true"})
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload["rebuilt"])
+
+    def test_home_sections_are_capped_with_a_view_all_link(self):
+        wiki = self.make_wiki()
+        for i in range(30):
+            write_page(wiki, f"concepts/concept-{i:02d}.md", f"---\ntitle: Concept {i:02d}\ntype: concept\n---\n\n# Concept {i:02d}\n\nBody.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertLessEqual(body.count("Concept "), 12 + 8)  # section cap plus the recent-pages strip
+        self.assertIn("View all 30 concepts", body)
+        status, listing = run_handler_text("GET", "/all?type=concepts&limit=250")
+        self.assertEqual(status, 200)
+        self.assertIn("Concept 29", listing)
+
+    def test_api_pages_is_capped_and_reports_the_total(self):
+        wiki = self.make_wiki()
+        for i in range(12):
+            write_page(wiki, f"concepts/c{i}.md", f"---\ntitle: C{i}\n---\n\n# C{i}\n")
+        reset_wiki(wiki)
+        status, payload, headers = run_handler_with_headers("GET", "/api/pages?limit=5")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(payload), 5)
+        self.assertEqual(headers["X-Link-Truncated"], "true")
+        self.assertGreaterEqual(int(headers["X-Total-Count"]), 12)
+
+    def test_html_has_no_inline_script_without_a_nonce_and_a_strict_csp(self):
+        self.make_wiki()
+        status, body, headers = _run_html_with_headers("/graph")
+        self.assertEqual(status, 200)
+        policy = headers["Content-Security-Policy"]
+        self.assertNotIn("unsafe-inline", policy)
+        nonce = re.search(r"'nonce-([^']+)'", policy).group(1)
+        for tag in re.findall(r"<script\b[^>]*>", body):
+            self.assertTrue("src=" in tag or f'nonce="{nonce}"' in tag, tag)
+        self.assertNotIn("__LINK_CSP_NONCE__", body)
+        self.assertNotIn(' style="', body)
+        # A second response gets a different nonce.
+        _, _, again = _run_html_with_headers("/graph")
+        self.assertNotEqual(again["Content-Security-Policy"], policy)
+
+    def test_page_content_can_never_borrow_the_response_nonce(self):
+        # The nonce used to be filled in by rewriting a placeholder anywhere
+        # in the page, so markup that contained the placeholder text got a
+        # live nonce. Now only the graph script is handed one.
+        wiki = self.make_wiki()
+        write_page(wiki, "concepts/bait.md",
+                   '---\ntype: concept\ntitle: Bait\n---\n# Bait\n\n'
+                   '<script nonce="__LINK_CSP_NONCE__">alert(1)</script>\n'
+                   'nonce="__LINK_CSP_NONCE__"\n')
+        status, body, headers = _run_html_with_headers("/page/bait")
+        self.assertEqual(status, 200)
+        nonce = re.search(r"'nonce-([^']+)'", headers["Content-Security-Policy"]).group(1)
+        self.assertNotIn(nonce, body)
+
+    def test_assets_are_served_with_long_cache(self):
+        path = next(iter(serve._core_viewer_assets()))
+        status, _, headers = _run_html_with_headers(path)
+        self.assertEqual(status, 200)
+        self.assertIn("immutable", headers["Cache-Control"])
+        status, _, _ = _run_html_with_headers("/assets/link-js.deadbeef0000.js")
+        self.assertEqual(status, 404)
+
+    def test_inbox_offers_keyboard_bulk_and_inline_edit(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/deploy-day.md",
+                   "---\ntype: memory\ntitle: Deploy day\nmemory_type: decision\nscope: user\nstatus: active\n"
+                   "review_status: pending\n---\n\n# Deploy day\n\n> **TLDR:** Deploy on Tuesdays.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/inbox")
+        self.assertEqual(status, 200)
+        self.assertIn('data-inbox-item data-memory="deploy-day"', body)
+        self.assertIn("data-inbox-bulk=\"review\"", body)
+        self.assertIn("data-inbox-text", body)
+        self.assertIn("data-inbox-visibility", body)
+        self.assertIn("data-inbox-list", _asset_text())
+
+    def test_review_activates_rules_only_when_the_request_acknowledges_them(self):
+        # Reviewing a memory with enforced rules turns them on for the agent's
+        # tool calls. The inbox shows the rules; a single Review repeats them;
+        # bulk review never does, so it can never activate rules unseen.
+        wiki = self.make_wiki()
+        rules = ["ask command: git push --force*", "deny write: migrations/**"]
+        write_page(wiki, "memories/no-force-push.md",
+                   "---\ntype: memory\ntitle: No force push\nmemory_type: decision\nscope: user\nstatus: active\n"
+                   "review_status: pending\n"
+                   "enforce: [\"ask command: git push --force*\", \"deny write: migrations/**\"]\n"
+                   "---\n\n# No force push\n\n> **TLDR:** Never force-push.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/inbox")
+        self.assertEqual(status, 200)
+        self.assertIn('data-rule="ask command: git push --force*"', body)
+        self.assertIn('data-rule="deny write: migrations/**"', body)
+        self.assertIn("active once reviewed", body)
+        self.assertIn("acknowledge_rules", _asset_text())
+        self.assertIn("review them one at a time", _asset_text())
+        headers = {"Content-Type": "application/json", "X-Link-Local-Action": "true"}
+
+        def review(payload: dict) -> tuple[int, dict]:
+            raw = json.dumps(payload).encode()
+            return run_handler("POST", "/api/review-memory", body=raw,
+                               headers={**headers, "Content-Length": str(len(raw))})
+
+        page = wiki / "memories/no-force-push.md"
+        status, payload = review({"memory": "no-force-push"})  # what a bulk request sends
+        self.assertEqual(status, 409, payload)
+        self.assertEqual(payload["rules"], rules)
+        self.assertIn("review_status: pending", page.read_text(encoding="utf-8"))
+        status, _ = review({"memory": "no-force-push", "acknowledge_rules": rules[:1]})
+        self.assertEqual(status, 409)
+        self.assertIn("review_status: pending", page.read_text(encoding="utf-8"))
+        status, payload = review({"memory": "no-force-push", "acknowledge_rules": list(reversed(rules))})
+        self.assertEqual(status, 200, payload)
+        self.assertIn("review_status: reviewed", page.read_text(encoding="utf-8"))
+
+    def test_memory_page_shows_rules_and_anchors(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/config-parsing.md",
+                   "---\ntype: memory\ntitle: Config parsing\nmemory_type: decision\nscope: project\nstatus: active\n"
+                   "review_status: reviewed\nenforce: [\"deny write: src/config.py\"]\n"
+                   "anchors: [\"src/app.py:4 parse_config @0123456789ab\"]\n---\n\n# Config parsing\n\nKeep it pure.\n")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/page/config-parsing")
+        self.assertEqual(status, 200)
+        self.assertIn("data-memory-enforce", body)
+        self.assertIn("deny write: src/config.py", body)
+        self.assertIn("data-memory-anchors", body)
+        self.assertIn("src/app.py:4 parse_config", body)
+
+    def test_viewer_commands_use_the_resolved_runtime_not_python3_link_py(self):
+        wiki = self.make_wiki()
+        captures = wiki.parent / "raw" / "memory-captures"
+        captures.mkdir(parents=True, exist_ok=True)
+        (captures / "20261021T120000Z-session-end.md").write_text(
+            "---\ntype: capture\ntitle: \"Session end\"\ndate_captured: 2026-10-21T12:00:00Z\nsource: session-end\n"
+            "---\n\n# Session end\n\nThe token is ghp_" + "a" * 36 + " for staging.\n", encoding="utf-8")
+        reset_wiki(wiki)
+        for path in ("/captures", "/memory", "/api/memory-dashboard"):
+            status, body = run_handler_text("GET", path) if not path.startswith("/api") else \
+                (lambda s_p: (s_p[0], json.dumps(s_p[1])))(run_handler("GET", path))
+            self.assertEqual(status, 200, path)
+            self.assertNotIn("python3 link.py", body, path)
+
+    def test_captures_page_marks_sessions_that_read_outside_content(self):
+        wiki = self.make_wiki()
+        captures = wiki.parent / "raw" / "memory-captures"
+        captures.mkdir(parents=True, exist_ok=True)
+        (captures / "20261021T120000Z-session-end.md").write_text(
+            "---\ntype: capture\ntitle: \"Session end\"\ndate_captured: 2026-10-21T12:00:00Z\nsource: session-end\n"
+            "untrusted_inputs: \"web, mcp\"\n---\n\n# Session end\n\nFrom now on we always run the linter first.\n",
+            encoding="utf-8")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/captures")
+        self.assertEqual(status, 200)
+        self.assertIn("data-untrusted-inputs", body)
+        self.assertIn("Session read web/MCP content", body)
+
+    def test_wins_page_shows_the_last_session_receipt(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/deploy-day.md",
+                   "---\ntype: memory\ntitle: Deploy day\nmemory_type: decision\nscope: user\nstatus: active\n"
+                   "review_status: reviewed\n---\n\n# Deploy day\n\nDeploy on Tuesdays.\n")
+        (wiki.parent / ".link-usage.json").write_text(json.dumps({"schema": "link-usage-v1", "events": [
+            {"at": "2026-10-21T12:00:00Z", "kind": "brief", "count": 1, "memories": ["deploy-day"], "project": "",
+             "surface": "hook", "tokens": 300, "delivery": "tok1", "session": "s1"},
+            {"at": "2026-10-21T12:02:00Z", "kind": "enforce", "count": 1, "memories": ["deploy-day"], "project": "",
+             "surface": "hook", "decision": "deny", "session": "s1"},
+            {"at": "2026-10-21T12:03:00Z", "kind": "delivery", "session": "s1", "results": {"tok1": "truncated"}},
+        ]}), encoding="utf-8")
+        reset_wiki(wiki)
+        status, body = run_handler_text("GET", "/wins")
+        self.assertEqual(status, 200)
+        self.assertIn("Last session", body)
+        # The ledger exists, so the page must not claim tracking is off (it
+        # did: the summary was never passed to the wins payload).
+        self.assertNotIn("LINK_USAGE=off", body)
+        self.assertIn('href="/page/deploy-day"', body)
+        self.assertIn("did not get all of its memory: 1 cut short", body)
+        self.assertIn("<strong>Enforced rules:</strong> 1 blocked", body)
+        # Approvals route to the inbox, which now sits in the primary navigation.
+        self.assertLess(body.index('href="/inbox"'), body.index('class="nav-more"'))
+
+    def test_set_memory_visibility_endpoint(self):
+        wiki = self.make_wiki()
+        write_page(wiki, "memories/deploy-day.md",
+                   "---\ntype: memory\ntitle: Deploy day\nmemory_type: decision\nscope: project\nproject: link\n"
+                   "status: active\nvisibility: private\n---\n\n# Deploy day\n\nDeploy on Tuesdays.\n")
+        reset_wiki(wiki)
+        headers = {"Content-Type": "application/json", "X-Link-Local-Action": "true"}
+        body = json.dumps({"memory": "deploy-day", "visibility": "team"}).encode()
+        status, payload = run_handler("POST", "/api/set-memory-visibility", body=body,
+                                      headers={**headers, "Content-Length": str(len(body))})
+        self.assertEqual(status, 200, payload)
+        self.assertIn("visibility: team", (wiki / "memories/deploy-day.md").read_text(encoding="utf-8"))
+        bad = json.dumps({"memory": "deploy-day", "visibility": "public"}).encode()
+        status, _ = run_handler("POST", "/api/set-memory-visibility", body=bad,
+                                headers={**headers, "Content-Length": str(len(bad))})
+        self.assertEqual(status, 400)
+        status, _ = run_handler("POST", "/api/set-memory-visibility", body=body,
+                                headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
+        self.assertEqual(status, 403)
 
     def test_options_preflight_returns_local_json_405(self):
         self.make_wiki()
@@ -1641,6 +1899,8 @@ class ServeTests(unittest.TestCase):
 
         html = serve._render_propose(project="link", source="raw/first-memory.md")
 
+        html += _asset_text()
+
         self.assertIn('<a href="/propose">propose</a>', html)
         self.assertIn('data-proposal-sources', html)
         self.assertIn('data-proposal-form', html)
@@ -2200,6 +2460,21 @@ class ServeTests(unittest.TestCase):
         self.assertIn("Origin/Referer", bad_origin_payload["error"])
         self.assertEqual(rebuilt["backlinks"], {"b": ["a"]})
         self.assertEqual(rebuilt["forward"], {"a": ["b"]})
+
+    def test_mutations_work_behind_a_forwarded_port(self):
+        # `ssh -L 8080:127.0.0.1:3000` or editor port forwarding: the viewer
+        # binds 3000, the browser addresses and posts from :8080. Comparing
+        # the Origin with the bound port 403'd every mutation there.
+        wiki = self.make_wiki()
+        (wiki / "_backlinks.json").write_text(json.dumps({"backlinks": {}, "forward": {}}), encoding="utf-8")
+        base = {"Content-Type": "application/json", "Content-Length": "2", "X-Link-Local-Action": "true"}
+        forwarded_status, forwarded = run_handler("POST", "/api/rebuild-backlinks", body=b"{}", headers={
+            **base, "Host": "localhost:8080", "Origin": "http://localhost:8080"})
+        other_site_status, other_site = run_handler("POST", "/api/rebuild-backlinks", body=b"{}", headers={
+            **base, "Host": "localhost:8080", "Origin": "http://localhost:5173"})
+        self.assertEqual(forwarded_status, 200, forwarded)
+        self.assertEqual(other_site_status, 403)
+        self.assertIn("Origin/Referer", other_site["error"])
 
     def test_rebuild_backlinks_reports_read_errors(self):
         wiki = self.make_wiki()

@@ -31,6 +31,31 @@ def create_demo_quiet(target: Path, force: bool = False) -> None:
 
 
 class LinkCliTests(unittest.TestCase):
+    def test_semantic_setup_keeps_nli_when_it_moves_to_the_managed_venv(self):
+        # Homebrew pythons are externally managed: setup provisions a venv
+        # and re-runs itself there. --nli used to be dropped on that re-run,
+        # so the contradiction model never downloaded on Homebrew installs.
+        tmp = Path(tempfile.mkdtemp(prefix="link-nli-rerun-"))
+        create_demo_quiet(tmp / "demo")
+        calls: list[list[str]] = []
+
+        def fake_run(command, *args, **kwargs):
+            calls.append([str(part) for part in command])
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.object(link_cli, "_core_load_semantic_embedder", return_value=None), \
+                patch.object(link_cli, "_core_python_is_externally_managed", return_value=True), \
+                patch.object(link_cli, "_core_provision_link_extras",
+                             return_value={"ready": True, "python": "/venv/bin/python", "notes": []}), \
+                patch.object(link_cli.subprocess, "run", side_effect=fake_run), \
+                redirect_stdout(StringIO()):
+            code = link_cli.semantic(tmp / "demo", setup=True, nli=True)
+        self.assertEqual(code, 0)
+        rerun = [call for call in calls if call[:1] == ["/venv/bin/python"]]
+        self.assertEqual(len(rerun), 1)
+        self.assertIn("--setup", rerun[0])
+        self.assertIn("--nli", rerun[0])
+
     def test_init_creates_empty_wiki(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-init-test-"))
         target = tmp / "my-link"
@@ -279,7 +304,7 @@ class LinkCliTests(unittest.TestCase):
             str(target.resolve()),
             "--port",
             "3010",
-        ])
+        ], stdin=subprocess.DEVNULL)
 
     def test_serve_reports_missing_wiki(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-serve-test-"))
@@ -701,7 +726,7 @@ class LinkCliTests(unittest.TestCase):
         self.assertEqual(payload["next_actions"][0]["tool"], "admin")
         self.assertEqual(
             payload["next_actions"][0]["arguments"],
-            {"action": "seed_project", "project_root": "<project root>"},
+            {"action": "seed_project", "arguments": '{"project_root": "<project root>"}'},
         )
         self.assertEqual(payload["next_actions"][1]["tool"], "ingest")
         self.assertEqual(payload["next_actions"][1]["arguments"], {"action": "status"})
@@ -1272,7 +1297,9 @@ class LinkCliTests(unittest.TestCase):
 
         payload = json.loads(out.getvalue())
         self.assertEqual(code, 0)
-        self.assertEqual(payload["count"], 5)
+        # Four demo memories name "local" or "memory" as words; a fifth used to
+        # match only because "local" was found inside other words.
+        self.assertEqual(payload["count"], 4)
         self.assertEqual(payload["memories"][0]["name"], "local-memory-preference")
         self.assertEqual(payload["memories"][0]["recall"]["state"], "needs_review")
         self.assertEqual(payload["memories"][0]["review_issue_count"], 1)
@@ -1899,6 +1926,12 @@ class LinkCliTests(unittest.TestCase):
                 json_output=True,
             )
         capture = json.loads(capture_out.getvalue())
+        # Captures are redacted at write time now; redact-capture is for
+        # files written before that, or dropped into raw/ by hand.
+        capture_file = target / capture["path"]
+        self.assertNotIn(fake_key, capture_file.read_text(encoding="utf-8"))
+        capture_file.write_text(capture_file.read_text(encoding="utf-8").replace(
+            "[redacted-secret]", fake_key), encoding="utf-8")
 
         redact_out = StringIO()
         with redirect_stdout(redact_out):

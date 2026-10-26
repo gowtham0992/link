@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_CLI_COMMANDS = {
+    "disconnect",
     "accept-capture",
     "archive-memory",
     "backup",
@@ -25,6 +26,7 @@ EXPECTED_CLI_COMMANDS = {
     "digest",
     "doctor",
     "end",
+    "enforce",
     "explain-memory",
     "forget-memory",
     "graph-summary",
@@ -53,7 +55,8 @@ EXPECTED_CLI_COMMANDS = {
     "query-link",
     "rebuild-index",
     "rebuild-backlinks",
-    "stale",
+    "stale", "compile",
+    "receipt",
     "recall",
     "recipes",
     "redact-capture",

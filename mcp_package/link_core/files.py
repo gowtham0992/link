@@ -79,7 +79,7 @@ def _atomic_write_bytes_unlocked(path: Path, data: bytes) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     try:
-        os.replace(tmp_name, target)
+        _replace_with_retry(tmp_name, target)
         _fsync_directory(target.parent)
     except Exception:
         try:
@@ -87,6 +87,27 @@ def _atomic_write_bytes_unlocked(path: Path, data: bytes) -> None:
         except OSError:
             pass
         raise
+
+
+# On Windows a file that another process (an antivirus scanner, an indexer,
+# a reader that has not closed yet) holds open cannot be replaced for a
+# moment; os.replace raises PermissionError and the write was lost when the
+# caller treated it as best-effort. Retry briefly before giving up.
+_REPLACE_RETRY_SECONDS = 2.0
+
+
+def _replace_with_retry(source: str, target: Path) -> None:
+    deadline = time.monotonic() + _REPLACE_RETRY_SECONDS
+    delay = 0.01
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.2)
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -165,3 +186,32 @@ def append_text_with_rotation(
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
+
+
+# Public names for callers that must do several steps under one lock (the
+# audit log reads its last hash and appends in the same critical section;
+# doing those two under separate locks forked the hash chain under
+# concurrent writers).
+file_lock = _file_lock
+
+
+def rotate_file_unlocked(target: Path, backups: int) -> None:
+    """Rotate `target` to `target.1`...; caller must hold file_lock(target)."""
+    _rotate_file_unlocked(target, backups)
+
+
+def atomic_write_text_unlocked(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    """Atomic replace; caller must already hold file_lock(path)."""
+    _atomic_write_bytes_unlocked(path, text.encode(encoding))
+
+
+def append_text_unlocked(path: Path, text: str, *, encoding: str = "utf-8", initial_text: str = "") -> None:
+    """Append + fsync; caller must already hold file_lock(path)."""
+    target = path.expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding=encoding) as handle:
+        if initial_text and target.stat().st_size == 0:
+            handle.write(initial_text)
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())

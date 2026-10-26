@@ -26,7 +26,7 @@ If Link session hooks are installed for this agent, the memory brief is injected
    ```bash
    lnk remember "<user-approved memory>" [link-root] --type note --scope user
    ```
-   Use `--project <slug>` for project-scoped memory, `--visibility private|project|team` for sharing intent, `--review-after YYYY-MM-DD` for stale-risk memories, and `--expires-at YYYY-MM-DD` for temporary context.
+   Use `--project <slug>` for project-scoped memory, `--visibility private|project|team` for sharing intent, `--review-after YYYY-MM-DD` for stale-risk memories, and `--expires-at YYYY-MM-DD` for temporary context. When the user asks Link to stop or check an action, add `--enforce "ask command: git push --force*"` (or `deny write: migrations/**`): with hooks installed the rule is checked before the agent's tool calls, once the user reviews the memory. Never review, clear, archive or update a memory that carries rules yourself; only the user does.
 When a brief or recall reports a memory backlog (pending captures or reviews above threshold), offer the user a short consolidation pass:
    ```bash
    lnk consolidate [link-root]
@@ -46,5 +46,12 @@ When a brief or recall reports a memory backlog (pending captures or reviews abo
    lnk restore-memory <name-or-title> [link-root]
    lnk forget-memory <name-or-title> [link-root] --confirm
    ```
+
+7. See what reached the agent, and keep agent files in step:
+   ```bash
+   lnk receipt [link-root]
+   lnk compile [repo] --dry-run
+   ```
+   The receipt lists each session's memories, whether they arrived whole, and the rule checks. `lnk compile` writes reviewed memory into AGENTS.md, CLAUDE.md and per-agent rule files; show the diff and write only when the user agrees.
 
 When duplicate or conflict warnings appear, prefer updating, reviewing, or archiving existing memory over creating another page.

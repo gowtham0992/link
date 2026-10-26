@@ -1,7 +1,7 @@
 # Releasing LinkBar
 
-The full, current release procedure lives as a Link procedure memory
-(`lnk recall "cutting a Link release"`) and is exercised every release.
+The full release procedure is `packaging/RELEASE.md`, and
+`scripts/prepare_release.py --linkbar-version A.B.C` does step 1 for you.
 This file keeps only the LinkBar-specific mechanics:
 
 1. Bump the version in `apps/LinkBar/Sources/LinkBar/DesignSystem.swift`
@@ -20,7 +20,8 @@ This file keeps only the LinkBar-specific mechanics:
 4. Update the tap cask (`gowtham0992/homebrew-link:Casks/linkbar.rb`):
    version, sha256, and the release tag inside the url. Three lines
    change, always three - check `git diff` before pushing.
-5. The cask clears macOS quarantine in a postflight because the app is
-   ad-hoc signed. If LinkBar is ever notarized, remove that postflight.
+5. The cask clears macOS quarantine in `postflight_steps` (Homebrew
+   deprecated the `postflight` block in 2026) because the app is ad-hoc
+   signed. If LinkBar is ever notarized, remove that step.
 
 Template: `packaging/linkbar.rb` (placeholders, mirrors the live cask).

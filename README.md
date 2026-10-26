@@ -76,12 +76,13 @@ agents instead of locked inside one vendor profile.
 
 ## How It Works
 
-Link gives agents four simple moves:
+Link gives agents five simple moves:
 
 1. **Capture** notes, transcripts, docs, screenshots, and project context in `raw/`.
 2. **Structure** source-backed pages under `wiki/`.
 3. **Remember** explicit preferences, decisions, facts, and project context as reviewable memory.
 4. **Retrieve** compact query packets through the CLI, MCP, official skills, or the local web viewer.
+5. **Hold** what you approved: rules are enforced before a tool call, memories about code are checked against the repository, and a receipt shows what each session was given.
 
 Most agent sessions start from zero. You re-explain preferences, repo decisions,
 project constraints, and why something matters. Link turns that repeated context
@@ -93,6 +94,9 @@ into local memory agents can query.
 | Notes are private or messy. | Keep raw sources local, then turn them into source-backed Markdown. |
 | Context windows are expensive. | Return compact query packets with provenance and follow-up actions. |
 | Memory needs trust. | Every page and memory can be inspected, reviewed, archived, or forgotten. |
+| Agents read a rule and break it anyway. | A reviewed memory can carry a rule that asks for your OK, or blocks the call, before it runs. |
+| Memory goes stale as the code moves on. | Memories that name files, scripts, dependencies or functions are checked against the repository and flagged, not believed. |
+| You cannot tell what the agent was given. | `lnk receipt` lists every memory that reached a session and whether it arrived whole. |
 
 Link follows Andrej Karpathy's
 [LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
@@ -102,7 +106,7 @@ compound over time.
 ## Why Link Is Different
 
 Every other agent-memory system stores memory as embeddings in a vector
-database or as an LLM-extracted graph. Link made four architectural
+database or as an LLM-extracted graph. Link made five architectural
 commitments those designs cannot bolt on:
 
 1. **Memory you can read.** Every memory is a plain Markdown file — open it,
@@ -114,6 +118,13 @@ commitments those designs cannot bolt on:
    in the write path.
 4. **Provably local.** CI blocks outbound network code in the runtime, and the
    optional semantic models load offline-only after one explicit setup.
+5. **Memory that holds when the agent acts.** A memory you reviewed can carry a
+   rule (`ask command: git push --force`, `deny write: migrations/**`) that is
+   checked before the agent's tool call, with no model and under a
+   millisecond. Memories about code are re-read against your repository and
+   flagged when the code moved on. Memories surface when the agent opens the
+   file they describe, `lnk compile` writes reviewed memory into the files
+   every agent already reads, and a receipt proves what reached each session.
 
 And the claims are measured, not asserted — see the benchmarks below. Named
 comparisons against Mem0/OpenMemory, Zep/Graphiti, and Letta:
@@ -128,10 +139,12 @@ that have one everywhere:
 |---|---|---|
 | **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
-| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 36.5% |
+| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 35.7% |
 | **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
-| **Token economics** — real recall packets, measured through the query path | **1,951–4,835 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.58×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~360 tokens of overhead, measured) — see RESULTS.md |
-| **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.589**; `lnk setup` provisions the fast local tier by default: **0.703**; optional quality tier **0.749**, plus rerank **0.839** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
+| **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
+| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
+| **Staleness checks** — memories and instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) checked against the repository | **0 false flags**: 345 memory references in Link's own docs and 604 instruction-file references across eight public repositories; every planted deletion caught | a reference is reported only when git history shows the thing existed |
+| **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 
 Every number ships with its config, judge model, caveats, and the
 experiments that *lost* — including LongMemEval end-to-end, where we
@@ -159,7 +172,8 @@ rails.
 reconstructed from the dated files and their supersede lineage — while
 the same question without the date returns today's truth. Deterministic:
 a regex and a calendar, no model. Point-in-time accuracy from plain
-language: 0.917, identical to asking with an ISO date.
+language: 1.00 on the hygiene benchmark's revised facts, identical to
+asking with an ISO date.
 
 **"Is my agent actually using this?"** The question most memory systems
 cannot answer about themselves. Link records retrievals locally — session
@@ -171,9 +185,9 @@ which memory was read and when, never what you asked; it never syncs, and
 the hooked ones: the first MCP tool response of a session carries the
 brief, whatever tool was called.
 
-## Quick Start
+## First Run, In Detail
 
-Two commands: see it work, then make it yours.
+The quick start above is the whole install. This is what each step does.
 
 ```bash
 brew install gowtham0992/link/link
@@ -209,12 +223,16 @@ Recall: found through the same bounded recall path used by CLI, skills, and MCP.
 Result: proof passed
 ```
 
-`lnk onboard --agent claude-code --write` then creates `~/link`, provisions the
-MCP runtime, and wires the agent — including the session hooks that capture
-memory automatically as you work (swap `claude-code` for `codex`, `cursor`,
-`kiro`, `copilot`, `antigravity`, or others). Drop `--write` to preview the
-config without touching anything, or drop `--agent` to just create the
-workspace.
+`lnk onboard --agent claude-code --write --hooks` creates `~/link`, provisions
+the MCP runtime, and wires the agent. Swap `claude-code` for `codex`,
+`cursor`, `kiro`, `copilot`, `antigravity`, `windsurf`, `zed` or `vscode`.
+Session hooks - a brief at session start, proposals captured at session end -
+exist for Claude Code, Cursor and Codex (Codex has no session-end event, so it
+gets the start brief only). The other agents get memory through MCP, where the
+first tool response of a session carries the same brief. Drop `--write` to
+preview without touching anything, or drop `--agent` to just create the
+workspace. `lnk disconnect <agent> --write` takes Link back out: its MCP entry
+and hooks, nothing else.
 
 The installed command is `lnk` because `link` is already a POSIX/macOS system
 utility. From a source checkout, use `python3 link.py ...` instead.
@@ -289,7 +307,7 @@ longer has — all running on the same reviewed `lnk` commands as the CLI.
 Pick the workspace in Settings; it defaults to `~/link`.
 
 <p align="center">
-  <img src="docs/assets/linkbar-tour.gif" alt="LinkBar cycling through its tabs: review inbox with live agent pulse and capture previews, memory browser, status dashboard, and settings" width="424">
+  <img src="docs/assets/linkbar-tour.gif" alt="LinkBar cycling through its tabs: the review inbox showing the rule a memory will enforce before you approve it and the last session's receipt, the memory browser, and settings" width="424">
 </p>
 
 ```bash
@@ -443,9 +461,13 @@ the brief is injected at session start and proposal-only notes are captured at
 session end, so memory no longer depends on the agent remembering to call
 Link. Empty sessions and duplicate end events are skipped, and when the
 backlog builds up the brief nudges the agent to offer a read-only
-`lnk consolidate` pass. Durable memory still requires your approval. Codex and
-Cursor hook support is new (wired to their documented schemas — report
-issues).
+`lnk consolidate` pass. On Claude Code the hooks also run before shell and
+file tool calls: a reviewed memory's enforced rules are checked there, and
+memories anchored to the file being read or edited are surfaced at that
+moment; on Cursor the shell-command check runs the same way. `lnk receipt`
+shows what actually arrived in each session. Durable memory still requires
+your approval. Codex and Cursor hook support is new (wired to their
+documented schemas — report issues).
 
 ```bash
 lnk connect claude-code ~/link --hooks --write
@@ -476,12 +498,14 @@ python3 -m link_mcp --semantic-setup --wiki ~/link/wiki   # MCP-only installs
 ```
 
 Measured, not asserted: on the bundled 1,176-case benchmark, the quality
-tier lifts token-overlap hit@1 from 0.589 to 0.749 and pure-paraphrase
-(zero token overlap) hit@3/hit@5 by ~4×, at ~10 ms per recall with no
-service or vector database. On the third-party LoCoMo retrieval track
-(1,536 evidence-annotated questions over 5,882 conversation turns), hybrid
-recall lifts any-evidence hit@10 from 0.628 to 0.737 (0.794 with the
-opt-in rerank tier). Full methodology, honest limitations, and
+tier lifts token-overlap hit@1 from 0.671 to 0.789 and finds half of the
+pure paraphrases (zero token overlap) in the top 5, where lexical recall
+finds 6%, at ~11 ms per recall with no service or vector database. On the
+third-party LoCoMo retrieval track (1,536 evidence-annotated questions over
+5,882 conversation turns), hybrid recall lifts any-evidence hit@10 from
+0.716 to 0.779, and the opt-in rerank tier to 0.826 with hit@1 0.453.
+Without the reranker, lexical recall is the stronger top-5 on LoCoMo;
+RESULTS.md says why. Full methodology, honest limitations, and
 reproduction steps: [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 <details>
@@ -591,6 +615,7 @@ model-facing tools. CLI and skill workflows call the same core behavior through
   the user instead of trusting them.
 - `remember`: durable local memory only after explicit user approval, with
   duplicate/conflict checks, provenance, review state, visibility, optional
+  enforce rules that act on tool calls once you review the memory, optional
   `review_after`, and optional `expires_at`.
 - `ingest`: exact next steps for raw files, source safety, stale ingest
   detection, validation, and rebuild checks.

@@ -16,6 +16,16 @@ _HEADING_RE = re.compile(r"<h([23])>(.*?)</h\1>", re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
+def _frontmatter_values(value: object) -> list[str]:
+    """A frontmatter list field as strings, whether parsed as a list or left as text."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return [part.strip().strip("\"'") for part in text.split(",") if part.strip().strip("\"'")]
+
+
 def render_wiki_page(
     title: str,
     *,
@@ -119,6 +129,16 @@ def render_page_meta_line(meta: Mapping[str, object]) -> str:
     parts: list[str] = []
     if meta.get("type"):
         parts.append(f'<span class="badge">{html.escape(str(meta["type"]))}</span>')
+    # A memory's rules act on the agent's tool calls once it is reviewed, and
+    # its anchors say which code it is about: both belong on the page itself.
+    for key, label in (("enforce", "Enforced before tool calls once reviewed"), ("anchors", "Anchored to")):
+        values = _frontmatter_values(meta.get(key))
+        if values:
+            parts.append(
+                f'<div class="memory-meta" data-memory-{key}><strong>{label}:</strong> '
+                + " · ".join(f"<code>{html.escape(value)}</code>" for value in values)
+                + "</div>"
+            )
     if meta.get("maturity"):
         parts.append(html.escape(str(meta["maturity"])))
     if meta.get("source_count"):

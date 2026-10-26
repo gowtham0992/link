@@ -14,8 +14,8 @@ BROWSER_SOURCE_LOCAL_ONLY = "Origin/Referer must match local Link viewer"
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
     "img-src 'self' data:; "
-    "style-src 'self' 'unsafe-inline'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self'; "
+    "script-src 'self'; "
     "connect-src 'self'; "
     "object-src 'none'; "
     "base-uri 'none'; "
@@ -25,6 +25,11 @@ PERMISSIONS_POLICY = (
     "camera=(), microphone=(), geolocation=(), payment=(), usb=(), "
     "serial=(), bluetooth=(), accelerometer=(), gyroscope=(), magnetometer=()"
 )
+def html_content_security_policy(nonce: str) -> str:
+    """The HTML policy: same-origin assets plus this response's inline script."""
+    return CONTENT_SECURITY_POLICY.replace("script-src 'self'; ", f"script-src 'self' 'nonce-{nonce}'; ")
+
+
 SVG_CONTENT_SECURITY_POLICY = (
     "default-src 'none'; "
     "img-src 'self' data:; "
@@ -165,18 +170,57 @@ def _browser_source_host(header_value: object) -> str | None:
     return _host_without_port(parsed.netloc) or ""
 
 
+def _browser_source_port(header_value: object) -> int | None:
+    parsed = urlsplit(str(header_value or "").strip().lower())
+    try:
+        port = parsed.port
+    except ValueError:
+        return -1
+    if port is None:
+        return {"http": 80, "https": 443}.get(parsed.scheme)
+    return port
+
+
+def host_header_port(host_header: object, *, default: int | None = 80) -> int | None:
+    """The port the browser addressed, from the Host header ("localhost:8080" -> 8080).
+
+    This, not the port the server bound, is what a same-origin Origin carries:
+    behind `ssh -L 8080:127.0.0.1:3000` or an editor's port forwarding the
+    viewer listens on 3000 while the page is served, and posts, as :8080.
+    """
+    host = str(host_header or "").strip().lower()
+    if not host:
+        return None
+    try:
+        port = urlsplit(f"//{host}").port
+    except ValueError:
+        return None
+    return port if port is not None else default
+
+
 def validate_local_browser_source_headers(
     origin_header: object,
     referer_header: object,
     allowed_hosts: Iterable[str] = ALLOWED_LOCAL_HOSTS,
+    *,
+    allowed_port: int | None = None,
 ) -> tuple[bool, str | None]:
-    """Allow browser-supplied Origin/Referer only from the local viewer."""
+    """Allow browser-supplied Origin/Referer only from the local viewer.
+
+    With `allowed_port`, the source must also be the viewer's own port as the
+    browser sees it (pass `host_header_port` of the request's Host header):
+    any other dev server or tool on localhost is a different origin, and the
+    custom header should not be the only thing standing between it and a
+    mutation.
+    """
     allowed = set(allowed_hosts)
     for header_value in (origin_header, referer_header):
         host = _browser_source_host(header_value)
         if host is None:
             continue
         if host not in allowed:
+            return False, BROWSER_SOURCE_LOCAL_ONLY
+        if allowed_port is not None and _browser_source_port(header_value) != allowed_port:
             return False, BROWSER_SOURCE_LOCAL_ONLY
     return True, None
 

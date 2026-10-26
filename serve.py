@@ -6,6 +6,7 @@ import errno
 import html
 import http.server
 import json
+import secrets
 import os
 import re
 import socketserver
@@ -23,6 +24,7 @@ if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
 from link_core.memory import (
+    set_memory_visibility as _core_set_memory_visibility,
     add_capture_review_to_brief as _core_add_capture_review_to_brief,
     count_values as _core_count_values,
     is_active_memory as _core_is_active_memory,
@@ -60,6 +62,11 @@ from link_core.memory_log import (
 from link_core.memory_wins import (
     memory_wins_payload as _core_memory_wins_payload,
 )
+from link_core.usage import (
+    load_usage as _core_load_usage,
+    memory_receipts as _core_memory_receipts,
+    usage_summary as _core_usage_summary,
+)
 from link_core.markdown import (
     markdown_to_html as _core_markdown_to_html,
 )
@@ -85,6 +92,7 @@ from link_core.version import (
     LINK_VERSION,
 )
 from link_core.mcp_verify import (
+    display_command as _core_display_command,
     set_link_command_override as _core_set_link_command_override,
 )
 from link_core.web_assets import CSS  # noqa: F401 - kept as serve.CSS for tests and compatibility
@@ -108,6 +116,7 @@ from link_core.web_layout import (
     render_footer_html as _core_render_footer_html,
     render_header_html as _core_render_header_html,
     render_layout as _core_render_layout,
+    viewer_assets as _core_viewer_assets,
 )
 from link_core.web_graph import (
     GRAPH_CATEGORY_COLORS as _core_graph_category_colors,
@@ -146,6 +155,8 @@ from link_core.web_http import (
     resolve_raw_static_path as _core_resolve_raw_static_path,
     safe_resolve as _core_safe_resolve,
     SVG_CONTENT_SECURITY_POLICY as _core_svg_content_security_policy,
+    html_content_security_policy as _core_html_content_security_policy,
+    host_header_port as _core_host_header_port,
     validate_local_browser_source_headers as _core_validate_local_browser_source_headers,
     validate_local_host_header as _core_validate_local_host_header,
 )
@@ -208,6 +219,8 @@ MAX_PROPOSAL_SOURCE_BYTES = 64 * 1024
 MAX_RAW_SOURCE_BYTES = 60 * 1024
 LOCAL_ACTION_HEADER = "X-Link-Local-Action"
 LOCAL_ACTION_VALUES = {"1", "true", "yes"}
+API_PAGES_DEFAULT_LIMIT = 500
+API_PAGES_MAX_LIMIT = 5000
 MUTATION_RATE_LIMIT = 180
 MUTATION_RATE_WINDOW_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 15
@@ -540,6 +553,16 @@ def _memory_profile(limit: int = 10, project: str | None = None) -> dict[str, ob
     return _core_memory_profile(_memory_records(), limit=limit, review_command="review-memory", project=project)
 
 
+def _enforced_rules_for(identifier: str) -> list[str]:
+    """The enforce rules of the memory an identifier names (by name, title or path)."""
+    wanted = _clean_text_input(identifier, max_len=300)
+    for record in _memory_records():
+        if wanted in {str(record.get("name") or ""), str(record.get("title") or ""), str(record.get("path") or "")}:
+            raw = record.get("enforce")
+            return [str(rule) for rule in raw if str(rule).strip()] if isinstance(raw, list) else []
+    return []
+
+
 def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
     result = _core_mark_memory_reviewed(
         WIKI_DIR,
@@ -581,6 +604,8 @@ def _remember_memory_from_web(payload: dict[str, object]) -> dict[str, object]:
         _clean_text_input(payload.get("source") or "web approval", max_len=500),
         _utc_timestamp(),
         project=_clean_text_input(payload.get("project"), max_len=80) or None,
+        # A project in the request was named by the person: infer its scope.
+        project_explicit=bool(_clean_text_input(payload.get("project"), max_len=80)),
         visibility=_clean_text_input(payload.get("visibility"), max_len=30) or None,
         review_after=_clean_text_input(payload.get("review_after"), max_len=40) or None,
         expires_at=_clean_text_input(payload.get("expires_at"), max_len=40) or None,
@@ -693,9 +718,9 @@ def _capture_review_summary(project: str | None = None, limit: int = 3) -> dict[
         commands_for=lambda rel_path: _core_cli_capture_commands(rel_path, WIKI_DIR.parent),
     )
     project_query = f"?project={urllib.parse.quote(project_name, safe='')}" if project_name else ""
-    project_arg = f' --project "{project_name}"' if project_name else ""
     summary["href"] = f"/captures{project_query}"
-    summary["command"] = f'python3 link.py capture-inbox "{WIKI_DIR.parent}"{project_arg}'
+    summary["command"] = _core_display_command(
+        ["link", "capture-inbox", str(WIKI_DIR.parent), *(["--project", project_name] if project_name else [])])
     return summary
 
 
@@ -793,11 +818,18 @@ def _memory_log(limit: int = 50, include_captures: bool = True) -> dict[str, obj
 
 
 def _memory_wins(limit: int = 6, project: str | None = None) -> dict[str, object]:
+    records = _memory_records()
     return _core_memory_wins_payload(
         WIKI_DIR,
         limit=max(1, min(limit, 50)),
         project=project,
-        records=_memory_records(),
+        records=records,
+        # Without the ledger summary the page said retrieval tracking was
+        # off, right above the Last session card built from that ledger.
+        usage=_core_usage_summary(
+            WIKI_DIR.parent, days=30,
+            records=[r for r in records if str(r.get("status") or "active") == "active"],
+        ),
     )
 
 
@@ -1023,9 +1055,14 @@ def _render_all(query: dict[str, list[str]] | None = None):
     sorted_pages = sorted(pages, key=lambda x: x["title"])
     type_counts = Counter(str(page.get("type") or page.get("category") or "root") for page in sorted_pages)
     active_type = _query_text(query, "type", "page_type", max_len=80).lower()
+    # A filter value matches the page's type label or its folder, so the
+    # home page's "view all concepts" link lands on the same pages it listed.
     visible_pages = [
         page for page in sorted_pages
-        if not active_type or str(page.get("type") or page.get("category") or "root").lower() == active_type
+        if not active_type or active_type in {
+            str(page.get("type") or page.get("category") or "root").lower(),
+            str(page.get("category") or "").lower(),
+        }
     ]
     total = len(visible_pages)
     window = visible_pages[offset:offset + limit]
@@ -1119,9 +1156,26 @@ def _render_memory_log():
     return _core_render_memory_log_page(_memory_log(limit=100), layout=_layout)
 
 
+def _last_session_receipt() -> dict[str, object]:
+    """The newest session from the retrieval ledger, with memory titles filled in."""
+    receipts = _core_memory_receipts(_core_load_usage(WIKI_DIR.parent), sessions=1)
+    if not receipts:
+        return {}
+    session = receipts[0]
+    titles = {str(r.get("name") or ""): str(r.get("title") or "") for r in _memory_records()}
+    for used in session.get("memories_used") or []:
+        if isinstance(used, dict):
+            name = str(used.get("name") or "")
+            used["title"] = titles.get(name, "")
+            used["exists"] = name in titles
+    return session
+
+
 def _render_memory_wins(project: str | None = None):
+    payload = dict(_memory_wins(limit=8, project=project))
+    payload["last_session"] = _last_session_receipt()
     return _core_render_memory_wins_page(
-        _memory_wins(limit=8, project=project),
+        payload,
         page_href=_page_href,
         layout=_layout,
     )
@@ -1139,7 +1193,7 @@ def _render_explain_memory(identifier: str):
     )
 
 
-def _render_graph(query: dict[str, list[str]] | None = None):
+def _render_graph(query: dict[str, list[str]] | None = None, *, nonce: str = ""):
     query = query or {}
     focus = _query_text(query, "focus", "page", "node", max_len=300)
     graph_search = _query_text(query, "q", "search", max_len=200)
@@ -1210,6 +1264,7 @@ def _render_graph(query: dict[str, list[str]] | None = None):
         label_json=_json_for_script(graph_labels),
         total_node_count=total_node_count,
         total_edge_count=total_edge_count,
+        nonce=nonce,
     )
 
     body = _core_render_graph_page_body(
@@ -1486,8 +1541,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._head_only = False
         if not self._require_allowed_host():
             return
-        if not self._require_mutation_rate_limit():
-            return
+        # Rate limiting happens after a request proves it comes from the
+        # viewer (see _require_local_action_header). Counting every POST
+        # first let any web page fire 180 blind form posts at localhost and
+        # lock the user's own review buttons for a minute, indefinitely.
         parsed = urllib.parse.urlparse(self.path)
         self._handle_api_post(parsed.path)
 
@@ -1508,6 +1565,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(result, status=http_status)
             return
         if path == "/api/propose-memories":
+            # Read-only and header-free by design; it gets its own bucket so
+            # it can never starve the mutation buckets.
+            if not self._require_mutation_rate_limit(bucket="propose"):
+                return
             payload = self._read_json_or_reply({"proposed": False, "count": 0, "proposals": []})
             if payload is None:
                 return
@@ -1546,6 +1607,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._json({"saved": False, "error": str(exc)}, status=400)
             return
+        if path == "/api/set-memory-visibility":
+            if not self._require_local_action_header():
+                return
+            payload = self._read_json_or_reply({"updated": False})
+            if payload is None:
+                return
+            identifier = _clean_text_input(payload.get("memory") or payload.get("identifier"), max_len=300)
+            visibility = _clean_text_input(payload.get("visibility"), max_len=20).lower()
+            if not identifier or visibility not in {"private", "project", "team"}:
+                self._json({"updated": False, "error": "memory and visibility (private, project, team) required"},
+                           status=400)
+                return
+            try:
+                result = _core_set_memory_visibility(WIKI_DIR, identifier, visibility, _utc_timestamp(),
+                                                     records=_memory_records(), log_writer=_append_log)
+            except ValueError as exc:
+                self._json({"updated": False, "error": str(exc)}, status=400)
+                return
+            _invalidate_pages_cache()
+            self._json({"updated": True, **result})
+            return
         if path in {"/api/review-memory", "/api/archive-memory", "/api/restore-memory"}:
             if not self._require_local_action_header():
                 return
@@ -1558,6 +1640,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             try:
                 if path == "/api/review-memory":
+                    # Reviewing a memory with enforced rules turns them on for
+                    # the agent's tool calls. The viewer is the one place a
+                    # person does that, and only after seeing the rules: the
+                    # request must repeat the exact rules it displayed. Bulk
+                    # review never sends them, so it can never activate rules.
+                    rules = _enforced_rules_for(identifier)
+                    raw_ack = payload.get("acknowledge_rules")
+                    acknowledged = {str(r) for r in raw_ack} if isinstance(raw_ack, list) else set()
+                    if rules and acknowledged != set(rules):
+                        self._json({
+                            "updated": False,
+                            "error": "this memory carries enforced rules; review it on its own, with its rules "
+                                     "in view, so they are acknowledged before they act on the agent's tool calls",
+                            "rules": rules,
+                        }, status=409)
+                        return
                     result = _mark_memory_reviewed(
                         identifier,
                         note=_clean_text_input(payload.get("note"), max_len=500),
@@ -1583,7 +1681,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
-        if path == "/logo.svg":
+        if path.startswith("/assets/link-"):
+            asset = _core_viewer_assets().get(path)
+            if asset is None:
+                self._err("asset")
+            else:
+                self._asset(*asset)
+        elif path == "/logo.svg":
             self._file(_brand_file("logo.svg"), "image/svg+xml")
         elif path == "/logo.png":
             self._file(_brand_file("logo.png"), "image/png")
@@ -1635,7 +1739,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/all":
             self._ok(_render_all(query))
         elif path == "/graph":
-            self._ok(_render_graph(query))
+            nonce = secrets.token_urlsafe(18)
+            self._ok(_render_graph(query, nonce=nonce), nonce=nonce)
         elif path == "/search":
             self._ok(_render_search(_query_text(query, "q"), page_type=_query_text(query, "type", "page_type", max_len=80)))
         elif path.startswith("/page/"):
@@ -1651,7 +1756,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in {"/api", "/api/"}:
             self._json(_api_discovery_payload())
         elif path == "/api/pages":
-            self._json(_all_pages())
+            # Unbounded, this sent every page's metadata on each call (355 KB
+            # at 1k pages). /api/page-list is the paged endpoint; this one
+            # keeps its list shape, capped, with the total in a header.
+            limit, limit_error = _core_parse_bounded_int(
+                query.get("limit", [str(API_PAGES_DEFAULT_LIMIT)])[0], "limit", API_PAGES_DEFAULT_LIMIT, 1, API_PAGES_MAX_LIMIT)
+            if limit_error:
+                self._json({"error": limit_error}, status=400)
+                return
+            pages = _all_pages()
+            self._json(pages[: int(limit or API_PAGES_DEFAULT_LIMIT)], headers={
+                "X-Total-Count": str(len(pages)),
+                "X-Link-Truncated": "true" if len(pages) > int(limit or API_PAGES_DEFAULT_LIMIT) else "false",
+            })
         elif path == "/api/page-list":
             limit, limit_error = _core_parse_bounded_int(query.get("limit", ["100"])[0], "limit", 100, 1, 1000)
             offset, offset_error = _core_parse_bounded_int(query.get("offset", ["0"])[0], "offset", 0, 0, 1000000)
@@ -1844,11 +1961,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     project=_query_text(query, "project", max_len=80),
                 ))
 
-    def _ok(self, body: str):
-        encoded = body.encode()
+    def _with_nonce(self, body: str, nonce: str | None = None) -> tuple[bytes, str]:
+        # The nonce reaches the page only through the renderer that asked for
+        # it (the graph script). The body is never searched and rewritten.
+        return body.encode(), _core_html_content_security_policy(nonce or secrets.token_urlsafe(18))
+
+    def _ok(self, body: str, nonce: str | None = None):
+        encoded, policy = self._with_nonce(body, nonce)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self._security_headers()
+        self._security_headers(policy)
         self.send_header("Content-Length", str(len(encoded)))
         self._no_store_headers()
         self.end_headers()
@@ -1856,10 +1978,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(encoded)
 
     def _err(self, name: str):
-        encoded = _layout("Not Found", f"<h1>Not found</h1><p>No page: {html.escape(name)}</p>").encode()
+        encoded, policy = self._with_nonce(_layout("Not Found", f"<h1>Not found</h1><p>No page: {html.escape(name)}</p>"))
         self.send_response(404)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self._security_headers()
+        self._security_headers(policy)
         self.send_header("Content-Length", str(len(encoded)))
         self._no_store_headers()
         self.end_headers()
@@ -1892,9 +2014,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             allowed, error = _core_validate_local_browser_source_headers(
                 self.headers.get("Origin", ""),
                 self.headers.get("Referer", ""),
+                # The port the browser used (Host), not the one we bound:
+                # port forwarding serves the viewer on another port.
+                allowed_port=_core_host_header_port(self.headers.get("Host", "")) or self._server_port(),
             )
             if allowed:
-                return True
+                # Only requests that proved they come from the viewer count
+                # against the mutation limit.
+                return self._require_mutation_rate_limit()
             payload = dict(error_payload or {"updated": False})
             payload["error"] = error
             self._json(payload, status=403)
@@ -1906,10 +2033,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         }, status=403)
         return False
 
-    def _require_mutation_rate_limit(self) -> bool:
+    def _server_port(self) -> int | None:
+        address = getattr(getattr(self, "server", None), "server_address", None)
+        try:
+            return int(address[1]) if address else None
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    def _require_mutation_rate_limit(self, bucket: str = "mutation") -> bool:
         client_host = self.client_address[0] if self.client_address else "local"
         with _rate_limiter_lock:
-            allowed, retry_after = _mutation_rate_limiter.check(client_host)
+            allowed, retry_after = _mutation_rate_limiter.check(f"{bucket}:{client_host}")
         if allowed:
             return True
         self._json(
@@ -1984,6 +2118,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             return None, "JSON body must be an object", 400
         return payload, None, 200
+
+    def _asset(self, text: str, content_type: str) -> None:
+        # Content-hashed path: safe to cache forever, a new build is a new URL.
+        encoded = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self._security_headers()
+        self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.end_headers()
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(encoded)
 
     def _security_headers(self, content_security_policy: str = CONTENT_SECURITY_POLICY):
         for key, value in _core_local_security_headers(API_VERSION, content_security_policy):

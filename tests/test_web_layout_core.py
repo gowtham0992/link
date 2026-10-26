@@ -32,6 +32,8 @@ class WebLayoutCoreTests(unittest.TestCase):
 
     def test_layout_escapes_title_and_page_class(self):
         html = render_layout('<Title>', "<main>Body</main>", page_class='graph" onclick="bad')
+        from link_core.web_layout import viewer_assets
+        html += "".join(text for text, _ in viewer_assets().values())
 
         self.assertIn("<title>&lt;Title&gt; — Link</title>", html)
         self.assertIn('class="graph&quot; onclick=&quot;bad"', html)
@@ -55,3 +57,10 @@ class WebLayoutCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ViewerNavigationTests(unittest.TestCase):
+    def test_project_context_is_carried_across_internal_links(self):
+        from link_core.web_layout import viewer_assets
+        bundle = "".join(text for text, _ in viewer_assets().values())
+        self.assertIn("url.searchParams.set('project', project)", bundle)

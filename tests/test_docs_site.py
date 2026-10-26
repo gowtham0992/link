@@ -1,5 +1,7 @@
 import re
 import importlib.util
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -19,7 +21,7 @@ class DocsSiteTests(unittest.TestCase):
         all_refs = []
         for page in pages:
             html = page.read_text(encoding="utf-8")
-            all_refs.extend(re.findall(r'(?:src|href)="(assets/[^"]+)"', html))
+            all_refs.extend(ref.split("?")[0] for ref in re.findall(r'(?:src|href)="(assets/[^"]+)"', html))
             for local_page in re.findall(r'href="([^":#]+\.html)"', html):
                 self.assertTrue((ROOT / "docs" / local_page).exists(), f"{page.name} -> {local_page}")
 
@@ -88,8 +90,32 @@ class DocsSiteTests(unittest.TestCase):
             if page == index:
                 continue
 
-            self.assertIn('<script src="assets/site.js" defer></script>', html)
+            self.assertRegex(html, r'<script src="assets/site\.js\?v=[0-9a-f]{10}" defer></script>')
+            self.assertRegex(html, r'<link rel="stylesheet" href="assets/site\.css\?v=[0-9a-f]{10}">')
             self.assertNotIn("<script>", lower)
+
+    def test_docs_chrome_and_search_index_are_in_sync(self):
+        """Every docs page carries the same nav and sidebar, stamped by one script.
+
+        The pages are plain HTML with no build step, so the shared chrome is
+        duplicated on purpose; this keeps the copies identical and the search
+        index current, and fails when a page is added without a sidebar entry.
+        """
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/sync_docs_site.py"), "--check"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        for page in self.docs_pages():
+            if page.name == "index.html":
+                continue
+            html = page.read_text(encoding="utf-8")
+            self.assertEqual(html.count('<aside class="docs-sidebar"'), 1, page.name)
+            self.assertEqual(html.count('class="site-search"'), 1, page.name)
+            sidebar = html[html.index('<aside class="docs-sidebar"'):html.index("</aside>", html.index('<aside class="docs-sidebar"'))]
+            self.assertEqual(sidebar.count('aria-current="page"'), 1, page.name)
+            self.assertIn(html.count('aria-current="page"'), (1, 2), page.name)  # sidebar, plus the top nav when listed
 
     def test_github_pages_analytics_is_docs_only_and_manual(self):
         site_js = (ROOT / "docs/assets/site.js").read_text(encoding="utf-8")

@@ -56,6 +56,11 @@ struct PopoverView: View {
         .onChange(of: store.requestedTab) { _, requested in
             guard let requested else { return }
             tab = requested
+            if requested == .memory, let title = store.focusMemoryTitle {
+                memoryQuery = title
+                expandedMemory = store.memories.first { $0.title == title }?.name
+                store.focusMemoryTitle = nil
+            }
             if requested == .status { store.refreshHealth() }
             store.requestedTab = nil
         }
@@ -133,6 +138,11 @@ struct PopoverView: View {
                     if let captures = store.captures, !captures.captures.isEmpty {
                         capturesSection(captures)
                     }
+                }
+                if let session = store.receipt?.last,
+                   !session.memoriesUsed.isEmpty || session.recalls > 0
+                    || session.anythingUndelivered == true || !(session.ruleChecks ?? []).isEmpty {
+                    receiptSection(session)
                 }
                 if !store.activity.isEmpty && !isFullyIdle {
                     activitySection
@@ -262,7 +272,7 @@ struct PopoverView: View {
                             .background(store.memoryFilterStale ? AnyShapeStyle(LinkBrand.amber) : AnyShapeStyle(LinkBrand.amber.opacity(0.14)), in: Capsule())
                         }
                         .buttonStyle(.plain)
-                        .help("Memories that name files \(stale.repoName) no longer has")
+                        .help("Memories that name files, scripts or code \(stale.repoName) no longer has")
                     }
                     ForEach(["preference", "decision", "note", "project", "procedure", "fact"], id: \.self) { t in
                         filterChip(t, t)
@@ -491,6 +501,7 @@ struct PopoverView: View {
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     /// The post-upgrade drift warning, with its one-click repair.
@@ -662,6 +673,11 @@ struct PopoverView: View {
                                     Text(tldr).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                                 }
                             }
+                            // A rule acts on the agent's tool calls once this
+                            // memory is reviewed: show exactly what is being approved.
+                            ForEach(item.rules, id: \.self) { rule in
+                                ruleLine(rule)
+                            }
                         }
                         .contentShape(Rectangle())
                         .contextMenu {
@@ -670,14 +686,20 @@ struct PopoverView: View {
                         Spacer(minLength: 6)
                         Button {
                             store.markReviewed(item)
-                        } label: { Image(systemName: "checkmark") }
+                        } label: { Image(systemName: "checkmark").accessibilityLabel(Text("Mark reviewed")) }
                             .buttonStyle(.borderedProminent)
                             .tint(LinkBrand.rust)
                             .controlSize(.small)
                             .help("Mark reviewed — confirm this memory is accurate")
                         Button {
+                            store.openDashboard(path: "/inbox")
+                        } label: { Image(systemName: "pencil").accessibilityLabel(Text("Edit")) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Edit — opens the review inbox in the viewer, where edits get the same conflict checks")
+                        Button {
                             store.archive(item)
-                        } label: { Image(systemName: "archivebox") }
+                        } label: { Image(systemName: "archivebox").accessibilityLabel(Text("Archive")) }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .help("Archive — keep it out of recall, never deleted")
@@ -749,6 +771,18 @@ struct PopoverView: View {
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(2)
+                            }
+                            if capture.readOutsideContent {
+                                Label {
+                                    Text("session read \((capture.untrustedInputs ?? []).map { $0 == "mcp" ? "MCP" : $0 }.joined(separator: "/")) content — check these are your words")
+                                        .font(.caption2)
+                                } icon: {
+                                    Image(systemName: "globe")
+                                        .font(.system(size: 9.5))
+                                }
+                                .foregroundStyle(LinkBrand.amber)
+                                .help("This session read web pages or MCP tool output. Text from those can end up in a " +
+                                      "proposal; accept it only if it says what you meant.")
                             }
                             if let warnings = capture.injectionWarnings, !warnings.isEmpty {
                                 Label {
@@ -835,11 +869,17 @@ struct PopoverView: View {
                                 .buttonStyle(.borderedProminent)
                                 .tint(LinkBrand.rust)
                                 .controlSize(.small)
-                                .help("Accept the proposal into reviewed memory")
+                                .help("Save the proposal as a memory; it still waits for your review")
                         }
                         Button {
+                            store.openDashboard(path: "/captures")
+                        } label: { Image(systemName: "pencil").accessibilityLabel(Text("Edit")) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Edit — opens the captures page in the viewer to change a proposal before saving it")
+                        Button {
                             store.deleteCapture(capture)
-                        } label: { Image(systemName: "trash") }
+                        } label: { Image(systemName: "trash").accessibilityLabel(Text("Discard capture")) }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .help("Discard this capture — Link remembers the dismissal and won't re-propose it")
@@ -847,6 +887,141 @@ struct PopoverView: View {
                 }
             }
         }
+
+    // MARK: memory receipt (lnk receipt)
+
+    /// What the agent was actually handed last session - the answer to "is
+    /// my agent even using this?" without opening a terminal.
+    private func receiptSection(_ session: MemoryReceipt.Session) -> some View {
+        VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionHeader(title: "Last session")
+                if let when = Date.fromLinkStamp(session.ended)?.relativeLabel {
+                    Text(when)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize()
+                }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(receiptHeadline(session))
+                    .font(.system(size: 12.5, weight: .medium))
+                let details = [session.surfaceLabel, session.tokenLabel].compactMap { $0 }
+                if !details.isEmpty {
+                    Text(details.joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if let missed = session.undeliveredLabel {
+                    Label("The agent didn't get all of its memory: \(missed)", systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(LinkBrand.amber)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(LinkBrand.amber.opacity(0.14), in: Capsule())
+                        .padding(.top, 2)
+                        .help("Link sent memory the agent's session never showed, or showed only in part. " +
+                              "`lnk receipt` lists which brief or reminder was affected.")
+                }
+                if let rules = session.ruleChecks, let label = session.ruleCheckLabel {
+                    Label("Enforced rules: \(label)", systemImage: "hand.raised")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 1)
+                        .help("Enforced rules (lnk enforce) checked the agent's tool calls \(rules.count) time(s) last session")
+                }
+                if session.anythingTruncated == true {
+                    Label("A size budget left some memories out", systemImage: "scissors")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(LinkBrand.amber)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(LinkBrand.amber.opacity(0.14), in: Capsule())
+                        .padding(.top, 2)
+                        .help("A brief or recall hit its size budget, so some memories were left out")
+                }
+            }
+            .padding(.horizontal, 8)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(session.memoriesUsed.prefix(4)) { used in
+                    receiptRow(used)
+                }
+            }
+            if session.memoriesUsed.count > 4 {
+                Text("+\(session.memoriesUsed.count - 4) more · lnk receipt")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 8)
+                    .textSelection(.enabled)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Last session: \(receiptHeadline(session))"))
+    }
+
+    private func ruleLine(_ rule: String) -> some View {
+        let parts = rule.split(separator: " ", maxSplits: 1).map(String.init)
+        let action = parts.first ?? ""
+        let rest = parts.count > 1 ? parts[1] : ""
+        return HStack(spacing: 5) {
+            Text(action == "deny" ? "blocks" : "asks")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(action == "deny" ? LinkBrand.rust : LinkBrand.amber)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background((action == "deny" ? LinkBrand.rust : LinkBrand.amber).opacity(0.14), in: Capsule())
+            Text(rest)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .help("Once reviewed, this memory \(action == "deny" ? "blocks" : "asks you before") the agent's " +
+              "tool call: \(rest)")
+        .accessibilityElement(children: .combine)
+    }
+
+    private func receiptHeadline(_ session: MemoryReceipt.Session) -> String {
+        let count = session.memoriesUsed.count
+        let memories = count == 1 ? "1 memory" : "\(count) memories"
+        let recalls = session.recalls == 1 ? "1 recall" : "\(session.recalls) recalls"
+        switch (count, session.recalls) {
+        case (0, _): return "No memories given · \(recalls)"
+        case (_, 0): return "Your agent was given \(memories)"
+        default: return "Your agent was given \(memories) · \(recalls)"
+        }
+    }
+
+    private func receiptRow(_ used: MemoryReceipt.Used) -> some View {
+        let gone = used.exists == false
+        return HoverRow {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(gone ? AnyShapeStyle(.quaternary) : AnyShapeStyle(LinkBrand.rust.opacity(0.7)))
+                    .frame(width: 5, height: 5)
+                Text(used.title.isEmpty ? used.name : used.title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(gone ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .strikethrough(gone)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                if used.times > 1 {
+                    Text("×\(used.times)")
+                        .font(.system(size: 10.5).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                if !gone {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.quaternary)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { if !gone { store.showMemory(titled: used.title) } }
+        }
+        .help(gone ? "This memory has since been deleted" : "Show this memory and why Link believes it")
+        .accessibilityAddTraits(gone ? [] : .isButton)
+    }
 
     // MARK: activity, idle, footer
 

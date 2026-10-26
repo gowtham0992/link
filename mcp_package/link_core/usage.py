@@ -5,7 +5,9 @@ the agent ever read it back — which makes "your agents have memory" a hope
 rather than a measurement. This module closes that gap the local-first way.
 
 What is recorded: a timestamp, which surface retrieved (session brief,
-recall, query), how many memories came back, and their names.
+recall, query), how many memories came back, their names, and - for the
+memory receipt - where it happened (hook, MCP, CLI), roughly how many
+tokens it cost and whether a budget cut anything.
 
 What is never recorded: the query text, the answer, the conversation, or
 anything about the machine. The ledger says *that* memory was used and
@@ -26,11 +28,22 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from .files import atomic_write_text_unlocked, file_lock
+
 USAGE_FILE = ".link-usage.json"
 USAGE_DISABLE_ENV = "LINK_USAGE"
 MAX_EVENTS = 500
-# Surfaces that count as "an agent read memory back".
-RETRIEVAL_KINDS = ("brief", "recall", "query", "guard")
+# Hooks, an MCP server and the CLI can all record at once, and every write
+# is serialized behind one lock. A waiter that gives up loses its event, so
+# it waits long enough for a slow disk to drain a burst of writers.
+LEDGER_LOCK_TIMEOUT_SECONDS = 60.0
+# Surfaces that count as "an agent read memory back": the session brief,
+# recalls, guard reminders, reminders when the agent touched anchored code,
+# and reviewed rules checked against a tool call.
+RETRIEVAL_KINDS = ("brief", "recall", "query", "guard", "touch", "enforce")
+# Whether each hook injection arrived, checked against the transcript at
+# session end (delivered / truncated / missing). Not a retrieval.
+DELIVERY_KIND = "delivery"
 
 
 def usage_disabled() -> bool:
@@ -63,6 +76,12 @@ def record_retrieval(
     memories: Iterable[str] = (),
     *,
     project: str = "",
+    surface: str = "",
+    tokens: int = 0,
+    truncated: bool = False,
+    session: str = "",
+    delivery: str = "",
+    decision: str = "",
 ) -> bool:
     """Append one retrieval event. Returns False when disabled or unwritable.
 
@@ -76,23 +95,87 @@ def record_retrieval(
         return False
     names = [str(name).strip() for name in memories if str(name).strip()][:20]
     try:
-        events = load_usage(root)
-        events.append({
+        event: dict[str, object] = {
             "at": _utc_now(),
             "kind": clean_kind,
             "count": len(names),
             "memories": names,
             "project": str(project or ""),
+        }
+        if surface:
+            event["surface"] = str(surface)[:20]
+        if tokens:
+            event["tokens"] = int(tokens)
+        if truncated:
+            event["truncated"] = True
+        if session:
+            event["session"] = str(session)[:80]
+        if delivery:
+            event["delivery"] = str(delivery)[:16]
+        if decision:
+            event["decision"] = str(decision)[:10]
+        return _append_event(root, event)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def record_delivery(root: Path, session: str, results: Mapping[str, str]) -> bool:
+    """Record whether each injection of a session reached the agent's context."""
+    if usage_disabled() or not results:
+        return False
+    try:
+        return _append_event(root, {
+            "at": _utc_now(),
+            "kind": DELIVERY_KIND,
+            "session": str(session or "")[:80],
+            "results": {str(key)[:16]: str(value)[:10] for key, value in results.items()},
         })
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _append_event(root: Path, event: dict[str, object]) -> bool:
+    try:
         path = usage_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"schema": "link-usage-v1", "events": events[-MAX_EVENTS:]}, indent=1) + "\n",
-            encoding="utf-8",
-        )
+        # Read, append and replace under one lock: a hook, an MCP server and
+        # the CLI record at the same moment, and an unlocked read-modify-write
+        # kept only the last writer's events.
+        with file_lock(path, timeout=LEDGER_LOCK_TIMEOUT_SECONDS):
+            events = load_usage(root)
+            events.append(event)
+            atomic_write_text_unlocked(
+                path, json.dumps({"schema": "link-usage-v1", "events": events[-MAX_EVENTS:]}, indent=1) + "\n",
+            )
         return True
     except (OSError, ValueError, TypeError):
         return False
+
+
+def estimated_tokens(value: object) -> int:
+    """Rough token count of what an agent receives (4 characters per token)."""
+    try:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return 0
+    return max(1, (len(text) + 3) // 4)
+
+
+def record_query_packet(root: Path, payload: Mapping[str, object], *, project: str = "", surface: str = "") -> bool:
+    """Record a query packet: the memories in it, its size, and whether a budget cut it."""
+    memory_section = payload.get("memory")
+    items = memory_section.get("items") if isinstance(memory_section, Mapping) else None
+    budget_section = payload.get("budget_report")
+    budget_report: Mapping[str, object] = budget_section if isinstance(budget_section, Mapping) else {}
+    total = budget_report.get("packet_total")
+    tokens = total.get("estimated_tokens") if isinstance(total, Mapping) else 0
+    return record_retrieval(
+        root, "query",
+        [str(item.get("name") or "") for item in (items if isinstance(items, list) else []) if isinstance(item, Mapping)],
+        project=project, surface=surface,
+        tokens=tokens if isinstance(tokens, int) else 0,
+        truncated=any(bool(section.get("has_more")) for section in budget_report.values() if isinstance(section, Mapping)),
+    )
 
 
 def _within(stamp: object, days: int, today: date) -> bool:
@@ -222,3 +305,144 @@ def usage_salience(events: list[dict[str, object]]) -> dict[str, int]:
         if boost:
             boosts[name] = boost
     return boosts
+
+
+# ── Memory receipt: what reached the agent, session by session ──────────
+# A session is a run of retrieval events with no gap longer than this.
+RECEIPT_SESSION_GAP_MINUTES = 30
+
+
+def _event_time(event: Mapping[str, object]) -> datetime | None:
+    stamp = str(event.get("at") or "")
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def memory_receipts(
+    events: Iterable[Mapping[str, object]],
+    *,
+    sessions: int = 3,
+    gap_minutes: int = RECEIPT_SESSION_GAP_MINUTES,
+) -> list[dict[str, object]]:
+    """The most recent sessions, newest first, as receipts.
+
+    Each receipt says what the agent was given from memory: the session
+    brief (how many memories, roughly how many tokens, whether it was cut
+    to fit), each recall, guard reminders, and every memory that reached the
+    agent with how many times. Rule checks say what a reviewed rule asked
+    or blocked, and each hook injection says whether the transcript shows it
+    arrived whole, cut off, or not at all. Built from the local ledger only;
+    the ledger never holds queries, so neither does the receipt.
+    """
+    events = list(events)
+    delivered: dict[str, str] = {}
+    for event in events:
+        results = event.get("results")
+        if str(event.get("kind") or "") == DELIVERY_KIND and isinstance(results, dict):
+            delivered.update({str(k): str(v) for k, v in results.items()})
+
+    def delivery_state(event: Mapping[str, object]) -> str | None:
+        token = str(event.get("delivery") or "")
+        if not token:
+            return None
+        return delivered.get(token, "unverified")
+
+    timed = [
+        (moment, event) for event in events
+        if (moment := _event_time(event)) is not None
+        and str(event.get("kind") or "") in RETRIEVAL_KINDS
+    ]
+    timed.sort(key=lambda pair: pair[0])
+    by_gap: list[list[tuple[datetime, Mapping[str, object]]]] = []
+    for moment, event in timed:
+        if by_gap and (moment - by_gap[-1][-1][0]).total_seconds() <= gap_minutes * 60:
+            by_gap[-1].append((moment, event))
+        else:
+            by_gap.append([(moment, event)])
+    # Sessions that overlap in time (two agents at once) carry their own
+    # session ids: split on those, and give events without one (CLI, MCP) to
+    # the session active just before them.
+    grouped: list[list[tuple[datetime, Mapping[str, object]]]] = []
+    for group in by_gap:
+        ids = [str(event.get("session") or "") for _moment, event in group]
+        if len({item for item in ids if item}) <= 1:
+            grouped.append(group)
+            continue
+        parts: dict[str, list[tuple[datetime, Mapping[str, object]]]] = {}
+        order: list[str] = []
+        last = next(item for item in ids if item)
+        for pair, session in zip(group, ids):
+            key = session or last
+            last = key
+            if key not in parts:
+                parts[key] = []
+                order.append(key)
+            parts[key].append(pair)
+        grouped.extend(sorted((parts[key] for key in order), key=lambda part: part[0][0]))
+    receipts: list[dict[str, object]] = []
+    for group in reversed(grouped[-max(1, sessions):]):
+        used: dict[str, int] = {}
+        briefs: list[dict[str, object]] = []
+        recalls = 0
+        guards: list[str] = []
+        tokens = 0
+        truncated = False
+        surfaces: set[str] = set()
+        rule_checks: list[dict[str, object]] = []
+        code_reminders: list[dict[str, object]] = []
+        deliveries: dict[str, int] = {}
+        for _moment, event in group:
+            state = delivery_state(event)
+            if state:
+                deliveries[state] = deliveries.get(state, 0) + 1
+            kind = str(event.get("kind") or "")
+            raw_names = event.get("memories")
+            names = [str(name) for name in raw_names if str(name)] if isinstance(raw_names, list) else []
+            for name in names:
+                used[name] = used.get(name, 0) + 1
+            event_tokens = event.get("tokens")
+            tokens += event_tokens if isinstance(event_tokens, int) else 0
+            truncated = truncated or bool(event.get("truncated"))
+            if event.get("surface"):
+                surfaces.add(str(event.get("surface")))
+            if kind == "brief":
+                brief: dict[str, object] = {
+                    "memories": len(names),
+                    "tokens": event_tokens if isinstance(event_tokens, int) else None,
+                    "truncated": bool(event.get("truncated")),
+                }
+                if state:
+                    brief["delivery"] = state
+                briefs.append(brief)
+            elif kind == "guard":
+                guards.extend(names)
+            elif kind == "enforce":
+                rule_checks.append({"decision": str(event.get("decision") or "ask"), "memories": names})
+            elif kind == "touch":
+                code_reminders.append({"memories": names, **({"delivery": state} if state else {})})
+            else:
+                recalls += 1
+        receipts.append({
+            "started": str(group[0][1].get("at") or ""),
+            "ended": str(group[-1][1].get("at") or ""),
+            "project": str(group[-1][1].get("project") or ""),
+            "surfaces": sorted(surfaces),
+            "briefs": briefs,
+            "recalls": recalls,
+            "guard_reminders": guards,
+            "memories_used": [
+                {"name": name, "times": times}
+                for name, times in sorted(used.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "estimated_tokens": tokens,
+            "anything_truncated": truncated,
+            "rule_checks": rule_checks,
+            "code_reminders": code_reminders,
+            # delivered / truncated / missing per hook injection; "unverified"
+            # when the agent gave no transcript to check against.
+            "delivery": deliveries,
+            "anything_undelivered": bool(deliveries.get("missing") or deliveries.get("truncated")),
+        })
+    return receipts

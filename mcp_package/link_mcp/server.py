@@ -29,8 +29,10 @@ import argparse
 import functools
 import json
 import os
+import re
 import sys
 import time
+from collections.abc import Collection
 from pathlib import Path
 
 from link_core.version import LINK_VERSION
@@ -240,9 +242,13 @@ def _attach_session_brief(result: object) -> object:
             pass
         if not names and not pending_handoff:
             return result  # nothing to say; do not pad every first response
+        compact = _compact_session_brief(brief)
         if names:
-            _core_record_retrieval(WIKI_DIR.parent, "brief", names)
-        payload[BRIEF_ATTACH_KEY] = _compact_session_brief(brief)
+            _core_record_retrieval(
+                WIKI_DIR.parent, "brief", names, surface="mcp",
+                tokens=_estimated_tokens_of(compact), truncated=bool(compact.get("truncated")),
+            )
+        payload[BRIEF_ATTACH_KEY] = compact
         return json.dumps(payload, ensure_ascii=False)
     except Exception:
         return result
@@ -278,7 +284,11 @@ def _compact_session_brief(brief: dict) -> dict:
 
     profile_obj = brief.get("profile")
     profile: dict = profile_obj if isinstance(profile_obj, dict) else {}
-    needs_review = brief.get("needs_review_count") or profile.get("needs_review_count") or 0
+    # memory_brief reports the review queue under review.count; the old
+    # needs_review_count key never existed, so this was always 0.
+    review_obj = brief.get("review")
+    review_block: dict = review_obj if isinstance(review_obj, dict) else {}
+    needs_review = review_block.get("count") or profile.get("review_count") or 0
     # A waiting handoff outranks memory: put it first in the digest.
     handoff_block = ""
     try:
@@ -307,6 +317,56 @@ def _compact_session_brief(brief: dict) -> dict:
     return compact
 
 
+# What each slim tool can do, for clients deciding what needs confirmation.
+# Nothing in Link reaches the network, so every tool is closed-world.
+SLIM_TOOL_HINTS: dict[str, dict[str, bool]] = {
+    "status": {"readOnlyHint": True},
+    "recall": {"readOnlyHint": True},
+    "remember": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
+    "ingest": {"readOnlyHint": False, "destructiveHint": False},
+    # review can archive, restore and (with confirm) forget a memory.
+    "review": {"readOnlyHint": False, "destructiveHint": True},
+    # admin covers migrate, backup restore paths and capture deletion.
+    "admin": {"readOnlyHint": False, "destructiveHint": True},
+}
+
+
+def _register_tool(fn, hints: dict[str, bool] | None):
+    """Register with annotations and without a duplicate structured copy.
+
+    Link tools return a JSON string. Left to its defaults, FastMCP also sent
+    that same string back as structuredContent under a {"result": string}
+    schema, so every result crossed the wire twice. Older mcp releases lack
+    one or both keywords, so registration degrades rather than failing.
+    """
+    annotations = None
+    if hints is not None:
+        try:
+            from mcp.types import ToolAnnotations
+
+            annotations = ToolAnnotations(
+                readOnlyHint=hints.get("readOnlyHint"),
+                destructiveHint=hints.get("destructiveHint"),
+                idempotentHint=hints.get("idempotentHint"),
+                openWorldHint=False,
+            )
+        except Exception:
+            annotations = None
+    try:
+        return mcp.tool(annotations=annotations, structured_output=False)(fn)
+    except TypeError:
+        pass
+    try:
+        return mcp.tool(annotations=annotations)(fn)
+    except TypeError:
+        return mcp.tool()(fn)
+
+
+def _estimated_tokens_of(value: object) -> int:
+    """Rough token count of what an agent receives (4 chars per token)."""
+    return _core_estimated_tokens(value)
+
+
 def _surface_tool(surface: str):
     def decorator(fn):
         if MCP_SURFACE != surface:
@@ -316,7 +376,7 @@ def _surface_tool(surface: str):
         def wrapper(*args, **kwargs):
             return _attach_session_brief(fn(*args, **kwargs))
 
-        return mcp.tool()(wrapper)
+        return _register_tool(wrapper, SLIM_TOOL_HINTS.get(fn.__name__) if surface == "slim" else None)
 
     return decorator
 
@@ -353,6 +413,7 @@ from link_core.memory import (
     memory_review_issues as _core_memory_review_issues,
     propose_memories_from_text as _core_propose_memories_from_text,
     recall_memories as _core_recall_memory_results,
+    parse_time_expression as _core_parse_time_expression,
     recall_abstention as _core_recall_abstention,
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
@@ -375,13 +436,21 @@ from link_core.capture import (
     capture_proposal_selection as _core_capture_proposal_selection,
     capture_records as _core_capture_records,
     capture_review_summary as _core_capture_review_summary,
+    load_dismissed_fingerprints as _core_load_dismissed_fingerprints,
     dedup_pending_captures as _core_dedup_pending_captures,
     delete_capture_file as _core_delete_capture_file,
     mcp_capture_commands as _core_mcp_capture_commands,
     redact_capture_file as _core_redact_capture_file,
     write_session_capture as _core_write_session_capture,
 )
-from link_core.usage import record_retrieval as _core_record_retrieval
+from link_core.usage import (
+    load_usage as _core_load_usage,
+    memory_receipts as _core_memory_receipts,
+    estimated_tokens as _core_estimated_tokens,
+    record_query_packet as _core_record_query_packet,
+    record_retrieval as _core_record_retrieval,
+    usage_disabled as _core_usage_disabled,
+)
 from link_core.handoff import (
     handoff_brief_block as _core_handoff_brief_block,
     pending_handoffs as _core_pending_handoffs,
@@ -724,7 +793,7 @@ def _guard_note_for(query: str, records: list[dict[str, object]] | None = None) 
         name = str(reminder.get("name") or "")
         if _core_recently_guarded(WIKI_DIR.parent, name):
             return ""
-        _core_record_retrieval(WIKI_DIR.parent, "guard", [name])
+        _core_record_retrieval(WIKI_DIR.parent, "guard", [name], surface="mcp")
         return _core_render_guard_text(reminder)
     except Exception:
         return ""
@@ -736,6 +805,8 @@ def _recall_memory_results(
     include_archived: bool = False,
     project: str = "",
     context_path: str = "",
+    as_of: str = "",
+    memory_type: str = "",
 ) -> list[dict[str, object]]:
     query = _clean_text_input(query)
     records = _memory_records()
@@ -748,7 +819,9 @@ def _recall_memory_results(
         include_archived=include_archived,
         project=_resolve_project(project),
         context_path=_clean_text_input(context_path, max_len=500) or None,
-        semantic_scores=_core_semantic_memory_scores(WIKI_DIR.parent, query, records),
+        semantic_scores=None if as_of else _core_semantic_memory_scores(WIKI_DIR.parent, query, records),
+        as_of=as_of or None,
+        memory_type=memory_type or None,
     )
     if reranker is not None:
         results = _core_rerank_blend(query, results, limit=limit, reranker=reranker)
@@ -761,6 +834,7 @@ def _propose_memories_from_text(
     limit: int = 10,
     project: str = "",
     curated: bool = False,
+    exclude_fingerprints: Collection[str] = (),
 ) -> dict[str, object]:
     return _core_propose_memories_from_text(
         text,
@@ -770,6 +844,7 @@ def _propose_memories_from_text(
         writes_memory=False,
         project=_resolve_project(project),
         curated=curated,
+        exclude_fingerprints=exclude_fingerprints,
     )
 
 
@@ -870,6 +945,10 @@ def _accept_capture(
     allow_conflict: bool = False,
 ) -> dict[str, object]:
     root = WIKI_DIR.parent
+    # The inbox preview hides proposals the user dismissed; accept must
+    # number them the same way, or "accept 1" after dismissing #1 stores
+    # the very proposal the user just declined.
+    dismissed = set(_core_load_dismissed_fingerprints(root))
     selection = _core_capture_proposal_selection(
         root,
         capture,
@@ -884,6 +963,7 @@ def _accept_capture(
             limit=proposal_limit,
             project=project_name,
             curated=curated,
+            exclude_fingerprints=dismissed,
         ),
     )
     rel_path = str(selection["capture"])
@@ -999,6 +1079,11 @@ def _rebuild_memory_backlinks() -> bool:
     return bool(rebuilt.get("rebuilt"))
 
 
+def _split_rules(value: str) -> list[str]:
+    """Enforce rules given as one string: separated by ";" or new lines."""
+    return [part.strip() for part in re.split(r"[;\n]", str(value or "")) if part.strip()]
+
+
 def _memory_mutation_options(project: str = "") -> dict[str, object]:
     return {
         "timestamp": _utc_timestamp(),
@@ -1016,7 +1101,30 @@ def _memory_type_scope(memory_type: str, scope: str) -> tuple[str, str]:
     )
 
 
+def _refuse_rule_change(identifier: str, action: str) -> None:
+    """Rules are the person's to turn on and off, never the agent's.
+
+    Over MCP an agent could otherwise mark its own rule reviewed, or clear,
+    archive, forget or update (which resets review on) a rule that just
+    stopped it. Those changes stay with the person: the CLI, the viewer and
+    LinkBar make them.
+    """
+    from link_core.memory import resolve_memory_page as _resolve
+
+    _path, record, _error = _resolve(WIKI_DIR, _clean_text_input(identifier, max_len=300), records=_memory_records())
+    rules = record.get("enforce") if record else None
+    if isinstance(rules, list) and rules:
+        name = str(record.get("name") if record else identifier)
+        raise ValueError(
+            f"{name} enforces rules on tool calls ({'; '.join(str(rule) for rule in rules)}). "
+            f"Only the person can {action} it: ask them to run `lnk review-memory {name}`, "
+            f"`lnk enforce {name} --clear` or use the viewer or LinkBar."
+        )
+
+
 def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[str, object]:
+    if status != "active":
+        _refuse_rule_change(identifier, status.rstrip("d") if status.endswith("d") else status)
     result = _core_set_memory_status(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),
@@ -1046,6 +1154,7 @@ def _set_memory_visibility(identifier: str, visibility: str) -> dict[str, object
 
 
 def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
+    _refuse_rule_change(identifier, "forget")
     result = _core_forget_memory_page(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),
@@ -1061,6 +1170,7 @@ def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
 
 
 def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
+    _refuse_rule_change(identifier, "approve")
     result = _core_mark_memory_reviewed(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),
@@ -1103,6 +1213,7 @@ def _write_mcp_memory_page(
     project: str = "",
     visibility: str = "", review_after: str = "", expires_at: str = "", trigger: str = "",
     applies_when: str = "", supersedes: str = "", context: str = "",
+    enforce: list[str] | None = None,
 ) -> dict[str, object]:
     clean_text = _required_text_input(text, "memory text required", max_len=4000)
     memory_type, scope = _memory_type_scope(memory_type, scope)
@@ -1121,6 +1232,10 @@ def _write_mcp_memory_page(
         context=_clean_text_input(context, max_len=600) or None,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
         allow_secret=allow_secret,
+        # Only a project the agent named makes the memory project-scoped;
+        # the resolved default project is always present.
+        project_explicit=bool(_clean_text_input(project)),
+        enforce=enforce,
         **options,
     )
     if result.get("created"):
@@ -1152,7 +1267,16 @@ def link_instructions_resource() -> str:
         "8. If a brief reports a memory backlog, offer the user a short consolidation pass: "
         "`review(action=\"consolidate\")` returns a read-only plan; apply its accept/discard actions only "
         "after the user approves each one.\n"
-        "9. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n\n"
+        "9. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n"
+        "10. Some reviewed memories carry enforce rules: a tool call may wait for the user's OK or be blocked, "
+        "and the decision names the memory - follow it. Never review, clear, archive, forget or update a "
+        "memory that carries rules; only the user does. Set `remember(enforce=...)` or `admin(action=\"set_enforce\")` "
+        "only when the user asks; rules act after the user reviews the memory.\n"
+        "11. A brief may end with \"Waiting for the user's OK\": show those items at a pause and run a listed "
+        "command only after the user says yes to that item in chat.\n"
+        "12. Recalled memories may carry `verified` or `stale_paths` (checked against the repository): treat a "
+        "stale one as possibly wrong and say so. `review(action=\"receipt\")` shows what memory reached each "
+        "session.\n\n"
         "If Link session hooks are installed for this agent, the startup brief is injected automatically — "
         "skip step 2 and go straight to bounded task recall.\n"
         "Recalled memories carry a `match` field: treat `semantic` matches (paraphrase similarity, capped "
@@ -1303,6 +1427,38 @@ def link_review_prompt(topic: str = "") -> str:
     )
 
 
+def _compile_memories(payload: dict[str, object]) -> dict[str, object]:
+    """admin compile: preview (default) or write compiled agent files for a repository."""
+    from link_core.compile import TARGET_KEYS, apply_plan, plan_changes, plan_compile, plan_diff, plan_summary
+
+    repo = Path(_str_arg(payload, "repo") or str(Path.cwd())).expanduser().resolve()
+    if not repo.is_dir():
+        return {"surface": "slim", "tool": "admin", "action": "compile", "ok": False,
+                "error": f"{repo} is not a directory"}
+    raw_targets = payload.get("targets")
+    targets = [str(t) for t in raw_targets] if isinstance(raw_targets, list) else (
+        [t.strip() for t in str(raw_targets).split(",") if t.strip()] if raw_targets else None)
+    unknown = [t for t in targets or [] if t not in TARGET_KEYS and t != "all"]
+    if unknown:
+        return {"surface": "slim", "tool": "admin", "action": "compile", "ok": False,
+                "error": f"unknown targets: {', '.join(unknown)}", "supported_targets": list(TARGET_KEYS)}
+    plan = plan_compile(_memory_records(), repo, project=_str_arg(payload, "project") or None, targets=targets,
+                        include_private=_bool_arg(payload, "include_private", False))
+    changes = plan_changes(plan)
+    write = _bool_arg(payload, "write", False)
+    if write:
+        apply_plan(plan)
+    result = plan_summary(plan, changes)
+    result.update({"surface": "slim", "tool": "admin", "action": "compile", "ok": True,
+                   "written": write and bool(changes)})
+    if not write:
+        diff = plan_diff(plan)
+        result["diff"] = diff[:20_000]
+        result["diff_truncated"] = len(diff) > 20_000
+        result["next"] = "Show the user this preview; write it with arguments {\"write\": true} after they approve."
+    return result
+
+
 def _admin_arguments(arguments: str) -> dict[str, object]:
     text = _clean_text_input(arguments, max_len=4000) if isinstance(arguments, str) else ""
     if not text:
@@ -1367,7 +1523,10 @@ def _record_brief_retrieval(brief: object, project: str) -> None:
         for item in (relevant if isinstance(relevant, list) else [])
         if isinstance(item, dict)
     ]
-    _core_record_retrieval(WIKI_DIR.parent, "brief", names, project=project)
+    _core_record_retrieval(
+        WIKI_DIR.parent, "brief", names, project=project, surface="mcp",
+        tokens=_estimated_tokens_of(brief),
+    )
 
 
 @_slim_tool()
@@ -1378,6 +1537,8 @@ def recall(
     mode: str = "auto",
     limit: int = 6,
     context_path: str = "",
+    as_of: str = "",
+    memory_type: str = "",
 ) -> str:
     """Retrieve local memory/wiki context through one obvious read tool.
 
@@ -1388,12 +1549,41 @@ def recall(
     Pass context_path (the session's working directory) so memories fenced
     with applies_when path: conditions can match; without it they are
     honestly demoted as out_of_context.
+    as_of (YYYY-MM-DD) answers what was true on that date, rebuilt from
+    supersede lineage; a plain phrase in the query ("in March", "last
+    quarter") does the same. memory_type (preference, decision, fact,
+    procedure, project, note) narrows memory recall to one kind.
     """
     clean_query = _clean_text_input(query, max_len=MAX_TEXT_INPUT)
     clean_mode = (_clean_text_input(mode, max_len=40) or "auto").lower().replace("-", "_")
     clean_budget = (_clean_text_input(budget, max_len=40) or "medium").lower()
     clean_project = _resolve_project(project)
     parsed_limit = _parse_limit(limit, default=6, max_limit=20)
+    clean_as_of = _clean_text_input(as_of, max_len=40)
+    clean_type = (_clean_text_input(memory_type, max_len=40) or "").lower()
+    # Point-in-time and typed questions are memory questions: route them to
+    # memory recall, where lineage and types live. A time phrase in the
+    # query resolves to a date and is removed from the ranked text.
+    if clean_type:
+        from link_core.memory import MEMORY_TYPES as _memory_types
+        if clean_type not in _memory_types:
+            return json.dumps({
+                "surface": "slim", "tool": "recall",
+                "error": f"memory_type must be one of: {', '.join(_memory_types)}",
+            })
+    search_query = clean_query
+    # A time phrase found in the text ("in 2017") is a hint, not an order:
+    # in auto mode, when memory holds nothing for that date the question
+    # goes to the full packet, wiki included, instead of an abstention.
+    time_hint_only = False
+    if clean_query and not clean_as_of:
+        temporal = _core_parse_time_expression(clean_query)
+        if temporal and temporal.get("as_of"):
+            clean_as_of = str(temporal["as_of"])
+            search_query = str(temporal.get("residual_query") or "") or clean_query
+            time_hint_only = clean_mode == "auto" and not clean_type
+    if clean_query and (clean_as_of or clean_type) and clean_mode in {"auto", "memory"}:
+        clean_mode = "memory"
 
     if clean_mode == "brief" or (clean_mode == "auto" and not clean_query):
         brief = _memory_brief(query=clean_query, limit=parsed_limit, project=clean_project)
@@ -1408,14 +1598,30 @@ def recall(
     if clean_mode == "memory":
         if not clean_query:
             return json.dumps({"surface": "slim", "tool": "recall", "error": "query required for memory mode"})
-        memories = _recall_memory_results(
-            clean_query, limit=parsed_limit, project=clean_project, context_path=context_path
+        try:
+            memories = _recall_memory_results(
+                search_query, limit=parsed_limit, project=clean_project, context_path=context_path,
+                as_of=clean_as_of, memory_type=clean_type,
+            )
+        except ValueError as exc:
+            return json.dumps({"surface": "slim", "tool": "recall", "error": str(exc)})
+        if not memories and time_hint_only:
+            clean_mode = "auto"
+            clean_as_of = ""
+    if clean_mode == "memory":
+        # The default surface's memory and query modes were never recorded,
+        # so "never retrieved" counted memories agents had in fact read.
+        _core_record_retrieval(
+            WIKI_DIR.parent, "recall", [str(item.get("name") or "") for item in memories],
+            project=clean_project, surface="mcp", tokens=_estimated_tokens_of(memories),
         )
         payload = {
             "surface": "slim",
             "tool": "recall",
             "mode": "memory",
             "query": clean_query,
+            "as_of": clean_as_of,
+            "memory_type": clean_type,
             "project": clean_project,
             "count": len(memories),
             "abstention": _core_recall_abstention(memories),
@@ -1429,6 +1635,7 @@ def recall(
     if not clean_query:
         return json.dumps({"surface": "slim", "tool": "recall", "error": "query required"})
     payload = _query_link(query=clean_query, budget=clean_budget, project=clean_project)
+    _core_record_query_packet(WIKI_DIR.parent, payload, project=clean_project, surface="mcp")
     payload["surface"] = "slim"
     payload["tool"] = "recall"
     payload["mode"] = "query"
@@ -1454,6 +1661,7 @@ def remember(
     applies_when: str = "",
     supersedes: str = "",
     context: str = "",
+    enforce: str = "",
     allow_duplicate: bool = False,
     allow_conflict: bool = False,
     allow_secret: bool = False,
@@ -1469,12 +1677,17 @@ def remember(
     Field rule: trigger helps recall FIND a recipe; applies_when FENCES a
     memory to a context; scope/project/visibility say whose memory it is;
     supersedes REPLACES an old claim with lineage. When unsure, omit them.
+    enforce: only when the user asks Link to stop or check an action - rules
+    like "ask command: git push --force*" or "deny write: migrations/**"
+    (several separated by ";"). They act on tool calls after the user
+    reviews the memory; a result's enforce_suggestions are for the user to
+    accept, never to apply on your own.
     """
     if not memory_type.strip():
         # Same cue-based inference as the CLI: "I prefer X" is a preference,
         # not a generic note — typing drives trust windows and conflict scope.
         from link_core.memory import classify_memory_segment as _classify
-        classified = _classify(text.strip().splitlines()[0] if text.strip() else "")
+        classified = _classify(text.strip().splitlines()[0] if text.strip() else "", explicit=True)
         memory_type = str(classified["memory_type"]) if classified else "note"
     try:
         result = _write_mcp_memory_page(
@@ -1495,6 +1708,7 @@ def remember(
             applies_when=applies_when,
             supersedes=supersedes,
             context=context,
+            enforce=_split_rules(enforce),
         )
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "remember", "created": False, "error": str(exc)})
@@ -1559,8 +1773,11 @@ def review(
 ) -> str:
     """Review, explain, and manage local memory lifecycle.
 
-    Supported actions: inbox, audit, profile, log, wins, explain, reviewed,
-    archive, restore, forget, consolidate. Prefer archive over forget unless
+    Supported actions: inbox, audit, profile, log, wins, receipt, explain,
+    reviewed, archive, restore, forget, consolidate. receipt shows, session
+    by session, which memories reached agents and what they cost; use it
+    when the user asks what the agent knew or why it said something.
+    Prefer archive over forget unless
     the user asks for permanent deletion. Use consolidate for a read-only plan
     when the capture or review backlog builds up; apply its actions only after
     the user approves each one.
@@ -1579,6 +1796,15 @@ def review(
             payload = _memory_log(limit=parsed_limit)
         elif clean_action == "wins":
             payload = _memory_wins(limit=parsed_limit, project=clean_project)
+        elif clean_action == "receipt":
+            titles = {str(r.get("name") or ""): str(r.get("title") or "") for r in _memory_records()}
+            receipts = _core_memory_receipts(_core_load_usage(WIKI_DIR.parent), sessions=min(parsed_limit, 10))
+            for item in receipts:
+                used_list = item.get("memories_used")
+                for used in used_list if isinstance(used_list, list) else []:
+                    if isinstance(used, dict):
+                        used["title"] = titles.get(str(used.get("name") or ""), "")
+            payload = {"recording": not _core_usage_disabled(), "sessions": receipts}
         elif clean_action == "explain":
             payload = _memory_explanation(identifier)
         elif clean_action in {"reviewed", "review", "mark_reviewed"}:
@@ -1601,7 +1827,7 @@ def review(
                 "surface": "slim",
                 "tool": "review",
                 "error": f"unsupported action: {clean_action}",
-                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "explain", "reviewed", "archive", "restore", "forget", "consolidate"],
+                "supported_actions": ["inbox", "audit", "profile", "log", "wins", "receipt", "explain", "reviewed", "archive", "restore", "forget", "consolidate"],
             })
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "review", "updated": False, "error": str(exc)})
@@ -1619,7 +1845,10 @@ def admin(action: str, arguments: str = "{}") -> str:
     backup, migrate, validate, operations, search, context, pages, backlinks,
     graph_summary, graph, rebuild_index, rebuild_backlinks, seed_project, propose_memories,
     capture_session, session_end, capture_inbox, accept_capture, redact_capture,
-    delete_capture, update_memory, and set_visibility.
+    delete_capture, update_memory, set_visibility, set_enforce (identifier, rules;
+    only on the user's explicit request - new rules act after the user reviews them),
+    and compile (reviewed memories into the repository's AGENTS.md, CLAUDE.md,
+    rules and skills; a preview unless arguments has "write": true).
     """
     clean_action = (_clean_text_input(action, max_len=100) or "").lower().replace("-", "_")
     try:
@@ -1673,6 +1902,8 @@ def admin(action: str, arguments: str = "{}") -> str:
             return rebuild_index()
         if clean_action == "rebuild_backlinks":
             return rebuild_backlinks()
+        if clean_action == "compile":
+            return json.dumps(_compile_memories(payload), ensure_ascii=False)
         if clean_action in {"seed_project", "project_seed"}:
             project_root = Path(_str_arg(payload, "project_root") or _str_arg(payload, "path") or ".")
             seed_payload = _core_seed_project_context(
@@ -1736,6 +1967,27 @@ def admin(action: str, arguments: str = "{}") -> str:
             )
         if clean_action in {"set_visibility", "set_memory_visibility"}:
             return set_memory_visibility(_str_arg(payload, "identifier"), _str_arg(payload, "visibility"))
+        if clean_action in {"set_enforce", "set_memory_enforce"}:
+            raw_rules = payload.get("rules")
+            rules = [str(rule) for rule in raw_rules] if isinstance(raw_rules, list) else _split_rules(str(raw_rules or ""))
+            from link_core.memory import resolve_memory_page as _resolve, set_memory_enforce as _set_enforce
+            _path, current, _error = _resolve(WIKI_DIR, _str_arg(payload, "identifier"), records=_memory_records())
+            existing = current.get("enforce") if current else None
+            held = current.get("enforce_active") if current else None
+            if (isinstance(existing, list) and existing) or (isinstance(held, list) and held):
+                # Any change to a rule-bearing memory is the person's call:
+                # adding a rule sends it back to review, and that must not
+                # be a way for an agent to touch rules it is subject to.
+                raise ValueError(
+                    "This memory already enforces rules; changing them is the person's call. Ask them to run "
+                    f"`lnk enforce {current.get('name') if current else ''} --rule ...` or `--clear`."
+                )
+            result = _set_enforce(
+                WIKI_DIR, _str_arg(payload, "identifier"), [] if _bool_arg(payload, "clear", False) else rules,
+                timestamp=_utc_timestamp(), records=_memory_records(), log_writer=_append_log,
+            )
+            _clear_cache()
+            return json.dumps({"surface": "slim", "tool": "admin", "action": clean_action, "ok": True, **result})
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "admin", "ok": False, "action": clean_action, "error": str(exc)})
     return json.dumps({
@@ -1749,7 +2001,7 @@ def admin(action: str, arguments: str = "{}") -> str:
             "search", "context", "pages", "backlinks", "graph_summary", "graph",
             "rebuild_index", "rebuild_backlinks", "seed_project", "propose_memories",
             "capture_session", "session_end", "capture_inbox", "accept_capture", "redact_capture",
-            "delete_capture", "dedup_captures", "update_memory", "set_visibility",
+            "delete_capture", "dedup_captures", "update_memory", "set_visibility", "set_enforce", "compile",
         ],
     })
 
@@ -1916,6 +2168,7 @@ def recall_memory(query: str, limit: int = 10, include_archived: bool = False, p
     _core_record_retrieval(
         WIKI_DIR.parent, "recall",
         [str(item.get("name") or "") for item in memories], project=project_name,
+        surface="mcp", tokens=_estimated_tokens_of(memories),
     )
     payload = {
         "query": query,
@@ -2139,6 +2392,7 @@ def update_memory(
     the memory body, logged, and marked pending review.
     """
     try:
+        _refuse_rule_change(identifier, "update")
         result = _update_memory_page(
             identifier,
             memory,

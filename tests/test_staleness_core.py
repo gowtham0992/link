@@ -184,7 +184,8 @@ class StaleCommandTests(unittest.TestCase):
             before = {p: p.read_bytes() for p in pages}
             result = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", str(repo)],
                             capture_output=True, text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            # Exit 1: something was flagged (0 would mean all clear).
+            self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn("gone.py", result.stdout)
             self.assertNotIn("archived-note", result.stdout)
             self.assertIn("Nothing was changed", result.stdout)
@@ -193,7 +194,7 @@ class StaleCommandTests(unittest.TestCase):
             # The JSON view carries the same facts for LinkBar's status row.
             as_json = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", str(repo), "--json"],
                              capture_output=True, text=True, env=env)
-            self.assertEqual(as_json.returncode, 0, as_json.stderr)
+            self.assertEqual(as_json.returncode, 1, as_json.stderr)
             report = json.loads(as_json.stdout)
             self.assertEqual(report["flagged"], 1)
             self.assertEqual(report["checked"], len([p for p in pages if p.name != "archived-note.md"]))
@@ -203,6 +204,21 @@ class StaleCommandTests(unittest.TestCase):
             self.assertEqual([f["path"] for f in entry["findings"]], ["gone.py"])
             self.assertEqual(entry["lines"], ["gone.py is no longer in the repository"])
             self.assertEqual({p: p.read_bytes() for p in pages}, before, "stale --json must not write")
+
+
+class StaleNonGitTests(unittest.TestCase):
+    def test_a_folder_git_cannot_read_is_an_error_not_an_all_clear(self):
+        import subprocess as sp  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as plain:
+            env = {**os.environ, "HOME": workspace, "USERPROFILE": workspace}
+            sp.run([sys.executable, str(ROOT / "link.py"), "demo", workspace, "--force"],
+                   check=True, capture_output=True, env=env)
+            result = sp.run([sys.executable, str(ROOT / "link.py"), "stale", workspace, "--repo", plain],
+                            capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("not a git repository", result.stderr)
+            self.assertNotIn("No stale", result.stdout)
 
 
 class RecallPacketMarkerTests(unittest.TestCase):
@@ -247,6 +263,22 @@ class RecallPacketMarkerTests(unittest.TestCase):
         # The marker must arrive with an instruction, or the agent has a flag and no idea what it means.
         self.assertTrue(any("stale_paths" in line for line in packet["agent_guidance"]))
 
+    def test_marks_a_memory_whose_references_all_hold_as_verified(self):
+        with tempfile.TemporaryDirectory() as repo_dir:
+            repo = Path(repo_dir)
+            _git(repo, "init", "--initial-branch", "main")
+            (repo / "src").mkdir()
+            (repo / "src" / "old.py").write_text("x\n", encoding="utf-8")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "seed")
+            sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+            packet = self._packet(repo)
+        item = packet["memory"]["items"][0]
+        self.assertNotIn("stale_paths", item)
+        self.assertTrue(sha.startswith(item["verified"]["sha"]))
+        self.assertGreaterEqual(item["verified"]["references_checked"], 1)
+        self.assertTrue(any("verified" in line for line in packet["agent_guidance"]))
+
     def test_no_marker_without_a_repository(self):
         with tempfile.TemporaryDirectory() as plain:
             packet = self._packet(Path(plain))          # exists, but no .git
@@ -254,3 +286,234 @@ class RecallPacketMarkerTests(unittest.TestCase):
         self.assertFalse(any("stale_paths" in line for line in packet["agent_guidance"]))
         packet = self._packet(None)                    # opt-in not given
         self.assertNotIn("stale_paths", packet["memory"]["items"][0])
+
+
+class StalenessV2Tests(unittest.TestCase):
+    """Scripts, targets, dependencies, variables, URLs, versions, managers."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="link-stale-v2-")
+        self.repo = Path(self.temp.name)
+        _git(self.repo, "init", "--initial-branch", "main")
+        (self.repo / "package.json").write_text(json.dumps({
+            "scripts": {"build": "tsc", "deploy:staging": "node deploy.js", "lint": "eslint ."},
+            "dependencies": {"left-pad": "1.0.0", "express": "4.0.0"},
+            "engines": {"node": ">=18"},
+        }), encoding="utf-8")
+        (self.repo / "Makefile").write_text("release:\n\techo release\nclean:\n\trm -rf out\n", encoding="utf-8")
+        (self.repo / "config.py").write_text(
+            "import os\nKEY = os.environ['LEGACY_API_TOKEN']\nURL = 'https://staging.acme.internal:8443/api'\n",
+            encoding="utf-8")
+        (self.repo / "package-lock.json").write_text("{}", encoding="utf-8")
+        (self.repo / "pyproject.toml").write_text('[project]\nname="x"\nrequires-python = ">=3.10"\n', encoding="utf-8")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-m", "seed")
+        # Then the project moves on.
+        (self.repo / "package.json").write_text(json.dumps({
+            "scripts": {"build": "tsc", "lint": "eslint ."},
+            "dependencies": {"express": "4.0.0"},
+            "engines": {"node": ">=20"},
+        }), encoding="utf-8")
+        (self.repo / "Makefile").write_text("clean:\n\trm -rf out\n", encoding="utf-8")
+        (self.repo / "config.py").write_text("import os\nKEY = os.environ['API_TOKEN']\nURL = 'https://api.acme.dev'\n",
+                                             encoding="utf-8")
+        (self.repo / "package-lock.json").unlink()
+        (self.repo / "pnpm-lock.yaml").write_text("lockfileVersion: 9\n", encoding="utf-8")
+        (self.repo / "pyproject.toml").write_text('[project]\nname="x"\nrequires-python = ">=3.12"\n', encoding="utf-8")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-m", "move on")
+        self.checker = StalenessChecker(self.repo)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _kinds(self, text):
+        return {(f["kind"], f["reference"]) for f in self.checker.findings(text)}
+
+    def test_removed_script_target_dependency_variable_and_url_are_flagged(self):
+        found = self._kinds(
+            "Deploy with `npm run deploy:staging`, then make release. We pad with `left-pad`. "
+            "Set LEGACY_API_TOKEN first. Staging lives at https://staging.acme.internal:8443/api."
+        )
+        self.assertEqual(found, {
+            ("script", "deploy:staging"), ("make_target", "release"), ("dependency", "left-pad"),
+            ("env_var", "LEGACY_API_TOKEN"), ("url", "staging.acme.internal:8443"),
+        })
+
+    def test_things_that_still_exist_are_left_alone(self):
+        self.assertEqual(self._kinds(
+            "Build with npm run build, lint with pnpm lint, make clean when stuck. We use `express`. "
+            "Set API_TOKEN. The API is https://api.acme.dev."
+        ), set())
+
+    def test_things_the_repository_never_had_are_prose_not_staleness(self):
+        self.assertEqual(self._kinds(
+            "Someday we might add npm run storybook, make docs, `react-query`, SENTRY_DSN and https://example.org."
+        ), set())
+
+    def test_runtime_version_contradicting_a_manifest_is_flagged(self):
+        found = self.checker.findings("We develop on Python 3.10 and Node 18.")
+        kinds = {(f["kind"], f["reference"]) for f in found}
+        self.assertEqual(kinds, {("version", "python 3.10"), ("version", "node 18")})
+        self.assertTrue(any("requires-python" in f["evidence"] for f in found))
+        self.assertEqual(self._kinds("We develop on Python 3.12 and Node 20."), set())
+
+    def test_package_manager_replaced_by_another_is_flagged(self):
+        found = self.checker.findings("Always use npm install before running tests.")
+        self.assertEqual([(f["kind"], f["reference"], f["successor"]) for f in found],
+                         [("package_manager", "npm", "pnpm")])
+        self.assertEqual(self._kinds("We use pnpm."), set())
+
+    def test_verdict_is_verified_stale_or_unverifiable(self):
+        verified = self.checker.verdict("Build with npm run build on Node 20.")
+        self.assertEqual(verified["verdict"], "verified")
+        self.assertTrue(verified["sha"])
+        stale = self.checker.verdict("Deploy with npm run deploy:staging.")
+        self.assertEqual(stale["verdict"], "stale")
+        self.assertEqual(stale["findings"][0]["reference"], "deploy:staging")
+        nothing = self.checker.verdict("I prefer short answers.")
+        self.assertEqual(nothing["verdict"], "unverifiable")
+
+    def test_describe_findings_uses_the_evidence(self):
+        lines = describe_findings(self.checker.findings("run make release"))
+        self.assertEqual(len(lines), 1)
+        self.assertIn("release", lines[0])
+
+
+class VersionSpecTests(unittest.TestCase):
+    def test_common_runtime_specs(self):
+        from link_core.staleness import _satisfies
+        cases = [
+            ("3.11", ">=3.12", False), ("3.12", ">=3.12", True), ("3.13", ">=3.10,<3.13", False),
+            ("3.11", ">=3.10,<3.13", True), ("18", "^20", False), ("20.4", "^20", True),
+            ("18.4", "~18.4", True), ("18.5", "~18.4", False), ("20", "20.x", True), ("18", "20.x", False),
+            ("19", ">=18 <21", True), ("21", ">=18 <21", False), ("3.12", "3.12", True), ("1.22", "1.21", False),
+        ]
+        for claimed, spec, expected in cases:
+            self.assertEqual(_satisfies(claimed, spec), expected, (claimed, spec))
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Each case below was a false flag or a false `verified` in the 4.0 review."""
+
+    def _repo(self, files: dict[str, str], later: dict[str, str | None] | None = None) -> Path:
+        temp = tempfile.TemporaryDirectory(prefix="link-stale-review-")
+        self.addCleanup(temp.cleanup)
+        repo = Path(temp.name)
+        _git(repo, "init", "--initial-branch", "main")
+        for rounds in (files, later or {}):
+            if not rounds:
+                continue
+            for rel, text in rounds.items():
+                target = repo / rel
+                if text is None:
+                    target.unlink()
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "step")
+        return repo
+
+    def test_naming_things_the_repository_never_had_is_not_verified(self):
+        repo = self._repo({"README.md": "# app\n"})
+        checker = StalenessChecker(repo)
+        for text in (
+            "The webhook handler lives in src/server/handler.py and needs STRIPE_SECRET_KEY",
+            "We deploy with Python 3.9 to https://api.acme.internal:8443",
+            "Run make deploy-prod, then npm run release",
+        ):
+            self.assertEqual(checker.verdict(text)["verdict"], "unverifiable", text)
+
+    def test_history_and_prohibitions_are_not_current_claims(self):
+        repo = self._repo(
+            {"package.json": json.dumps({"engines": {"node": ">=20"}}), "package-lock.json": "{}",
+             "pyproject.toml": '[project]\nrequires-python = ">=3.11"\n'},
+            {"package-lock.json": None, "pnpm-lock.yaml": "lockfileVersion: 9\n"},
+        )
+        checker = StalenessChecker(repo)
+        for text in (
+            "Do not use npm in this repo; we use pnpm.",
+            "Install the CLI globally: npm install -g vercel",
+            "We upgraded from Node 16 to Node 20",
+            "We dropped Python 3.9 support",
+        ):
+            self.assertEqual(checker.findings(text), [], text)
+        self.assertEqual(checker.verdict("We upgraded from Node 16 to Node 20")["verdict"], "verified")
+
+    def test_version_specs_manifests_really_use(self):
+        from link_core.staleness import _satisfies
+        for claimed, spec, expected in [
+            ("3.12", "~=3.10", True), ("3.9", "~=3.10", False), ("4.0", "~=3.10", False),
+            ("3.10.5", "~=3.10.2", True), ("3.11", "~=3.10.2", False),
+            ("3.12.4", "==3.12.*", True), ("3.13", "==3.12.*", False),
+        ]:
+            self.assertEqual(_satisfies(claimed, spec), expected, (claimed, spec))
+        repo = self._repo({"go.mod": "module x\n\ngo 1.22\n"})
+        self.assertEqual(StalenessChecker(repo).findings("Build with Go 1.23."), [])
+        self.assertTrue(StalenessChecker(repo).findings("Build with Go 1.21."))
+
+    def test_make_and_just_targets_the_parser_used_to_miss(self):
+        repo = self._repo(
+            {"Makefile": "include tools/common.mk\nlint test: deps\n\techo\nold:\n\techo\n",
+             "tools/common.mk": "release:\n\techo\n",
+             "justfile": "@quiet:\n    echo\nbench *args:\n    echo\n"},
+            {"Makefile": "include tools/common.mk\nlint test: deps\n\techo\n"},
+        )
+        checker = StalenessChecker(repo)
+        self.assertEqual(checker.findings("run make lint, make test, make release, just quiet and just bench"), [])
+        self.assertEqual([f["reference"] for f in checker.findings("run make old")], ["old"])
+
+    def test_install_prose_is_not_a_dependency_list(self):
+        from link_core.staleness import symbol_references
+        deps = [ref for kind, ref in symbol_references("pip install httpx then restart the worker") if kind == "dependency"]
+        self.assertEqual(deps, ["httpx"])
+        repo = self._repo({"requirements.txt": "httpx\nthenable\n"}, {"requirements.txt": "httpx\n"})
+        self.assertEqual(StalenessChecker(repo).findings("pip install httpx then restart the worker"), [])
+
+    def test_workspace_manifests_count(self):
+        repo = self._repo(
+            {"package.json": json.dumps({"scripts": {"build": "tsc"}, "dependencies": {"zod": "3"}}),
+             "requirements.txt": "attrs\npyyaml\n"},
+            {"package.json": json.dumps({"private": True, "workspaces": ["packages/*"]}),
+             "packages/web/package.json": json.dumps({"scripts": {"build": "vite build"},
+                                                      "dependencies": {"zod": "3"}}),
+             "requirements.txt": "-r requirements/base.txt\n",
+             "requirements/base.txt": "attrs\nPyYAML\n"},
+        )
+        self.assertEqual(StalenessChecker(repo).findings(
+            "Build with npm run build, then pip install attrs pyyaml."), [])
+        self.assertEqual(StalenessChecker(repo).findings("npm install zod"), [])
+
+    def test_public_documentation_links_are_not_repository_claims(self):
+        repo = self._repo({"README.md": "See https://docs.python.org/3/library/os.html\n"}, {"README.md": "# app\n"})
+        self.assertEqual(StalenessChecker(repo).findings(
+            "Per https://docs.python.org/3/library/os.html, os.replace is atomic."), [])
+
+    def test_recall_budget_never_verifies_or_flags_on_partial_evidence(self):
+        repo = self._repo({"src/kept.py": "x = 1\n"})
+        slow = StalenessChecker(repo, budget_seconds=0.0001)
+        self.assertEqual(slow.verdict("see src/kept.py and LEGACY_TOKEN_NAME")["verdict"], "unverifiable")
+
+    def test_history_answers_are_cached_across_processes_by_head(self):
+        from unittest import mock
+        from link_core import staleness
+        repo = self._repo({"config.py": "KEY = 'LEGACY_TOKEN_NAME'\n"}, {"config.py": "KEY = 'NEW_TOKEN_NAME'\n"})
+        cache = repo.parent / (repo.name + "-staleness.json")
+        self.addCleanup(lambda: cache.unlink(missing_ok=True))
+        text = "Set LEGACY_TOKEN_NAME before deploying."
+        first = StalenessChecker(repo, cache_path=cache)
+        self.assertEqual([f["reference"] for f in first.findings(text)], ["LEGACY_TOKEN_NAME"])
+        first.save_cache()
+        self.assertTrue(cache.exists())
+        calls: list[list[str]] = []
+        real = staleness._git
+
+        def counting(root, arguments, runner=None, timeout=10):
+            calls.append(arguments)
+            return real(root, arguments, runner, timeout=timeout)
+
+        with mock.patch.object(staleness, "_git", counting):
+            second = StalenessChecker(repo, cache_path=cache)
+            self.assertEqual([f["reference"] for f in second.findings(text)], ["LEGACY_TOKEN_NAME"])
+        self.assertFalse([c for c in calls if c[:1] == ["log"]], calls)

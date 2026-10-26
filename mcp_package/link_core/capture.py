@@ -1,6 +1,7 @@
 """Shared raw capture helpers for Link CLI and MCP runtimes."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from collections.abc import Callable, Collection, Mapping
@@ -17,6 +18,7 @@ from .memory import (
 )
 from .security import (
     injected_instruction_warnings,
+    redact_password_values,
     redact_secret_values,
     secret_value_warnings,
 )
@@ -164,6 +166,9 @@ def record_dismissed_proposals(root: Path, memories: list[str]) -> int:
     return added
 
 
+CAPTURE_FINGERPRINT_LIMIT = 50
+
+
 def capture_proposal_fingerprints(text: str, project: str | None = None) -> set[str]:
     """Fingerprints of everything a saved capture would propose on re-mining."""
     mining_text = capture_proposal_source(text)
@@ -171,7 +176,10 @@ def capture_proposal_fingerprints(text: str, project: str | None = None) -> set[
         _, mining_text = capture_notes_from_markdown(text)
     if not mining_text:
         return set()
-    mined = propose_memories_from_text(mining_text, [], limit=10, project=project)
+    # Must see every proposal a capture can yield: at limit=10 a capture
+    # whose first ten were covered was deleted as "all duplicates" even when
+    # proposals 11+ were new.
+    mined = propose_memories_from_text(mining_text, [], limit=CAPTURE_FINGERPRINT_LIMIT, project=project)
     proposals = mined.get("proposals")
     items: list[object] = proposals if isinstance(proposals, list) else []
     return {
@@ -248,6 +256,7 @@ def write_session_capture(
     decision_trail: list[str] | None = None,
     conversation_id: str | None = None,
     source_type: str = "conversation",
+    untrusted_inputs: list[str] | None = None,
 ) -> dict[str, object]:
     """Persist proposal-only session notes under raw/memory-captures.
 
@@ -257,10 +266,29 @@ def write_session_capture(
     proposals were kept or dropped, so the pipeline is reviewable.
     """
     root = root.expanduser().resolve()
-    notes = text.strip()
-    if not notes:
+    original_notes = text.strip()
+    if not original_notes:
         raise ValueError("session capture input is required")
+    # The warning is computed from what was said; the file stores the
+    # redacted text. A capture that warns about a key and then writes the
+    # key to disk verbatim has already leaked it.
+    secret_warnings = secret_value_warnings(original_notes)
+    password_hits = 0
+
+    def redact(value: str) -> str:
+        # Every section written to disk gets both redactions: the Proposal
+        # Source kept "the password is Zk9#mango42" verbatim under a
+        # frontmatter line claiming it had been redacted.
+        nonlocal password_hits
+        value, labels, _ = redact_secret_values(value)
+        secret_warnings.extend(label for label in labels if label not in secret_warnings)
+        value, count = redact_password_values(value)
+        password_hits += count
+        return value
+
+    notes = redact(original_notes)
     source_value = str(source or default_source).strip() or default_source
+    source_value = redact(source_value)
     captured_at = timestamp or utc_timestamp()
     project_name = normalize_project(project)
     capture_name = capture_title(
@@ -270,7 +298,7 @@ def write_session_capture(
         default_source=default_source,
         path_source=path_source,
     )
-    secret_warnings = secret_value_warnings(notes)
+    capture_name = redact(capture_name)
     capture_dir = root / "raw" / "memory-captures"
     capture_dir.mkdir(parents=True, exist_ok=True)
     conversation = str(conversation_id or "").strip()
@@ -279,24 +307,30 @@ def write_session_capture(
     # newer proposals) instead of stacking a near-duplicate next to it.
     refreshed_capture = find_conversation_capture(root, conversation) if conversation else None
     capture_path = refreshed_capture or capture_filename(captured_at, capture_name, capture_dir)
-    project_line = f'project: "{frontmatter_string(project_name)}"\n' if project_name else ""
-    conversation_line = f'conversation: "{frontmatter_string(conversation)}"\n' if conversation else ""
-
     # Proposal source: the user's own turns, redacted, so accept-time mining
     # reads exactly what the hook mined — not the assistant's prose beneath.
     mined = (proposal_text or "").strip()
     mined_section = ""
-    if mined and mined != notes:
-        safe_mined, _, _ = redact_secret_values(mined)
-        mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{safe_mined}\n"
+    if mined and mined != original_notes:
+        mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{redact(mined)}\n"
 
     trail_section = ""
     if decision_trail:
-        safe_lines = []
-        for line in decision_trail:
-            safe, _, _ = redact_secret_values(str(line))
-            safe_lines.append(f"- {safe}")
+        safe_lines = [f"- {redact(str(line))}" for line in decision_trail]
         trail_section = "\n## How Link Read This Session\n\n" + "\n".join(safe_lines) + "\n"
+
+    if password_hits and "password in prose" not in secret_warnings:
+        secret_warnings.append("password in prose")
+    project_line = f'project: "{frontmatter_string(project_name)}"\n' if project_name else ""
+    conversation_line = f'conversation: "{frontmatter_string(conversation)}"\n' if conversation else ""
+    # Remember what was redacted so the inbox still says "this session
+    # contained a key - rotate it", after the value itself is gone.
+    redacted_line = (f'redacted_secrets: "{frontmatter_string(", ".join(secret_warnings))}"\n'
+                     if secret_warnings else "")
+    # The session read outside content (web pages, other MCP servers): its
+    # proposals may carry words the user never said, so review says so.
+    outside = sorted({str(item) for item in untrusted_inputs or [] if str(item) in {"web", "mcp"}})
+    redacted_line += f'untrusted_inputs: "{", ".join(outside)}"\n' if outside else ""
 
     atomic_write_text(
         capture_path,
@@ -304,7 +338,7 @@ def write_session_capture(
 title: "{frontmatter_string(capture_name)}"
 source_type: {source_type}
 date_captured: "{captured_at}"
-{project_line}{conversation_line}---
+{project_line}{conversation_line}{redacted_line}---
 
 # {capture_name}
 
@@ -340,25 +374,62 @@ def resolve_capture_file(root: Path, capture: str, *, max_len: int | None = None
     if not raw:
         return None
 
+    given_root = root.expanduser().absolute()
     root = root.expanduser().resolve()
+    capture_dirs = {base / "raw" / "memory-captures" for base in (given_root, root)}
+    # The capture directory itself must be real: with
+    # raw/memory-captures -> ../wiki/memories a bare page name used to
+    # resolve to (and delete) a memory.
+    if (root / "raw").is_symlink() or (root / "raw" / "memory-captures").is_symlink():
+        return None
+    real_capture_dir = (root / "raw" / "memory-captures").resolve()
+
     raw_path = Path(raw).expanduser()
     candidates = [raw_path]
     if not raw_path.is_absolute():
-        candidates.extend([
+        candidates = [
             root / raw,
             root / "raw" / "memory-captures" / raw,
             root / "raw" / "memory-captures" / f"{raw}.md",
-        ])
+        ]
 
     for candidate in candidates:
+        # Only a real capture file qualifies: it must sit inside
+        # raw/memory-captures (not merely inside the workspace — delete
+        # accepted wiki/memories/<page>.md), be a .md file that is not a
+        # dotfile, and no component below the capture dir may be a symlink
+        # (one can point at a memory page or any file under the root).
+        lexical = Path(os.path.normpath(candidate))
+        relative: Path | None = None
+        base: Path | None = None
+        for capture_dir in capture_dirs:
+            try:
+                relative = lexical.relative_to(capture_dir)
+                base = capture_dir
+                break
+            except ValueError:
+                continue
+        if relative is None or base is None or not relative.parts:
+            continue
+        if any(part.startswith(".") for part in relative.parts) or lexical.suffix != ".md":
+            continue
+        current = base
+        linked = False
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                linked = True
+                break
+        if linked:
+            continue
         try:
-            resolved = candidate.resolve()
+            resolved = lexical.resolve()
         except OSError:
             continue
         if not resolved.is_file():
             continue
         try:
-            resolved.relative_to(root)
+            resolved.relative_to(real_capture_dir)
         except ValueError:
             continue
         return resolved
@@ -584,7 +655,7 @@ def delete_capture_file(
             if mining_text is None:
                 _, mining_text = capture_notes_from_markdown(text)
             mined = propose_memories_from_text(
-                mining_text or "", [], limit=10,
+                mining_text or "", [], limit=CAPTURE_FINGERPRINT_LIMIT,
                 project=normalize_project(str(meta.get("project") or "")),
             )
             proposals = mined.get("proposals")
@@ -722,6 +793,10 @@ def capture_records(
         if project_name and capture_project and capture_project != project_name:
             continue
         warnings = secret_value_warnings(text)
+        for label in str(meta.get("redacted_secrets") or "").split(","):
+            label = label.strip()
+            if label and label not in warnings:
+                warnings.append(label)
         injection_warnings = injected_instruction_warnings(text)
         safe_notes, _, _ = redact_secret_values(notes)
         # What Accept will actually save: mine from the user's own turns
@@ -765,6 +840,8 @@ def capture_records(
             "proposal_count": len(proposal_items),
             "proposals": proposal_previews,
             "decision_trail": capture_decision_trail(text),
+            "untrusted_inputs": [part.strip() for part in str(meta.get("untrusted_inputs") or "").split(",")
+                                 if part.strip()],
             "mined_from_user_turns": capture_proposal_source(text) is not None,
             "commands": command_builder(rel),
         })

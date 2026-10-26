@@ -1,0 +1,1077 @@
+[
+ {
+  "page": "getting-started.html",
+  "title": "First 10 Minutes",
+  "label": "Getting started",
+  "eyebrow": "First 10 minutes",
+  "lead": "Run the cross-agent proof, explore the demo, onboard a real local workspace, seed your current repo, add one source, save one explicit memory, then ask an agent to query Link through MCP, skills, or the CLI.",
+  "sections": [
+   {
+    "id": "demo",
+    "heading": "1. Prove The Memory Loop",
+    "text": "Start with lnk proof . It creates a clean local workspace, writes one reviewed memory, then recalls it through the same bounded path used by CLI, skills, and MCP. This proves the core product before you configure an…",
+    "body": "Start with lnk proof . It creates a clean local workspace, writes one reviewed memory, then recalls it through the same bounded path used by CLI, skills, and MCP. This proves the core product before you configure an agent or open the web viewer. macOS with Homebrew: brew install gowtham0992/link/link lnk proof You should see Cross-agent memory continuity works and Result: proof passed . The richer demo is next. It already has raw sources, wiki pages, memories, backlinks, graph data, and a local viewer to inspect: lnk try lnk serve link-demo The Homebrew formula is maintained in the public gowtham0992/homebrew-link tap. Or from source: git clone https://github.com/gowtham0992/link.git cd link python3 link.py proof python3 link.py demo python3 link.py next link-demo python3 link.py serve link-demo On Windows from source, use the Python launcher: git clone https://github.com/gowtham0992/link.git cd link py link.py proof py link.py demo py link.py next link-demo py link.py serve link-demo lnk try creates the demo, checks readiness, runs a compact query and brief, and prints the viewer command plus the first agent prompts. From source, use python3 link.py try or py link.py try . Judge the generated demo The repo's root wiki/ is only a scaffold for local development and personal testing. Generated content in wiki/ , raw/ , and link-demo/ is ignored by git so private memory is not published by accident. Viewer is optional lnk serve is only for browsing Link in a local web UI. CLI commands, official skills, and MCP-enabled agents work without it because they read the same local wiki/ files directly. The demo includes one pending memory intentionally, so the review inbox and explain-memory workflow are visible. Run lnk review-memory prefer-local-personal-memory link-demo if you want memory audit to be fully clear. Open http://127.0.0.1:3000 , then inspect /onboard , /brief , /memory , /ingest , /graph , and /health . Open more for prompts, proposal review, audit, captures, profile, log, and all pages. Link accepts localhost too, but the numeric loopback address avoids slow IPv6 fallback in some Safari setups. lnk start link-demo --task \"working on agent memory\" lnk query \"why does Link help agents?\" link-demo --budget small lnk brief \"working on agent memory\" link-demo lnk benchmark \"agent memory\" link-demo lnk health link-demo"
+   },
+   {
+    "id": "onboard",
+    "heading": "2. Make It Yours — One Command",
+    "text": "lnk setup is install day and every upgrade after it: it detects every agent installed on your machine — Claude Code, Codex, Cursor, Windsurf, Zed, Kiro, Gemini CLI — and wires them all at once: workspace create/repair,…",
+    "body": "lnk setup is install day and every upgrade after it: it detects every agent installed on your machine — Claude Code, Codex, Cursor, Windsurf, Zed, Kiro, Gemini CLI — and wires them all at once: workspace create/repair, MCP provisioning, and session hooks for agents that have them. It is idempotent, so after any brew upgrade you just run it again. lnk setup # every detected agent, wired lnk setup --preview # show the plan without writing agent configs Prefer the guided single-agent flow? lnk onboard checks health, prints the first agent prompts, and previews MCP wiring without changing agent config files unless you pass --write . lnk onboard lnk onboard --first-memory \"I prefer concise release notes\" lnk onboard --seed-project . lnk onboard --agent codex lnk onboard --agent codex --write lnk onboard --agent claude-code --hooks --write From source, use python3 link.py onboard on macOS/Linux or py link.py onboard on Windows. The command is safe to re-run: it preserves existing wiki data and only applies safe structural repairs. Add --seed-project . from inside a repo when you want onboarding to create the first source-backed project page. If the local viewer is running, http://127.0.0.1:3000/onboard shows the same setup loop with copy buttons."
+   },
+   {
+    "id": "seed",
+    "heading": "3. Seed Project Context",
+    "text": "Run lnk seed inside a project so Link has useful source-backed context before you ask an agent to recall anything. It reads allowlisted project files such as README.md , AGENTS.md , CLAUDE.md , .cursorrules , and editor…",
+    "body": "Run lnk seed inside a project so Link has useful source-backed context before you ask an agent to recall anything. It reads allowlisted project files such as README.md , AGENTS.md , CLAUDE.md , .cursorrules , and editor rule files, blocks secret-looking values, writes a generated source page, and rebuilds the graph. cd /path/to/your/project lnk seed . ~/link lnk query \"what is this project about?\" ~/link --budget small Seeding does not create durable memories. It gives agents a cited project source to retrieve from; preferences and decisions should still go through reviewed memory proposals."
+   },
+   {
+    "id": "install",
+    "heading": "4. Install Link For Your Agent (source checkouts)",
+    "text": "Skip this if you ran lnk setup : it already wired every agent it found. From a cloned checkout, the installers add the agent's instruction block and then call lnk connect --write for the MCP entry (plus session hooks…",
+    "body": "Skip this if you ran lnk setup : it already wired every agent it found. From a cloned checkout, the installers add the agent's instruction block and then call lnk connect --write for the MCP entry (plus session hooks for Claude Code, Codex and Cursor), which verifies the runtime, creates the config if it does not exist, and edits JSON-with-comments settings without losing comments. Re-running an installer updates code and instructions without replacing existing wiki data. The matching uninstall.sh calls lnk disconnect --write , which removes Link's MCP entry and hooks and nothing else. bash integrations/codex/install.sh bash integrations/kiro/install.sh bash integrations/claude-code/install.sh bash integrations/cursor/install.sh bash integrations/copilot/install.sh bash integrations/vscode/install.sh bash integrations/antigravity/install.sh Use --project for a repo-local Link install. Project-scoped memory then stays separate from other project memory while still allowing broad user memory to be recalled. On Windows PowerShell, use the matching install.ps1 script. The PowerShell installers add the instruction block and scaffold the workspace but do not call lnk connect or install hooks, so run lnk connect <agent> ~/link --hooks --write after one: .\\integrations\\codex\\install.ps1 .\\integrations\\kiro\\install.ps1 .\\integrations\\claude-code\\install.ps1 .\\integrations\\cursor\\install.ps1 .\\integrations\\copilot\\install.ps1 .\\integrations\\vscode\\install.ps1 .\\integrations\\antigravity\\install.ps1"
+   },
+   {
+    "id": "source",
+    "heading": "5. Add One Source",
+    "text": "Open the local viewer and use ingest -> Add Raw Source , or write a first note directly: mkdir -p ~/link/raw cat > ~/link/raw/first-memory.md <<'EOF' --- title: \"First Link memory\" source_type: note date_captured:…",
+    "body": "Open the local viewer and use ingest -> Add Raw Source , or write a first note directly: mkdir -p ~/link/raw cat > ~/link/raw/first-memory.md <<'EOF' --- title: \"First Link memory\" source_type: note date_captured: 2026-05-04 --- # First Link memory I am testing Link as local personal memory for agents. Raw notes stay local. The agent turns them into source-cited wiki pages. EOF Check pending work: lnk ingest-status Safety gate Link blocks normal ingest guidance when raw files contain secret-looking values or cannot be read safely. Redact or fix those local files first. Existing Link data If you already have files in ~/link/raw/ , lnk ingest-status may point to a different pending file first. If first-memory.md was already ingested and you overwrite it, Link marks that raw file as stale and asks the agent to refresh the existing source page."
+   },
+   {
+    "id": "memory",
+    "heading": "6. Save One Direct Memory",
+    "text": "Use natural language with an agent: remember that I am testing Link as local personal memory for agents start with Link before we continue what does Link remember about local personal memory? CLI-first agents or Link…",
+    "body": "Use natural language with an agent: remember that I am testing Link as local personal memory for agents start with Link before we continue what does Link remember about local personal memory? CLI-first agents or Link skills can run the same startup loop directly: lnk start ~/link --task \"working on Link release\" Or use the CLI: lnk remember \"I am testing Link as local personal memory for agents.\" --type preference --scope user --tags onboarding lnk brief \"local personal memory\" lnk recall \"local personal memory\" lnk profile lnk memory-audit"
+   },
+   {
+    "id": "ingest",
+    "heading": "7. Ask The Agent To Ingest",
+    "text": "In your agent chat, ask: ingest raw/first-memory.md into Link The agent reads ~/link/LINK.md , creates a source page, updates concepts/entities when useful, updates the index and log, rebuilds backlinks, and validates…",
+    "body": "In your agent chat, ask: ingest raw/first-memory.md into Link The agent reads ~/link/LINK.md , creates a source page, updates concepts/entities when useful, updates the index and log, rebuilds backlinks, and validates generated pages. Return to /ingest after the agent finishes. Link shows which raw files are represented and gives follow-up prompts for proposals or retrieval checks."
+   },
+   {
+    "id": "verify",
+    "heading": "8. Verify The Loop",
+    "text": "lnk doctor --fix lnk health lnk ingest-status lnk validate lnk memory-audit lnk operations lnk verify-mcp lnk verify-mcp should report Result: ready when you use MCP. Then ask your agent: query Link for first Link…",
+    "body": "lnk doctor --fix lnk health lnk ingest-status lnk validate lnk memory-audit lnk operations lnk verify-mcp lnk verify-mcp should report Result: ready when you use MCP. Then ask your agent: query Link for first Link memory If the answer comes from Link, local agent memory is working."
+   },
+   {
+    "id": "hooks",
+    "heading": "9. Make The Loop Automatic (Session Hooks)",
+    "text": "Agents with session-hook support — Claude Code, Codex, and Cursor — can run the memory loop without being asked. --hooks installs hooks that inject a bounded memory brief at the start of every new session and store…",
+    "body": "Agents with session-hook support — Claude Code, Codex, and Cursor — can run the memory loop without being asked. --hooks installs hooks that inject a bounded memory brief at the start of every new session and store proposal-only session notes at session end. Empty sessions are skipped, duplicate end events are deduplicated, and durable memory still requires your approval. When the review backlog grows, the injected brief nudges the agent to offer a read-only lnk consolidate pass. On Claude Code the hooks also run before shell and file tool calls: a reviewed memory\\'s enforced rules are checked there (asking for your OK or blocking), and memories anchored to the file being read or edited are surfaced at that moment. On Cursor the shell-command check runs the same way. lnk receipt shows what actually arrived in each session. lnk connect claude-code ~/link --hooks --write lnk connect codex ~/link --hooks --write # session-start brief (Codex has no session-end event) lnk connect cursor ~/link --hooks --write Codex and Cursor hook support is new and follows those vendors' documented hook schemas; if a hook misbehaves there, please open an issue."
+   },
+   {
+    "id": "linkbar",
+    "heading": "10. Optional: LinkBar, the menu bar app (macOS)",
+    "text": "Hooks make capture automatic; LinkBar makes reviewing it ambient. It puts the review gate in your menu bar: proposals arrive as a native notification with a one-tap Accept , a global palette ( ⌥⌘M ) recalls or remembers…",
+    "body": "Hooks make capture automatic; LinkBar makes reviewing it ambient. It puts the review gate in your menu bar: proposals arrive as a native notification with a one-tap Accept , a global palette ( ⌥⌘M ) recalls or remembers from any app, a live pulse shows which agent sessions are writing right now, and a Status tab reports the health of every Link surface (CLI, workspace, MCP, hooks, recall tier, viewer) with one-click fixes. It runs the same reviewed lnk commands you just wired — nothing new to trust. brew install --cask gowtham0992/link/linkbar LinkBar ships unsigned (no Apple Developer certificate); the cask clears the quarantine flag on install so it opens like any other app. Prefer building it yourself: cd apps/LinkBar && bash Scripts/bundle.sh --install ."
+   },
+   {
+    "id": "semantic",
+    "heading": "11. Optional: Hybrid Semantic Recall",
+    "text": "Lexical recall is always the default and the fallback. Two optional local tiers add paraphrase recall — \"how should I structure my pull requests\" finds a memory about commit style. The models load offline-only at recall…",
+    "body": "Lexical recall is always the default and the fallback. Two optional local tiers add paraphrase recall — \"how should I structure my pull requests\" finds a memory about commit style. The models load offline-only at recall time (a query can never trigger a download), embeddings are plain JSON under .link-cache/ , and there is no vector database or service. lnk semantic ~/link --setup # installs the extras if needed + fetches the models once python3 -m link_mcp --semantic-setup --wiki ~/link/wiki # MCP-only installs On Homebrew installs the runtime Python refuses direct pip install s (PEP 668), so --setup provisions the extras into Link's managed venv ( ~/.link-mcp-venv ) automatically — the same venv the MCP server runs from, and lnk uses it on the next command. In your own venv, pip install \"link-mcp[semantic]\" (fast tier) or \"link-mcp[semantic-quality]\" (quality tier) works as usual before running --setup . Recall quality is measured, not asserted: see benchmarks/RESULTS.md for the full methodology, numbers, and honest limitations."
+   },
+   {
+    "id": "faq",
+    "heading": "12. The Three Questions Everyone Asks",
+    "text": "Does Link read my conversations? Link never sees a conversation. The session hooks do the reading: at session end the agent's own transcript is mined locally and deterministically — no LLM, no network — for statements…",
+    "body": "Does Link read my conversations? Link never sees a conversation. The session hooks do the reading: at session end the agent's own transcript is mined locally and deterministically — no LLM, no network — for statements that look like durable preferences or decisions (\"from now on I only push to develop\"). Those become proposals in a pending inbox. Nothing is memory until you approve it, and the whole pipeline runs from plain Python files inside your own workspace that you can read ( link_core/agent_hooks.py ). If you never install hooks, Link only knows what you explicitly tell it with lnk remember . What happens when I clear context or open a new terminal? That is the whole point of Link. Context windows are disposable — cleared, compacted, abandoned with every new terminal. Your memory does not live there: it lives in Markdown files under ~/link , outside every context window. When a new session starts, the hook injects a compact brief of relevant memories back in; when an agent needs more, it asks over MCP. Clear context a hundred times — the agent still knows you never push to main, because that fact was never in the context to begin with. It was in a file. Which project or branch does a memory belong to? Every memory carries an explicit scope — user (true everywhere: \"I prefer concise release notes\") or project (tied to one repo: \"this service deploys from tags\"). Project memories are labeled with their project and don't leak into other repos' briefs. For finer fencing, applies_when conditions ( project: , path: , task: ) demote a memory to out of context — verify whenever you're outside its territory — so one project's conventions never masquerade as another's. Old checkouts and stale branches can't pollute recall: it's deterministic frontmatter you can open and edit, not classifier guesswork. Link home · Concepts · MCP setup · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   },
+   {
+    "id": "faq",
+    "heading": "Does Link read my conversations?",
+    "text": "Link never sees a conversation. The session hooks do the reading: at session end the agent's own transcript is mined locally and deterministically — no LLM, no network — for statements that look like durable preferences…",
+    "body": "Link never sees a conversation. The session hooks do the reading: at session end the agent's own transcript is mined locally and deterministically — no LLM, no network — for statements that look like durable preferences or decisions (\"from now on I only push to develop\"). Those become proposals in a pending inbox. Nothing is memory until you approve it, and the whole pipeline runs from plain Python files inside your own workspace that you can read ( link_core/agent_hooks.py ). If you never install hooks, Link only knows what you explicitly tell it with lnk remember .",
+    "under": "12. The Three Questions Everyone Asks"
+   },
+   {
+    "id": "faq",
+    "heading": "What happens when I clear context or open a new terminal?",
+    "text": "That is the whole point of Link. Context windows are disposable — cleared, compacted, abandoned with every new terminal. Your memory does not live there: it lives in Markdown files under ~/link , outside every context…",
+    "body": "That is the whole point of Link. Context windows are disposable — cleared, compacted, abandoned with every new terminal. Your memory does not live there: it lives in Markdown files under ~/link , outside every context window. When a new session starts, the hook injects a compact brief of relevant memories back in; when an agent needs more, it asks over MCP. Clear context a hundred times — the agent still knows you never push to main, because that fact was never in the context to begin with. It was in a file.",
+    "under": "12. The Three Questions Everyone Asks"
+   },
+   {
+    "id": "faq",
+    "heading": "Which project or branch does a memory belong to?",
+    "text": "Every memory carries an explicit scope — user (true everywhere: \"I prefer concise release notes\") or project (tied to one repo: \"this service deploys from tags\"). Project memories are labeled with their project and…",
+    "body": "Every memory carries an explicit scope — user (true everywhere: \"I prefer concise release notes\") or project (tied to one repo: \"this service deploys from tags\"). Project memories are labeled with their project and don't leak into other repos' briefs. For finer fencing, applies_when conditions ( project: , path: , task: ) demote a memory to out of context — verify whenever you're outside its territory — so one project's conventions never masquerade as another's. Old checkouts and stale branches can't pollute recall: it's deterministic frontmatter you can open and edit, not classifier guesswork. Link home · Concepts · MCP setup · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest.",
+    "under": "12. The Three Questions Everyone Asks"
+   }
+  ]
+ },
+ {
+  "page": "why-link.html",
+  "title": "Why Link?",
+  "label": "Why Link",
+  "eyebrow": "Positioning",
+  "lead": "The wiki is the inspectable storage layer. The product is shared, source-backed memory that local agents can query without starting every session from zero.",
+  "sections": [
+   {
+    "id": "architecture",
+    "heading": "The Architecture Is the Product",
+    "text": "Every other agent-memory system — Mem0/OpenMemory, Zep/Graphiti, Letta — stores memory as embeddings in a vector database or as an LLM-extracted graph. You cannot read your own memory, and a model sits inside the write…",
+    "body": "Every other agent-memory system — Mem0/OpenMemory, Zep/Graphiti, Letta — stores memory as embeddings in a vector database or as an LLM-extracted graph. You cannot read your own memory, and a model sits inside the write path. Link made five architectural commitments that cannot be bolted onto those designs: Memory you can read Every memory is a plain Markdown file. Open it, grep it, git-diff it, back it up. If Link disappeared tomorrow, your memory is still yours. Review-gated writes No durable memory is created without your approval. Agents propose; you decide. Automatic session hooks capture proposals — never facts. No LLM in the memory layer Ingestion and recall are deterministic. An extraction model can hallucinate facts into a knowledge graph; Link's memory layer cannot, because there is no model in the write path. Provably local CI blocks outbound network code in the runtime. The optional semantic models load offline-only after one explicit setup. \"Local-first\" here is enforced, not promised. Memory that holds when the agent acts A memory you reviewed can carry a rule ( ask command: git push --force , deny write: migrations/** ) that is checked before the agent's tool call, with no model and under a millisecond. Memories about code are re-read against your repository and flagged when the code moved on. Memories surface when the agent opens the file they describe, lnk compile writes reviewed memory into the files every agent already reads, and a receipt proves what reached each session. Recall quality is measured, not asserted: a 1,176-case reproducible benchmark plus a third-party LoCoMo retrieval track, with published miss rates and a CI gate against regressions. See benchmarks/RESULTS.md ."
+   },
+   {
+    "id": "architecture",
+    "heading": "Memory you can read",
+    "text": "Every memory is a plain Markdown file. Open it, grep it, git-diff it, back it up. If Link disappeared tomorrow, your memory is still yours.",
+    "body": "Every memory is a plain Markdown file. Open it, grep it, git-diff it, back it up. If Link disappeared tomorrow, your memory is still yours.",
+    "under": "The Architecture Is the Product"
+   },
+   {
+    "id": "architecture",
+    "heading": "Review-gated writes",
+    "text": "No durable memory is created without your approval. Agents propose; you decide. Automatic session hooks capture proposals — never facts.",
+    "body": "No durable memory is created without your approval. Agents propose; you decide. Automatic session hooks capture proposals — never facts.",
+    "under": "The Architecture Is the Product"
+   },
+   {
+    "id": "architecture",
+    "heading": "No LLM in the memory layer",
+    "text": "Ingestion and recall are deterministic. An extraction model can hallucinate facts into a knowledge graph; Link's memory layer cannot, because there is no model in the write path.",
+    "body": "Ingestion and recall are deterministic. An extraction model can hallucinate facts into a knowledge graph; Link's memory layer cannot, because there is no model in the write path.",
+    "under": "The Architecture Is the Product"
+   },
+   {
+    "id": "architecture",
+    "heading": "Provably local",
+    "text": "CI blocks outbound network code in the runtime. The optional semantic models load offline-only after one explicit setup. \"Local-first\" here is enforced, not promised.",
+    "body": "CI blocks outbound network code in the runtime. The optional semantic models load offline-only after one explicit setup. \"Local-first\" here is enforced, not promised.",
+    "under": "The Architecture Is the Product"
+   },
+   {
+    "id": "architecture",
+    "heading": "Memory that holds when the agent acts",
+    "text": "A memory you reviewed can carry a rule ( ask command: git push --force , deny write: migrations/** ) that is checked before the agent's tool call, with no model and under a millisecond. Memories about code are re-read…",
+    "body": "A memory you reviewed can carry a rule ( ask command: git push --force , deny write: migrations/** ) that is checked before the agent's tool call, with no model and under a millisecond. Memories about code are re-read against your repository and flagged when the code moved on. Memories surface when the agent opens the file they describe, lnk compile writes reviewed memory into the files every agent already reads, and a receipt proves what reached each session. Recall quality is measured, not asserted: a 1,176-case reproducible benchmark plus a third-party LoCoMo retrieval track, with published miss rates and a CI gate against regressions. See benchmarks/RESULTS.md .",
+    "under": "The Architecture Is the Product"
+   },
+   {
+    "id": "fit",
+    "heading": "Best Fit",
+    "text": "Use Link when you want one local memory layer that multiple agents can share. It is strongest for developer and power-user workflows where privacy, provenance, and inspectable files matter. Personal agent memory…",
+    "body": "Use Link when you want one local memory layer that multiple agents can share. It is strongest for developer and power-user workflows where privacy, provenance, and inspectable files matter. Personal agent memory Preferences, decisions, project conventions, and active context that should survive between Codex, Kiro, Claude, Cursor, Antigravity, and other local agents. Source-backed knowledge Raw notes, transcripts, release notes, articles, and project files that should become cited Markdown pages instead of hidden context. Inspectable retrieval Smart query packets with reasons, sources, graph links, budgets, and follow-up actions instead of full-folder dumps. Local ownership Plain Markdown and JSON indexes on your machine. No hosted backend, telemetry, or required cloud account."
+   },
+   {
+    "id": "fit",
+    "heading": "Personal agent memory",
+    "text": "Preferences, decisions, project conventions, and active context that should survive between Codex, Kiro, Claude, Cursor, Antigravity, and other local agents.",
+    "body": "Preferences, decisions, project conventions, and active context that should survive between Codex, Kiro, Claude, Cursor, Antigravity, and other local agents.",
+    "under": "Best Fit"
+   },
+   {
+    "id": "fit",
+    "heading": "Source-backed knowledge",
+    "text": "Raw notes, transcripts, release notes, articles, and project files that should become cited Markdown pages instead of hidden context.",
+    "body": "Raw notes, transcripts, release notes, articles, and project files that should become cited Markdown pages instead of hidden context.",
+    "under": "Best Fit"
+   },
+   {
+    "id": "fit",
+    "heading": "Inspectable retrieval",
+    "text": "Smart query packets with reasons, sources, graph links, budgets, and follow-up actions instead of full-folder dumps.",
+    "body": "Smart query packets with reasons, sources, graph links, budgets, and follow-up actions instead of full-folder dumps.",
+    "under": "Best Fit"
+   },
+   {
+    "id": "fit",
+    "heading": "Local ownership",
+    "text": "Plain Markdown and JSON indexes on your machine. No hosted backend, telemetry, or required cloud account.",
+    "body": "Plain Markdown and JSON indexes on your machine. No hosted backend, telemetry, or required cloud account.",
+    "under": "Best Fit"
+   },
+   {
+    "id": "loop",
+    "heading": "The Loop Link Changes",
+    "text": "Link is useful when it changes the start and end of real agent sessions. Moment Without Link With Link Starting work You retype project state and preferences. The agent calls recall for a compact local brief or task…",
+    "body": "Link is useful when it changes the start and end of real agent sessions. Moment Without Link With Link Starting work You retype project state and preferences. The agent calls recall for a compact local brief or task packet. Switching agents Each tool has its own memory gap. Codex, Claude, Cursor, Kiro, VS Code, and Antigravity can point at the same wiki. Saving a decision The note disappears into chat history. An explicit remember becomes a reviewable Markdown memory. Trusting memory You cannot see why the agent knows something. You can inspect sources, graph links, review state, and lifecycle history."
+   },
+   {
+    "id": "compare",
+    "heading": "How To Choose",
+    "text": "If you need... Use Link when... Use another category when... Human-first notes You want agents to query and maintain the notes as memory. You mainly want a polished human writing app, mobile sync, plugins, and manual…",
+    "body": "If you need... Use Link when... Use another category when... Human-first notes You want agents to query and maintain the notes as memory. You mainly want a polished human writing app, mobile sync, plugins, and manual note-taking. Hosted app memory You want local files, no cloud account, and MCP access from many desktop agents. You are building a hosted product and need managed APIs, user accounts, dashboards, and cloud-scale operations. Stateful agent runtime You already use agents and need shared memory outside any one runtime. You want an entire agent platform with its own execution loop, hosted state, and deployment model. Temporal business graph You need personal/project memory with explicit review and source-backed Markdown. You need automatic entity extraction, temporal fact invalidation, multi-user business data, and enterprise integrations. Plain file search You want search plus memory lifecycle, graph context, MCP tools, validation, and provenance. You only need grep, ripgrep, or a folder of notes with no agent-memory workflow."
+   },
+   {
+    "id": "competitors",
+    "heading": "Compared With Alternatives",
+    "text": "Link is intentionally narrow: local, inspectable memory for agents. That makes the tradeoffs clearer. Alternative Where Link wins Where they win Obsidian Agent-ready memory lifecycle, MCP/CLI retrieval, validation,…",
+    "body": "Link is intentionally narrow: local, inspectable memory for agents. That makes the tradeoffs clearer. Alternative Where Link wins Where they win Obsidian Agent-ready memory lifecycle, MCP/CLI retrieval, validation, source-backed query packets. A Link workspace is plain Markdown, so you can open it in Obsidian as a vault and keep both. Human-first note editing, mobile sync, plugins, and a mature visual graph. IWE A memory lifecycle - proposals, review, supersession, expiry, staleness checks - and one store every agent reads through MCP and hooks. Your whole Markdown tree as a queryable graph (every header a node), an LSP server so you edit the same files in Neovim, VS Code, Zed or Helix with backlinks and rename-refactoring, and a document schema. Closer to \"the notes you already keep\" than to a memory inbox. Basic Memory Review-gated writes instead of agent-written notes, no LLM in the memory layer, staleness checks against the repository, published adversarial and behavioral benchmarks, fully local with no cloud tier. A longer-running MCP knowledge-base project with a hosted cloud option, pluggable vector stores, and reranking. qmd Memory, not only search: lifecycle, review, provenance, per-agent delivery at session start, bounded packets. A focused local search engine over Markdown - the right tool when you want fast hybrid search over notes and nothing else. Mem0 / OpenMemory Readable Markdown storage instead of a vector database, review-gated writes instead of silent extraction, no LLM in the memory layer, hooks-guaranteed session loop, published benchmark with miss rates. Managed cloud APIs, hosted dashboards, larger community, and team/app integration primitives. Letta Works beside existing agents instead of becoming the agent runtime; simpler local file model. Full stateful-agent runtime, managed execution loop, and hosted deployment options. Zep / Graphiti Deterministic memory with no LLM extraction cost or hallucination risk, reviewable Markdown, millisecond local recall, review/expiry lifecycle for time-sensitive memory. Bi-temporal knowledge graphs, automatic entity extraction, multi-user business data, and enterprise graph use cases. Built-in agent memory One memory layer shared across Codex, Claude, Cursor, Kiro, VS Code, Antigravity, and local agents. Zero setup inside one vendor's product. Plain RAG or vector search Reviewable memory, source…"
+   },
+   {
+    "id": "trust",
+    "heading": "Trust Model",
+    "text": "Link deliberately avoids hidden memory. A durable memory is a Markdown page with scope, status, review state, source/provenance, graph links, and a local audit trail. Agents can recall it, but humans can inspect, edit,…",
+    "body": "Link deliberately avoids hidden memory. A durable memory is a Markdown page with scope, status, review state, source/provenance, graph links, and a local audit trail. Agents can recall it, but humans can inspect, edit, archive, restore, or forget it. raw/file.md -> wiki/sources/file.md -> linked concepts remember \"preference\" -> wiki/memories/preference.md recall -> recall_capsule + why_selected + follow_up actions"
+   },
+   {
+    "id": "boundaries",
+    "heading": "Boundaries",
+    "text": "Link is local-first personal software, not a hosted SaaS backend. The local web viewer has no authentication and must stay on loopback unless you add your own auth layer. Ingest quality depends on the agent that reads…",
+    "body": "Link is local-first personal software, not a hosted SaaS backend. The local web viewer has no authentication and must stay on loopback unless you add your own auth layer. Ingest quality depends on the agent that reads and writes pages; Link provides schema, validation, safety gates, and review workflows. Generated memory is not automatically trusted. Use proposal, review, explain, archive, and forget workflows. First 10 minutes · Concepts · MCP setup · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "concepts.html",
+  "title": "Concepts",
+  "label": "Concepts",
+  "eyebrow": "Mental model",
+  "lead": "Link keeps knowledge outside the chat window, makes claims inspectable, and gives every local agent the same source-backed context.",
+  "sections": [
+   {
+    "id": "layers",
+    "heading": "Storage Layers",
+    "text": "raw sources -> agent ingest -> Markdown wiki -> backlinks/graph -> MCP recall \\ -> direct memories -> review/update/archive The wiki is the storage layer. Reviewed memory and compact context are the product surfaces…",
+    "body": "raw sources -> agent ingest -> Markdown wiki -> backlinks/graph -> MCP recall \\ -> direct memories -> review/update/archive The wiki is the storage layer. Reviewed memory and compact context are the product surfaces agents use. One wiki, three independent surfaces The web UI, CLI, official skills, and MCP server are separate ways to use the same local files. Closing the viewer does not stop CLI commands, skills, or MCP recall. Public repo versus local memory Link deliberately keeps generated raw/ , wiki/ , and link-demo/ content out of git. The tracked root wiki is scaffolding; python3 link.py demo creates the product-story demo wiki. raw/ Immutable notes, papers, articles, transcripts, images, and PDFs. wiki/sources/ One source page per ingested raw file. wiki/memories/ Preferences, decisions, project facts, and user context. indexes Backlinks, page index, local cache, token index, and optional SQLite FTS. Markdown remains the source of truth. Derived indexes can be rebuilt. Agents maintain the files, but the files stay inspectable in git, Obsidian , or any editor."
+   },
+   {
+    "id": "moves",
+    "heading": "Three User Moves",
+    "text": "Link deliberately separates knowledge from memory: ingest raw/file.md into Link remember that I prefer short release notes query Link for the release process Raw files do not silently personalize future agents. Ingest…",
+    "body": "Link deliberately separates knowledge from memory: ingest raw/file.md into Link remember that I prefer short release notes query Link for the release process Raw files do not silently personalize future agents. Ingest creates source-backed wiki knowledge. Explicit remember creates durable user or project memory."
+   },
+   {
+    "id": "memory",
+    "heading": "Memory Lifecycle",
+    "text": "The lifecycle can run automatically: session hooks inject the memory brief at session start and store proposal-only notes at session end, and when the review backlog grows, briefs nudge the agent to offer a read-only…",
+    "body": "The lifecycle can run automatically: session hooks inject the memory brief at session start and store proposal-only notes at session end, and when the review backlog grows, briefs nudge the agent to offer a read-only lnk consolidate pass. Every write still requires explicit user approval — automation changes when memory is proposed , never who decides. A memory is a Markdown page with status, scope, visibility, source, review state, optional review_after and expires_at dates, graph links, and local log entries. It can be proposed, remembered, reviewed, updated, archived, restored, explained, or forgotten. Propose Generate candidate memories from chat notes or raw captures without writing durable memory. Approve Save only the memories the user explicitly wants agents to carry forward. Explain Show why a memory exists, whether it is recall-ready, and what graph links support it. Re-check Use review_after when a memory should come back to the inbox after a date instead of staying trusted forever. Expire Use expires_at for temporary context that should leave default recall after a date while staying inspectable. Enforce Give a reviewed memory a rule ( ask or deny on a command, read or write) and the session hook checks it before the agent's tool call; only you can turn a rule on. Check against the repository Memories that name files, scripts, dependencies or code are re-read against the checkout and marked verified or stale in recall; lnk stale lists what moved on. Compile lnk compile writes reviewed memory into the instruction files, rules and skills every agent already reads, and --check fails CI when they drift."
+   },
+   {
+    "id": "memory",
+    "heading": "Propose",
+    "text": "Generate candidate memories from chat notes or raw captures without writing durable memory.",
+    "body": "Generate candidate memories from chat notes or raw captures without writing durable memory.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "memory",
+    "heading": "Approve",
+    "text": "Save only the memories the user explicitly wants agents to carry forward.",
+    "body": "Save only the memories the user explicitly wants agents to carry forward.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "memory",
+    "heading": "Explain",
+    "text": "Show why a memory exists, whether it is recall-ready, and what graph links support it.",
+    "body": "Show why a memory exists, whether it is recall-ready, and what graph links support it.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "memory",
+    "heading": "Re-check",
+    "text": "Use review_after when a memory should come back to the inbox after a date instead of staying trusted forever.",
+    "body": "Use review_after when a memory should come back to the inbox after a date instead of staying trusted forever.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "memory",
+    "heading": "Expire",
+    "text": "Use expires_at for temporary context that should leave default recall after a date while staying inspectable.",
+    "body": "Use expires_at for temporary context that should leave default recall after a date while staying inspectable.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "memory",
+    "heading": "Enforce",
+    "text": "Give a reviewed memory a rule ( ask or deny on a command, read or write) and the session hook checks it before the agent's tool call; only you can turn a rule on.",
+    "body": "Give a reviewed memory a rule ( ask or deny on a command, read or write) and the session hook checks it before the agent's tool call; only you can turn a rule on.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "memory",
+    "heading": "Check against the repository",
+    "text": "Memories that name files, scripts, dependencies or code are re-read against the checkout and marked verified or stale in recall; lnk stale lists what moved on.",
+    "body": "Memories that name files, scripts, dependencies or code are re-read against the checkout and marked verified or stale in recall; lnk stale lists what moved on.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "memory",
+    "heading": "Compile",
+    "text": "lnk compile writes reviewed memory into the instruction files, rules and skills every agent already reads, and --check fails CI when they drift.",
+    "body": "lnk compile writes reviewed memory into the instruction files, rules and skills every agent already reads, and --check fails CI when they drift.",
+    "under": "Memory Lifecycle"
+   },
+   {
+    "id": "query",
+    "heading": "Smart Query Packets",
+    "text": "Retrieval is lexical by default (token matching, stemming, SQLite FTS) and optionally hybrid : two local embedding tiers (a tiny static model for instant CLI use, a contextual model for the MCP server) add paraphrase…",
+    "body": "Retrieval is lexical by default (token matching, stemming, SQLite FTS) and optionally hybrid : two local embedding tiers (a tiny static model for instant CLI use, a contextual model for the MCP server) add paraphrase recall while staying fully offline at query time. Semantic matches are labeled and confidence-capped so agents verify before trusting them; measured results live in benchmarks/RESULTS.md . recall is designed for agents. It returns a compact packet with a recall_capsule , relevant memory, ranked wiki pages, graph context, provenance, budget reports, estimated size, and follow-up actions. Budget tiers keep context predictable: micro : the smallest capsule-first context for quick recall. small : fast, compact context for most questions. medium : more memory and page context for active tasks. large : broader context when the agent needs to plan or compare."
+   },
+   {
+    "id": "graph",
+    "heading": "Graph Context",
+    "text": "Link builds forward and reverse wikilinks so agents can inspect what links to a page and what that page references. Large graphs open as bounded overviews first, with explicit controls for type filters, search,…",
+    "body": "Link builds forward and reverse wikilinks so agents can inspect what links to a page and what that page references. Large graphs open as bounded overviews first, with explicit controls for type filters, search, neighborhood depth, and all-data loading for search/filtering. Graph context stays bounded by default so it remains useful for humans and agents."
+   },
+   {
+    "id": "scale",
+    "heading": "Scale Model",
+    "text": "Link uses local caching, token indexes, bounded page APIs, bounded graph summaries, and optional in-memory SQLite FTS5 for fast search. If SQLite is unavailable, Link falls back to the token index. lnk benchmark \"agent…",
+    "body": "Link uses local caching, token indexes, bounded page APIs, bounded graph summaries, and optional in-memory SQLite FTS5 for fast search. If SQLite is unavailable, Link falls back to the token index. lnk benchmark \"agent memory\" lnk graph-summary \"local memory\" --limit 40 --depth 1 lnk validate lnk rebuild-backlinks Use lnk benchmark when a wiki starts to feel slow or when you want evidence that Link is keeping agent context bounded. It reports cache time, persistent-cache reuse, search, query, graph payloads, backend, readiness recommendations, and estimated context avoided by the bounded query packet. First 10 minutes · MCP setup · Security · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "cli.html",
+  "title": "CLI Reference",
+  "label": "CLI reference",
+  "eyebrow": "Command reference",
+  "lead": "Install the CLI with brew install gowtham0992/link/link on macOS, or use lnk <command> after a global agent installer run. Link uses lnk because link is already a POSIX/macOS system utility. From a source checkout, use python3 link.py…",
+  "sections": [
+   {
+    "id": "tour",
+    "heading": "CLI Tour",
+    "text": "Status, query, brief, and benchmark are the core terminal loop. The CLI is independent of the web viewer. Use lnk start , lnk query , lnk brief , lnk session-end , lnk health , and maintenance commands even when lnk…",
+    "body": "Status, query, brief, and benchmark are the core terminal loop. The CLI is independent of the web viewer. Use lnk start , lnk query , lnk brief , lnk session-end , lnk health , and maintenance commands even when lnk serve is not running. Agents that support lazy-loaded instructions can also use the official Link skills instead of MCP setup. Use lnk try when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command. Use lnk demo [dir] to create a sample workspace with a few memories, raw sources and wiki pages, so you can try recall, the viewer and the graph without touching your own memory. It refuses to overwrite a directory that is not an earlier demo; --force replaces an earlier demo. Use lnk proof when you want to prove the cross-agent memory loop directly: one clean local workspace, one reviewed memory, and one bounded recall packet shared by CLI, skills, and MCP. Use lnk setup for install day and every upgrade after it: it detects every agent installed on your machine and wires them all — workspace, MCP provisioning, session hooks, and a refresh of any stale Link-owned agent instruction files (a steering file from an older Link can name MCP tools the configured server no longer exposes, sending the agent back to file greps) — in one idempotent command. Use lnk onboard when you want the guided single-agent flow: safe repair, health check, optional first memory, optional project seed, first prompts, and optional agent MCP wiring. If the local viewer is running, /onboard mirrors that flow with copy buttons. Use lnk seed . ~/link from a project directory when you want Link to create a source-backed project page from existing repo context before the first real recall. It scans allowlisted docs/rule files, blocks secret-looking values, and does not create durable memories silently."
+   },
+   {
+    "id": "daily",
+    "heading": "Daily Loop",
+    "text": "lnk serve lnk setup # every detected agent, wired in one command lnk onboard lnk onboard --seed-project . lnk seed . ~/link lnk proof lnk welcome lnk next lnk start ~/link --task \"working on Link release\" lnk…",
+    "body": "lnk serve lnk setup # every detected agent, wired in one command lnk onboard lnk onboard --seed-project . lnk seed . ~/link lnk proof lnk welcome lnk next lnk start ~/link --task \"working on Link release\" lnk session-end session-notes.md ~/link --limit 3 lnk health lnk ingest-status # Supported structured exports: plan first, then apply lnk ingest raw/chezmoi-docs/export.jsonl ~/link --adapter chezmoi-docs-graph-v1 lnk ingest raw/chezmoi-docs/export.jsonl ~/link --adapter chezmoi-docs-graph-v1 --apply lnk remember \"User prefers feature branches for Link work.\" --type preference --scope project --project link --visibility project --review-after 2026-08-01 lnk remember \"Temporary launch branch is release/one-off.\" --type project --project link --expires-at 2026-09-01 lnk remember \"1. Bump version 2. Run tests 3. Tag and publish\" --type procedure --trigger \"cutting a release\" lnk remember \"Deploy acme only via blue-green\" --applies-when \"project:acme, task:deploying\" lnk remember \"Releases ship daily from main\" --supersedes weekly-releases lnk recall \"how often do releases ship\" --as-of 2026-03-01 lnk share \"Prefer local memory\" lnk snapshot ~/link --output link-snapshot lnk brief \"working on Link release\" --project link lnk query \"what should I know before changing the MCP tools?\" --budget small --project link lnk validate"
+   },
+   {
+    "id": "memory",
+    "heading": "Memory Commands",
+    "text": "One rule for the memory knobs. Finding it → --trigger (a phrase that helps task-shaped recall find a recipe). Fencing it → --applies-when (conditions that demote or hide a memory outside its context). Owning it →…",
+    "body": "One rule for the memory knobs. Finding it → --trigger (a phrase that helps task-shaped recall find a recipe). Fencing it → --applies-when (conditions that demote or hide a memory outside its context). Owning it → --scope / --project / --visibility (whose memory it is and who may see it). Replacing it → --supersedes (archive the old claim with lineage; accepts the memory name or its title). Aging it → --review-after / --expires-at . When in doubt, save with none of them — every knob can be added later through review. lnk remember Save a local agent memory. Strong duplicates and likely conflicts are refused unless explicitly allowed. lnk recall Search local memories with recall readiness, project-aware filtering, type filters, and --as-of temporal recall. lnk recipes List saved procedure memories with their triggers and first steps. lnk explain-memory Show provenance, lifecycle, graph links, review issues, and recall readiness. lnk update-memory Merge new text into an existing memory and reset review state. lnk archive-memory Reversibly hide a stale or wrong memory from default recall. lnk forget-memory Permanently delete a memory after explicit confirmation."
+   },
+   {
+    "id": "memory",
+    "heading": "lnk remember",
+    "text": "Save a local agent memory. Strong duplicates and likely conflicts are refused unless explicitly allowed.",
+    "body": "Save a local agent memory. Strong duplicates and likely conflicts are refused unless explicitly allowed.",
+    "under": "Memory Commands"
+   },
+   {
+    "id": "memory",
+    "heading": "lnk recall",
+    "text": "Search local memories with recall readiness, project-aware filtering, type filters, and --as-of temporal recall.",
+    "body": "Search local memories with recall readiness, project-aware filtering, type filters, and --as-of temporal recall.",
+    "under": "Memory Commands"
+   },
+   {
+    "id": "memory",
+    "heading": "lnk recipes",
+    "text": "List saved procedure memories with their triggers and first steps.",
+    "body": "List saved procedure memories with their triggers and first steps.",
+    "under": "Memory Commands"
+   },
+   {
+    "id": "memory",
+    "heading": "lnk explain-memory",
+    "text": "Show provenance, lifecycle, graph links, review issues, and recall readiness.",
+    "body": "Show provenance, lifecycle, graph links, review issues, and recall readiness.",
+    "under": "Memory Commands"
+   },
+   {
+    "id": "memory",
+    "heading": "lnk update-memory",
+    "text": "Merge new text into an existing memory and reset review state.",
+    "body": "Merge new text into an existing memory and reset review state.",
+    "under": "Memory Commands"
+   },
+   {
+    "id": "memory",
+    "heading": "lnk archive-memory",
+    "text": "Reversibly hide a stale or wrong memory from default recall.",
+    "body": "Reversibly hide a stale or wrong memory from default recall.",
+    "under": "Memory Commands"
+   },
+   {
+    "id": "memory",
+    "heading": "lnk forget-memory",
+    "text": "Permanently delete a memory after explicit confirmation.",
+    "body": "Permanently delete a memory after explicit confirmation.",
+    "under": "Memory Commands"
+   },
+   {
+    "id": "captures",
+    "heading": "Capture Workflow",
+    "text": "Use lnk session-end at the end of a work session when an agent has notes or a transcript and should propose memory without saving it silently. Use lower-level captures for saved review inbox workflows. lnk session-end…",
+    "body": "Use lnk session-end at the end of a work session when an agent has notes or a transcript and should propose memory without saving it silently. Use lower-level captures for saved review inbox workflows. lnk session-end session-notes.md ~/link --project link --limit 3 cat transcript.md | lnk session-end - ~/link --project link lnk capture-session session-notes.md --project link lnk capture-inbox --project link lnk accept-capture raw/memory-captures/<capture>.md --index 1 lnk redact-capture raw/memory-captures/<capture>.md lnk delete-capture raw/memory-captures/<capture>.md --confirm lnk dedup-captures # collapse inbox captures that offer nothing new (--confirm applies)"
+   },
+   {
+    "id": "guard",
+    "heading": "Proactive Guard",
+    "text": "On Claude Code, Link checks each prompt against your constraint-shaped memories (never / always / only / do not) and interrupts exactly once when one strongly applies: \"let's deploy payments on Friday\" surfaces your…",
+    "body": "On Claude Code, Link checks each prompt against your constraint-shaped memories (never / always / only / do not) and interrupts exactly once when one strongly applies: \"let's deploy payments on Friday\" surfaces your deploys-on-Tuesdays memory before the agent acts. Silence is the normal output - unrelated and weak-overlap prompts pass untouched - and each firing is recorded locally as a guard event. Installed automatically with session hooks."
+   },
+   {
+    "id": "handoff",
+    "heading": "Session Handoff",
+    "text": "The most universal pain of multi-agent work: a rate limit hits mid-task, you switch tools, and the first ten minutes go to re-explaining. lnk handoff writes a standalone packet - task, state, next steps - and the next…",
+    "body": "The most universal pain of multi-agent work: a rate limit hits mid-task, you switch tools, and the first ten minutes go to re-explaining. lnk handoff writes a standalone packet - task, state, next steps - and the next session on any connected agent opens with it: session-start hooks and the MCP first response both carry it, so delivery never depends on the agent thinking to ask. Handoffs expire on their own (48h), are secret-redacted at write time, and never become durable memory unless you promote them through normal review. lnk handoff \"Auth refactor: token validation moved, refresh test failing\" --task \"Auth refactor\" --next \"Fix refresh test\" lnk handoffs # list pending lnk handoffs --clear FILE # after the next session picks it up"
+   },
+   {
+    "id": "import",
+    "heading": "Import Your Scattered Memory",
+    "text": "Your memory already exists — in ~/.claude/CLAUDE.md and Claude Code's auto-memory, Cursor rules, a hand-tended AGENTS.md , or memories copied out of ChatGPT. lnk import reads those surfaces and turns each deliberate…",
+    "body": "Your memory already exists — in ~/.claude/CLAUDE.md and Claude Code's auto-memory, Cursor rules, a hand-tended AGENTS.md , or memories copied out of ChatGPT. lnk import reads those surfaces and turns each deliberate line into a reviewable proposal in the capture inbox — through the same dedup, secret-scanning, and injection-labeling gates as any capture. Nothing is ever auto-accepted, Link's own instruction sections are excluded, and re-running an import is a no-op for anything already pending, dismissed, or saved. lnk import claude-code # CLAUDE.md + auto-memory lnk import cursor # rules files lnk import codex # AGENTS.md (minus Link's own section) lnk import file --file chatgpt-memories.txt # anything pasted to a file Review at bulk speed when a capture is trustworthy: lnk accept-capture FILE --all accepts every proposal (duplicates and conflicts are skipped and reported, never forced), and lnk delete-capture TARGET --all --confirm clears the whole inbox with dismissals recorded."
+   },
+   {
+    "id": "digest",
+    "heading": "Weekly Digest",
+    "text": "lnk digest is the reflection ritual: what you taught Link this week, what is aging out of its trust window, which memories are drifting into saying the same thing, and what is still waiting for review. Read-only and…",
+    "body": "lnk digest is the reflection ritual: what you taught Link this week, what is aging out of its trust window, which memories are drifting into saying the same thing, and what is still waiting for review. Read-only and deterministic — it reuses the lifecycle, consolidation, and inbox engines rather than computing new truth. A quiet week says so. lnk digest # the last 7 days lnk digest --days 30 # a monthly look back lnk digest --json # for dashboards and agents"
+   },
+   {
+    "id": "temporal",
+    "heading": "Temporal Recall",
+    "text": "Ask what you believed then , in plain language. Link resolves everyday time phrases (\"last quarter\", \"in March\", \"2 months ago\", \"back then\") to an exact date and reconstructs what was active on it from the dated files…",
+    "body": "Ask what you believed then , in plain language. Link resolves everyday time phrases (\"last quarter\", \"in March\", \"2 months ago\", \"back then\") to an exact date and reconstructs what was active on it from the dated files themselves — archived memories, supersede lineage, and expiry all participate. No model, no clock magic. --as-of YYYY-MM-DD still pins the moment explicitly. lnk recall \"where does local data live\" # today's truth lnk recall \"where does local data live in March\" # what was true then lnk recall \"what did we decide last quarter\" lnk recall \"deploy process\" --as-of 2026-03-31"
+   },
+   {
+    "id": "sync",
+    "heading": "Sync Between Machines",
+    "text": "lnk sync moves reviewed memory between your machines through a git remote you control (a private repo, a homelab bare repo) — no server, no service. Every outgoing file is scanned for secrets before anything is pushed,…",
+    "body": "lnk sync moves reviewed memory between your machines through a git remote you control (a private repo, a homelab bare repo) — no server, no service. Every outgoing file is scanned for secrets before anything is pushed, not only wiki pages; conflicting memory edits are kept as both versions and surfaced by lnk consolidate for review (git conflict markers never touch wiki files); the tamper-evident log merges with a declared re-anchor. raw/ captures, ingest staging, operation snapshots, backups, caches and the runtime never sync: they are ignored, and if an older setup tracked them, sync reports it and prints the commands to untrack them, and never does it for you: the untracking commit would delete those files on a machine still running an older Link. lnk sync --init refuses to re-point a workspace that already has a different origin . lnk sync --init --remote git@github.com:you/link-memory.git lnk sync # daily: commit, pull, resolve, gate secrets, push lnk sync --status"
+   },
+   {
+    "id": "compile",
+    "heading": "Compile Memory into Agent Files",
+    "text": "lnk compile ~/link --repo . lnk compile ~/link --repo . --dry-run lnk compile ~/link --repo . --check lnk compile ~/link --repo . --targets all lnk compile writes your reviewed memories into the files each coding agent…",
+    "body": "lnk compile ~/link --repo . lnk compile ~/link --repo . --dry-run lnk compile ~/link --repo . --check lnk compile ~/link --repo . --targets all lnk compile writes your reviewed memories into the files each coding agent already reads, so they reach agents with no MCP connection or hooks. By default it writes AGENTS.md plus the agents the repository already has files for; --targets all or a comma-separated list chooses others. Memory Written to Preferences, decisions, facts, project context A Link block in AGENTS.md , CLAUDE.md , GEMINI.md and .github/copilot-instructions.md ; .windsurf/rules/link-memory.md and .kiro/steering/link-memory.md Anchored to code in this repository One rule per memory, loaded when the agent works on those files: .cursor/rules/link-*.mdc ( globs ), .claude/rules/link-*.md ( paths ), .github/instructions/link-*.instructions.md ( applyTo ), Windsurf ( trigger: glob ) and Kiro ( inclusion: fileMatch ). AGENTS.md and GEMINI.md, which have no path rules, list them with their files. Procedures Agent Skills: .claude/skills/<name>/SKILL.md What it will and will not write: Only reviewed, active memories. Unreviewed ones, unreviewed team imports, and anything with a secret-shaped value or an injection-shaped instruction are left out and listed. Private memories stay out of files a repository commits unless you pass --include-private . A memory fenced to a task stays in recall; one fenced to another project or directory is not written here. In shared files only the block between the Link markers changes; everything else is kept byte for byte, including line endings. Link-owned files carry a generated-by line; a file without it is never overwritten and is reported instead. Stale Link-owned files are removed. Symlinked targets are refused. Each file stays within what its agent reads: 32 KiB for AGENTS.md (Codex), 200 lines for CLAUDE.md, 12,000 characters per Windsurf rule, 500 lines per Cursor rule. When memories do not fit, notes go first, then facts, then decisions and preferences, older before newer, and every memory left out is listed with the reason. Output is deterministic. Running it twice changes nothing, so --check can fail CI when the files drift from the reviewed memories, and --dry-run shows the diff first. Over MCP it is admin(action=\"compile\", arguments=\"{\"repo\": \"/path/to/repo\"}\") . It returns a preview with the diff; add…"
+   },
+   {
+    "id": "instructions",
+    "heading": "Check Instruction Files",
+    "text": "lnk stale ~/link --repo . --instructions lnk stale ~/link --repo . --instructions --json lnk stale --instructions checks the repository's own agent instruction files the way lnk stale checks memories: every AGENTS.md ,…",
+    "body": "lnk stale ~/link --repo . --instructions lnk stale ~/link --repo . --instructions --json lnk stale --instructions checks the repository's own agent instruction files the way lnk stale checks memories: every AGENTS.md , CLAUDE.md and GEMINI.md (nested ones too), .claude/rules , Cursor, Windsurf and Kiro rules, and Copilot's instruction files. It reports three things and changes none of them: Stale references. Paths, scripts, make and just targets, dependencies, variables, local endpoints, runtime versions and package managers the repository once had and no longer does, with the same history rule as memories. In an instruction file a bare filename counts only as a link ( [CLAUDE.md](CLAUDE.md) ); “run main.ts” is an example. A nested file's links are resolved from its own folder. Size limits. Text an agent never reads: Codex stops after 32 KiB of AGENTS.md, counted along the chain from the repository root to each nested file; Windsurf reads 12,000 characters of a rule; Claude Code skips a CLAUDE.md over 4 MiB. Each finding gives the limit and how far over. Longer-than-recommended files (CLAUDE.md over 200 lines, a Cursor rule over 500) are reported as warnings that do not fail the check. Contradictions. Rules in two instruction files, or a rule and a reviewed memory, that cannot both hold (“always use tabs” and “never use tabs”; “2 spaces” and “4 spaces”). Copies of the same rule in AGENTS.md and CLAUDE.md are not contradictions, and words inside code, links or names do not count. With the local contradiction model on disk ( lnk semantic --setup --nli ) pairs the word rules miss are added. Link's own compiled block and Link-owned files are skipped: their content comes from memories, which lnk stale checks. Exit codes are the same as lnk stale : 0 nothing found, 1 something to fix, 2 could not check."
+   },
+   {
+    "id": "maintenance",
+    "heading": "Maintenance",
+    "text": "lnk backup lnk doctor --fix lnk health lnk status --validate lnk memory-audit lnk compliance-export --output link-audit.json lnk team-sync ~/link lnk snapshot ~/link --output link-snapshot lnk operations lnk benchmark…",
+    "body": "lnk backup lnk doctor --fix lnk health lnk status --validate lnk memory-audit lnk compliance-export --output link-audit.json lnk team-sync ~/link lnk snapshot ~/link --output link-snapshot lnk operations lnk benchmark \"agent memory\" lnk rebuild-index lnk rebuild-backlinks lnk stale lnk receipt lnk validate lnk verify-mcp Use lnk backup before broad repair work. Use lnk benchmark when a wiki starts to feel slow or when you want to see how much broad wiki context the bounded packet avoided sending to an agent. lnk status --validate and lnk benchmark both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records. Run lnk stale from inside a repository to list memories that describe things the repository no longer has. It checks file paths (with the new name when git recorded a rename), package scripts ( npm run deploy:staging ), make and just targets, dependencies, environment variables and URLs, and two direct contradictions with files the repository checks in: a runtime version the manifests no longer allow (“Python 3.10” when pyproject.toml requires >=3.12 ) and a package manager whose lockfile was replaced by another manager's. Each reference is only reported when the repository shows it once had the thing and no longer does, so prose that merely looks like a filename, a variable or a script stays quiet. On this repository's own documentation plus eight other real repositories, that rule produced no false flags across more than 600 references (exact figures in benchmarks/RESULTS.md ). It also re-reads each memory's code anchors ( path:line symbol , recorded when the memory was written inside a checkout) and reports symbols that were removed. A symbol that only moved within its file is not a finding, and anchors from another repository are never checked here. Claims framed as history (“we dropped Python 3.9”) or as a prohibition (“do not use npm”) are not read as current claims, monorepo workspace manifests count, and links to public documentation are left alone. History answers are cached per commit in the workspace's .link-cache/ , so repeat runs on a large repository are fast. The command changes nothing: it tells you which memories to review. It exits like a linter, so CI and scripts can act on the result. 0 means nothing was flagged, 1 means at least one memory was flagged, and 2 means it could not…"
+   },
+   {
+    "id": "all",
+    "heading": "All Commands",
+    "text": "lnk --version lnk version lnk init [dir] lnk serve [dir] [--port 3000] lnk onboard [dir] [--agent codex] [--write] [--hooks] [--first-memory \"...\"] [--seed-project .] lnk seed [project-dir] [dir] [--project-name name]…",
+    "body": "lnk --version lnk version lnk init [dir] lnk serve [dir] [--port 3000] lnk onboard [dir] [--agent codex] [--write] [--hooks] [--first-memory \"...\"] [--seed-project .] lnk seed [project-dir] [dir] [--project-name name] [--overwrite] [--dry-run] lnk try [dir] [--force] [--serve] [--port 3000] lnk demo [dir] [--force] lnk proof [dir] [--force] [--serve] [--port 3000] lnk welcome [dir] [--project slug] lnk prompts [dir] [--project slug] lnk next [dir] [--project slug] lnk health [dir] [--json] lnk status [--validate] lnk operations [--limit 20] [--recover marker.json] [--confirm] lnk backup [--label name] [--include-raw] lnk compliance-export [dir] [--output audit.json] [--project slug] lnk team-sync [dir] [--remote git-url] lnk share <page-or-memory> [dir] [--port 3000] lnk snapshot [dir] [--output link-snapshot] [--include-memories] [--include-private-memories] [--force] lnk ingest <raw-source> [dir] --adapter chezmoi-docs-graph-v1 [--exclude \"group\"] [--apply] [--replace-unmanaged] [--prune] lnk ingest-status lnk import-obsidian <vault> [dir] [--dry-run] [--overwrite] lnk remember \"text\" [--type note|preference|decision|project|fact|procedure] [--project slug] [--visibility private|project|team] [--review-after YYYY-MM-DD] [--expires-at YYYY-MM-DD] [--trigger \"...\"] [--applies-when \"...\"] [--supersedes name-or-title] lnk propose-memories <file-or-text> [--project slug] lnk session-end <file-or-text-or-> [dir] [--project slug] [--limit 3] lnk capture-session <file-or-text> [--project slug] lnk capture-inbox [--project slug] lnk accept-capture <capture> [--index N] [--visibility private|project|team] lnk redact-capture <capture> lnk delete-capture <capture> --confirm lnk query \"task\" [--budget micro|small|medium|large] [--project slug] lnk graph-summary [\"topic\"] [--limit 40] [--depth 1] lnk benchmark [\"query\"] [--budget micro|small|medium|large] [--project slug] lnk start [dir] [--task \"task\"] [--project slug] lnk brief \"task\" [--project slug] lnk memory-audit [--project slug] lnk consolidate [dir] [--project slug] [--limit N] lnk semantic [dir] [--setup] [--rebuild] [--nli] [--json] lnk recall \"query\" [--project slug] [--type TYPE] [--as-of YYYY-MM-DD] [--include-archived] lnk recipes [dir] [--project slug] lnk profile [--project slug] lnk wins [--project slug] lnk memory-inbox [--project slug] lnk memory-log [--limit N] lnk review-memory <name> lnk…"
+   }
+  ]
+ },
+ {
+  "page": "mcp.html",
+  "title": "MCP Setup",
+  "label": "MCP setup",
+  "eyebrow": "Agent integration",
+  "lead": "Link is listed as io.github.gowtham0992/link on the MCP Registry and also ships as the link-mcp PyPI package.",
+  "sections": [
+   {
+    "id": "tour",
+    "heading": "MCP Tour",
+    "text": "Agents use natural prompts, then call Link tools for readiness, recall packets, ingest plans, and reviewed memory writes. MCP does not need serve.py The local web viewer is only for humans. MCP clients start python -m…",
+    "body": "Agents use natural prompts, then call Link tools for readiness, recall packets, ingest plans, and reviewed memory writes. MCP does not need serve.py The local web viewer is only for humans. MCP clients start python -m link_mcp --wiki ... --surface slim over stdio and read the same Markdown wiki directly. Prefer no MCP? Use the official Link skills when an agent can run local CLI commands and you want a lazy-loaded workflow instead of MCP configuration. For agent builders, the stable read/write behavior is summarized in the Link memory contract ."
+   },
+   {
+    "id": "installers",
+    "heading": "Agent Installers",
+    "text": "Use the installer for the agent you use most. Installers create or update ~/link , install link-mcp , write short agent instructions, and preserve existing wiki data. bash integrations/codex/install.sh bash…",
+    "body": "Use the installer for the agent you use most. Installers create or update ~/link , install link-mcp , write short agent instructions, and preserve existing wiki data. bash integrations/codex/install.sh bash integrations/kiro/install.sh bash integrations/claude-code/install.sh bash integrations/cursor/install.sh bash integrations/copilot/install.sh bash integrations/vscode/install.sh bash integrations/antigravity/install.sh Use --project from a repo when memory should be project-scoped. On Windows PowerShell, use .\\integrations\\AGENT\\install.ps1 instead: .\\integrations\\codex\\install.ps1 .\\integrations\\kiro\\install.ps1 .\\integrations\\claude-code\\install.ps1 .\\integrations\\cursor\\install.ps1 .\\integrations\\copilot\\install.ps1 .\\integrations\\vscode\\install.ps1 .\\integrations\\antigravity\\install.ps1 If you want a guided setup that also checks the wiki and prints first-run prompts, use lnk onboard --agent AGENT . It previews the target config first; add --write for an explicit update. MCP and CLI work without lnk serve ; the local /onboard page is only a browser checklist. lnk onboard --agent codex lnk onboard --agent codex --write lnk onboard --agent cursor --write If you already have agent instructions and only need MCP wiring, use lnk connect directly. lnk connect codex ~/link lnk connect codex ~/link --write lnk connect kiro ~/link --write lnk connect claude-code ~/link --write lnk connect cursor ~/link --write lnk connect antigravity ~/link --write lnk verify-mcp ~/link"
+   },
+   {
+    "id": "mcp-only",
+    "heading": "MCP Only",
+    "text": "python3 -m pip install --upgrade link-mcp python3 -m link_mcp --version # optional local semantic recall (fast or quality tier): python3 -m pip install \"link-mcp[semantic-quality]\" python3 -m link_mcp --semantic-setup…",
+    "body": "python3 -m pip install --upgrade link-mcp python3 -m link_mcp --version # optional local semantic recall (fast or quality tier): python3 -m pip install \"link-mcp[semantic-quality]\" python3 -m link_mcp --semantic-setup --wiki ~/link/wiki The semantic extras stay fully local: the embedding model is fetched once by the explicit --semantic-setup command, and the serving path loads it offline-only — a recall can never download anything. { \"mcpServers\": { \"link\": { \"command\": \"python3\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"~/link/wiki\", \"--surface\", \"slim\"] } } } On macOS/Homebrew Python, if pip reports externally-managed-environment , use a dedicated venv: python3 -m venv ~/.link-mcp-venv ~/.link-mcp-venv/bin/python -m pip install --upgrade pip link-mcp On Windows, use a project or user venv and point your MCP client at that venv's Python: py -m venv .link-mcp-venv .\\.link-mcp-venv\\Scripts\\python -m pip install --upgrade pip link-mcp { \"mcpServers\": { \"link\": { \"command\": \"C:\\\\Users\\\\YOU\\\\.link-mcp-venv\\\\Scripts\\\\python.exe\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"C:\\\\Users\\\\YOU\\\\link\\\\wiki\", \"--surface\", \"slim\"] } } }"
+   },
+   {
+    "id": "workflow",
+    "heading": "Predictable Agent Workflow",
+    "text": "Memory arrives on its own. Only some agents support session hooks, so Link also pushes through the one channel every MCP agent shares: the first tool response of a session carries a compact memory brief under…",
+    "body": "Memory arrives on its own. Only some agents support session hooks, so Link also pushes through the one channel every MCP agent shares: the first tool response of a session carries a compact memory brief under link_session_brief , whatever tool was called — even status . It happens once per session, is skipped when there is nothing to say, is recorded as a retrieval so lnk wins can prove it happened, and is disabled with LINK_MCP_AUTOBRIEF=off . Agents should treat it as context they already have. If Link session hooks are installed for the agent ( lnk connect <agent> --hooks --write ), the startup brief is injected automatically — agents should skip the manual brief call and go straight to bounded task recall. When a brief reports a memory backlog, review(action=\"consolidate\") returns a read-only consolidation plan to walk through with the user. New MCP configs use the slim surface by default so agents see one obvious read tool and one obvious write tool instead of a long menu of overlapping helpers. The full compatibility surface remains available with --surface full . Slim agents should use Link in this order: Call status when connecting or troubleshooting. Call recall with an empty query once at the first substantive turn of a session. Call recall(query, budget=\"micro\") before broad file reads or asking the user to repeat durable context. Call ingest when the user drops files into raw/ . Call remember only after the user explicitly approves durable memory. At session end, call admin(action=\"session_end\") or capture_session to propose memory candidates without saving them silently. Call review for memory inbox, profile, audit, log, receipt, explain, archive, restore, and forget workflows. Change who a memory is shared with through admin(action=\"set_visibility\") , after the user approves. Rules a memory enforces on tool calls are set with admin(action=\"set_enforce\") only when the user asks; they act after the user reviews the memory, and an agent cannot mark a rule-bearing memory reviewed, clear its rules, or archive, forget or update it over MCP - the person does that in the CLI, the viewer or LinkBar. Call admin for backup, migrate, validate, rebuild, graph export, pages, captures, and advanced updates."
+   },
+   {
+    "id": "tools",
+    "heading": "MCP Tools",
+    "text": "Recommended slim tool set: status recall remember ingest review admin What each slim tool accepts: status(include_validation) : readiness and safe next actions. recall(query, budget, project, mode, limit, context_path,…",
+    "body": "Recommended slim tool set: status recall remember ingest review admin What each slim tool accepts: status(include_validation) : readiness and safe next actions. recall(query, budget, project, mode, limit, context_path, as_of, memory_type) : an empty query returns the session brief. as_of (YYYY-MM-DD) answers what was true on a date, and a time phrase in the query (“last quarter”) does the same. memory_type narrows memory recall to one kind. remember(text, title, memory_type, scope, visibility, project, tags, review_after, expires_at, trigger, applies_when, supersedes, context, enforce, ...) : only after the user asks or approves. enforce takes rules such as ask command: git push --force* (several separated by ; ), only when the user asks Link to check or stop an action; the result's enforce_suggestions are for the user to accept, never to apply on the agent's own initiative. ingest(action) : status , validate , rebuild . review(action, ...) : inbox , audit , profile , log , wins , receipt , explain , reviewed , archive , restore , forget , consolidate . admin(action, arguments) , where arguments is a JSON object string: backup , migrate , validate , operations , prompts , search , context , pages , backlinks , graph_summary , graph , rebuild_index , rebuild_backlinks , seed_project , propose_memories , capture_session , session_end , capture_inbox , accept_capture , redact_capture , delete_capture , dedup_captures , update_memory , set_visibility , set_enforce , compile (reviewed memories into the repository's agent files; a preview with the diff unless arguments has \"write\": true ). MCP prompts exposed by Link: link_start link_brief link_remember link_session_end link_ingest link_review MCP resources exposed by Link: link://instructions link://health link://brief link://profile link://project link_start and link://instructions carry the portable startup loop for clients that support native prompts or resource attachment: check readiness, run one empty-query recall brief, then use bounded recall before broad context reads. If recall finds no useful project context, agents can call admin(action=\"seed_project\", arguments=\"{\"project_root\":\"/absolute/project/path\"}\") or ask the user to run lnk seed . ~/link from the repo before retrying recall. link_session_end carries the matching review-gated shutdown loop: capture useful session notes, return proposals, and…"
+   },
+   {
+    "id": "verify",
+    "heading": "Verify Setup",
+    "text": "lnk verify-mcp lnk health lnk next lnk verify-mcp --json is useful when an agent or script should read structured issues and next actions. Natural prompts to try is Link ready? start with Link before we continue query…",
+    "body": "lnk verify-mcp lnk health lnk next lnk verify-mcp --json is useful when an agent or script should read structured issues and next actions. Natural prompts to try is Link ready? start with Link before we continue query Link for my current project context remember that I prefer short release notes First 10 minutes · CLI reference · Troubleshooting · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "skills.html",
+  "title": "Skills",
+  "label": "Skills",
+  "eyebrow": "No MCP required",
+  "lead": "Official skills are small CLI workflows an agent can load when Link is relevant: session start, retrieval, ingest, health, session-end proposals, and memory lifecycle.",
+  "sections": [
+   {
+    "id": "why",
+    "heading": "Why Skills",
+    "text": "MCP gives Link structured tool calls, but it should not be the only path. If an agent can run local commands, it can use Link through lnk without an MCP server, background viewer, or extra client configuration. From a…",
+    "body": "MCP gives Link structured tool calls, but it should not be the only path. If an agent can run local commands, it can use Link through lnk without an MCP server, background viewer, or extra client configuration. From a source checkout, the same workflows work with python3 link.py . The skills are intentionally proactive. Retrieval should load before work that may depend on previous context, health should load before trusting a changed wiki, ingest should load when raw files appear, and memory should load after important decisions or at session end so the agent can propose durable memory for review. lnk serve is optional The web viewer is only for humans. Skills, CLI commands, and MCP tools all read the same local Markdown wiki directly."
+   },
+   {
+    "id": "included",
+    "heading": "Included Skills",
+    "text": "The repo ships official skill folders under skills/ : Skill Use it for First command link-health Start of Link work, after installs/upgrades, interrupted writes, backups, repair, validation. lnk health link-retrieve…",
+    "body": "The repo ships official skill folders under skills/ : Skill Use it for First command link-health Start of Link work, after installs/upgrades, interrupted writes, backups, repair, validation. lnk health link-retrieve Before answering context-sensitive work: bounded query packets, briefs, graph summaries, benchmarks. lnk query \"...\" link-ingest When raw files are present: source ingest, stale sources, memory proposals, post-ingest checks. lnk ingest-status link-memory After important user-approved decisions or session end: propose, remember, recall, review, explain, update, archive, restore, forget. lnk session-end"
+   },
+   {
+    "id": "install",
+    "heading": "Use Them",
+    "text": "Point your agent at the skill folder it supports, or copy the relevant SKILL.md into that agent's local skill directory. skills/link-health/SKILL.md skills/link-retrieve/SKILL.md skills/link-ingest/SKILL.md…",
+    "body": "Point your agent at the skill folder it supports, or copy the relevant SKILL.md into that agent's local skill directory. skills/link-health/SKILL.md skills/link-retrieve/SKILL.md skills/link-ingest/SKILL.md skills/link-memory/SKILL.md Then use natural prompts that map to the skills: is Link ready? start with Link before we continue seed this project into Link query Link for the release process end this session with Link memory proposals ingest raw/notes.md into Link remember that I prefer short release notes"
+   },
+   {
+    "id": "rules",
+    "heading": "Rules For Agents",
+    "text": "Two things the skills rely on: if Link session hooks are installed, the startup brief arrives automatically — skip the manual brief and go straight to bounded task recall. And when a brief reports a memory backlog,…",
+    "body": "Two things the skills rely on: if Link session hooks are installed, the startup brief arrives automatically — skip the manual brief and go straight to bounded task recall. And when a brief reports a memory backlog, offer the user a read-only lnk consolidate pass instead of letting captures pile up. Prefer lnk health when readiness is unclear, especially after an install, upgrade, restore, or broad wiki edit. Start with lnk start for readiness plus memory context, and use lnk session-end to capture proposal-only memory candidates at the end of meaningful work. Use lnk seed . ~/link from a project directory when the user's wiki has no project context yet. Prefer lnk query , lnk brief , and lnk graph-summary over reading the whole wiki. Use lnk ingest-status before touching raw sources. Do not silently create durable memory; use lnk remember only when the user asks or approves a proposal. Run lnk validate and lnk health after ingest or broad wiki edits. Use MCP when you want structured tool calls inside an MCP client. Use skills when you want a lightweight, lazy-loaded CLI workflow. First 10 minutes · MCP setup · CLI reference · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "ui.html",
+  "title": "Web UI",
+  "label": "Web UI",
+  "eyebrow": "Local viewer",
+  "lead": "Use it to read source-backed pages, inspect what Link knows, review proposed memories, browse captures, validate ingest, and explore graph neighborhoods.",
+  "sections": [
+   {
+    "id": "tour",
+    "heading": "UI Tour",
+    "text": "Prompts, ingest, brief, memory review, and graph exploration in the local viewer.",
+    "body": "Prompts, ingest, brief, memory review, and graph exploration in the local viewer."
+   },
+   {
+    "id": "onboard",
+    "heading": "Onboard Checklist",
+    "text": "Open /onboard when you want the browser version of lnk onboard . It gathers readiness, project context seeding, first-memory setup, agent wiring, and starter prompts into one copyable checklist so a new user can move…",
+    "body": "Open /onboard when you want the browser version of lnk onboard . It gathers readiness, project context seeding, first-memory setup, agent wiring, and starter prompts into one copyable checklist so a new user can move from empty local files to working agent memory without memorizing commands. lnk serve ~/link open http://127.0.0.1:3000/onboard The onboard page does not run MCP for you and does not need to stay open. It is a guided local setup screen; CLI commands, official skills, and MCP clients keep working after you close the browser because they read the same local Markdown wiki directly."
+   },
+   {
+    "id": "reading",
+    "heading": "Reading Pages",
+    "text": "Link's local viewer is document-first. Common paths, including the review inbox, stay in the top navigation; advanced tools live under more , and sectioned wiki pages get a contents outline so long source-backed pages…",
+    "body": "Link's local viewer is document-first. Common paths, including the review inbox, stay in the top navigation; advanced tools live under more , and sectioned wiki pages get a contents outline so long source-backed pages remain scannable. Page footers include related pages from inbound and forward graph links, so reading can continue without opening the full graph."
+   },
+   {
+    "id": "catalog",
+    "heading": "Catalog And Search",
+    "text": "The home page shows recently updated pages so you can resume work quickly. The All Pages catalog groups visible pages by type and includes clickable type chips for narrowing large wikis. Search results use the same…",
+    "body": "The home page shows recently updated pages so you can resume work quickly. The All Pages catalog groups visible pages by type and includes clickable type chips for narrowing large wikis. Search results use the same page-type grouping and include an in-page refinement form, so a broad query can be narrowed to concepts, sources, memories, or other page types without leaving the local viewer."
+   },
+   {
+    "id": "daily",
+    "heading": "Daily Loop",
+    "text": "Start from prompts The home page gives first-run prompts an agent can act on without you memorizing file paths or command syntax. Check ingest The ingest view shows pending raw files, represented sources, stale ingests,…",
+    "body": "Start from prompts The home page gives first-run prompts an agent can act on without you memorizing file paths or command syntax. Check ingest The ingest view shows pending raw files, represented sources, stale ingests, safety warnings, and post-ingest checks. Review memory Use the memory dashboard, inbox, profile, audit, and explain views to keep recall useful instead of mysterious. Check health The health page shows readiness, validation, interrupted writes, memory review state, and copyable repair commands. Validate after writes Run validation from the CLI or MCP after ingest and broad repairs so dead links, missing sections, and stale graph indexes do not linger."
+   },
+   {
+    "id": "daily",
+    "heading": "Start from prompts",
+    "text": "The home page gives first-run prompts an agent can act on without you memorizing file paths or command syntax.",
+    "body": "The home page gives first-run prompts an agent can act on without you memorizing file paths or command syntax.",
+    "under": "Daily Loop"
+   },
+   {
+    "id": "daily",
+    "heading": "Check ingest",
+    "text": "The ingest view shows pending raw files, represented sources, stale ingests, safety warnings, and post-ingest checks.",
+    "body": "The ingest view shows pending raw files, represented sources, stale ingests, safety warnings, and post-ingest checks.",
+    "under": "Daily Loop"
+   },
+   {
+    "id": "daily",
+    "heading": "Review memory",
+    "text": "Use the memory dashboard, inbox, profile, audit, and explain views to keep recall useful instead of mysterious.",
+    "body": "Use the memory dashboard, inbox, profile, audit, and explain views to keep recall useful instead of mysterious.",
+    "under": "Daily Loop"
+   },
+   {
+    "id": "daily",
+    "heading": "Check health",
+    "text": "The health page shows readiness, validation, interrupted writes, memory review state, and copyable repair commands.",
+    "body": "The health page shows readiness, validation, interrupted writes, memory review state, and copyable repair commands.",
+    "under": "Daily Loop"
+   },
+   {
+    "id": "daily",
+    "heading": "Validate after writes",
+    "text": "Run validation from the CLI or MCP after ingest and broad repairs so dead links, missing sections, and stale graph indexes do not linger.",
+    "body": "Run validation from the CLI or MCP after ingest and broad repairs so dead links, missing sections, and stale graph indexes do not linger.",
+    "under": "Daily Loop"
+   },
+   {
+    "id": "inbox",
+    "heading": "Review Inbox",
+    "text": "The inbox is where memory becomes trusted, so it is built to be fast and to show everything that a review turns on. Keyboard. j / k move, r reviews, a archives, x selects, e opens the edit form. Focus moves to the next…",
+    "body": "The inbox is where memory becomes trusted, so it is built to be fast and to show everything that a review turns on. Keyboard. j / k move, r reviews, a archives, x selects, e opens the edit form. Focus moves to the next memory without a reload. Inline edit. Change the claim or the visibility in place. The claim goes through update-memory , so duplicate and conflict checks still run, and nothing is sent unless it changed. Rules before approval. A memory that carries enforced rules lists them under its claim in the words the hook uses ( asks , blocks ). Reviewing it activates those rules for the agent's tool calls, so the request must acknowledge the rules it displayed; the server refuses otherwise. Bulk review skips rules. Select several memories and review or archive them at once. Memories with enforced rules are skipped and reported, so rules are never switched on in a batch. Outside content is marked. On the captures page, proposals from a session that read web pages or MCP tool output say so, so you can check the words are yours before accepting. The wins page carries a Last session card mirroring lnk receipt : which memories the agent was given, whether every brief arrived whole, how many tool calls the enforced rules asked about or blocked, and how many code reminders fired."
+   },
+   {
+    "id": "graph",
+    "heading": "Graph At Scale",
+    "text": "The graph opens as a bounded overview on large wikis. Search, legend chips, type filters, and focused neighborhoods can pull from the full graph data without forcing the browser to render every node at once. Large…",
+    "body": "The graph opens as a bounded overview on large wikis. Search, legend chips, type filters, and focused neighborhoods can pull from the full graph data without forcing the browser to render every node at once. Large graphs start in deterministic page-type clusters so the first view stays readable. Use search, clickable legend filters, neighborhood focus, fullscreen, labels, and motion controls for large graphs."
+   },
+   {
+    "id": "health",
+    "heading": "Health Page",
+    "text": "Open /health when the wiki feels wrong. It gathers the same readiness signals as lnk status --validate , plus persistent-cache reuse, interrupted operation markers, and repair commands you can copy back into your…",
+    "body": "Open /health when the wiki feels wrong. It gathers the same readiness signals as lnk status --validate , plus persistent-cache reuse, interrupted operation markers, and repair commands you can copy back into your terminal or agent chat. Readiness, validation, interrupted writes, and copyable repair commands in one local check."
+   },
+   {
+    "id": "start",
+    "heading": "Start It",
+    "text": "lnk serve # from a source checkout python3 link.py serve link-demo The server binds to 127.0.0.1 and is intended for local use. Do not expose it to the internet without adding your own authentication layer. This viewer…",
+    "body": "lnk serve # from a source checkout python3 link.py serve link-demo The server binds to 127.0.0.1 and is intended for local use. Do not expose it to the internet without adding your own authentication layer. This viewer is optional. CLI commands, official skills, and MCP clients keep working after you close the browser or stop serve.py . First 10 minutes · MCP setup · CLI reference · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "obsidian.html",
+  "title": "Obsidian",
+  "label": "Obsidian",
+  "eyebrow": "Plain Markdown",
+  "lead": "Link owns the memory lifecycle. Obsidian can be a comfortable editor and graph viewer for the same local Markdown files.",
+  "sections": [
+   {
+    "id": "import",
+    "heading": "Import An Existing Obsidian Vault",
+    "text": "Use lnk import-obsidian when you already have project notes in Obsidian and want Link agents to ingest them as source-backed knowledge. Link copies Markdown notes into raw/obsidian/<vault>/ , skips Obsidian plugin…",
+    "body": "Use lnk import-obsidian when you already have project notes in Obsidian and want Link agents to ingest them as source-backed knowledge. Link copies Markdown notes into raw/obsidian/<vault>/ , skips Obsidian plugin state, and blocks notes with secret-looking values before writing them. lnk init ~/link lnk import-obsidian ~/Documents/ObsidianVault ~/link lnk ingest-status ~/link The import does not silently create durable memories. It stages raw source notes, then the normal ingest and proposal workflow decides what becomes wiki knowledge or reviewed memory."
+   },
+   {
+    "id": "open",
+    "heading": "Open The Link Wiki",
+    "text": "In Obsidian, choose Open folder as vault and select your Link wiki folder: ~/link/wiki For a project-local install, open that project's wiki/ folder instead. Link uses regular Markdown files, YAML frontmatter, and…",
+    "body": "In Obsidian, choose Open folder as vault and select your Link wiki folder: ~/link/wiki For a project-local install, open that project's wiki/ folder instead. Link uses regular Markdown files, YAML frontmatter, and [[wikilinks]] , so Obsidian can read the pages directly."
+   },
+   {
+    "id": "edit",
+    "heading": "Edit Safely",
+    "text": "Prefer editing prose, titles, aliases, tags, summaries, and source notes. Be careful with lifecycle fields on memory pages, such as status , review_status , scope , project , and source , because agents use those fields…",
+    "body": "Prefer editing prose, titles, aliases, tags, summaries, and source notes. Be careful with lifecycle fields on memory pages, such as status , review_status , scope , project , and source , because agents use those fields to decide what is safe to recall. Memory rule Use Link commands or MCP tools for durable memory writes when possible. They check duplicates, conflicts, review state, and audit logs."
+   },
+   {
+    "id": "sync",
+    "heading": "Keep Link Indexes Current",
+    "text": "After manual Obsidian edits, rebuild derived indexes and validate the wiki before asking agents to rely on the new content: lnk rebuild-index ~/link lnk rebuild-backlinks ~/link lnk validate ~/link lnk health ~/link The…",
+    "body": "After manual Obsidian edits, rebuild derived indexes and validate the wiki before asking agents to rely on the new content: lnk rebuild-index ~/link lnk rebuild-backlinks ~/link lnk validate ~/link lnk health ~/link The local web viewer is still useful for Link-specific views like health, ingest, memory review, captures, and MCP-ready query context. Obsidian is an editor/viewer for the same underlying files, not a replacement for Link's validation and memory lifecycle. Concepts · CLI reference · Security · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "troubleshooting.html",
+  "title": "Troubleshooting",
+  "label": "Troubleshooting",
+  "eyebrow": "Troubleshooting",
+  "lead": "Most Link issues are local path, stale graph, MCP Python, raw safety, or validation problems. The commands below are safe first checks.",
+  "sections": [
+   {
+    "id": "ready",
+    "heading": "Is Link Ready?",
+    "text": "lnk health lnk status --validate lnk doctor lnk next If link is not on your PATH , run from the source checkout with python3 link.py , or add ~/.local/bin to your shell path.",
+    "body": "lnk health lnk status --validate lnk doctor lnk next If link is not on your PATH , run from the source checkout with python3 link.py , or add ~/.local/bin to your shell path."
+   },
+   {
+    "id": "mcp",
+    "heading": "MCP Is Not Visible",
+    "text": "lnk verify-mcp python3 -m pip index versions link-mcp Restart the MCP client after changing its config. If your installer printed a venv Python path, use that exact path in the MCP config. You do not need lnk serve or…",
+    "body": "lnk verify-mcp python3 -m pip index versions link-mcp Restart the MCP client after changing its config. If your installer printed a venv Python path, use that exact path in the MCP config. You do not need lnk serve or serve.py running for MCP. The web viewer is separate from the MCP server."
+   },
+   {
+    "id": "ingest",
+    "heading": "Ingest Is Blocked",
+    "text": "lnk ingest-status Blocked ingest usually means a raw source has secret-looking values, cannot be read safely, or source representation counts may be incomplete. Redact or fix the local file, then ask the agent to ingest…",
+    "body": "lnk ingest-status Blocked ingest usually means a raw source has secret-looking values, cannot be read safely, or source representation counts may be incomplete. Redact or fix the local file, then ask the agent to ingest again."
+   },
+   {
+    "id": "operations",
+    "heading": "Interrupted Writes",
+    "text": "lnk operations lnk operations ~/link --recover remember-2026-06-30.json --confirm lnk validate lnk doctor --fix If a memory write was interrupted, Link leaves a marker under wiki/.link-operations/ . Inspect it before…",
+    "body": "lnk operations lnk operations ~/link --recover remember-2026-06-30.json --confirm lnk validate lnk doctor --fix If a memory write was interrupted, Link leaves a marker under wiki/.link-operations/ . Inspect it before deleting anything manually. When the marker includes a rollback snapshot, lnk operations --recover <marker> previews the restore plan and --confirm applies it. Then validate the wiki and repair generated indexes if needed."
+   },
+   {
+    "id": "graph",
+    "heading": "Graph Is Stale",
+    "text": "lnk rebuild-index lnk rebuild-backlinks lnk validate Run this after manual Obsidian edits, hand-written wikilinks, or a failed ingest.",
+    "body": "lnk rebuild-index lnk rebuild-backlinks lnk validate Run this after manual Obsidian edits, hand-written wikilinks, or a failed ingest."
+   },
+   {
+    "id": "demo",
+    "heading": "Demo Looks Stale",
+    "text": "link-demo/ is generated local output and is ignored by git. If it was created with an older Link version, regenerate it: python3 link.py demo link-demo --force python3 link.py health link-demo python3 link.py query \"why…",
+    "body": "link-demo/ is generated local output and is ignored by git. If it was created with an older Link version, regenerate it: python3 link.py demo link-demo --force python3 link.py health link-demo python3 link.py query \"why does Link help agents?\" link-demo --budget small The current generated demo should include three raw sources, source-backed wiki pages, four starter memories (three reviewed, one pending review), one exploration, current backlinks, and schema v1."
+   },
+   {
+    "id": "hooks",
+    "heading": "Session Hooks Are Not Firing",
+    "text": "Check the agent's settings file (for Claude Code, ~/.claude/settings.json ) for the Link entries under SessionStart / SessionEnd ; rerunning lnk connect <agent> --hooks --write is idempotent and repairs a workspace…",
+    "body": "Check the agent's settings file (for Claude Code, ~/.claude/settings.json ) for the Link entries under SessionStart / SessionEnd ; rerunning lnk connect <agent> --hooks --write is idempotent and repairs a workspace runtime that predates hooks. Since 5.0 the same command also registers PreToolUse , PostToolUse and UserPromptSubmit entries on Claude Code; if the session brief arrives but enforced rules and code reminders never fire, those entries are missing (LinkBar's Hooks row says \"rules not enforced\"). You can run the pre-tool check by hand with lnk hook pre-tool ~/link , feeding it a tool call on stdin, to see the decision it would return. If sessions start with the brief but nothing is captured at session end, that is usually correct behavior — trivial sessions, duplicates, and restatements of existing memory are skipped by design. See exactly why with: lnk hook session-end ~/link --explain"
+   },
+   {
+    "id": "semantic",
+    "heading": "Semantic Recall Is Not Working",
+    "text": "lnk semantic ~/link shows the active provider and tier. Common causes: the extra was installed into a different Python than the one running Link (the status output names the interpreter it checked, and the error prints…",
+    "body": "lnk semantic ~/link shows the active provider and tier. Common causes: the extra was installed into a different Python than the one running Link (the status output names the interpreter it checked, and the error prints the exact venv-side command such as python3 -m link_mcp --semantic-setup ); the one-time model fetch has not run ( lnk semantic ~/link --setup ); or LINK_SEMANTIC=off is set. Recall itself never downloads anything — a missing model degrades silently to lexical recall by design."
+   },
+   {
+    "id": "slow",
+    "heading": "The Wiki Feels Slow",
+    "text": "lnk benchmark \"agent memory\" lnk graph-summary \"agent memory\" --limit 40 --depth 1 Large graph views intentionally open bounded first. Use type filters, node search, depth controls, and explicit all-data loading only…",
+    "body": "lnk benchmark \"agent memory\" lnk graph-summary \"agent memory\" --limit 40 --depth 1 Large graph views intentionally open bounded first. Use type filters, node search, depth controls, and explicit all-data loading only when you need search or filtering across every page. If lnk health or lnk benchmark shows low persistent-cache reuse after repeated runs, inspect recently edited pages or generated files that are changing on every request. From a source checkout, use the synthetic smoke script when you want local scale evidence without touching your real wiki: python3 scripts/smoke_large_wiki.py --pages 10000"
+   },
+   {
+    "id": "pip",
+    "heading": "pip Is Blocked By Homebrew Python",
+    "text": "If pip reports externally-managed-environment , avoid forcing packages into Homebrew Python. Use a dedicated venv: python3 -m venv ~/.link-mcp-venv ~/.link-mcp-venv/bin/python -m pip install --upgrade pip link-mcp The…",
+    "body": "If pip reports externally-managed-environment , avoid forcing packages into Homebrew Python. Use a dedicated venv: python3 -m venv ~/.link-mcp-venv ~/.link-mcp-venv/bin/python -m pip install --upgrade pip link-mcp The current installers do this automatically when needed. First 10 minutes · MCP setup · Security · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "memory-contract.html",
+  "title": "Memory Contract",
+  "label": "Memory contract",
+  "eyebrow": "Agent memory contract",
+  "lead": "Link's MCP tools give agents one stable loop: check readiness, get starter prompts, retrieve compact context, write only approved memory, and audit what changed.",
+  "sections": [
+   {
+    "id": "promise",
+    "heading": "Contract Promise",
+    "text": "Link is not asking every agent to learn a new notes app. It gives agents a small, repeatable memory contract backed by local Markdown files. Readable storage Raw source notes live in raw/ . Structured pages and durable…",
+    "body": "Link is not asking every agent to learn a new notes app. It gives agents a small, repeatable memory contract backed by local Markdown files. Readable storage Raw source notes live in raw/ . Structured pages and durable memories live in wiki/ . Bounded recall Agents ask for a task-sized packet instead of dumping the whole wiki into context. Each recalled memory carries a confidence label ( strong , moderate , weak ) so weak lexical matches are verified with the user instead of trusted. Reviewable writes Durable memory writes are explicit, duplicate-checked, conflict-checked, and logged. Local trust The CLI, official skills, HTTP viewer, and MCP server read the same local files. serve.py is not required for recall."
+   },
+   {
+    "id": "promise",
+    "heading": "Readable storage",
+    "text": "Raw source notes live in raw/ . Structured pages and durable memories live in wiki/ .",
+    "body": "Raw source notes live in raw/ . Structured pages and durable memories live in wiki/ .",
+    "under": "Contract Promise"
+   },
+   {
+    "id": "promise",
+    "heading": "Bounded recall",
+    "text": "Agents ask for a task-sized packet instead of dumping the whole wiki into context. Each recalled memory carries a confidence label ( strong , moderate , weak ) so weak lexical matches are verified with the user instead…",
+    "body": "Agents ask for a task-sized packet instead of dumping the whole wiki into context. Each recalled memory carries a confidence label ( strong , moderate , weak ) so weak lexical matches are verified with the user instead of trusted.",
+    "under": "Contract Promise"
+   },
+   {
+    "id": "promise",
+    "heading": "Reviewable writes",
+    "text": "Durable memory writes are explicit, duplicate-checked, conflict-checked, and logged.",
+    "body": "Durable memory writes are explicit, duplicate-checked, conflict-checked, and logged.",
+    "under": "Contract Promise"
+   },
+   {
+    "id": "promise",
+    "heading": "Local trust",
+    "text": "The CLI, official skills, HTTP viewer, and MCP server read the same local files. serve.py is not required for recall.",
+    "body": "The CLI, official skills, HTTP viewer, and MCP server read the same local files. serve.py is not required for recall.",
+    "under": "Contract Promise"
+   },
+   {
+    "id": "loop",
+    "heading": "Recommended Agent Loop",
+    "text": "With session hooks installed ( lnk connect <agent> --hooks --write ), step one happens automatically: the bounded memory brief is injected at session start and proposal-only notes are captured at session end. Hooked…",
+    "body": "With session hooks installed ( lnk connect <agent> --hooks --write ), step one happens automatically: the bounded memory brief is injected at session start and proposal-only notes are captured at session end. Hooked agents skip the manual brief call and go straight to bounded task recall. Call status . If schema or validation needs attention, follow the safe action it returns. Call recall with an empty query once at the first substantive turn of a session. The brief always keeps room for standing preferences (active, unconditional, user-scope preferences about how the agent answers, formats, cites or behaves). Those apply to every task but share no words with any task, so ranking by recency alone would drop them. Call recall(query, budget=\"micro\") before broad file reads or asking the user to repeat durable context. Call ingest after the user drops files into raw/ , then follow its guided plan. Use remember only after the user explicitly asks to remember something or approves a proposal. When a brief opens with a Waiting for the user's OK block, list those proposals and rules to the user and act on one only after they reply in chat; never approve from the block itself. Use review for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows. Use admin for backup, migration, graph export, captures, rebuilds, and advanced maintenance. User: is Link ready? Agent: status() User: start with Link before we continue Agent: recall(query=\"\", mode=\"brief\") User: query Link for the release plan Agent: recall(query=\"release plan\", budget=\"small\")"
+   },
+   {
+    "id": "tools",
+    "heading": "Core Tool Groups",
+    "text": "Need Primary tools Contract behavior Readiness status Returns safe next actions instead of guessing. Recall recall Returns startup briefs, ranked memory/wiki context, graph context, reasons, and budget limits. Memory…",
+    "body": "Need Primary tools Contract behavior Readiness status Returns safe next actions instead of guessing. Recall recall Returns startup briefs, ranked memory/wiki context, graph context, reasons, and budget limits. Memory writes remember , review Requires explicit approval and surfaces duplicate/conflict candidates. Ingest ingest Provides raw-source plans, validation, and rebuild checks. Maintenance admin Handles backup, migrate, validate, graph export, captures, pages, rebuilds, and compatibility actions. Recalled memories carry honest signals agents must respect: a confidence label ( strong / moderate / weak ) and, when the optional local semantic tier is installed, a match field ( lexical / hybrid / semantic ). Semantic-only matches are capped below strong confidence — verify them with the user before acting. When a brief reports a memory backlog, review(action=\"consolidate\") (or lnk consolidate ) returns a read-only plan; apply its actions only with per-item user approval. When recall runs inside a git checkout, each returned memory that names something in the repository is checked against it. A memory carries verified , with the commit sha it was checked at and references_checked , when at least one file, symbol, script, target, dependency, variable or version it names was found in place and nothing it names is gone. Naming things the repository never had is not evidence either way. A memory that names something the repository once had and no longer has carries stale_paths , one entry per finding, with the path , the reason , the successor when git recorded a rename, and evidence , and the packet's agent_guidance tells the agent to check the memory against the current code before relying on it. Claims framed as history or as a prohibition (“we dropped Python 3.9”, “do not use npm here”) are not checked as present-tense claims, and links to public documentation are facts about the world, not about the repository. The checks share a short time budget and a history cache per commit; a memory whose checks did not finish in time is left unmarked, never called verified on partial evidence. Memories that name nothing checkable carry neither key; a missing key is normal, not a warning. A memory written or updated inside a git checkout that names a repository file along with a code symbol found in that file gets anchors . Each anchor records where the symbol was,…"
+   },
+   {
+    "id": "receipt",
+    "heading": "Memory Receipt",
+    "text": "Link records that each brief and recall happened in .link-usage.json at the workspace root. That lets you see what actually reached your agent, not just what is stored. lnk receipt (or review(action=\"receipt\") over MCP)…",
+    "body": "Link records that each brief and recall happened in .link-usage.json at the workspace root. That lets you see what actually reached your agent, not just what is stored. lnk receipt (or review(action=\"receipt\") over MCP) groups those events into sessions: runs of retrievals with no gap longer than 30 minutes. For each session it shows: when the session started and ended; the project; the surfaces it came through ( hook , mcp , cli ); each session brief, with how many memories it carried, roughly how many tokens it cost, and whether a budget cut it short; how many recalls there were; any guard reminders; every memory the agent was given, with a count; for each hook injection, whether it arrived whole, was cut off, or never arrived (and unverified when the agent left no transcript to check); the enforced-rule checks that ran before tool calls, and whether each asked for the user's OK or blocked the call; the code reminders: memories surfaced because the agent read or edited the file they describe. Every memory in the receipt comes with the command to explain it and the command to forget it. lnk receipt ~/link --sessions 3 lnk receipt ~/link --json The ledger never records query text, answers, or anything from the conversation, only that a memory was used and which one. It is machine-local, excluded from sync, capped at a ring of recent events, and switched off with LINK_USAGE=off . Events recorded before 5.0 have no surface or size, and the receipt says so instead of guessing."
+   },
+   {
+    "id": "time",
+    "heading": "Point-in-Time and Typed Recall",
+    "text": "Every memory is a dated file with its lifecycle recorded ( date_captured , supersedes , superseded_by , archived_at ). That makes “what was true then” an exact reconstruction, not a guess. recall accepts two optional…",
+    "body": "Every memory is a dated file with its lifecycle recorded ( date_captured , supersedes , superseded_by , archived_at ). That makes “what was true then” an exact reconstruction, not a guess. recall accepts two optional arguments: as_of ( YYYY-MM-DD ) answers with the memories that were active on that date, following supersede lineage backwards. memory_type ( preference , decision , fact , procedure , project , note ) narrows recall to one kind. Either one routes the call to memory recall, where lineage and types are recorded. Nobody types dates into a question, so a plain time phrase in the query does the same job. Link resolves it to a date and drops the phrase from the text it ranks: last week/month/quarter/year , this week/month/quarter/year , 3 weeks ago , in March , in 2025 , as of 2026-03-31 , and the deliberately vague back then or originally , which it reads as about a quarter ago. Phrases anchored to an event ( before the migration ) are not resolved to a date, and the event name stays in the query. Resolution is deterministic and offline; unrecognised phrasing leaves recall unchanged. recall(query=\"which database did we use last quarter?\") recall(query=\"deploy day\", as_of=\"2026-03-31\") recall(query=\"formatting\", memory_type=\"preference\")"
+   },
+   {
+    "id": "writes",
+    "heading": "Write Rules",
+    "text": "Agents should treat Link memory as durable state, not scratch space. Do not call remember unless the user explicitly asks to remember something. Use admin action propose_memories for transcripts, long notes, or…",
+    "body": "Agents should treat Link memory as durable state, not scratch space. Do not call remember unless the user explicitly asks to remember something. Use admin action propose_memories for transcripts, long notes, or uncertain context. If a write returns duplicate_candidates , update the existing memory instead of creating another one. If a write returns conflict_candidates , explain the conflict and ask the user before overriding. If a write returns possible_contradictions , tell the user which stored memories the new one may contradict and offer to supersede or archive the old one. The memory is already saved; the flag asks for review, it does not block. Use review_after for memories that should be re-checked, and expires_at for temporary context. Never review, clear, archive or update a memory that carries enforced rules. Only the user does that, in the viewer or the CLI, after seeing the rules; the MCP surface refuses, and the hook asks before an agent runs those commands itself. Contradiction flags (optional). Word rules catch contradictions that share structure, such as “uses X” against “no longer uses X”, or two different version numbers. After lnk semantic <dir> --setup --nli , a small local natural-language-inference model also reads meaning. What it checks. On each remember , it scores the new claim against at most five stored memories whose subject words overlap with it by at least 30%. The overlap gate is what keeps it from reading two unrelated project rules as a contradiction. What it adds. A pair scored at 0.9 or higher gets a review_note on the new memory, and the write result includes possible_contradictions , with the name , title and probability of each flagged memory. What it never does. It never blocks a save and never runs during recall. A missing or failing model cannot break a write. LINK_NLI=off turns it off. Proposals from transcripts and session-end captures are filtered before anything reaches the inbox. Only the user's own words are mined. Text the agent harness injects is dropped: system reminders, command output, sub-agent turns and compaction summaries. So are the shapes that were never memory: instructions for the work at hand (“do not edit any files”) with no standing-rule framing; requests to the agent; goals for this one conversation; throwaways and hypotheticals; other people's habits; anything tied to today or tomorrow;…"
+   },
+   {
+    "id": "sharing",
+    "heading": "Sharing Semantics",
+    "text": "scope answers where a memory applies. visibility answers who should see it. Field Values Meaning scope user , project , global Controls relevance for recall and project filters. visibility private , project , team…",
+    "body": "scope answers where a memory applies. visibility answers who should see it. Field Values Meaning scope user , project , global Controls relevance for recall and project filters. visibility private , project , team Controls sharing intent for Git sync and snapshots. By default, user/global memories are private and project memories are project-visible. lnk team-sync blocks ready status if private memories would be included in a broad Git share. lnk snapshot --include-memories still excludes private memories unless --include-private-memories is explicitly passed. Use admin action set_visibility or lnk set-memory-visibility only after explicit user approval when an existing memory should move between private, project, and team sharing intent."
+   },
+   {
+    "id": "budgets",
+    "heading": "Budgets",
+    "text": "recall supports micro , small , medium , and large budgets. Each packet includes a recall_capsule , why an item was selected, estimated tokens, has_more flags, and follow-up actions. This keeps agents from reading a…",
+    "body": "recall supports micro , small , medium , and large budgets. Each packet includes a recall_capsule , why an item was selected, estimated tokens, has_more flags, and follow-up actions. This keeps agents from reading a 500-page or 10,000-page wiki just to answer one task. Each item's content appears once in the packet. Memories are under memory.items and wiki pages under wiki.pages . context_packet is the ranked list across both, and it holds references, not copies. Each entry has the kind , name , title , why_selected , its rank signals, and see , which names the section that holds the content. budget_report.packet_total estimates the whole packet's characters and tokens, which is what an agent actually pays. The per-section figures beside it count one section each. At the micro budget, a second memory that ranks within a hair of the first is included too, and the guidance says the call was close. recall(query=\"what should I know before changing release docs?\", budget=\"small\") GitHub PyPI MCP Registry Star Link if it helps"
+   }
+  ]
+ },
+ {
+  "page": "security.html",
+  "title": "Security",
+  "label": "Security",
+  "eyebrow": "Local-first",
+  "lead": "Link has no hosted backend, no telemetry, no external API calls, and no cloud account requirement. The safety model is local files, explicit writes, and inspectable provenance.",
+  "sections": [
+   {
+    "id": "privacy",
+    "heading": "Privacy Model",
+    "text": "No telemetry in the installed CLI, MCP server, local web UI, or wiki runtime. No hosted backend. No external API calls from serve.py or link-mcp . Raw sources and generated wiki pages are ignored by git by default.…",
+    "body": "No telemetry in the installed CLI, MCP server, local web UI, or wiki runtime. No hosted backend. No external API calls from serve.py or link-mcp . Raw sources and generated wiki pages are ignored by git by default. SQLite search, when available, is an in-memory derived index. Markdown remains the source of truth. Optional semantic recall stays local: embedding models load offline-only at recall time (only the explicit lnk semantic --setup may fetch a model, once), embeddings live in plain JSON under .link-cache/ , and CI blocks outbound network code in the runtime. Automatic session hooks store proposal-only notes; no durable memory is written without explicit review. Transcript extraction skips tool calls and tool outputs, and it drops text the harness writes with the user's role but the user never typed: subagent reports, slash-command expansions, local command output, interruption markers, compaction summaries and messages from other sessions. Secret-shaped values are redacted before a capture is written to disk; the inbox still names what was redacted so you know to rotate it. Session handoffs are delivered to the next session on any agent, framed as notes from a previous session rather than instructions. A handoff carrying injection-shaped instructions is labelled, and the agent is told to show it to you and not act on it until you confirm it is yours. Retrieval observability is local-only and minimal. So you can answer \"are my agents actually using this?\", Link records that a brief or recall happened, when, and which memory names came back — in .link-usage.json at the workspace root. It never records your queries, the answers, the conversation, or anything about the machine; it is bounded to the most recent events; it is excluded from lnk sync (behavior is not memory, and it never leaves this machine); and it is switched off entirely with LINK_USAGE=off . The public GitHub Pages documentation may use lightweight analytics to understand install interest. It does not run inside Link, read local wiki data, or capture source/memory content."
+   },
+   {
+    "id": "secrets",
+    "heading": "Secret Handling",
+    "text": "Link scans raw sources, captures, wiki pages, release files, and public artifacts for secret-looking values. It detects common API keys, provider tokens, JWTs, private key blocks, and registry credentials, warns without…",
+    "body": "Link scans raw sources, captures, wiki pages, release files, and public artifacts for secret-looking values. It detects common API keys, provider tokens, JWTs, private key blocks, and registry credentials, warns without logging secret values, and refuses normal ingest guidance when raw safety cannot be established. Validation and doctor checks also fail if a secret-looking value is already present in a wiki page before the local UI or MCP tools can serve it as context. lnk ingest-status lnk capture-inbox lnk redact-capture raw/memory-captures/<capture>.md lnk validate lnk doctor python3 scripts/check_release_hygiene.py Rule Redact or remove secret-looking values locally before asking an agent to ingest a file. Link is not a secret manager."
+   },
+   {
+    "id": "http",
+    "heading": "HTTP Boundary",
+    "text": "The local viewer binds to 127.0.0.1 , rejects unexpected host/bind flags and unexpected Host headers, and has no authentication. Do not expose it to the internet without adding an auth layer. HTTP write actions require…",
+    "body": "The local viewer binds to 127.0.0.1 , rejects unexpected host/bind flags and unexpected Host headers, and has no authentication. Do not expose it to the internet without adding an auth layer. HTTP write actions require X-Link-Local-Action: true . Responses include X-Link-API-Version . Proposal analysis does not write pages."
+   },
+   {
+    "id": "backups",
+    "heading": "Backups",
+    "text": "lnk backup and MCP admin action backup write local .link-backups/ archives. Raw sources are excluded unless explicitly requested. lnk backup lnk backup --include-raw lnk doctor --fix Run a backup before broad repair…",
+    "body": "lnk backup and MCP admin action backup write local .link-backups/ archives. Raw sources are excluded unless explicitly requested. lnk backup lnk backup --include-raw lnk doctor --fix Run a backup before broad repair work or large generated changes."
+   },
+   {
+    "id": "rules",
+    "heading": "Enforced Rules",
+    "text": "A reviewed memory can carry rules that are checked before the agent's tool calls. Because a rule changes what an agent may do, only a person turns one on or off. Over MCP an agent cannot approve, clear, archive or…",
+    "body": "A reviewed memory can carry rules that are checked before the agent's tool calls. Because a rule changes what an agent may do, only a person turns one on or off. Over MCP an agent cannot approve, clear, archive or update a memory that carries rules; the viewer activates rules only when the review request repeats the rules it displayed, and never in bulk. The session hook also asks for your OK before an agent runs Link's own review, enforce, archive or forget commands, or edits a memory file directly, so an agent cannot quietly loosen its own constraints."
+   },
+   {
+    "id": "team",
+    "heading": "Team Review",
+    "text": "For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed wiki/ pages can be shared through Git when the team explicitly wants shared memory. Teammates'…",
+    "body": "For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed wiki/ pages can be shared through Git when the team explicitly wants shared memory. Teammates' memories arrive through your own review gate: lnk team-sync imports them as pending, and nothing a teammate wrote is recalled, briefed or compiled for you until you review it. Open the team security checklist"
+   },
+   {
+    "id": "share",
+    "heading": "Before Sharing A Repo Or Wiki",
+    "text": "python3 link.py doctor python3 link.py validate python3 scripts/check_release_hygiene.py git diff --check Use git push , git archive , or clean build artifacts for public sharing. Do not zip a whole working directory;…",
+    "body": "python3 link.py doctor python3 link.py validate python3 scripts/check_release_hygiene.py git diff --check Use git push , git archive , or clean build artifacts for public sharing. Do not zip a whole working directory; ignored local files, .git/ , caches, raw sources, and build outputs can be included by accident."
+   },
+   {
+    "id": "reporting",
+    "heading": "Reporting Security Issues",
+    "text": "Use a private maintainer contact channel first. Do not post secrets, private wiki content, raw source files, or exploitable details in public GitHub issues. If a public issue is the only available path, keep it high…",
+    "body": "Use a private maintainer contact channel first. Do not post secrets, private wiki content, raw source files, or exploitable details in public GitHub issues. If a public issue is the only available path, keep it high level and ask for a private follow-up channel. See SECURITY.md for the current reporting policy. First 10 minutes · MCP setup · Troubleshooting · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "team-security.html",
+  "title": "Team Security Review",
+  "label": "Team security",
+  "eyebrow": "Team review",
+  "lead": "A practical checklist for engineering leads and security reviewers evaluating Link for a small team, repo, or design partner pilot.",
+  "sections": [
+   {
+    "id": "deployment",
+    "heading": "Deployment Model",
+    "text": "Link is designed as a local personal or repo-local memory layer. Each developer runs the CLI, optional skills, and MCP server on their own machine. The web viewer is optional and only serves the local UI. No server…",
+    "body": "Link is designed as a local personal or repo-local memory layer. Each developer runs the CLI, optional skills, and MCP server on their own machine. The web viewer is optional and only serves the local UI. No server dependency lnk serve is only the human web viewer. CLI, skills, and MCP access work directly against local Markdown files when the viewer is closed. brew install gowtham0992/link/link lnk init ~/link lnk health ~/link lnk connect codex ~/link"
+   },
+   {
+    "id": "data",
+    "heading": "Data Boundaries",
+    "text": "raw/ contains private source material and is gitignored by default. wiki/ contains structured Markdown pages, memories, logs, and backlinks. link-mcp talks over stdio to the local agent client. It does not require…",
+    "body": "raw/ contains private source material and is gitignored by default. wiki/ contains structured Markdown pages, memories, logs, and backlinks. link-mcp talks over stdio to the local agent client. It does not require serve.py . The installed product has no telemetry, hosted backend, or outbound API calls. Secret-looking values are scanned before capture, ingest, Obsidian import, and doctor checks. lnk ingest-status ~/link lnk doctor ~/link lnk validate ~/link"
+   },
+   {
+    "id": "review",
+    "heading": "Memory Approval Gates",
+    "text": "Agents can propose memories, but durable memory should be explicit and reviewable. Link keeps memory as Markdown with type, scope, visibility, project, source, review status, optional review dates, and optional expiry…",
+    "body": "Agents can propose memories, but durable memory should be explicit and reviewable. Link keeps memory as Markdown with type, scope, visibility, project, source, review status, optional review dates, and optional expiry dates. lnk propose-memories raw/notes.md ~/link lnk memory-inbox ~/link lnk review-memory memory-name ~/link lnk archive-memory memory-name ~/link --reason stale For temporary context, use expires_at . For decisions that should be re-confirmed, use review_after . For team handoff, keep personal context at visibility: private and only mark memories project or team after the user explicitly approves sharing them."
+   },
+   {
+    "id": "share",
+    "heading": "Team Sharing Pattern",
+    "text": "The safest early team workflow is Git-backed sharing of reviewed wiki pages. Keep raw sources local unless the team explicitly decides to share them. lnk team-sync ~/link --remote git@example.com:team/link-memory.git…",
+    "body": "The safest early team workflow is Git-backed sharing of reviewed wiki pages. Keep raw sources local unless the team explicitly decides to share them. lnk team-sync ~/link --remote git@example.com:team/link-memory.git lnk compliance-export ~/link --output link-audit.json lnk backup ~/link Before it is set up, lnk team-sync is read-only. It checks Git state, raw-source protection, review readiness, and whether active visibility: private memories would be swept into a broad git add wiki , and prints paste-safe commands. Once you run lnk team-sync --init --remote <git-url> , it runs the loop for you: only your active visibility: team memories are exported; the shared repo syncs with the same full secret push-gate as lnk sync ; and teammates' memories are imported as review_status: pending with imported_from: team , so nothing a teammate wrote becomes trusted memory for you without your review. The importer rejects, and reports, pages that are not visibility: team , not active, symlinks (a symlink in a shared repo can point at any file on your disk), or that carry a secret-shaped value or an injection-shaped instruction. A team memory you forget or archive stays gone on later syncs."
+   },
+   {
+    "id": "audit",
+    "heading": "Audit Packet",
+    "text": "lnk compliance-export creates a redacted JSON packet for review. It includes readiness, validation status, memory review counts, operation markers, recent audit log metadata, and safe next actions. Raw source contents…",
+    "body": "lnk compliance-export creates a redacted JSON packet for review. It includes readiness, validation status, memory review counts, operation markers, recent audit log metadata, and safe next actions. Raw source contents and memory bodies are excluded. lnk compliance-export ~/link --output link-audit.json lnk wins ~/link lnk memory-log ~/link"
+   },
+   {
+    "id": "limits",
+    "heading": "Current Limits",
+    "text": "Link is local-first and single-user by default. It is not an SSO-backed team server. The local web viewer has no authentication and should not be exposed beyond loopback. Git sharing is intentionally manual so teams see…",
+    "body": "Link is local-first and single-user by default. It is not an SSO-backed team server. The local web viewer has no authentication and should not be exposed beyond loopback. Git sharing is intentionally manual so teams see exactly what is being committed. Access control is currently based on local files, project filters, and review workflow, not centralized RBAC."
+   },
+   {
+    "id": "checklist",
+    "heading": "Security Review Checklist",
+    "text": "Run lnk health ~/link and verify readiness is green. Run lnk doctor ~/link and resolve secret or validation warnings. Run lnk compliance-export ~/link --output link-audit.json . Confirm raw/ , backups, caches, local MCP…",
+    "body": "Run lnk health ~/link and verify readiness is green. Run lnk doctor ~/link and resolve secret or validation warnings. Run lnk compliance-export ~/link --output link-audit.json . Confirm raw/ , backups, caches, local MCP Python markers, and wiki/log.md are ignored by Git. Review local wiki/log.md , lnk memory-log ~/link , and lnk wins ~/link before sharing the reviewed wiki pages. Only share reviewed wiki/ pages whose memories are marked visibility: team . lnk team-sync exports only visibility: team memories; project and private ones stay on your machine. Security model · CLI reference · MCP setup · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "scale.html",
+  "title": "Scale",
+  "label": "Scale",
+  "eyebrow": "Scale model",
+  "lead": "Large local wikis should stay usable because agents receive budgets, graph overviews open bounded first, search uses SQLite FTS when available, and unchanged pages are reused from the persistent cache.",
+  "sections": [
+   {
+    "id": "promise",
+    "heading": "Practical Promise",
+    "text": "Link is local personal memory software. The expected sweet spot is a real user's working wiki: hundreds to thousands of Markdown pages, raw sources, durable memories, and graph links. The product is designed so agents…",
+    "body": "Link is local personal memory software. The expected sweet spot is a real user's working wiki: hundreds to thousands of Markdown pages, raw sources, durable memories, and graph links. The product is designed so agents do not need to enumerate that whole corpus for normal work. Search SQLite FTS5 is used when Python provides it. Link stores a derived FTS sidecar under .link-cache/ so unchanged wikis can reuse the search table across process starts. Cache reuse Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend in status and benchmark output. Graph Large graphs open as a bounded high-signal overview first. Users can search, filter, focus neighborhoods, or explicitly load more when they need it. Agent context MCP and CLI query packets use micro, small, medium, and large budgets. Agents read the recall capsule first, then follow-up actions instead of dumping every page into the model."
+   },
+   {
+    "id": "promise",
+    "heading": "Search",
+    "text": "SQLite FTS5 is used when Python provides it. Link stores a derived FTS sidecar under .link-cache/ so unchanged wikis can reuse the search table across process starts.",
+    "body": "SQLite FTS5 is used when Python provides it. Link stores a derived FTS sidecar under .link-cache/ so unchanged wikis can reuse the search table across process starts.",
+    "under": "Practical Promise"
+   },
+   {
+    "id": "promise",
+    "heading": "Cache reuse",
+    "text": "Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend…",
+    "body": "Persistent page-cache records let repeated runs reuse unchanged parsed pages instead of rereading everything after every command. If SQLite FTS is unavailable, Link falls back to a token index and reports that backend in status and benchmark output.",
+    "under": "Practical Promise"
+   },
+   {
+    "id": "promise",
+    "heading": "Graph",
+    "text": "Large graphs open as a bounded high-signal overview first. Users can search, filter, focus neighborhoods, or explicitly load more when they need it.",
+    "body": "Large graphs open as a bounded high-signal overview first. Users can search, filter, focus neighborhoods, or explicitly load more when they need it.",
+    "under": "Practical Promise"
+   },
+   {
+    "id": "promise",
+    "heading": "Agent context",
+    "text": "MCP and CLI query packets use micro, small, medium, and large budgets. Agents read the recall capsule first, then follow-up actions instead of dumping every page into the model.",
+    "body": "MCP and CLI query packets use micro, small, medium, and large budgets. Agents read the recall capsule first, then follow-up actions instead of dumping every page into the model.",
+    "under": "Practical Promise"
+   },
+   {
+    "id": "bounded",
+    "heading": "Bounded Surfaces",
+    "text": "The important scale behavior is not \"can Link list every page?\" It is \"does the default agent and UI path stay bounded?\" Surface Default behavior Expansion path recall Returns a budgeted context packet plus a tiny…",
+    "body": "The important scale behavior is not \"can Link list every page?\" It is \"does the default agent and UI path stay bounded?\" Surface Default behavior Expansion path recall Returns a budgeted context packet plus a tiny hybrid-ranked recall capsule. Use follow-up actions for more memory, search, context, or graph detail. admin(action=\"graph_summary\") Returns a bounded topic or high-degree graph neighborhood. Increase limit/depth or request the full graph only when needed. Local graph UI Starts capped with sparse labels and motion limits for large wikis. Use type filters, node search, focused neighborhoods, fullscreen, and explicit all-data loading. All pages Lists a bounded window grouped by page type. Use paging, search, and type filters instead of scrolling the whole wiki. Health Shows readiness, validation, interrupted writes, backend, and cache reuse. Run repair commands only when health points to a specific issue; doctor uses the parsed page cache for backlink checks."
+   },
+   {
+    "id": "measure",
+    "heading": "Measure Locally",
+    "text": "Recall quality is measured too, not just speed: the repo ships a 1,176-case recall benchmark and a third-party LoCoMo retrieval track with reproduction commands — see benchmarks/RESULTS.md . Use lnk benchmark on your…",
+    "body": "Recall quality is measured too, not just speed: the repo ships a 1,176-case recall benchmark and a third-party LoCoMo retrieval track with reproduction commands — see benchmarks/RESULTS.md . Use lnk benchmark on your real wiki. It reports cache time, persistent-cache reuse, search backend, search/query timing, graph payload shape, value evidence, and recommendations. The value section compares broad wiki body text with the bounded query packet so you can see whether Link is reducing context-budget waste. lnk benchmark \"agent memory\" lnk health lnk status --validate From a source checkout, use a synthetic 10k-page check without touching your real wiki: python3 scripts/smoke_large_wiki.py --pages 10000 The smoke script prints the generated wiki path, the local viewer command, and graph URLs so you can inspect browser behavior manually."
+   },
+   {
+    "id": "large",
+    "heading": "Large Wiki Habits",
+    "text": "Prefer brief , query , and graph-summary over full exports. Use page-type filters and search before opening full graph data. Run lnk health after ingest or broad manual edits. Run lnk doctor --fix only when health or…",
+    "body": "Prefer brief , query , and graph-summary over full exports. Use page-type filters and search before opening full graph data. Run lnk health after ingest or broad manual edits. Run lnk doctor --fix only when health or validation points to a repairable issue. Keep private raw sources and local wiki/log.md out of Git; use snapshot , team-sync , and compliance-export for reviewable sharing paths."
+   },
+   {
+    "id": "limits",
+    "heading": "Current Limits",
+    "text": "Link is not pretending to be an enterprise search cluster. These are the current boundaries to understand before betting a huge corpus on it: Indexes are local and process-owned. Very large wikis still use memory…",
+    "body": "Link is not pretending to be an enterprise search cluster. These are the current boundaries to understand before betting a huge corpus on it: Indexes are local and process-owned. Very large wikis still use memory proportional to the page/index size. The SQLite FTS index is built locally from wiki pages rather than maintained as a separate hosted service. The local HTTP viewer is for personal loopback use, not a multi-user hosted deployment. Full graph exports are intentionally not the default for large wikis. Use bounded graph summaries first. At tens of thousands of pages and beyond, persistent on-disk indexing and chunked graph loading become the next engineering frontier. The near-term direction is clear: preserve the plain Markdown storage model while making cache, search, graph, and validation paths more incremental over time. CLI · UI · Troubleshooting · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "api.html",
+  "title": "HTTP API",
+  "label": "HTTP API",
+  "eyebrow": "Local HTTP",
+  "lead": "serve.py exposes Link locally while the web viewer is running. It is a loopback-only API for personal tooling, not a hosted service.",
+  "sections": [
+   {
+    "id": "boundary",
+    "heading": "Boundary",
+    "text": "serve.py binds to 127.0.0.1 , rejects unsafe host/bind flags and unexpected Host headers, and has no authentication. Do not expose it to the internet without adding auth. Write actions require X-Link-Local-Action: true…",
+    "body": "serve.py binds to 127.0.0.1 , rejects unsafe host/bind flags and unexpected Host headers, and has no authentication. Do not expose it to the internet without adding auth. Write actions require X-Link-Local-Action: true . Responses include X-Link-API-Version ."
+   },
+   {
+    "id": "read",
+    "heading": "Read Endpoints",
+    "text": "GET /api GET /api/status?validate=true GET /api/health GET /api/prompts?project=slug GET /api/ingest-status GET /api/page-list?limit=100&offset=0 GET /api/pages GET /api/memory-dashboard?project=slug GET…",
+    "body": "GET /api GET /api/status?validate=true GET /api/health GET /api/prompts?project=slug GET /api/ingest-status GET /api/page-list?limit=100&offset=0 GET /api/pages GET /api/memory-dashboard?project=slug GET /api/memory-brief?q=task&project=slug GET /api/memory-audit?project=slug GET /api/memory-profile?project=slug GET /api/memory-inbox?project=slug GET /api/wins?project=slug GET /api/memory-log?limit=50 GET /api/capture-inbox?project=slug GET /api/explain-memory?memory=name GET /api/query-link?q=query&budget=micro|small|medium|large GET /api/validate?strict=true GET /api/proposal-sources GET /api/proposal-source?path=raw/file.md GET /api/search?q=query GET /api/context?topic=topic GET /api/graph-summary?topic=topic&limit=40&depth=1 GET /api/graph GET /api/page-links?page=name&limit=100&offset=0"
+   },
+   {
+    "id": "write",
+    "heading": "Write Endpoints",
+    "text": "POST /api/raw-source POST /api/propose-memories POST /api/remember-memory POST /api/update-memory POST /api/review-memory POST /api/archive-memory POST /api/restore-memory POST /api/rebuild-backlinks POST…",
+    "body": "POST /api/raw-source POST /api/propose-memories POST /api/remember-memory POST /api/update-memory POST /api/review-memory POST /api/archive-memory POST /api/restore-memory POST /api/rebuild-backlinks POST /api/rebuild-index Web memory approval APIs intentionally do not honor duplicate/conflict override flags. If Link reports a duplicate or conflict, review the existing memory and use the CLI or MCP tool explicitly after deciding what should coexist. POST /api/remember-memory accepts optional visibility , review_after , and expires_at fields for sharing intent, scheduled review, and temporary-memory expiry."
+   },
+   {
+    "id": "large",
+    "heading": "Large Wiki Endpoints",
+    "text": "Agents and integrations should prefer bounded endpoints over full dumps: /api for a compact discovery payload with recommended endpoints. /api/health for one machine-readable readiness packet with validation and…",
+    "body": "Agents and integrations should prefer bounded endpoints over full dumps: /api for a compact discovery payload with recommended endpoints. /api/health for one machine-readable readiness packet with validation and interrupted-operation state. /api/query-link for answer-ready context. /api/page-list instead of /api/pages when paging matters. /api/pages returns at most 500 pages by default ( ?limit= up to 5000) and reports the full count in X-Total-Count , with X-Link-Truncated: true when it cut the list. /api/graph-summary instead of /api/graph for agent context. /api/page-links for paginated inbound and forward links. Security · CLI reference · MCP setup · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ },
+ {
+  "page": "contributing.html",
+  "title": "Contributing",
+  "label": "Contributing",
+  "eyebrow": "Contributing",
+  "lead": "Contributions should make agent memory easier to trust: clearer onboarding, safer writes, faster retrieval, better validation, and tighter docs.",
+  "sections": [
+   {
+    "id": "branches",
+    "heading": "Branches",
+    "text": "Contributions should come through pull requests. Please target main unless the maintainer asks for a different branch. The develop branch is a maintainer integration branch for staging larger release work before it is…",
+    "body": "Contributions should come through pull requests. Please target main unless the maintainer asks for a different branch. The develop branch is a maintainer integration branch for staging larger release work before it is proposed to main ."
+   },
+   {
+    "id": "before-pr",
+    "heading": "Before Opening A PR",
+    "text": "python3 -m pip install \"ruff>=0.8,<1\" python3 -m pip install \"pytest>=8,<10\" python3 -m ruff check . python3 -m pytest tests python3 -m py_compile link.py serve.py scripts/check_release_hygiene.py…",
+    "body": "python3 -m pip install \"ruff>=0.8,<1\" python3 -m pip install \"pytest>=8,<10\" python3 -m ruff check . python3 -m pytest tests python3 -m py_compile link.py serve.py scripts/check_release_hygiene.py scripts/check_runtime_duplication.py scripts/check_tool_contract.py scripts/prepare_release.py scripts/smoke_first_use.py scripts/smoke_http_viewer.py scripts/smoke_large_wiki.py scripts/smoke_mcp_stdio.py mcp_package/link_core/*.py mcp_package/link_mcp/server.py mcp_package/link_mcp/__main__.py mcp_package/link_mcp/__init__.py python3 scripts/smoke_first_use.py python3 scripts/smoke_http_viewer.py python3 scripts/smoke_large_wiki.py --pages 1000 python3 scripts/check_release_hygiene.py python3 scripts/check_runtime_duplication.py python3 scripts/check_tool_contract.py bash -n integrations/*/install.sh integrations/*/uninstall.sh integrations/_shared/*.sh pwsh -NoProfile -Command \"Get-ChildItem integrations -Recurse -Include *.ps1 | ForEach-Object { [scriptblock]::Create((Get-Content -Raw $_.FullName)) | Out-Null }\" python3 link.py demo /tmp/link-mcp-smoke --force PYTHONPATH=mcp_package python3 scripts/smoke_mcp_stdio.py /tmp/link-mcp-smoke/wiki git diff --check For graph or query performance changes, also run a local 10k-page stress check. It is intentionally not part of normal PR CI. python3 scripts/smoke_large_wiki.py --pages 10000"
+   },
+   {
+    "id": "description",
+    "heading": "PR Description",
+    "text": "What changed. How you tested it. Whether it touches memory writes, installers, MCP behavior, HTTP endpoints, or automation. Screenshots or GIFs for UI changes. Do not include personal wiki data, raw sources, registry…",
+    "body": "What changed. How you tested it. Whether it touches memory writes, installers, MCP behavior, HTTP endpoints, or automation. Screenshots or GIFs for UI changes. Do not include personal wiki data, raw sources, registry tokens, .env files, or local MCP credentials in a PR."
+   },
+   {
+    "id": "structure",
+    "heading": "Project Structure",
+    "text": "link/ |-- LINK.md # schema and instructions for agents |-- raw/ # source documents, ignored by git |-- .link-cache/ # local derived cache, ignored by git |-- wiki/ # compiled knowledge, ignored by git except scaffolding…",
+    "body": "link/ |-- LINK.md # schema and instructions for agents |-- raw/ # source documents, ignored by git |-- .link-cache/ # local derived cache, ignored by git |-- wiki/ # compiled knowledge, ignored by git except scaffolding |-- docs/ # GitHub Pages product and docs site |-- integrations/ # one-step setup per AI tool |-- mcp_package/ # PyPI package for link-mcp and shared link_core |-- scripts/ # release and hygiene tooling |-- serve.py # local web viewer and HTTP API `-- link.py # local utility CLI"
+   },
+   {
+    "id": "principles",
+    "heading": "Design Principles",
+    "text": "Every claim links to a source. Confidence tags make uncertainty visible. log.md records wiki operations. Pages mature from seed to established. Agents should use slim recall first, then follow up with admin…",
+    "body": "Every claim links to a source. Confidence tags make uncertainty visible. log.md records wiki operations. Pages mature from seed to established. Agents should use slim recall first, then follow up with admin graph/context actions only when the compact packet is insufficient. The local web viewer has no runtime dependencies beyond Python stdlib. The wiki is plain Markdown, so it works with git, Obsidian, and normal editors."
+   },
+   {
+    "id": "integrations",
+    "heading": "Installer Integrations",
+    "text": "Agent installers are part of Link's first-use product surface. If a change touches Codex, Claude Code, Kiro, Cursor, Copilot, VS Code, Antigravity, MCP config writing, or PowerShell support, follow the maintainer…",
+    "body": "Agent installers are part of Link's first-use product surface. If a change touches Codex, Claude Code, Kiro, Cursor, Copilot, VS Code, Antigravity, MCP config writing, or PowerShell support, follow the maintainer checklist in integrations/README.md . The key rule is simple: installers should preserve existing user instructions, keep CLI/MCP independent from the web viewer, and update macOS/Linux plus Windows paths together. Link home · Security · Troubleshooting · If Link helps your agents remember better, star it on GitHub . The installed Link product has no telemetry. This public docs site may use lightweight analytics to understand install interest."
+   }
+  ]
+ }
+]

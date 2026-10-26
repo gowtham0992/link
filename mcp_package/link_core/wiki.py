@@ -82,6 +82,17 @@ def _body_snippet(body: str) -> str:
     return body_lines[0][:200] if body_lines else ""
 
 
+def _quarantined_memory(category: str, meta: dict[str, Any]) -> bool:
+    """A teammate's memory nobody here has reviewed (memory.memory_quarantined).
+
+    It stays in the cache so the viewer can show it for review, but search,
+    topic context and index.md - the paths that reach agents - leave it out.
+    """
+    if category != "memories" or not str(meta.get("imported_from") or "").strip():
+        return False
+    return str(meta.get("review_status") or "pending").strip().strip('"').lower() in {"pending", "needs_review"}
+
+
 def _markdown_page_paths(wiki_dir: Path) -> list[Path]:
     return sorted(path for path in wiki_dir.rglob("*.md") if not path.name.startswith("."))
 
@@ -90,8 +101,39 @@ def _persistent_cache_path(wiki_dir: Path) -> Path:
     return wiki_dir.parent / ".link-cache" / f"wiki-cache-v{PERSISTENT_CACHE_SCHEMA_VERSION}.json"
 
 
+FTS_CACHE_VERSION = 3
+
+
 def _persistent_fts_path(wiki_dir: Path) -> Path:
-    return wiki_dir.parent / ".link-cache" / "page-fts-v2.sqlite"
+    return wiki_dir.parent / ".link-cache" / f"page-fts-v{FTS_CACHE_VERSION}.sqlite"
+
+
+def _prune_superseded_fts_caches(wiki_dir: Path) -> list[str]:
+    """Delete FTS index files an older Link version built.
+
+    A version bump rebuilds the index under a new name and nothing reads the
+    old one again, so after an upgrade it was dead weight in .link-cache.
+    Only files matching the index's own naming pattern are touched.
+    """
+    removed: list[str] = []
+    cache_dir = wiki_dir.parent / ".link-cache"
+    current = _persistent_fts_path(wiki_dir).name
+    try:
+        candidates = list(cache_dir.glob("page-fts-v*.sqlite*"))
+    except OSError:
+        return removed
+    for path in candidates:
+        if path.name.startswith(current):
+            continue  # current index and its -wal/-shm companions
+        stem = path.name.split(".sqlite", 1)[0]
+        if not stem[len("page-fts-v"):].isdigit():
+            continue
+        try:
+            path.unlink()
+            removed.append(path.name)
+        except OSError:
+            pass  # held open elsewhere (Windows); the next build retries
+    return removed
 
 
 def _page_signatures(wiki_dir: Path, page_paths: list[Path]) -> list[dict[str, Any]]:
@@ -257,6 +299,8 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
             "date_updated": meta.get("date_updated", ""),
             "date_published": meta.get("date_published", ""),
         }
+        if _quarantined_memory(category, meta):
+            page["quarantined"] = True
         pages.append(page)
         page_index[stem] = md
         # Stems are not unique: wiki/index.md and
@@ -334,6 +378,8 @@ def build_wiki_cache(wiki_dir: Path, *, use_persistent_cache: bool = True) -> di
             forward_links_index.setdefault(source_name, []).append(target)
 
     persistent_fts_path = _persistent_fts_path(wiki_dir)
+    if use_persistent_cache and not persistent_fts_path.exists():
+        _prune_superseded_fts_caches(wiki_dir)
     fts_index = build_fts_index(
         pages,
         fulltext,
@@ -490,7 +536,7 @@ def context_for_topic(
 
     forward: list[str] = []
     forward_seen: set[str] = set()
-    page_set = {page["name"].lower() for page in cache["pages"]}
+    page_set = {page["name"].lower() for page in cache["pages"] if not page.get("quarantined")}
     forward_links_index = cache.get("forward_links_index")
     if isinstance(forward_links_index, dict):
         cached_forward = (
@@ -972,7 +1018,7 @@ def page_link_summary(
 def _index_pages(cache: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         page for page in cache["pages"]
-        if str(page.get("name") or "").lower() not in {"index", "log"}
+        if str(page.get("name") or "").lower() not in {"index", "log"} and not page.get("quarantined")
     ]
 
 

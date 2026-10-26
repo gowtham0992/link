@@ -751,3 +751,342 @@ footer a {
     background: var(--paper);
   }
 }
+
+/* --- Docs chrome: sidebar, on-this-page, search ---------------------------
+   The sidebar and the search index are stamped by scripts/sync_docs_site.py. */
+
+.site-search {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 6px;
+  padding: 6px 10px 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--muted);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.site-search kbd,
+.search-hint kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--paper);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--faint);
+}
+
+.site-search:hover,
+.site-search:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.doc-grid {
+  grid-template-columns: 200px minmax(0, 1fr) 220px;
+  gap: 44px;
+}
+
+.docs-sidebar { order: 1; }
+.doc-content { order: 2; }
+.toc { order: 3; }
+
+.docs-sidebar {
+  position: sticky;
+  top: 92px;
+  align-self: start;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.docs-sidebar-toggle {
+  display: none;
+}
+
+.docs-group {
+  margin: 0 0 22px;
+}
+
+.docs-group strong {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.docs-group a {
+  display: block;
+  margin: 0 0 2px -10px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 14.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.docs-group a:hover {
+  color: var(--ink);
+  background: rgba(34, 28, 18, 0.05);
+}
+
+.docs-group a[aria-current="page"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.toc a {
+  position: relative;
+  padding-left: 12px;
+  margin: 7px 0;
+  transition: color 120ms ease;
+}
+
+.toc a::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 3px;
+  height: 0.9em;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.toc a.active {
+  color: var(--ink);
+}
+
+.toc a.active::before {
+  background: var(--accent);
+}
+
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 11vh 16px 16px;
+  background: rgba(34, 28, 18, 0.42);
+  backdrop-filter: blur(3px);
+}
+
+.search-overlay[hidden] {
+  display: none;
+}
+
+body.search-open {
+  overflow: hidden;
+}
+
+.search-box {
+  width: min(680px, 100%);
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  box-shadow: 0 30px 80px -30px rgba(34, 28, 18, 0.55);
+  overflow: hidden;
+}
+
+.search-input {
+  width: 100%;
+  padding: 18px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 17px;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--faint);
+}
+
+.search-results {
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.search-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.search-result:hover,
+.search-result.selected {
+  background: var(--accent-soft);
+}
+
+.search-result-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.search-result-where {
+  align-self: center;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.search-result-snippet {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.search-empty {
+  padding: 18px 14px 22px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+
+.search-empty em {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.search-hint {
+  display: flex;
+  gap: 18px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.search-hint span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 1120px) {
+  .doc-grid {
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 36px;
+  }
+
+  .toc {
+    order: 1;
+    grid-column: 2;
+    position: static;
+  }
+
+  .doc-content {
+    order: 2;
+    grid-column: 2;
+  }
+
+  .docs-sidebar {
+    grid-row: 1 / span 2;
+  }
+}
+
+@media (max-width: 920px) {
+  .doc-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docs-sidebar,
+  .toc,
+  .doc-content {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .docs-sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .docs-sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    appearance: none;
+    padding: 9px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--paper-2);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .docs-sidebar-toggle::after {
+    content: "▾";
+    color: var(--faint);
+  }
+
+  .docs-sidebar.open .docs-sidebar-toggle::after {
+    content: "▴";
+  }
+
+  .docs-sidebar-groups {
+    display: none;
+    margin-top: 14px;
+    padding: 16px 18px 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--paper-2);
+  }
+
+  .docs-sidebar.open .docs-sidebar-groups {
+    display: block;
+  }
+
+  .site-search {
+    margin-left: 0;
+  }
+}

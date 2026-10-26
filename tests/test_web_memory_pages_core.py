@@ -258,6 +258,48 @@ def test_render_inbox_page_lists_review_items_and_actions():
     assert "lnk review-memory memory-one" in html
 
 
+def test_render_inbox_item_shows_enforced_rules_before_review():
+    from link_core.web_memory_pages import render_rules
+    payload = {
+        "project": "", "review_count": 1, "counts_by_severity": {},
+        "items": [{
+            "name": "no-force-push", "title": "No force push", "memory_type": "decision", "scope": "user",
+            "status": "active", "tldr": "Never force-push.", "issues": [], "actions": [],
+            "enforce": ["ask command: git push --force*", "deny write: migrations/**"],
+        }],
+    }
+    html = render_inbox_page(payload, page_href=_page_href, layout=_layout)
+    assert "data-inbox-rules" in html
+    assert 'data-rule="ask command: git push --force*"' in html
+    assert '<span class="severity">asks</span> <code>command: git push --force*</code>' in html
+    assert '<span class="severity">blocks</span> <code>write: migrations/**</code>' in html
+    assert "active once reviewed" in html
+    assert render_rules([]) == ""
+
+
+def test_render_last_session_reports_delivery_rules_and_memories():
+    from link_core.web_memory_pages import render_last_session
+    session = {
+        "started": "2026-10-21T12:00:00Z", "ended": "2026-10-21T12:09:00Z", "surfaces": ["hook", "mcp"],
+        "briefs": [{"memories": 2, "tokens": 400, "truncated": False, "delivery": "truncated"}],
+        "recalls": 1, "estimated_tokens": 620, "anything_truncated": False,
+        "memories_used": [{"name": "deploy-day", "title": "Deploy day", "times": 3, "exists": True},
+                          {"name": "gone", "title": "Gone memory", "times": 1, "exists": False}],
+        "delivery": {"truncated": 1}, "anything_undelivered": True,
+        "rule_checks": [{"decision": "ask", "memories": ["x"]}, {"decision": "ask", "memories": ["x"]},
+                        {"decision": "deny", "memories": ["y"]}],
+        "code_reminders": [{"memories": ["deploy-day"]}],
+    }
+    html = render_last_session(session, page_href=_page_href)
+    assert "2 memories given · 1 recall · 1 brief · via session hook, MCP · about 620 tokens" in html
+    assert "did not get all of its memory: 1 cut short" in html
+    assert "<strong>Enforced rules:</strong> 2 asked for your OK · 1 blocked" in html
+    assert "<strong>Code reminders:</strong> 1" in html
+    assert "Deploy day</a> <span class=\"memory-meta\">×3</span>" in html
+    assert "<s>Gone memory</s>" in html
+    assert "No session recorded yet" in render_last_session({}, page_href=_page_href)
+
+
 def test_render_memory_explanation_page_shows_trust_context_actions_and_body():
     payload = {
         "memory": {

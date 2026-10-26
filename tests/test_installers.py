@@ -154,6 +154,19 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("[scriptblock]::Create", workflow)
         self.assertIn("*.ps1", workflow)
 
+    def test_project_installs_never_rewrite_global_mcp_or_hooks(self):
+        # 4.0 review: --project mode repointed the global Kiro and Gemini
+        # servers at the project's wiki and replaced global session hooks.
+        for agent in ("claude-code", "codex", "cursor"):
+            script = (ROOT / "integrations" / agent / "install.sh").read_text(encoding="utf-8")
+            self.assertNotRegex(script, r"link_connect [\w-]+ .*--hooks", agent)
+            self.assertIn('if [ "$MODE" = "--global" ]; then HOOKS_FLAG="--hooks"; fi', script, agent)
+        kiro = (ROOT / "integrations" / "kiro" / "install.sh").read_text(encoding="utf-8")
+        project_branch = kiro.split('elif [ "$MODE" = "--project" ]; then', 1)[1].split("\nelse", 1)[0]
+        self.assertNotIn("link_connect", project_branch)
+        antigravity = (ROOT / "integrations" / "antigravity" / "install.sh").read_text(encoding="utf-8")
+        self.assertRegex(antigravity, r'if \[ "\$MODE" = "--global" \]; then\n\s+link_connect antigravity')
+
     def test_codex_and_kiro_update_existing_mcp_registration(self):
         codex = (ROOT / "integrations/codex/install.sh").read_text(encoding="utf-8")
         kiro = (ROOT / "integrations/kiro/install.sh").read_text(encoding="utf-8")

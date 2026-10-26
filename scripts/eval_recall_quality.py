@@ -47,7 +47,13 @@ from link_core.memory import (  # noqa: E402
     significant_memory_tokens,
     stemmed_memory_tokens,
 )
-from link_core.semantic import load_embedder, semantic_memory_scores  # noqa: E402
+from link_core.semantic import (  # noqa: E402
+    RERANK_CANDIDATES,
+    load_embedder,
+    load_reranker,
+    rerank_blend,
+    semantic_memory_scores,
+)
 from recall_dataset import build_cases, build_corpus  # noqa: E402
 from test_semantic_core import fake_embedder  # noqa: E402
 
@@ -82,6 +88,7 @@ def run_suite(
     corpus: list[dict[str, object]],
     embedder,
     root: Path,
+    reranker=None,
 ) -> dict[str, object]:
     groups: dict[str, dict[str, float]] = {}
     domains: dict[str, dict[str, float]] = {}
@@ -93,7 +100,10 @@ def run_suite(
             if embedder is not None
             else None
         )
-        results = recall_memories(corpus, case["query"], limit=RANK_LIMIT, semantic_scores=scores)
+        fetch = max(RANK_LIMIT, RERANK_CANDIDATES) if reranker is not None else RANK_LIMIT
+        results = recall_memories(corpus, case["query"], limit=fetch, semantic_scores=scores)
+        if reranker is not None:
+            results = rerank_blend(case["query"], results, limit=RANK_LIMIT, reranker=reranker)
         latencies.append((time.perf_counter() - started) * 1000)
         names = [str(item["name"]) for item in results]
         rank = names.index(case["target"]) + 1 if case["target"] in names else 0
@@ -151,7 +161,17 @@ def main() -> int:
     parser.add_argument("--allow-download", action="store_true", help="allow the real model to be fetched once")
     parser.add_argument("--domains", action="store_true", help="show per-domain breakdown")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--rerank", action="store_true",
+                        help="apply the optional cross-encoder rerank tier to the hybrid run, the way recall does")
     args = parser.parse_args()
+
+    reranker = None
+    if args.rerank:
+        reranker = load_reranker(allow_download=args.allow_download)
+        if reranker is None:
+            print("Rerank model unavailable. Install the quality tier and run `lnk semantic --setup` first.",
+                  file=sys.stderr)
+            return 2
 
     embedder = None
     if args.mode == "fake":
@@ -181,7 +201,8 @@ def main() -> int:
             "authored_cases": authored,
             "wrapped_variant_cases": len(cases) - authored,
             "lexical_baseline": run_suite(cases, corpus, None, root),
-            "hybrid": run_suite(cases, corpus, embedder, root) if embedder is not None else None,
+            "rerank": reranker is not None,
+            "hybrid": run_suite(cases, corpus, embedder, root, reranker) if embedder is not None else None,
         }
 
     if args.json:

@@ -17,6 +17,7 @@ Supported agents differ in mechanism, so each config records its schema:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,10 @@ SESSION_START_TIMEOUT_SECONDS = 30
 SESSION_END_TIMEOUT_SECONDS = 60
 # The guard runs on every prompt: it must be fast or absent.
 GUARD_TIMEOUT_SECONDS = 10
+# Tool hooks run on every tool call and read a compiled index.
+TOOL_HOOK_TIMEOUT_SECONDS = 10
+PRE_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep"
+POST_TOOL_MATCHER = "Read|Edit|Write|MultiEdit"
 
 _HOOK_SCRIPT_MARKER = "link.py"
 
@@ -47,6 +52,13 @@ class AgentHookConfig:
     # Per-prompt guard (constraint reminders). Only agents with a
     # prompt-submit hook event support it.
     guard_event: str | None = None
+    # Before a tool call: reviewed rules ask or block (tool_hooks).
+    pre_tool_event: str | None = None
+    pre_tool_matcher: str | None = None
+    pre_tool_emit: str = "text"
+    # After a file read or edit: memories anchored to that file.
+    post_tool_event: str | None = None
+    post_tool_matcher: str | None = None
     restart_hint: str = "Restart the agent; new sessions will start with the Link memory brief."
 
 
@@ -57,6 +69,10 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         aliases=("claude-code", "claude", "claude-code-cli"),
         default_settings="~/.claude/settings.json",
         guard_event="UserPromptSubmit",
+        pre_tool_event="PreToolUse",
+        pre_tool_matcher=PRE_TOOL_MATCHER,
+        post_tool_event="PostToolUse",
+        post_tool_matcher=POST_TOOL_MATCHER,
     ),
     AgentHookConfig(
         name="codex",
@@ -79,6 +95,10 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         end_event="sessionEnd",
         start_matcher=None,
         start_emit="cursor",
+        # Cursor asks its hooks before shell commands; file edits have no
+        # before-event there, so only command rules apply.
+        pre_tool_event="beforeShellExecution",
+        pre_tool_emit="cursor",
     ),
 )
 
@@ -139,7 +159,58 @@ def _flat_entry(command: str, timeout: int) -> dict[str, object]:
 def _is_link_hook_command(command: object, event: str) -> bool:
     if not isinstance(command, str):
         return False
-    return _HOOK_SCRIPT_MARKER in command and f" hook {event}" in command
+    # Hooks run the workspace's link.py today; an installed `lnk` launcher
+    # counts too, so disconnect finds either form.
+    launcher = _HOOK_SCRIPT_MARKER in command or re.search(r"(?:^|[\s/\"'])lnk(?:\s|\"|$)", command)
+    return bool(launcher) and f" hook {event}" in command
+
+
+LINK_HOOK_EVENTS = ("session-start", "session-end", "prompt-check", "pre-tool", "post-tool")
+
+
+def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, object]:
+    """Find (and with write, remove) Link's hook entries; other hooks stay."""
+    config = _find_hook_agent(agent)
+    result: dict[str, object] = {"path": str(path), "supported": config is not None,
+                                 "found": [], "removed": False}
+    if config is None or not path.exists():
+        return result
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        return result
+    settings = json.loads(text)
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return result
+    found: list[str] = []
+    for event_name in list(hooks):
+        groups = hooks.get(event_name)
+        if not isinstance(groups, list):
+            continue
+        kept_groups: list[object] = []
+        for group in groups:
+            if config.schema == "nested" and isinstance(group, dict) and isinstance(group.get("hooks"), list):
+                inner = [h for h in group["hooks"]
+                         if not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
+                                                             for e in LINK_HOOK_EVENTS))]
+                if len(inner) != len(group["hooks"]):
+                    found.append(event_name)
+                if inner:
+                    kept_groups.append({**group, "hooks": inner})
+            elif isinstance(group, dict) and any(_is_link_hook_command(group.get("command"), e)
+                                                 for e in LINK_HOOK_EVENTS):
+                found.append(event_name)
+            else:
+                kept_groups.append(group)
+        if kept_groups:
+            hooks[event_name] = kept_groups
+        else:
+            del hooks[event_name]
+    result["found"] = sorted(set(found))
+    if found and write:
+        atomic_write_json(path, settings)
+        result["removed"] = True
+    return result
 
 
 def _merge_nested_event(
@@ -233,6 +304,26 @@ def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, 
                 GUARD_TIMEOUT_SECONDS,
             ),
         })
+    if config.pre_tool_event:
+        plan.append({
+            "event_name": config.pre_tool_event,
+            "event": "pre-tool",
+            "matcher": config.pre_tool_matcher,
+            "entry": make_entry(
+                _hook_command(python_cmd, runtime_script, "pre-tool", target, emit=config.pre_tool_emit),
+                TOOL_HOOK_TIMEOUT_SECONDS,
+            ),
+        })
+    if config.post_tool_event:
+        plan.append({
+            "event_name": config.post_tool_event,
+            "event": "post-tool",
+            "matcher": config.post_tool_matcher,
+            "entry": make_entry(
+                _hook_command(python_cmd, runtime_script, "post-tool", target),
+                TOOL_HOOK_TIMEOUT_SECONDS,
+            ),
+        })
     return plan
 
 
@@ -312,6 +403,16 @@ def build_agent_hooks_payload(
             f"{config.display_name} has no session-end hook event; end sessions with `lnk session-end` "
             "or the MCP session_end action to capture memory proposals."
         )
+    if config.pre_tool_event:
+        behavior.append(
+            f"{config.pre_tool_event}: reviewed memories with enforce rules ask before (or block) the "
+            "tool calls they name; nothing is checked until a rule has been reviewed."
+        )
+    if config.post_tool_event:
+        behavior.append(
+            f"{config.post_tool_event}: when a file is read or edited, the reviewed memories anchored to it "
+            "are shown once per session."
+        )
     if config.name in {"codex", "cursor"}:
         behavior.append(
             f"New: {config.display_name} hook support follows the vendor's documented schema; "
@@ -331,9 +432,9 @@ def build_agent_hooks_payload(
     }
 
 
-def _content_text(content: object) -> str:
+def _content_blocks(content: object) -> list[str]:
     if isinstance(content, str):
-        return content.strip()
+        return [content.strip()] if content.strip() else []
     parts: list[str] = []
     if isinstance(content, list):
         for block in content:
@@ -341,7 +442,7 @@ def _content_text(content: object) -> str:
                 text = block.get("text")
                 if isinstance(text, str) and text.strip():
                     parts.append(text.strip())
-    return "\n".join(parts)
+    return parts
 
 
 # Text that Link itself injected into the session (the session-start brief,
@@ -356,6 +457,52 @@ LINK_ECHO_MARKERS = (
     "Link consolidation plan (read-only)",
     "Link session end",
 )
+
+
+# Text that arrives in the transcript with role "user" but that the user
+# never typed: subagent reports, slash-command expansions, local command
+# output, interruption markers, compaction summaries, peer-session messages.
+# Mining these as "the user's own turns" turned a subagent's report ("always
+# run migrations with --force") into a high-confidence preference
+# attributed to the user. Newer transcripts label the origin; older ones
+# only carry the tag, so both are checked.
+HARNESS_TEXT_PREFIXES = (
+    "<task-notification>",
+    "<local-command-caveat>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "<system-reminder>",
+    "<cross-session-message",
+    "[Request interrupted",
+    "This session is being continued from a previous conversation",
+)
+_SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+
+
+def _harness_reason(entry: dict[str, object], text: str) -> str | None:
+    """Why a user-role entry is not the user's own words, or None if it is."""
+    if entry.get("isSidechain") is True:
+        return "subagent turn"
+    if entry.get("isCompactSummary") is True:
+        return "compaction summary"
+    if entry.get("promptSource") == "system":
+        return "system prompt"
+    origin = entry.get("origin")
+    if isinstance(origin, dict):
+        kind = str(origin.get("kind") or "")
+        if kind and kind != "human":
+            return f"{kind} message"
+    stripped = text.lstrip()
+    for prefix in HARNESS_TEXT_PREFIXES:
+        if stripped.startswith(prefix):
+            return f"harness text ({prefix.strip('<>[')})"
+    return None
 
 
 def extract_transcript_text(
@@ -402,9 +549,38 @@ def extract_transcript_text(
         message = entry.get("message")
         if not isinstance(message, dict):
             continue
-        text = _content_text(message.get("content"))
-        if not text:
+        blocks = _content_blocks(message.get("content"))
+        if not blocks:
             continue
+        if entry.get("type") == "user":
+            # Every text block is checked, not only the first: a real prompt
+            # followed by a <task-notification> block used to be mined whole.
+            # A block that is only a harness reminder is dropped on its own
+            # (the person's text beside it is kept); any other harness block
+            # means the message is not the user's own words.
+            user_blocks: list[str] = []
+            reason = _harness_reason(entry, "")  # entry-level origin markers
+            if not reason:
+                for block in blocks:
+                    cleaned = _SYSTEM_REMINDER_RE.sub("", block).strip()
+                    if not cleaned:
+                        continue
+                    reason = _harness_reason(entry, block)
+                    if reason:
+                        break
+                    user_blocks.append(cleaned)
+                if not reason and not user_blocks:
+                    # Nothing but harness reminders in the whole message.
+                    reason = _harness_reason(entry, blocks[0])
+            if reason:
+                if stats is not None:
+                    stats["dropped_harness_text"] = stats.get("dropped_harness_text", 0) + 1
+                continue
+            text = "\n".join(user_blocks)
+            if not text:
+                continue
+        else:
+            text = "\n".join(blocks)
         if any(marker in text for marker in LINK_ECHO_MARKERS):
             if stats is not None:
                 stats["dropped_link_output"] = stats.get("dropped_link_output", 0) + 1
@@ -462,3 +638,40 @@ def extract_transcript_text(
     if head and tail:
         return "\n\n".join(head) + "\n\n… (middle of the session omitted) …\n\n" + "\n\n".join(tail)
     return "\n\n".join(head or tail)
+
+
+# Tools whose output is someone else's text: a web page, a search result, or
+# another MCP server. A session that read them can carry instructions the
+# user never gave into its proposals, so the capture says so for review.
+_WEB_TOOL_NAMES = {"webfetch", "websearch", "web_search", "web_fetch", "fetch", "browser"}
+
+
+def transcript_untrusted_inputs(transcript_path: Path) -> list[str]:
+    """"web" and/or "mcp" when the session's agent read outside content."""
+    found: set[str] = set()
+    try:
+        handle = transcript_path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    with handle:
+        for line in handle:
+            if '"tool_use"' not in line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            message = entry.get("message") if isinstance(entry, dict) else None
+            content = message.get("content") if isinstance(message, dict) else None
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = str(block.get("name") or "")
+                lowered = name.lower()
+                if lowered.startswith("mcp__"):
+                    server = lowered.split("__")[1] if lowered.count("__") >= 2 else ""
+                    if server != "link":
+                        found.add("mcp")
+                elif lowered in _WEB_TOOL_NAMES:
+                    found.add("web")
+    return sorted(found)

@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .files import append_text_with_rotation, atomic_write_text
+from .files import (
+    append_text_unlocked,
+    atomic_write_text,
+    atomic_write_text_unlocked,
+    file_lock,
+    rotate_file_unlocked,
+)
 
 DEFAULT_LOG_TEXT = "# Link Wiki Log\n\n*Append-only record of wiki operations.*\n"
 DEFAULT_LOG_MAX_BYTES = 2 * 1024 * 1024
@@ -16,6 +23,73 @@ LOG_HEADING_RE = re.compile(r"^## \[(?P<timestamp>[^\]]+)\] (?P<operation>[^|]+)
 LOG_HASH_RE = re.compile(r"^- log_entry_hash: (?P<hash>[0-9a-f]{64})$")
 LOG_PREVIOUS_HASH_RE = re.compile(r"^- log_previous_hash: (?P<hash>[0-9a-f]{64})$")
 LOG_GENESIS_HASH = "0" * 64
+# Machine-local record of the newest entry this machine wrote or accepted.
+# A log whose newest entries were cut off still verifies entry by entry;
+# the anchor is what notices the cut.
+LOG_ANCHOR_RELATIVE = Path(".link-cache") / "log-anchor.json"
+# Every character str.splitlines() treats as a line boundary (\n \r \v \f
+# \x1c-\x1e \x85 U+2028 U+2029) plus the remaining C0/C1 control characters.
+_LINE_BREAK_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
+
+
+def _one_line(value: object) -> str:
+    """Log headings and details are single lines by format.
+
+    A line break inside a title or reason split one entry across lines; the
+    parser then dropped the continuation and an honest entry failed its
+    own hash check. That includes the Unicode separators splitlines()
+    honours, so a title (or a teammate's filename) carrying U+2028 used to
+    poison the chain.
+    """
+    return _LINE_BREAK_RE.sub(" ", str(value)).strip()
+
+
+def _log_lines(text: str) -> list[str]:
+    """Split log text on \n only: the one separator the writer emits.
+
+    str.splitlines() also breaks on \v, \f, U+2028 and friends, which an
+    older writer could leave inside a heading; splitting there made an
+    honest entry fail its hash check.
+    """
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def _hashed_details(details: tuple[str, ...] | list[str]) -> list[str]:
+    """The detail lines verification hashes: stripped `- ` bullets only."""
+    return [line.strip() for line in details if line.strip().startswith("- ")]
+
+
+def log_anchor_path(wiki_dir: Path) -> Path:
+    return wiki_dir.parent / LOG_ANCHOR_RELATIVE
+
+
+def _write_anchor(wiki_dir: Path, head: str) -> None:
+    try:
+        atomic_write_text(
+            log_anchor_path(wiki_dir),
+            json.dumps({"head": head, "updated_at": utc_timestamp()}) + "\n",
+        )
+    except OSError:
+        # The anchor is a second line of defence; failing to write it must
+        # never fail the operation being logged.
+        pass
+
+
+def _read_anchor(wiki_dir: Path) -> str:
+    try:
+        payload = json.loads(log_anchor_path(wiki_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    head = payload.get("head") if isinstance(payload, dict) else ""
+    return head if isinstance(head, str) and LOG_HASH_RE.match(f"- log_entry_hash: {head}") else ""
+
+
+def refresh_log_anchor(wiki_dir: Path) -> None:
+    """Accept the current log head as trusted (after sync or restore)."""
+    _write_anchor(wiki_dir, _last_log_hash(wiki_dir / "log.md"))
 
 
 def utc_timestamp() -> str:
@@ -28,7 +102,7 @@ def write_default_log(path: Path) -> None:
 
 def _last_log_hash(log_path: Path) -> str:
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = _log_lines(log_path.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return LOG_GENESIS_HASH
     for line in reversed(lines):
@@ -54,22 +128,48 @@ def append_log(
     backups: int = DEFAULT_LOG_BACKUPS,
 ) -> None:
     log_path = wiki_dir / "log.md"
-    heading = f"## [{timestamp}] {operation} | {description}"
-    detail_lines = [f"- {line}" for line in lines]
-    previous_hash = _last_log_hash(log_path)
-    entry_hash = _hash_log_entry(previous_hash, heading, detail_lines)
-    entry = [heading, ""]
-    entry.extend(detail_lines)
-    entry.append(f"- log_previous_hash: {previous_hash}")
-    entry.append(f"- log_entry_hash: {entry_hash}")
-    entry.extend(["", "---", ""])
-    append_text_with_rotation(
-        log_path,
-        "\n".join(entry),
-        initial_text=DEFAULT_LOG_TEXT,
-        max_bytes=max_bytes,
-        backups=backups,
-    )
+    heading = f"## [{_one_line(timestamp)}] {_one_line(operation).replace('|', '/')} | {_one_line(description)}"
+    detail_lines = [f"- {_one_line(line)}" for line in lines]
+    # Read the previous hash and append under one lock. Two separate locks
+    # let concurrent hooks and MCP writes both chain onto the same parent,
+    # forking the chain so verification then failed on honest entries.
+    with file_lock(log_path):
+        previous_hash = _last_log_hash(log_path)
+        entry_hash = _hash_log_entry(previous_hash, heading, detail_lines)
+        entry = [heading, ""]
+        entry.extend(detail_lines)
+        entry.append(f"- log_previous_hash: {previous_hash}")
+        entry.append(f"- log_entry_hash: {entry_hash}")
+        entry.extend(["", "---", ""])
+        text = "\n".join(entry)
+        current_size = log_path.stat().st_size if log_path.exists() else 0
+        if max_bytes > 0 and current_size > 0 and current_size + len(text.encode("utf-8")) > max_bytes:
+            # Rotation happens after the parent hash is read, so the first
+            # entry of the new file continues the chain of the rotated one.
+            rotate_file_unlocked(log_path, backups)
+        append_text_unlocked(log_path, text, initial_text=DEFAULT_LOG_TEXT)
+    _write_anchor(wiki_dir, entry_hash)
+
+
+def _log_family(log_path: Path) -> list[Path]:
+    """log.md and its rotated files, oldest first."""
+    rotated = []
+    index = 1
+    while True:
+        candidate = log_path.with_name(f"{log_path.name}.{index}")
+        if not candidate.exists():
+            break
+        rotated.append(candidate)
+        index += 1
+    return list(reversed(rotated)) + ([log_path] if log_path.exists() else [])
+
+
+def _first_previous_hash(text: str) -> str:
+    for line in _log_lines(text):
+        match = LOG_PREVIOUS_HASH_RE.match(line.strip())
+        if match:
+            return match.group("hash")
+    return LOG_GENESIS_HASH
 
 
 def redact_log_references(
@@ -80,65 +180,37 @@ def redact_log_references(
 ) -> dict[str, object]:
     """Replace needle text in past log entries and re-anchor the hash chain.
 
-    Forgetting a memory must also forget the log lines that quote its title.
-    The log is tamper-evident, so this is never silent: every touched entry
-    is re-hashed into a fresh chain and a final entry declares the redaction
-    and the re-anchor. Needles shorter than 6 characters are ignored to
-    avoid mangling unrelated text.
+    Forgetting a memory must also forget the log lines that quote its title,
+    in rotated log files too (they used to keep the title forever). The log
+    is tamper-evident, so this is never silent: the chain is rebuilt across
+    every file, oldest first, and a final entry declares the redaction and
+    the re-anchor. Each file is replaced atomically under the log's lock,
+    so a hook appending at the same moment can neither be lost nor
+    interleave. Needles shorter than 6 characters are ignored to avoid
+    mangling unrelated text.
     """
     log_path = wiki_dir / "log.md"
-    safe_needles = [n for n in needles if isinstance(n, str) and len(n.strip()) >= 6]
+    safe_needles = [_one_line(n) for n in needles if isinstance(n, str) and len(n.strip()) >= 6]
     if not log_path.exists() or not safe_needles:
         return {"redacted_entries": 0, "rechained": False}
-    text = log_path.read_text(encoding="utf-8", errors="replace")
     touched = 0
-    for needle in safe_needles:
-        if needle in text:
-            touched += text.count(needle)
-            text = text.replace(needle, "[forgotten memory]")
+    with file_lock(log_path):
+        family = _log_family(log_path)
+        texts = {path: path.read_text(encoding="utf-8", errors="replace") for path in family}
+        for path, text in texts.items():
+            for needle in safe_needles:
+                if needle in text:
+                    touched += text.count(needle)
+                    text = text.replace(needle, "[forgotten memory]")
+            texts[path] = text
+        if touched:
+            previous_hash = _first_previous_hash(texts[family[0]]) if family else LOG_GENESIS_HASH
+            for path in family:
+                preamble, entries = _parse_log_text(texts[path])
+                rendered, previous_hash = _render_chain_from(preamble, entries, previous_hash)
+                atomic_write_text_unlocked(path, rendered)
     if not touched:
         return {"redacted_entries": 0, "rechained": False}
-
-    # Rebuild the hash chain over the redacted entries.
-    lines = text.splitlines()
-    out: list[str] = []
-    previous_hash = "0" * 64
-    heading: str | None = None
-    details: list[str] = []
-
-    def flush() -> None:
-        nonlocal previous_hash, heading, details
-        if heading is None:
-            return
-        entry_hash = _hash_log_entry(previous_hash, heading, details)
-        out.append(heading)
-        out.append("")
-        out.extend(details)
-        out.append(f"- log_previous_hash: {previous_hash}")
-        out.append(f"- log_entry_hash: {entry_hash}")
-        out.extend(["", "---", ""])
-        previous_hash = entry_hash
-        heading = None
-        details = []
-
-    preamble_done = False
-    for line in lines:
-        if line.startswith("## ["):
-            flush()
-            preamble_done = True
-            heading = line
-            continue
-        if not preamble_done:
-            out.append(line)
-            continue
-        if LOG_HASH_RE.match(line) or LOG_PREVIOUS_HASH_RE.match(line):
-            continue
-        if line.strip() == "---" or (heading is not None and not line.strip() and not details):
-            continue
-        if heading is not None and line.startswith("- "):
-            details.append(line)
-    flush()
-    log_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
     append_log(
         wiki_dir,
         timestamp,
@@ -155,15 +227,18 @@ def redact_log_references(
 def _parse_log_text(text: str) -> tuple[list[str], list[tuple[str, tuple[str, ...]]]]:
     """Split a log into (preamble lines, [(heading, detail lines)]).
 
-    Hash lines and separators are dropped — they are recomputed whenever a
-    chain is rebuilt.
+    Hash lines, separators and blank lines are dropped — they are recomputed
+    whenever a chain is rebuilt. Any other line inside an entry (a note
+    someone added by hand, say) is kept in place: forget and sync-merge
+    used to drop every line that was not a `- ` bullet. Only bullets are
+    hashed, exactly as verification reads them.
     """
     preamble: list[str] = []
     entries: list[tuple[str, tuple[str, ...]]] = []
     heading: str | None = None
     details: list[str] = []
     preamble_done = False
-    for line in text.splitlines():
+    for line in _log_lines(text):
         if line.startswith("## ["):
             if heading is not None:
                 entries.append((heading, tuple(details)))
@@ -174,22 +249,27 @@ def _parse_log_text(text: str) -> tuple[list[str], list[tuple[str, tuple[str, ..
         if not preamble_done:
             preamble.append(line)
             continue
-        if LOG_HASH_RE.match(line) or LOG_PREVIOUS_HASH_RE.match(line):
+        stripped = line.strip()
+        if LOG_HASH_RE.match(stripped) or LOG_PREVIOUS_HASH_RE.match(stripped):
             continue
-        if line.strip() == "---" or (heading is not None and not line.strip() and not details):
+        if stripped == "---" or not stripped:
             continue
-        if heading is not None and line.startswith("- "):
+        if heading is not None:
             details.append(line)
     if heading is not None:
         entries.append((heading, tuple(details)))
     return preamble, entries
 
 
-def _render_chained_log(preamble: list[str], entries: list[tuple[str, tuple[str, ...]]]) -> str:
+def _render_chain_from(
+    preamble: list[str],
+    entries: list[tuple[str, tuple[str, ...]]],
+    previous_hash: str,
+) -> tuple[str, str]:
+    """Render entries chained onto `previous_hash`; return (text, last hash)."""
     out = list(preamble)
-    previous_hash = LOG_GENESIS_HASH
     for heading, details in entries:
-        entry_hash = _hash_log_entry(previous_hash, heading, list(details))
+        entry_hash = _hash_log_entry(previous_hash, heading.strip(), _hashed_details(details))
         out.append(heading)
         out.append("")
         out.extend(details)
@@ -197,7 +277,11 @@ def _render_chained_log(preamble: list[str], entries: list[tuple[str, tuple[str,
         out.append(f"- log_entry_hash: {entry_hash}")
         out.extend(["", "---", ""])
         previous_hash = entry_hash
-    return "\n".join(out).rstrip() + "\n"
+    return "\n".join(out).rstrip() + "\n", previous_hash
+
+
+def _render_chained_log(preamble: list[str], entries: list[tuple[str, tuple[str, ...]]]) -> str:
+    return _render_chain_from(preamble, entries, LOG_GENESIS_HASH)[0]
 
 
 def merge_log_texts(ours: str, theirs: str) -> str:
@@ -224,7 +308,7 @@ def merge_log_texts(ours: str, theirs: str) -> str:
 
 def _log_entry_blocks(log_path: Path) -> list[dict[str, Any]]:
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = _log_lines(log_path.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return []
     blocks: list[dict[str, Any]] = []
@@ -273,29 +357,65 @@ def verify_log_integrity(wiki_dir: Path) -> dict[str, object]:
     hashed_entries = 0
     legacy_entries = 0
     expected_previous: str | None = None
-    for index, block in enumerate(_log_entry_blocks(log_path), start=1):
-        entry_hash = str(block.get("entry_hash") or "")
-        previous_hash = str(block.get("previous_hash") or "")
-        if not entry_hash:
-            legacy_entries += 1
-            continue
-        hashed_entries += 1
-        if expected_previous is None:
-            # The first visible hashed entry may continue from a rotated log file.
-            expected_previous = previous_hash or LOG_GENESIS_HASH
-        if previous_hash != expected_previous:
-            findings.append(f"entry {index} previous hash mismatch")
-        expected_hash = _hash_log_entry(
-            previous_hash,
-            str(block.get("heading") or ""),
-            list(block.get("detail_lines") or []),
-        )
-        if entry_hash != expected_hash:
-            findings.append(f"entry {index} hash mismatch")
-        expected_previous = entry_hash
+    seen_hashes: set[str] = set()
+    # Rotated files are part of the chain: verifying only log.md let an
+    # edit to an older entry in log.md.1 pass. Oldest file first.
+    previous_file: Path | None = None
+    for path in _log_family(log_path):
+        active = path == log_path
+        prefix = "" if active else f"{path.name}: "
+        first_in_file = True
+        for index, block in enumerate(_log_entry_blocks(path), start=1):
+            entry_hash = str(block.get("entry_hash") or "")
+            previous_hash = str(block.get("previous_hash") or "")
+            if not entry_hash:
+                legacy_entries += 1
+                continue
+            hashed_entries += 1
+            seen_hashes.add(entry_hash)
+            if first_in_file:
+                first_in_file = False
+                if previous_hash and previous_hash != LOG_GENESIS_HASH:
+                    if expected_previous is None:
+                        # The oldest rotated file may start mid-chain (rotation
+                        # prunes past its backup count); log.md itself may not:
+                        # deleting the head of the log used to verify clean.
+                        if active:
+                            findings.append("log starts mid-chain: earlier entries are missing")
+                    elif previous_hash != expected_previous:
+                        name = "log" if active else path.name
+                        older = previous_file.name if previous_file else "the previous file"
+                        findings.append(
+                            f"{name} does not continue the rotated {older} (entries between them are missing)"
+                        )
+                # A chain may restart at genesis (a sync merge rebuilds it).
+                expected_previous = previous_hash or LOG_GENESIS_HASH
+            if previous_hash != expected_previous:
+                findings.append(f"{prefix}entry {index} previous hash mismatch")
+            expected_hash = _hash_log_entry(
+                previous_hash,
+                str(block.get("heading") or ""),
+                list(block.get("detail_lines") or []),
+            )
+            if entry_hash != expected_hash:
+                findings.append(f"{prefix}entry {index} hash mismatch")
+            expected_previous = entry_hash
+        if not first_in_file:
+            previous_file = path
+    anchor = _read_anchor(wiki_dir)
+    anchor_state = "missing"
+    if anchor:
+        if anchor in seen_hashes or not seen_hashes and anchor == LOG_GENESIS_HASH:
+            anchor_state = "ok"
+        else:
+            anchor_state = "mismatch"
+            # The newest entry this machine wrote is gone: the tail was cut
+            # or the file replaced. Entry-by-entry checks cannot see that.
+            findings.append("latest logged entries are missing (log truncated or replaced since this machine last wrote it)")
     return {
         "checked": True,
         "passed": not findings,
+        "anchor": anchor_state,
         "hashed_entries": hashed_entries,
         "legacy_entries": legacy_entries,
         "findings": findings,
@@ -313,7 +433,7 @@ def read_log_entries(wiki_dir: Path, *, limit: int = 100) -> list[dict[str, obje
     if not log_path.exists():
         return []
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = _log_lines(log_path.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return []
     entries: list[dict[str, object]] = []

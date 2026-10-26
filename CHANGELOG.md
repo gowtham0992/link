@@ -6,6 +6,618 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-10-25
+
+Memory that checks itself against the code, and holds at the moment the
+agent acts. Two lines of work ship together. First, memory that keeps
+itself honest: it verifies what it says about files, scripts, dependencies
+and code against your repository, ranks the current truth first, works in
+any language, and shows you a receipt of what reached each agent. Second,
+memory that acts where the agent works: rules you approved are enforced
+before a tool call, memories surface when the agent opens the code they
+describe, reviewed memory is compiled into the files every agent already
+reads, and every injection is checked for arrival. Every claim here is
+measured in benchmarks/RESULTS.md, losses included.
+
+### Added
+
+- **Reviewed memories can enforce rules on tool calls.** A memory can carry
+  `enforce` rules - `ask command: git push --force*`, `deny write:
+  migrations/**`, `ask read: .env` - checked before the agent's shell
+  commands and file reads and writes (Claude Code; shell commands in
+  Cursor). `ask` is the default: the call waits for your OK. `deny` blocks
+  it. Every decision names the memory it came from. A rule acts only after
+  you review the memory, and adding one sends the memory back to review.
+  Turning rules on and off stays with you: over MCP an agent cannot mark a
+  rule-bearing memory reviewed, clear its rules, or archive, forget or
+  update it, and while any rule is active the hook asks before an agent
+  runs Link's review, enforce, archive or forget commands from the shell or
+  edits Link's memory files directly. When a saved constraint names a command in backticks, `lnk
+  remember` suggests the rule for you to approve. `lnk enforce <memory>
+  --rule ...` sets rules (`--clear`, `--suggest`), and `remember --enforce`,
+  MCP `remember(enforce=)` and admin `set_enforce` do the same. Commands
+  are read the way the shell will run them: every command in a `&&`, `;`,
+  `|` or `&` chain, inside `( )`, `{ }`, `if`/`then`, `bash -c`, `eval`,
+  `$( )` and backticks, past quoting, assignments, `sudo`/`env`/`timeout`/
+  `nice`/`xargs` and their options, and with `/usr/bin/git` read as `git`;
+  quoted text such as a commit message is not a command. File rules also
+  cover what shell commands read and write (`cat .env`, `> migrations/x`)
+  and Grep, and paths compare case-insensitively. A project's rules apply
+  anywhere inside its repository and nowhere else, and a memory fenced
+  with `applies_when` enforces only where it applies. Hooks read a
+  compiled index rebuilt when any memory file changes or a day passes (so
+  expiry dates retire rules). What the reader cannot see - variables
+  expanded at run time, a script that does the forbidden thing inside -
+  it does not claim to. Measured by the new
+  `scripts/eval_enforcement.py`: 17 of 17 forbidden calls caught, 0 of 34
+  ordinary coding-agent calls stopped, under 0.2 ms per decision (p95) and
+  about 100 ms per hook call, almost all of it Python start-up.
+- **Memories surface when the agent touches the code they describe.** When
+  the agent reads or edits a file, the reviewed memories anchored to it
+  (recorded when the memory was written inside the repository) are shown,
+  once per session, and never when the anchored symbol is gone from the
+  file. The memory does not need to share a single word with the task.
+- **Proof of delivery.** Everything a hook injects carries a short
+  `(link:...)` marker and stays under the size some hosts drop silently,
+  cut with a visible notice when it must be. At session end Link checks the
+  transcript, and `lnk receipt` says whether the brief and each reminder
+  arrived, arrived cut off, or never arrived, and lists the rule checks
+  (asked, blocked) and code reminders of each session.
+- **Approval in the flow of work.** The session brief lists what is waiting
+  for your OK - session proposals and rules awaiting review - with the
+  exact command for each; the agent runs one only after you say yes in
+  chat. A short session proposes memory only when you stated a standing
+  rule in it, and proposals from a session that read web pages or another
+  MCP server's output are marked so you can check the words were yours.
+- **`lnk compile` writes reviewed memory into the files each agent reads.**
+  A delimited Link block in AGENTS.md, CLAUDE.md, GEMINI.md and
+  copilot-instructions; path-scoped rules for Cursor, Claude Code, Copilot,
+  Windsurf and Kiro, derived from memories anchored to code in this
+  repository; and Agent Skills from procedure memories. Unreviewed,
+  quarantined, task-conditional, secret- or injection-flagged memories are
+  left out with a reason, private memories stay out unless you pass
+  `--include-private`, and every line outside Link's block is kept byte for
+  byte. Each target's size limit is respected (AGENTS.md 32 KiB, CLAUDE.md
+  200 lines, 12,000 characters per Windsurf rule, 500 lines per Cursor
+  rule), with lower-priority memories dropped first and every drop
+  reported. Output is deterministic: `--check` fails CI on drift and
+  `--dry-run` shows the diff. MCP admin `compile` previews unless asked to
+  write.
+- **`lnk stale --instructions` checks instruction files like memories.**
+  AGENTS.md, CLAUDE.md and GEMINI.md (nested ones too), `.claude/rules`,
+  Cursor, Windsurf, Kiro and Copilot files get the same history-backed
+  stale checks, size-limit overruns with the exact limit and overage
+  (counting the AGENTS.md chain from the root to each nested file), and
+  contradictions between files and against reviewed memories. Findings are
+  reported, never rewritten. On eight public repositories: 604 checkable
+  references, 0 false flags, 8 real findings.
+
+- **The viewer shows rules before they act, and the last session.** The
+  review inbox lists a memory's enforced rules under its claim in the words
+  the hook uses (asks / blocks), and the server activates a rule-bearing
+  memory only when the review request repeats the exact rules it showed:
+  a single Review does, bulk review never does, so bulk skips those
+  memories and says so. Captures from sessions that read web or MCP
+  content are marked, a memory's page shows its rules and the code it is
+  anchored to, and /wins gains a "Last session" section mirroring `lnk
+  receipt` (memories given, delivery, rule checks, code reminders). The
+  inbox moves into the primary navigation, since approvals route there.
+- **The instructions every agent reads cover the new loop.** The installed
+  instruction block, `LINK.md`, the MCP instructions resource and the CLI
+  skills now tell agents what enforce rules do, that only the user may
+  review, clear, archive or update a rule-bearing memory, how to treat the
+  brief's "Waiting for the user's OK" list and a `stale_paths` memory, and
+  what `lnk receipt` and `lnk compile` are for.
+  The project instruction file now carries the same handoff, session-end
+  and rules paragraphs as the global one.
+- **The docs describe 5.0.** The viewer page covers the inbox: keyboard
+  review, inline edit, rules shown before approval, bulk review that skips
+  rule-bearing memories, outside-content marks, and the Last session card.
+  The architecture page lists the five commitments. The memory contract's
+  receipt section covers delivery, rule checks and code reminders; its
+  write rules say agents never review, clear, archive or update a memory
+  with rules; its agent loop covers the waiting-for-OK block. Getting
+  started and the README say what the Claude Code hooks check before shell
+  and file tool calls, that Cursor checks shell commands, and that
+  `lnk receipt` shows what arrived. Security gains an Enforced Rules
+  section and the team import gate; the team checklist says team-sync
+  exports only `visibility: team`. Concepts adds enforce, repository checks
+  and compile to the memory lifecycle; troubleshooting covers the hook
+  entries and `lnk hook pre-tool`. The installer README says what
+  `lnk connect --write --hooks` adds and that the PowerShell installers do
+  not call it.
+- **The docs read like a docs site.** Every page now carries a sidebar
+  with all fifteen pages in four groups, an on-this-page column that
+  follows the scroll, and search (`/` or ⌘K) over every heading and
+  section, served from a checked-in index with no service behind it. One
+  script (`scripts/sync_docs_site.py`) stamps the shared chrome into the
+  pages and writes the index; a test fails when a page is added without a
+  sidebar entry or the copies drift. The two replayed terminals at the top
+  of Getting started are gone, so the first command is above the fold.
+  Stylesheet, script and tour links carry the file's hash, so a returning
+  visitor never sees a new page with a cached old stylesheet.
+- **The site opens with the loop.** A new section plays Link's whole cycle
+  in five scenes - say it once, you approve it, every session knows,
+  checked against the code, held at the moment of action - using the real
+  proposal, brief, receipt, stale verdict and rule check. It pauses on
+  hover, can be paused, stepped with the keyboard or tapped, stays still
+  under reduced motion, and "See how it works" now starts there.
+- **LinkBar shows what a review turns on and what reached the agent.**
+  Inbox rows list a memory's enforced rules ("asks · command: git push
+  --force*") next to Approve, which runs the review; Edit opens the viewer's
+  inbox, where edits get the usual conflict checks. A notification with an
+  Approve action arrives when a memory with rules is waiting. Captures from
+  sessions that read web or MCP content carry an amber "check these are
+  your words" mark. The last-session card warns in amber when the agent did
+  not get all of its memory ("1 cut short · 1 never arrived") and counts
+  rule checks ("2 asked for your OK · 1 blocked"). Every new field is
+  optional, so LinkBar still works with an older CLI.
+- **`lnk stale` checks far more than file paths.** 3.0 questioned a memory
+  only when it named a file git no longer has. It now also notices package
+  scripts (`npm run deploy:staging`), make and just targets, dependencies,
+  environment variables and URLs the repository once had and no longer does,
+  and two contradictions with files the repository checks in: a runtime
+  version the manifests no longer allow ("Python 3.10" when `pyproject.toml`
+  requires `>=3.12`, "Node 18" when `engines.node` is `>=20`), and a package
+  manager whose lockfile was replaced by another manager's. The precision
+  rule is unchanged - a reference is reported only when history shows the
+  thing existed - and it holds: 0 false flags across 345 references in
+  Link's own documentation and 298 more across eight other real
+  repositories, every real deletion caught, and every one of seven removal
+  kinds caught in the eval's scratch repository. Findings carry the
+  evidence ("package.json no longer defines scripts.deploy:staging").
+  It reads every tracked manifest (workspace `package.json`s,
+  `requirements/*.txt`), compares package names the way package managers
+  do (pyyaml is PyYAML), understands PEP 440 `~=` and wildcards and the
+  go.mod `go` directive as a minimum, finds make and just targets on
+  multi-target lines, in `@recipes`, recipes with parameters and included
+  files, and checks only endpoint URLs (localhost, private hosts, explicit
+  ports), never links to public docs. History and prohibitions are not
+  current claims: "we upgraded from Node 16", "we dropped Python 3.9" and
+  "do not use npm; we use pnpm" are left alone.
+  Memories also get a per-memory verdict against the checkout -
+  `verified` only when something the memory names was found in place and
+  nothing it names is gone, `stale`, or `unverifiable` when there is
+  nothing to check or the checks did not finish.
+- **Memories about code are anchored to the lines they describe.** When a
+  memory is written or updated inside a git checkout and it names a
+  repository file together with a symbol in that file ("`parse_config` in
+  src/app.py must stay side-effect free"), Link records `path:line symbol`
+  in the memory's `anchors` frontmatter - found by reading the file, not by
+  a model. The staleness verdict re-reads those lines: an anchor holds,
+  has moved (with the new line, which is not stale), or is gone because the
+  symbol or the file disappeared. This catches what path checks cannot: a
+  function deleted or renamed while its file stayed. Each anchor records
+  the repository's root commit (`path:line symbol @root`) and is checked
+  only in that repository, so a user-wide memory is never judged against
+  whatever repo you happen to be in; anchor paths cannot leave the
+  checkout. Ordinary memories never get anchors, and `LINK_ANCHORS=off`
+  turns them off.
+- **A claim-shaped recall slice.** `scripts/eval_claim_updates.py` asks the
+  question fact-update benchmarks ask and LoCoMo does not: when a fact
+  changed two or three times (a rate limit, a port, a database, a deploy
+  day, a preference), does recall return the current value? Sixteen
+  subjects, each queried in its own words and as a paraphrase, in a store
+  where updates carry `supersedes` lineage and in one where they do not,
+  plus point-in-time recall between versions. It was written after the
+  ranking changes it measures and is gated as a floor, not tuned against;
+  with lineage a superseded value must never come back first.
+- **A with/without behavioral A/B.** `scripts/eval_behavior_ab.py` asks
+  whether an agent with Link does the right thing more often than one
+  without it, on twelve scenarios whose answer depends on an earlier
+  session. In CI a deterministic oracle measures delivery - is the memory
+  that should change the answer in front of the agent, ahead of any stale
+  one: 11 of 12 with Link, 0 of 12 without. The one miss is published as
+  a known gap (a ranking collision on a shared word). A live mode pipes each
+  prompt to an agent command you choose; Link makes no network calls, and
+  nothing runs without `--yes`.
+- **Upgrading from 2.x is tested, not assumed.** A workspace written by
+  Link 2.3.0 itself (memories, a pending capture, its search cache and log)
+  is now part of the test suite. Every run drives it through today's
+  `migrate`, `status`, `validate`, `recall`, `query` and `capture-inbox`
+  and checks the details. Memory counts stay the same and review state
+  carries over. The search cache is rebuilt in the current format, and the
+  old log verifies and gets its first anchor on the next write.
+- **A memory receipt: what reached your agents, session by session.**
+  People could not see what their agent was given from memory. `lnk
+  receipt` (and MCP `review` action `receipt`) groups the local retrieval
+  ledger into sessions and shows the session brief (memories, approximate
+  tokens, whether it was cut to fit), recalls, guard reminders, every
+  memory the agent was given with its title and how often, the total size,
+  and how to explain or forget any of them. The ledger never records
+  queries, so neither does the receipt. Building it exposed two recording
+  gaps, both fixed: the session-start hook never recorded the brief it
+  delivers, and the default MCP surface recorded only brief-mode recalls,
+  so "never retrieved" counted memories agents had read. CLI agents'
+  `lnk recall`, `lnk query` and `lnk brief` are recorded under their own
+  surface, so a CLI-only session has a receipt too.
+- **Recalled memories say whether they still hold.** When recall runs in a
+  repository, each returned memory carries `verified` (something it names
+  was found in place and nothing it names is gone, with the commit it was
+  checked at) or `stale_paths` (what disappeared, with evidence). Memories
+  that name nothing checkable carry neither. The checks on the recall path
+  run under a 1.5 s budget with a per-commit cache in `.link-cache`, and a
+  check that did not finish never yields `verified`.
+- **Optional contradiction flags from a local NLI model.** `lnk semantic
+  <dir> --setup --nli` adds an ~87 MB int8 model (onnxruntime and
+  tokenizers, already in the rerank extra). When a memory is written it is
+  read against the few stored memories about the same subject; a likely
+  contradiction becomes a review note, never a refusal. It never runs on
+  the recall path and a model failure cannot break a save. Measured by
+  the new `scripts/eval_contradiction_flags.py` on 20 revisions and 216
+  unrelated pairs that share a subject word: the word rules catch 17 with 0
+  false alarms; the model alone raises 107 false alarms; as shipped, with a
+  30% subject-overlap gate, it raises 0 and adds 1 revision the rules miss.
+  A small gain, which is why the tier is opt-in. A running MCP server
+  picks the model up within a minute of setup, without a restart.
+- **Point-in-time and typed recall over MCP.** The `recall` tool takes
+  `as_of` and `memory_type`, and a time phrase in the query ("in March",
+  "last quarter") resolves to a date, as `lnk recall` always did.
+- **LinkBar 1.5.0 shows the last session's receipt.** A "Last session"
+  card in the Inbox tab says how many memories your agent was given and in
+  how many recalls, through which surfaces, at roughly how many tokens,
+  with an amber note when a budget cut some context, and the memories
+  themselves with how often each was used. Clicking one opens it in the
+  Memory tab with its explanation expanded; a deleted memory is struck
+  through. Against an older CLI the card stays hidden.
+- **The rerank tier is measurable from the repo.** Both recall
+  benchmarks take `--rerank` and apply the cross-encoder exactly as recall
+  does. On LoCoMo it is the best configuration on every metric (hit@1
+  0.453, hit@10 0.826, up from 3.x's 0.794); on the bundled claim-shaped
+  benchmark it now adds little (hit@1 0.789 to 0.798), because this
+  release's ranking underneath took most of that gain.
+
+### Changed
+
+- **Lexical recall matches words, not substrings.** Query words were
+  tested against fields with substring checks ("main" scored "Maintain the
+  domain allowlist", "the" matched "theme") and question words counted as
+  content. Words now match as words or as another form of the same word;
+  question words are stopwords; rare words weigh more than common ones;
+  two-letter acronyms (CI, DB, PR, S3) are tokens; and the stemmer does
+  what its docstring said ("committing" and "commit" meet). On LoCoMo,
+  lexical hit@1 rises from 0.266 to 0.350 and hit@10 from 0.628 to
+  0.716, with no model and faster than before. It also changed which tier
+  wins where: without the rerank tier, the semantic tiers on LoCoMo now
+  trail lexical at hit@1 and hit@5 while still leading at hit@10. Scaling the semantic weight down
+  fixes LoCoMo and costs the bundled benchmark a third of its
+  pure-paraphrase recall, so the weight stays; RESULTS.md has the ablation.
+- **The current claim ranks first.** Point-in-time recall penalised the
+  right answer for being archived today; activity and age are now judged
+  on the date asked about. When two top results contradict each other the
+  older one is labelled `contradicted_by` and read second, and revisions
+  that name what they replaced ("moved from 8080 to 8443", "Buildkite
+  replaced Jenkins") are recognised. A value change counts only for one
+  subject: "Node 20 runs the api" and "Node 18 runs the worker" are two
+  facts, not a revision, and "copy the database from staging to prod"
+  replaces nothing. `lnk recall` prints the dispute under the older result. In the hygiene benchmark, contradiction exposure
+  after a revision falls from 0.167 to 0 and point-in-time accuracy rises
+  from 0.917 to 1.00.
+- **Standing preferences reach every session.** A preference about how the
+  agent should answer ("keep answers short and cite the wiki page") applies
+  to every task but shares no words with any of them, so it fell out of the
+  session brief. Two slots are reserved for them, which closes one of the
+  behavioral A/B's two known gaps.
+- **The recall packet stops repeating itself.** The ranked list carried
+  every memory and page a second time, and over MCP every result was also
+  sent back as a duplicate structured copy. The ranked list is now
+  references, `budget_report.packet_total` gives the whole packet's size,
+  and tools declare read-only/destructive hints. Mean
+  packets are 13% smaller at micro (1,951 to 1,697 tokens) and 22% smaller
+  at large (4,835 to 3,752).
+- **Recall stays fast on large stores.** Records are parsed once per file
+  change, tokens once per field, and records that share no word with the
+  query are skipped before scoring; `query_link` no longer scores the
+  store twice. At
+  20,000 memories a full packet takes 0.7 s instead of 1.7 s, and a fresh
+  process's first packet 4.4 s instead of 5.8 s. Ranking alone costs about a
+  quarter more than 3.0 at that size, the price of whole-word matching; a
+  pre-release build was 4.4 times slower until the benchmark caught it.
+- **Session captures propose far less junk.** Instructions for the work at
+  hand ("Do not edit any files"), requests ("I want you to..."), goals for
+  the conversation, throwaways, hypotheticals, someone else's habits,
+  anything tied to today and Link's own brief lines are no longer proposed
+  as memory; numbered prompt lists are not recipes. On 12 real developer
+  sessions: 58 proposals to 6, both genuine keepers kept. These filters
+  apply to proposals only: a sentence you save yourself with `remember`
+  keeps its type, so "Do not use tabs in YAML files" is a rule, not a note.
+
+### Fixed
+
+- **LinkBar says when rules are not enforced.** Its Hooks row tells a
+  session-only hook install from one with the rule hooks, and shows "rules
+  not enforced" with the connect command when only the session hook is
+  present; Cursor gets the same row when it has a hooks file. Stale help
+  names scripts and code, the receipt line says "Enforced rules", and the
+  budget note no longer reads like the delivery warning.
+- **A repeated session-end event is recognised.** The duplicate check
+  stored the last proposal's fingerprint instead of the session's.
+- **`lnk compile` never rewrites a file it cannot read exactly.** A
+  non-UTF-8 or unreadable AGENTS.md, CLAUDE.md or Link-owned rule file is a
+  conflict with a reason, never replaced. In a file that mixes CRLF and LF
+  every existing line keeps its own ending, so appending a line after
+  Link's block does not show as drift.
+- **`lnk stale --instructions` finds nested instruction files under
+  non-ASCII folders**, and the staleness engine's manifest lookup reads
+  such names too.
+- **Staleness precision.** A package-manager binary (`pnpm nx build`) is not
+  a removed script, a backticked `@decorator` is not a scoped package, a
+  dependency counts as removed only when a manifest declared it, just
+  recipes with default parameters are recognised, and mentions inside
+  instruction files do not keep a removed variable "present".
+- **MCP on Windows no longer hangs when Link runs git.** Inside the MCP
+  server, stdin is the connection to the agent. Child processes (git for
+  sync, project seeding and repository checks, and Python for runtime
+  checks) inherited it. On Windows a child holding that pipe waits until
+  its timeout, so any tool that ran git stalled. Every spawn in the package
+  now closes stdin, and a test fails if a new one does not.
+- **The viewer's review inbox is a real loop.** Reviewing used to mean a
+  confirm dialog, a full page reload per memory, and a "Next" hint telling
+  you to edit frontmatter in a terminal. Now `j`/`k` move, `r` reviews, `a`
+  archives, `x` selects, `e` edits; focus advances to the next memory
+  without a reload; selected memories can be reviewed or archived in bulk;
+  and each item edits its claim (through update-memory, so the claim moves
+  and conflict checks run) and its visibility inline.
+- **The viewer keeps your project, and the graph suggests titles.** A
+  `?project=` view was lost on the first navigation click; internal links
+  now carry it. The graph's Find box suggests node titles instead of
+  needing an exact one.
+- **The viewer's home page stays small.** It listed every page in the wiki
+  (173 KB of links at 1,000 pages); each section now shows twelve and links
+  to the filtered, paged view for the rest. `/api/pages` is capped at 500
+  by default with the total in `X-Total-Count`.
+- **LinkBar 1.5.0.** The CLI bridge read a command's stdout to the end
+  before reading stderr, so any command that wrote more than a pipe buffer
+  to stderr first (a Python traceback from a broken venv, pip or model
+  download progress) hung LinkBar forever; both pipes are drained at once
+  now. "Clear handoff" never ran - it launched `handoffs` as if it were an
+  executable path - and reported success anyway; it goes through `lnk`
+  and reports failures. Refreshes are coalesced: an agent session writing
+  captures used to start five Python processes every 0.6 seconds, now one
+  refresh runs at a time and events during it collapse into one follow-up.
+  Watchers are reopened only for directories that newly exist, instead of
+  on every refresh. When both inbox reads fail the app says why (lnk
+  missing, no workspace at that path, or the CLI's own error) instead of
+  always suggesting a reinstall; Setup, Update, Wire and Clear show the
+  CLI's reason when they fail. The stale-references row decides "needs
+  Link 3.0" from the CLI version rather than from a failed probe. VoiceOver
+  now reads the menu bar state, the health dots, the status rows and the
+  icon-only buttons.
+
+- **`lnk disconnect <agent>`.** Uninstalling Link removed the instruction
+  block and nothing else; the MCP server entry and session hooks stayed, so
+  after deleting the workspace every new Claude Code session printed "wiki
+  missing" into the model's context. `lnk disconnect` previews, and with
+  `--write` removes, exactly Link's entries - other servers, other hooks and
+  comments are left alone - and every `integrations/*/uninstall.sh` now calls
+  it. For Codex it removes the `[mcp_servers.link]` table with every
+  subtable, and checks the result parses before writing it; a truncated
+  config is a clear error and is left untouched.
+- **Editor configs with comments.** VS Code and Zed settings are JSON with
+  comments and trailing commas; `lnk connect --write` failed on them with a
+  JSON parse error. Link now edits those files in place, inserting or
+  replacing only its own entry and keeping every comment, and re-reads the
+  result before writing it. Files with a UTF-8 BOM or CRLF line endings
+  are read correctly and keep both.
+- **The integration scripts use `lnk connect`.** Each installer only
+  registered MCP when the agent's config file already existed, and Kiro's
+  project mode never registered at all. The installers now delegate to
+  `lnk connect --write` (with `--hooks` for Claude Code, Codex and Cursor),
+  which creates the config, verifies the runtime and installs hooks; the old
+  inline registration remains as the fallback when no Link CLI is found.
+  A `--project` install leaves global state alone: session hooks come only
+  from global installs, Kiro's project mode prints the connect command
+  instead of rewriting `~/.kiro/settings/mcp.json`, and Antigravity writes
+  `~/.gemini` only in global mode.
+
+- **Releases follow a written procedure.** `packaging/RELEASE.md` holds the
+  whole release in order; it used to live in a maintainer's private memory.
+  `scripts/prepare_release.py` now refuses to run without banner words
+  (3.0.0 shipped announcing 2.2's features after the warning was missed),
+  refuses when LinkBar changed without a version bump and can bump it
+  (`--linkbar-version`), and prints steps that work as they are: build and
+  upload from a release venv instead of Homebrew's pip-locked Python, the
+  version bump through a pull request because `main` is protected, and the
+  exact tap edits.
+- **Memory in any language, everywhere.** 3.0's multilingual recall did
+  not reach proposals, fingerprints, the duplicate gate or negation
+  detection, which still compacted non-Latin text to nothing: three
+  distinct Japanese proposals collapsed into one and unrelated claims
+  shared a fingerprint. Every path now keeps every script (ASCII
+  fingerprints unchanged), negation is recognised in major languages
+  without mistaking everyday words for it (特别, 危ない, 不具合), and voiced
+  kana are no longer split mid-character. Recall matches Han, kana and
+  Korean words inside running text ("배포" finds "배포는", one kanji finds
+  its memory), and a Latin word inside Japanese text is a whole word.
+- **An update changes what recall shows.** `update-memory` appended the
+  new claim but left the summary and a claim-shaped title on the old one,
+  so agents kept reading "Python 3.11" after the update to 3.12. An update
+  now moves the summary and a claim-shaped title, unless it says it adds
+  to the claim ("Also pin pip to 24.0", "... as well"): an addition is
+  appended and leaves the claim as it was.
+- **Contradiction detection sees value changes and more.** Version, port
+  and count changes were invisible (short tokens were dropped), facts were
+  never checked, "Never use Ruff" did not meet "Use Ruff for linting",
+  and "release notes" or "local development" read as branch policies and
+  archived unrelated memories through supersession.
+- **Unreviewed team imports stay out of recall** until reviewed
+  (`recall.state` "quarantined"); memories flagged stale are inactive on
+  every past date too.
+- **CLI.** Help says `lnk` on installs (it said `usage: link.py`);
+  a `--project` you name implies project scope instead of being dropped
+  (the default project never does, so user-wide memories stay user-wide); `lnk stale`
+  exits 1 when something is flagged and 2 when `--repo` is not a git
+  repository (it reported "no stale references" about any folder); and an
+  installed-but-unfetched reranker no longer prints errors and a download
+  bar on every recall.
+- **MCP.** The first response reported `needs_review: 0` always; brief
+  guidance named tools the default surface does not have; follow-up
+  suggestions were admin calls in a shape the tool rejected. `recall`
+  rejects an unknown `memory_type` instead of returning nothing, and a year
+  or month in a question ("in 2017") falls back to the full packet when no
+  memory holds that date, instead of hiding the wiki.
+- **Old full-text index files are removed** after an upgrade instead of
+  staying in `.link-cache`.
+- **The viewer stops crashing after every change.** Each Mark reviewed,
+  Archive or Save wrote its change and then dropped the connection
+  (ERR_EMPTY_RESPONSE): the search index connection was opened on one
+  request thread and closed from another. The same check made viewer
+  search fall back to the slow path silently. The connection is now shared
+  safely across request threads. Present since 3.0.
+- **Inbox Save sends only what changed**, so changing a memory's
+  visibility no longer appends a copy of its claim as an "update".
+- **Two machines syncing no longer break the audit log.** Only a
+  conflicted `log.md` was re-chained after a merge; when git merged it
+  cleanly, one machine's entries followed the other's with their own
+  previous hashes, and `lnk doctor` reported a broken chain on both
+  machines after ordinary use. A merged log is now always re-chained and
+  the re-anchor recorded. Present since 3.0.
+- **pip installs suggest next steps that run.** The CLI's suggested
+  commands named a `link.py` that pip installs do not ship, even when the
+  venv's `lnk` was first on PATH. They now say `lnk`, or name the file that
+  is actually running; `lnk connect` and `verify-mcp` print an init command
+  that exists on pip installs. Present since 3.0.
+
+- **The viewer's wins page knows the ledger.** It said retrieval
+  tracking was off while showing a Last session card built from that very
+  ledger; the usage summary now reaches the wins payload, as it did on the
+  CLI.
+- Copyable commands on the viewer's dashboard and captures pages use the
+  runtime the viewer was started with (`lnk`, or this checkout's
+  `link.py`) instead of a hard-coded `python3 link.py`.
+- Compiled bullets no longer repeat a title the claim already starts with.
+- The landing page's memory card shows a memory as Link writes it: the
+  real folder (`wiki/memories/`), the real fields, and an enforce rule.
+  The three replayed terminals under "How it works" are gone; the loop
+  section above them tells the same story with the real artifacts. The
+  hero's decorative node graph is now a still of the loop: the brief, the
+  force-push, the rule check. The design-principles section is gone (the
+  page said each of them already). The hero and the LinkBar copy describe
+  what 5.0 adds, and the LinkBar tour is re-recorded from LinkBar 1.5: the
+  inbox shows the rule a memory will enforce and the last session's
+  receipt.
+
+### Security
+
+- **Team memories arrive through your review gate.** `lnk team-sync`
+  copied every page in the shared repo straight into your active memory: no
+  review, no visibility check, no secret scan, no injection label. Anyone
+  with push access to the team remote could plant a memory in every
+  teammate's next session. Imports now land as `review_status: pending`
+  with `imported_from: team`; pages that are not `visibility: team`, not
+  active, symlinks, or carry a secret-shaped value or injection-shaped
+  instruction are rejected and reported. A team memory you forgot or
+  archived is no longer resurrected by the next sync, and an imported copy
+  is never exported back, so a teammate's deletion sticks. Until you
+  review it, an import stays out of wiki search, topic context and
+  `index.md` as well as memory recall; once reviewed you can edit it, and
+  the edit stays on your machine instead of overwriting the teammate's
+  page. Team sync refuses a shared repo or incoming change that contains
+  a symlink anywhere, before merging, so a committed `wiki/log.md ->
+  ~/.zshrc` can never be written through.
+- **`lnk sync` scans everything it pushes.** The secret gate only looked at
+  `wiki/`, while sync staged the whole workspace, and `raw/` was not in its
+  ignore list - so a workspace whose `.gitignore` predated Link pushed raw
+  captures unscanned. Changes are scanned before they are committed, and
+  every commit a push would carry is scanned before pushing, so a secret
+  redacted since an earlier commit cannot reach the remote inside it; the
+  refusal names the commit and how to drop it, and Link never rewrites
+  history for you. File names are read unquoted, so `café notes.md` is
+  scanned too, and a merge that would leave conflict markers is refused.
+  `raw/`, ingest staging, operation snapshots, backups and caches are
+  ignored and never staged; if an older setup tracked them, sync says how
+  to untrack them rather than doing it, because the untracking commit
+  would delete those files on machines still running 3.x. A pull never
+  deletes or overwrites local private files, and a local edit to one
+  (`redact-capture` edits in place) no longer blocks later pulls. `--init`
+  refuses to re-point a workspace that already has a different `origin`
+  before it changes anything.
+- **Only your own words become proposals.** Claude Code writes subagent
+  reports, slash-command expansions, local command output, interruption
+  markers and compaction summaries into the transcript with the user's
+  role. Session-end mined them as "your own turns", so a subagent's report
+  saying "always run migrations with --force" became a high-confidence
+  preference attributed to you. Those entries are dropped by origin label
+  and by tag in every text block of a message, and system reminders
+  appended to a real prompt are removed.
+  The decision trail reports how many were dropped.
+- **Captures no longer keep the secrets they warn about.** `session-end`
+  warned about a key and then wrote it verbatim into the capture file. The
+  notes, title, source, proposal source and decision trail are redacted
+  before the file is written, including passwords written in prose; the
+  inbox still names what was redacted so you know to rotate it.
+- **Handoffs are labelled.** A handoff reaches every next session on any
+  agent, which made it the strongest write in Link that skips review. It
+  is now framed as notes from a previous session, re-checked for
+  injection-shaped instructions on every read (the file can be edited by
+  anything), and a flagged handoff tells the agent to show it to you and
+  wait. The source label is sanitised so it cannot carry prose.
+- **Accept after dismiss picks the right proposal over MCP.** The inbox
+  hides dismissed proposals, but MCP `accept_capture` numbered them anyway,
+  so "accept 1" after dismissing the first proposal stored the one you had
+  just declined. The CLI already matched; MCP does now.
+- **The audit log is tamper-evident in the ways the docs claimed.** The
+  previous hash was read outside the lock that guarded the append, so
+  concurrent hooks and MCP writes chained onto the same parent and forked
+  the log; verification then failed on honest entries. A newline in a title
+  or reason split an entry and broke its own hash (so did U+2028 and other
+  line separators). Deleting the first or
+  last entries verified clean. Now the read and append share one lock,
+  headings and details are single-line by construction, the first entry
+  must start the chain or continue the newest rotated file, and a
+  machine-local anchor (`.link-cache/log-anchor.json`) records the newest
+  entry so a cut-off tail is reported. Sync and restore accept the new head
+  explicitly. Rotated log files are verified as part of the chain.
+  Forgetting a memory now redacts rotated log files too (they kept the
+  title forever), atomically and under the log's lock, and keeps lines it
+  does not recognise.
+- **Backups and restores cannot leave you with nothing.** A backup is
+  written to a hidden partial file and renamed into place, so a killed
+  backup no longer leaves a truncated archive that looks valid; a damaged
+  archive is a clear error instead of a traceback; and restore moves the
+  current tree aside before moving the restored one in, putting it back if
+  anything fails or is interrupted, instead of deleting `wiki/` first. An
+  archive whose `wiki` or `raw` is a plain file is rejected.
+- **`lnk snapshot --force` only replaces a previous snapshot.** It deleted
+  any non-empty output directory; `lnk snapshot ~ --force` would have
+  removed your home folder. It now requires the directory to contain a Link
+  `snapshot.json`, and deletes it only after the new snapshot passes the
+  secret check.
+- **Sync stops cleanly when a merge fails for a reason other than a
+  conflict**, instead of committing and pushing on top of a half-merge, and
+  a clean pull regenerates the index and backlinks.
+- **The poisoning benchmark covers every way into a session.** The same 18
+  attacks now also go through harness-written transcript text (0 of 108
+  probes become proposals), handoffs (every attack the detector labels is
+  labelled in the brief, 0 credentials unredacted) and team imports (14
+  rejected, 4 quarantined, 0 active). All three are CI gates. Writing the
+  handoff track found one more gap, closed here: a password written in
+  prose ("the staging password is ...") passed through handoffs and
+  captures verbatim; it is now redacted like a token.
+- **The local viewer's Content-Security-Policy no longer allows inline
+  script.** Every page inlined 65 KB of CSS and JavaScript, which forced
+  `'unsafe-inline'` into the policy, so a single escaping slip anywhere would
+  have been executable. The assets are now served as content-hashed files
+  (cached for good, a new build is a new URL), the one page-specific
+  inline script - the graph - carries a fresh nonce per response, handed to
+  that script alone, and the policy allows only same-origin scripts and
+  styles plus that nonce.
+- **A web page can no longer lock you out of your own viewer.** The
+  mutation rate limit counted every POST before checking where it came
+  from, so any site you visited could send 180 blind form posts to
+  localhost and disable Mark reviewed, Archive and Save for a minute, over
+  and over. Only requests that prove they come from the viewer are
+  counted now, and the Origin/Referer check also requires the port the
+  viewer was reached on instead of accepting any localhost origin, so it
+  still works through an SSH or editor port forward.
+- **Capture commands only touch captures.** `delete-capture`, accept and
+  redact take only a capture file inside the real `raw/memory-captures`
+  with no symlink on the way, so they can no longer be pointed at a memory
+  page by path or through a link, and capture
+  de-duplication sees all of a capture's proposals rather than the first
+  ten (a capture whose first ten were covered was deleted as a duplicate
+  even when later proposals were new).
+
 ## [3.0.0] - 2026-09-16
 
 ### Added

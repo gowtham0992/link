@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Link CLI reference for local agent memory, wiki maintenance, validation, backup, and MCP verification.">
   <title>Link - CLI Reference</title>
-  <link rel="stylesheet" href="assets/site.css">
+  <link rel="stylesheet" href="assets/site.css?v=74addfc189">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
@@ -13,25 +13,20 @@
   <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
-  <script src="assets/site.js" defer></script>
+  <script src="assets/site.js?v=e04a4e8e00" defer></script>
 </head>
 <body>
   <nav class="site-nav" aria-label="Main">
     <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
-      <a href="why-link.html">Why</a>
-      <a href="scale.html">Scale</a>
-      <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
-      <a href="mcp.html">MCP</a>
-      <a href="memory-contract.html">Contract</a>
       <a href="cli.html" aria-current="page">CLI</a>
-      <a href="skills.html">Skills</a>
-      <a href="api.html">API</a>
+      <a href="mcp.html">MCP</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
       <a href="https://github.com/gowtham0992/link">GitHub</a>
+      <button type="button" class="site-search" aria-label="Search the docs">Search <kbd>/</kbd></button>
     </div>
   </nav>
 
@@ -45,12 +40,42 @@
 
   <main class="doc-section">
     <div class="section-inner doc-grid">
+      <aside class="docs-sidebar" aria-label="Documentation">
+        <button type="button" class="docs-sidebar-toggle" aria-expanded="false">Docs menu</button>
+        <div class="docs-sidebar-groups">
+          <div class="docs-group"><strong>Start here</strong>
+            <a href="getting-started.html">Getting started</a>
+            <a href="why-link.html">Why Link</a>
+            <a href="concepts.html">Concepts</a>
+          </div>
+          <div class="docs-group"><strong>Use it</strong>
+            <a href="cli.html" aria-current="page">CLI reference</a>
+            <a href="mcp.html">MCP setup</a>
+            <a href="skills.html">Skills</a>
+            <a href="ui.html">Web UI</a>
+            <a href="obsidian.html">Obsidian</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+          <div class="docs-group"><strong>Trust it</strong>
+            <a href="memory-contract.html">Memory contract</a>
+            <a href="security.html">Security</a>
+            <a href="team-security.html">Team security</a>
+            <a href="scale.html">Scale</a>
+          </div>
+          <div class="docs-group"><strong>Project</strong>
+            <a href="api.html">HTTP API</a>
+            <a href="contributing.html">Contributing</a>
+          </div>
+        </div>
+      </aside>
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#tour">CLI tour</a>
         <a href="#daily">Daily loop</a>
         <a href="#memory">Memory commands</a>
         <a href="#captures">Capture workflow</a>
+        <a href="#compile">Compile to agent files</a>
+        <a href="#instructions">Check instruction files</a>
         <a href="#maintenance">Maintenance</a>
         <a href="#all">All commands</a>
       </aside>
@@ -62,6 +87,7 @@
         </figure>
         <p>The CLI is independent of the web viewer. Use <code>lnk start</code>, <code>lnk query</code>, <code>lnk brief</code>, <code>lnk session-end</code>, <code>lnk health</code>, and maintenance commands even when <code>lnk serve</code> is not running. Agents that support lazy-loaded instructions can also use the official <a href="skills.html">Link skills</a> instead of MCP setup.</p>
         <p>Use <code>lnk try</code> when you want the shortest proof loop: demo creation, readiness, query proof, brief proof, viewer command, and first agent prompts in one command.</p>
+        <p>Use <code>lnk demo [dir]</code> to create a sample workspace with a few memories, raw sources and wiki pages, so you can try recall, the viewer and the graph without touching your own memory. It refuses to overwrite a directory that is not an earlier demo; <code>--force</code> replaces an earlier demo.</p>
         <p>Use <code>lnk proof</code> when you want to prove the cross-agent memory loop directly: one clean local workspace, one reviewed memory, and one bounded recall packet shared by CLI, skills, and MCP.</p>
         <p>Use <code>lnk setup</code> for install day and every upgrade after it: it detects every agent installed on your machine and wires them all — workspace, MCP provisioning, session hooks, and a refresh of any stale Link-owned agent instruction files (a steering file from an older Link can name MCP tools the configured server no longer exposes, sending the agent back to file greps) — in one idempotent command. Use <code>lnk onboard</code> when you want the guided single-agent flow: safe repair, health check, optional first memory, optional project seed, first prompts, and optional agent MCP wiring. If the local viewer is running, <code>/onboard</code> mirrors that flow with copy buttons.</p>
         <p>Use <code>lnk seed . ~/link</code> from a project directory when you want Link to create a source-backed project page from existing repo context before the first real recall. It scans allowlisted docs/rule files, blocks secret-looking values, and does not create durable memories silently.</p>
@@ -149,10 +175,45 @@ lnk recall "what did we decide last quarter"
 lnk recall "deploy process" --as-of 2026-03-31</code></pre>
 
 <h2 id="sync">Sync Between Machines</h2>
-        <p><code>lnk sync</code> moves reviewed memory between your machines through a git remote you control (a private repo, a homelab bare repo) — no server, no service. Secrets are scanned before anything is pushed; conflicting memory edits are kept as both versions and surfaced by <code>lnk consolidate</code> for review (git conflict markers never touch wiki files); the tamper-evident log merges with a declared re-anchor. <code>raw/</code> captures and the runtime never sync.</p>
+        <p><code>lnk sync</code> moves reviewed memory between your machines through a git remote you control (a private repo, a homelab bare repo) — no server, no service. Every outgoing file is scanned for secrets before anything is pushed, not only wiki pages; conflicting memory edits are kept as both versions and surfaced by <code>lnk consolidate</code> for review (git conflict markers never touch wiki files); the tamper-evident log merges with a declared re-anchor. <code>raw/</code> captures, ingest staging, operation snapshots, backups, caches and the runtime never sync: they are ignored, and if an older setup tracked them, sync reports it and prints the commands to untrack them, and never does it for you: the untracking commit would delete those files on a machine still running an older Link. <code>lnk sync --init</code> refuses to re-point a workspace that already has a different <code>origin</code>.</p>
         <pre><code>lnk sync --init --remote git@github.com:you/link-memory.git
 lnk sync                      # daily: commit, pull, resolve, gate secrets, push
 lnk sync --status</code></pre>
+
+        <h2 id="compile">Compile Memory into Agent Files</h2>
+        <pre><code>lnk compile ~/link --repo .
+lnk compile ~/link --repo . --dry-run
+lnk compile ~/link --repo . --check
+lnk compile ~/link --repo . --targets all</code></pre>
+        <p><code>lnk compile</code> writes your reviewed memories into the files each coding agent already reads, so they reach agents with no MCP connection or hooks. By default it writes AGENTS.md plus the agents the repository already has files for; <code>--targets all</code> or a comma-separated list chooses others.</p>
+        <table>
+          <thead><tr><th>Memory</th><th>Written to</th></tr></thead>
+          <tbody>
+            <tr><td>Preferences, decisions, facts, project context</td><td>A Link block in <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>GEMINI.md</code> and <code>.github/copilot-instructions.md</code>; <code>.windsurf/rules/link-memory.md</code> and <code>.kiro/steering/link-memory.md</code></td></tr>
+            <tr><td>Anchored to code in this repository</td><td>One rule per memory, loaded when the agent works on those files: <code>.cursor/rules/link-*.mdc</code> (<code>globs</code>), <code>.claude/rules/link-*.md</code> (<code>paths</code>), <code>.github/instructions/link-*.instructions.md</code> (<code>applyTo</code>), Windsurf (<code>trigger: glob</code>) and Kiro (<code>inclusion: fileMatch</code>). AGENTS.md and GEMINI.md, which have no path rules, list them with their files.</td></tr>
+            <tr><td>Procedures</td><td>Agent Skills: <code>.claude/skills/&lt;name&gt;/SKILL.md</code></td></tr>
+          </tbody>
+        </table>
+        <p>What it will and will not write:</p>
+        <ul>
+          <li>Only reviewed, active memories. Unreviewed ones, unreviewed team imports, and anything with a secret-shaped value or an injection-shaped instruction are left out and listed.</li>
+          <li>Private memories stay out of files a repository commits unless you pass <code>--include-private</code>. A memory fenced to a task stays in recall; one fenced to another project or directory is not written here.</li>
+          <li>In shared files only the block between the Link markers changes; everything else is kept byte for byte, including line endings. Link-owned files carry a generated-by line; a file without it is never overwritten and is reported instead. Stale Link-owned files are removed. Symlinked targets are refused.</li>
+          <li>Each file stays within what its agent reads: 32 KiB for AGENTS.md (Codex), 200 lines for CLAUDE.md, 12,000 characters per Windsurf rule, 500 lines per Cursor rule. When memories do not fit, notes go first, then facts, then decisions and preferences, older before newer, and every memory left out is listed with the reason.</li>
+          <li>Output is deterministic. Running it twice changes nothing, so <code>--check</code> can fail CI when the files drift from the reviewed memories, and <code>--dry-run</code> shows the diff first.</li>
+        </ul>
+        <p>Over MCP it is <code>admin(action="compile", arguments="{&quot;repo&quot;: &quot;/path/to/repo&quot;}")</code>. It returns a preview with the diff; add <code>&quot;write&quot;: true</code> after the user approves.</p>
+
+        <h2 id="instructions">Check Instruction Files</h2>
+        <pre><code>lnk stale ~/link --repo . --instructions
+lnk stale ~/link --repo . --instructions --json</code></pre>
+        <p><code>lnk stale --instructions</code> checks the repository's own agent instruction files the way <code>lnk stale</code> checks memories: every <code>AGENTS.md</code>, <code>CLAUDE.md</code> and <code>GEMINI.md</code> (nested ones too), <code>.claude/rules</code>, Cursor, Windsurf and Kiro rules, and Copilot's instruction files. It reports three things and changes none of them:</p>
+        <ul>
+          <li><strong>Stale references.</strong> Paths, scripts, make and just targets, dependencies, variables, local endpoints, runtime versions and package managers the repository once had and no longer does, with the same history rule as memories. In an instruction file a bare filename counts only as a link (<code>[CLAUDE.md](CLAUDE.md)</code>); &ldquo;run main.ts&rdquo; is an example. A nested file's links are resolved from its own folder.</li>
+          <li><strong>Size limits.</strong> Text an agent never reads: Codex stops after 32 KiB of AGENTS.md, counted along the chain from the repository root to each nested file; Windsurf reads 12,000 characters of a rule; Claude Code skips a CLAUDE.md over 4 MiB. Each finding gives the limit and how far over. Longer-than-recommended files (CLAUDE.md over 200 lines, a Cursor rule over 500) are reported as warnings that do not fail the check.</li>
+          <li><strong>Contradictions.</strong> Rules in two instruction files, or a rule and a reviewed memory, that cannot both hold (&ldquo;always use tabs&rdquo; and &ldquo;never use tabs&rdquo;; &ldquo;2 spaces&rdquo; and &ldquo;4 spaces&rdquo;). Copies of the same rule in AGENTS.md and CLAUDE.md are not contradictions, and words inside code, links or names do not count. With the local contradiction model on disk (<code>lnk semantic --setup --nli</code>) pairs the word rules miss are added.</li>
+        </ul>
+        <p>Link's own compiled block and Link-owned files are skipped: their content comes from memories, which <code>lnk stale</code> checks. Exit codes are the same as <code>lnk stale</code>: <code>0</code> nothing found, <code>1</code> something to fix, <code>2</code> could not check.</p>
 
         <h2 id="maintenance">Maintenance</h2>
         <pre><code>lnk backup
@@ -168,12 +229,14 @@ lnk benchmark "agent memory"
 lnk rebuild-index
 lnk rebuild-backlinks
 lnk stale
+lnk receipt
 lnk validate
 lnk verify-mcp</code></pre>
         <p>Use <code>lnk backup</code> before broad repair work. Use <code>lnk benchmark</code> when a wiki starts to feel slow or when you want to see how much broad wiki context the bounded packet avoided sending to an agent. <code>lnk status --validate</code> and <code>lnk benchmark</code> both show persistent-cache reuse so you can tell whether Link is rereading every page or reusing unchanged records.</p>
-        <p>Run <code>lnk stale</code> from inside a repository to list memories that name files git no longer has. A path is only reported when it is missing now and git tracked it before, so prose that merely looks like a filename stays quiet. The command changes nothing: it tells you which memories to review.</p>
+        <p>Run <code>lnk stale</code> from inside a repository to list memories that describe things the repository no longer has. It checks file paths (with the new name when git recorded a rename), package scripts (<code>npm run deploy:staging</code>), make and just targets, dependencies, environment variables and URLs, and two direct contradictions with files the repository checks in: a runtime version the manifests no longer allow (&ldquo;Python 3.10&rdquo; when <code>pyproject.toml</code> requires <code>&gt;=3.12</code>) and a package manager whose lockfile was replaced by another manager's. Each reference is only reported when the repository shows it once had the thing and no longer does, so prose that merely looks like a filename, a variable or a script stays quiet. On this repository's own documentation plus eight other real repositories, that rule produced no false flags across more than 600 references (exact figures in <code>benchmarks/RESULTS.md</code>). It also re-reads each memory's code anchors (<code>path:line symbol</code>, recorded when the memory was written inside a checkout) and reports symbols that were removed. A symbol that only moved within its file is not a finding, and anchors from another repository are never checked here. Claims framed as history (&ldquo;we dropped Python 3.9&rdquo;) or as a prohibition (&ldquo;do not use npm&rdquo;) are not read as current claims, monorepo workspace manifests count, and links to public documentation are left alone. History answers are cached per commit in the workspace's <code>.link-cache/</code>, so repeat runs on a large repository are fast. The command changes nothing: it tells you which memories to review. It exits like a linter, so CI and scripts can act on the result. <code>0</code> means nothing was flagged, <code>1</code> means at least one memory was flagged, and <code>2</code> means it could not check, for example because the folder is not a git repository. A folder git cannot read never gets a false all-clear.</p>
+        <p>Run <code>lnk receipt</code> to see what your agent was actually given, session by session. It lists which surface each session came through (session hook, MCP or CLI), each brief's size and whether anything was truncated, how many recalls there were, and every memory used, each with the commands to explain or forget it. <code>--sessions N</code> shows more history, and <code>--json</code> is for scripts and LinkBar. The receipt comes from a local ledger that never records what you asked; <code>LINK_USAGE=off</code> disables it.</p>
         <p>Use <code>lnk operations</code> when health reports an interrupted write. If a marker has a rollback snapshot, run <code>lnk operations ~/link --recover &lt;marker&gt;</code> to preview the recovery and add <code>--confirm</code> only after reviewing the plan.</p>
-        <p>Use <code>lnk team-sync</code> before sharing Link through Git. It is read-only: it checks Git state, verifies that <code>raw/</code> is protected, checks whether review or <code>visibility: private</code> memories would make sharing unsafe, keeps <code>wiki/log.md</code> local to preserve each machine's audit hash chain, and prints paste-safe setup/sync commands without pushing private source material for you.</p>
+        <p>Use <code>lnk team-sync</code> to share memories through a team git remote. Before it is set up, it is a read-only plan: it checks Git state, verifies that <code>raw/</code> is protected, and checks whether review or <code>visibility: private</code> memories would make sharing unsafe. After <code>lnk team-sync --init --remote &lt;git-url&gt;</code>, each run exports your active <code>visibility: team</code> memories, syncs the shared repo, and imports teammates' memories <em>for your review</em>: they arrive as <code>review_status: pending</code> with <code>imported_from: team</code>, because a teammate's review is not yours. Pages that are not <code>visibility: team</code>, not active, symlinks, or carrying a secret-shaped value or an injection-shaped instruction are rejected and reported, never written. Local versions win, and a team memory you forgot or archived is not re-imported.</p>
         <p>Use <code>lnk snapshot</code> when you need a static, read-only HTML export for a teammate, maintainer, security reviewer, or demo. It excludes <code>raw/</code>, captures, local operation state, and memory pages by default. With <code>--include-memories</code>, it still excludes <code>visibility: private</code> memories unless <code>--include-private-memories</code> is explicitly passed.</p>
         <p>Use <code>lnk connect &lt;agent&gt;</code> when an agent already has Link instructions but still needs MCP wiring. It previews the config before writing.</p>
         <pre><code>lnk connect codex ~/link
@@ -181,10 +244,20 @@ lnk connect codex ~/link --write
 lnk connect kiro ~/link --write
 lnk connect claude-code ~/link --hooks --write
 lnk verify-mcp ~/link</code></pre>
+        <p>Use <code>lnk disconnect &lt;agent&gt;</code> to take Link out of an agent: it previews, and with <code>--write</code> removes, Link's MCP server entry and its session hooks. Other servers, other hooks and comments in those files are left as they were, so it is safe on hand-edited VS Code and Zed settings. Run it before deleting a workspace, or new sessions keep trying to load it.</p>
         <p>Add <code>--hooks</code> (Claude Code, Codex, Cursor) to also install session hooks: every new session then starts with a bounded Link memory brief injected automatically, and session end stores proposal-only notes with memory candidates for later review — no durable memory is written without approval. Codex has no session-end event, so it gets the session-start brief only. Sessions without memory-worthy content are skipped and duplicate end events are deduplicated, so the capture inbox does not fill with noise. The hooks run <code>lnk hook session-start</code> and <code>lnk hook session-end</code>, which you can also invoke directly to inspect what they inject or capture. Codex and Cursor hook support is new and follows those vendors' documented hook schemas — if a hook misbehaves there, please open an issue. If the workspace runtime predates session hooks, <code>--write</code> refreshes it automatically.</p>
+        <p>The hooks themselves are plain commands you can run by hand to see what they inject or decide: <code>lnk hook session-start</code>, <code>session-end</code>, <code>prompt-check</code>, <code>pre-tool</code> and <code>post-tool</code>, each reading the agent's event JSON on stdin; <code>--emit cursor</code> prints Cursor's envelope instead of plain text. <code>lnk remember "..." --enforce "ask command: git push --force*"</code> saves a memory with its rule in one step (repeatable; the rule acts after review).</p>
+        <p><strong>Memory that holds at the moment of action.</strong> A memory can carry rules that are checked before the agent's tool calls: <code>lnk enforce &lt;name&gt; --rule "ask command: git push --force*"</code> (or <code>deny write: migrations/**</code>, <code>ask read: .env*</code>). A rule acts only after you review the memory, <code>ask</code> is the default (the tool call waits for your OK) and <code>deny</code> blocks it, and every decision names the memory it came from. When a saved constraint names a command in backticks, <code>lnk remember</code> suggests the rule for you to approve; Link never enables one on its own. With hooks installed (<code>lnk connect claude-code --hooks --write</code>), Claude Code checks rules before shell commands and file reads and writes, Cursor before shell commands. Claude Code also gets memories surfaced when the agent opens or edits a file they are anchored to (recorded when the memory was written inside the repository), once per session, and never for an anchor whose symbol is gone. Everything a hook injects carries a short <code>(link:…)</code> marker; at session end Link checks the transcript for it, and <code>lnk receipt</code> says whether the brief and each reminder arrived, arrived cut off, or never arrived. Proposals waiting for your OK, and rules waiting for review, are listed at the top of the next session with the exact command for each; the agent runs one only after you say yes. Proposals from a session that read web pages or another MCP server's output are marked, so you can check the words were yours.</p>
         <p>Use <code>lnk recipes</code> to list saved procedure memories with their triggers, and <code>lnk recall "&lt;task&gt;" --type procedure</code> to recall only recipes. Consolidation plans also surface recurring themes across session captures — the review-gated way an agent learns your patterns: detection is automatic and deterministic, but turning a pattern into one durable memory is always proposed to you first. A scheduled idle-time agent session can run the plan as a "dream pass" and bring proposals to your next session.</p>
         <p>Use <code>lnk consolidate</code> when the capture or review backlog builds up. It is read-only: it counts pending captures and memories needing review, groups duplicate captures, and prints paste-safe accept/discard/review commands to run with the user. When the backlog crosses a threshold, the injected session-start brief nudges the agent to offer a consolidation pass, and MCP agents can request the same plan through <code>review(action="consolidate")</code>.</p>
         <p>Use <code>lnk semantic</code> to inspect or enable optional hybrid recall. Lexical recall is always the default and the fallback; running <code>lnk semantic --setup</code> once (or <code>python3 -m link_mcp --semantic-setup</code> for MCP-only installs) adds a small local embedding model so paraphrased queries also find memories phrased differently — on Homebrew installs, where the runtime Python refuses direct pip installs, setup provisions the extras into <code>~/.link-mcp-venv</code> automatically. Recall itself never touches the network — the model loads offline-only, embeddings live in plain JSON under <code>.link-cache/</code>, and semantic-only matches are labeled with capped confidence so agents verify before trusting them. Measured results and methodology live in <code>benchmarks/RESULTS.md</code>.</p>
+        <p>Contradiction flags are a separate opt-in. <code>lnk semantic --setup --nli</code> also downloads a small local natural-language-inference model (<code>Xenova/nli-deberta-v3-xsmall</code>, int8, about 87 MB), which needs the <code>onnxruntime</code> and <code>tokenizers</code> packages from the rerank extra.</p>
+        <ul>
+          <li>After that, <code>lnk remember</code> checks a new memory against the few stored memories that share its subject. A likely contradiction adds a review note and a <code>possible_contradictions</code> list to the result.</li>
+          <li>The save always goes through. The model is never used during recall and never contacts the network after setup.</li>
+          <li><code>lnk semantic --json</code> reports the state under <code>contradiction_flags</code> (<code>enabled</code>, <code>reason</code>, <code>model</code>, <code>threshold</code>).</li>
+          <li><code>LINK_NLI=off</code> disables it.</li>
+        </ul>
         <p>From a source checkout, use the synthetic large-wiki smoke when you want local scale evidence without touching your real wiki. The script prints the exact <code>lnk serve</code> command and graph URL for the generated fixture.</p>
         <pre><code>python3 scripts/smoke_large_wiki.py --pages 10000</code></pre>
 
@@ -196,6 +269,7 @@ lnk serve [dir] [--port 3000]
 lnk onboard [dir] [--agent codex] [--write] [--hooks] [--first-memory "..."] [--seed-project .]
 lnk seed [project-dir] [dir] [--project-name name] [--overwrite] [--dry-run]
 lnk try [dir] [--force] [--serve] [--port 3000]
+lnk demo [dir] [--force]
 lnk proof [dir] [--force] [--serve] [--port 3000]
 lnk welcome [dir] [--project slug]
 lnk prompts [dir] [--project slug]
@@ -226,7 +300,7 @@ lnk start [dir] [--task "task"] [--project slug]
 lnk brief "task" [--project slug]
 lnk memory-audit [--project slug]
 lnk consolidate [dir] [--project slug] [--limit N]
-lnk semantic [dir] [--setup] [--rebuild]
+lnk semantic [dir] [--setup] [--rebuild] [--nli] [--json]
 lnk recall "query" [--project slug] [--type TYPE] [--as-of YYYY-MM-DD] [--include-archived]
 lnk recipes [dir] [--project slug]
 lnk profile [--project slug]
@@ -237,6 +311,7 @@ lnk review-memory &lt;name&gt;
 lnk explain-memory &lt;name&gt;
 lnk update-memory &lt;name&gt; "text" [--project slug]
 lnk set-memory-visibility &lt;name&gt; private|project|team
+lnk enforce &lt;name&gt; [dir] --rule "ask command: git push --force*" [--clear] [--suggest] [--json]
 lnk archive-memory &lt;name&gt;
 lnk restore-memory &lt;name&gt;
 lnk forget-memory &lt;name&gt; --confirm
@@ -246,10 +321,13 @@ lnk migrate
 lnk validate [--strict]
 lnk rebuild-index
 lnk rebuild-backlinks
-lnk stale [dir] [--repo path] [--json]
+lnk stale [dir] [--repo path] [--instructions] [--json]
+lnk compile [dir] [--repo path] [--targets list|all] [--check] [--dry-run] [--include-private] [--project slug] [--json]
+lnk receipt [dir] [--sessions N] [--json]
 lnk verify-mcp [--json]
 lnk connect &lt;agent&gt; [dir] [--write] [--config path] [--python python] [--hooks]
-lnk hook session-start|session-end [dir] [--limit N] [--project slug]
+lnk disconnect &lt;agent&gt; [--write] [--config path] [--hooks-settings path]
+lnk hook session-start|session-end|prompt-check|pre-tool|post-tool [dir] [--limit N] [--project slug]
 lnk backup [--list] [--include-raw]
 lnk restore-backup &lt;backup.tar.gz&gt; [--include-raw] --confirm
 python3 link.py demo

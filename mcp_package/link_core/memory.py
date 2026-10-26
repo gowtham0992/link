@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import functools
+import math
 import re
+import threading
 import unicodedata
 import urllib.parse
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -12,6 +15,9 @@ from pathlib import Path
 
 from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
+from .nli import CONTRADICTION_THRESHOLD, ContradictionScorer, load_contradiction_scorer
+from .provenance import add_anchors_to_page
+from .enforce_rules import MAX_ENFORCE_RULES, parse_enforce_rule, suggest_enforce_rules
 from .semantic import semantic_confidence_cap, semantic_match_points
 from .security import looks_like_password_note, secret_value_warnings
 from .frontmatter import (
@@ -39,7 +45,7 @@ MEMORY_VISIBILITIES = ("private", "project", "team")
 MEMORY_REVIEW_STATUSES = ("pending", "reviewed", "needs_update")
 MEMORY_PROPOSAL_MIN_SCORE = 70
 MEMORY_RECALL_MIN_SCORE = 2
-MEMORY_CONFLICT_TYPES = {"preference", "decision", "project"}
+MEMORY_CONFLICT_TYPES = {"preference", "decision", "project", "fact"}
 MEMORY_STOPWORDS = {
     "about",
     "after",
@@ -93,8 +99,17 @@ NEGATION_TERMS = {
     "not",
     "without",
 }
+# How a question is asked, not what it is about. Left in, "what is the
+# branch policy" needed "what" in a memory's head to rate strong, so ordinary
+# questions were capped at moderate and "where do I push" scored nothing.
+MEMORY_STOPWORDS |= {
+    "what", "which", "where", "when", "who", "whom", "whose", "why", "how",
+    "does", "did", "can", "could", "would", "should", "shall", "will",
+    "are", "was", "were", "our", "you", "your", "they", "them", "their",
+    "per", "via",
+}
 CONFLICT_OPTION_GROUPS = {
-    "branch_policy": {"codex", "develop", "development", "direct", "feature", "main", "master", "release"},
+    "branch_policy": {"develop", "direct", "feature", "main", "master", "trunk"},
     "storage_policy": {"cloud", "hosted", "local", "offline", "remote"},
     "theme": {"dark", "light", "system"},
     "install_method": {"brew", "global", "homebrew", "pipx", "system", "venv", "virtualenv"},
@@ -173,7 +188,12 @@ def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
 
 
 def normalize_project(value: str | None) -> str:
-    return slugify(value or "", fallback="")
+    return _normalize_project_cached(value or "")
+
+
+@functools.lru_cache(maxsize=4096)
+def _normalize_project_cached(value: str) -> str:
+    return slugify(value, fallback="")
 
 
 def default_memory_visibility(scope: str) -> str:
@@ -242,6 +262,20 @@ def _token_unspaced(character: str) -> bool:
     )
 
 
+def _substring_script(value: str) -> bool:
+    """True when whole-word matching cannot work for this text.
+
+    Scripts without spaces (see _token_unspaced) have no word boundaries, and
+    Korean attaches particles to words ("배포" is written "배포는"). Such
+    query words match as substrings, the way 3.x matched everything.
+    """
+    return any(
+        _token_unspaced(character) or 0xAC00 <= ord(character) <= 0xD7AF
+        or 0x1100 <= ord(character) <= 0x11FF or 0x3130 <= ord(character) <= 0x318F
+        for character in value
+    )
+
+
 def _compose(value: str) -> str:
     """Recompose a token after NFKD.
 
@@ -282,7 +316,10 @@ def _unicode_memory_tokens(value: str) -> set[str]:
     def flush() -> None:
         if not buffer:
             return
-        run = "".join(buffer)
+        # Recompose before slicing: NFKD splits voiced kana into base plus a
+        # combining mark that also sits in the unspaced range, so slicing the
+        # decomposed run cut デプロイ into デ, プ, ゙フ, ゚ロ, ロイ.
+        run = _compose("".join(buffer))
         buffer.clear()
         cursor = 0
         while cursor < len(run):
@@ -326,24 +363,60 @@ def _unicode_memory_tokens(value: str) -> set[str]:
 unicode_memory_tokens = _unicode_memory_tokens
 
 
+# Two-character tokens are dropped as noise, which also dropped every
+# acronym: "which CI system do we run" had nothing to match. Kept when written
+# in capitals (CI, DB, PR), when a letter meets a digit (S3, K8), or when one
+# of these common engineering acronyms is typed in lowercase. "go" and "it"
+# stay out: they are ordinary words far more often than names.
+_ACRONYM_RE = re.compile(r"(?<![A-Za-z0-9])(?:[A-Z][A-Z0-9]|[A-Za-z][0-9]|[0-9][A-Za-z])(?![A-Za-z0-9])")
+_KNOWN_ACRONYMS = frozenset({
+    "ci", "cd", "db", "ui", "ux", "pr", "qa", "os", "ip", "js", "ts", "ai", "ml", "vm", "s3", "k8", "tz",
+})
+
+
+_ACRONYM_WORD_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _acronym_tokens(value: str) -> set[str]:
+    found = {match.lower() for match in _ACRONYM_RE.findall(value)}
+    # One split and a set intersection: the same [a-z0-9] word boundaries as
+    # a per-acronym regex search, which cost 17 searches per field and was
+    # most of a cold recall on a large store.
+    found |= _KNOWN_ACRONYMS.intersection(_ACRONYM_WORD_SPLIT.split(value.lower()))
+    return found
+
+
 def memory_tokens(value: str) -> set[str]:
     # ASCII text needs no folding, no mark handling, and no segmentation, so
     # it keeps the original path: byte-identical tokens, no added cost.
     if value.isascii():
-        return {
-            token
-            for token in _ASCII_TOKEN_SPLIT.split(value.lower())
-            if len(token) >= 3
-        }
-    return _unicode_memory_tokens(value)
+        words = _ASCII_TOKEN_SPLIT.split(value.lower())
+        tokens = {token for token in words if len(token) >= 3}
+        # The acronym split is this same split; reuse it.
+        tokens |= _KNOWN_ACRONYMS.intersection(words)
+        tokens |= {match.lower() for match in _ACRONYM_RE.findall(value)}
+        return tokens
+    return _unicode_memory_tokens(value) | _acronym_tokens(value)
 
 
 def compact_memory_text(value: str) -> str:
-    return " ".join(
-        token
-        for token in re.split(r"[^a-z0-9]+", value.lower())
-        if token
-    )
+    """Normalized word stream used as a claim's identity.
+
+    Dedupe keys, proposal fingerprints and text-containment checks all read
+    this. It used to keep only [a-z0-9], so any Japanese, Hindi, Arabic or
+    Cyrillic claim compacted to the empty string: three distinct proposals
+    collapsed into one and unrelated claims shared a fingerprint. ASCII text
+    takes the original path byte for byte, so every stored fingerprint and
+    dismissal stays valid; other scripts keep their letters, with Latin
+    accents folded the same way the tokenizer folds them.
+    """
+    if value.isascii():
+        return " ".join(
+            token
+            for token in re.split(r"[^a-z0-9]+", value.lower())
+            if token
+        )
+    return " ".join(_slug_fold(value).replace("-", " ").split())
 
 
 def proposal_fingerprint(memory: str) -> str:
@@ -379,6 +452,7 @@ def significant_memory_tokens(value: str) -> set[str]:
     }
 
 
+@functools.lru_cache(maxsize=131_072)
 def stem_memory_token(token: str) -> str:
     """Light deterministic suffix stemming so close paraphrases still match.
 
@@ -386,10 +460,23 @@ def stem_memory_token(token: str) -> str:
     services. Enough to make "committing" match "commit" and "answers"
     match "answer" without changing Link's local-first story.
     """
-    for suffix in ("ing", "ed", "es", "s"):
-        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
-            return token[: -len(suffix)]
-    return token
+    if not token.isascii():
+        return token
+    stem = token
+    if stem.endswith("ies") and len(stem) - 3 >= 3:
+        stem = stem[:-3] + "y"  # policies -> policy
+    else:
+        for suffix in ("ing", "ed", "es", "s"):
+            if stem.endswith(suffix) and len(stem) - len(suffix) >= 3:
+                stem = stem[: -len(suffix)]
+                if suffix in {"ing", "ed"} and len(stem) >= 4 and stem[-1] == stem[-2] and stem[-1] not in "lsz":
+                    stem = stem[:-1]  # committing -> committ -> commit
+                break
+    # A final silent e is dropped so both forms of a word meet:
+    # license/licensed -> licens, package/packages -> packag.
+    if stem.endswith("e") and len(stem) >= 5:
+        stem = stem[:-1]
+    return stem
 
 
 def stemmed_memory_tokens(tokens: set[str]) -> set[str]:
@@ -418,24 +505,46 @@ def memory_recall_confidence(record: Mapping[str, object], query: str) -> str:
     trigger = str(record.get("trigger") or "").lower()
     if trigger:
         tldr = f"{tldr} {trigger}".strip()
-    body = str(record.get("body", "")).lower()
-    if q and (q in title or q in tldr):
+    if q and len(q.split()) >= 2 and (_contains_phrase(title, q) or _contains_phrase(tldr, q)):
         return "strong"
     if not significant:
         return "weak"
-    title_tokens = stemmed_memory_tokens(memory_tokens(title))
-    head_tokens = title_tokens | stemmed_memory_tokens(
-        memory_tokens(tldr) | memory_tokens(tags)
+    title_tokens = cached_stems(cached_field_tokens(title))
+    head_tokens = title_tokens | cached_stems(
+        cached_field_tokens(tldr) | cached_field_tokens(tags)
     )
-    all_tokens = head_tokens | stemmed_memory_tokens(memory_tokens(body))
-    if significant <= head_tokens:
+    all_tokens = head_tokens | cached_stems(cached_field_tokens(str(record.get("body", ""))))
+    # One shared content word is never strong evidence on its own: with
+    # question words no longer counted, "can you deploy it" is just "deploy",
+    # and a memory titled with that word is a candidate, not an answer.
+    if len(significant) >= 2 and significant <= head_tokens:
         return "strong"
-    coverage = len(significant & all_tokens) / len(significant)
-    if coverage >= 0.5:
+    matched = significant & all_tokens
+    if len(matched) >= 2 and len(matched) / len(significant) >= 0.5:
         return "moderate"
     if significant & title_tokens:
         return "moderate"
     return "weak"
+
+
+def _contains_phrase(text: str, phrase: str) -> bool:
+    """Whole-word containment: "main" is not inside "maintain"."""
+    if text.isascii() and phrase.isascii():
+        return re.search(rf"(?<![A-Za-z0-9_]){re.escape(phrase)}(?![A-Za-z0-9_])", text) is not None
+    if _substring_script(phrase):
+        return phrase in text
+    # A letter from a script without spaces is a boundary too: "vault" is a
+    # whole word in "鍵はvaultに保存する".
+    for match in re.finditer(re.escape(phrase), text):
+        before = text[match.start() - 1] if match.start() else ""
+        after = text[match.end()] if match.end() < len(text) else ""
+        if not _word_character(before) and not _word_character(after):
+            return True
+    return False
+
+
+def _word_character(character: str) -> bool:
+    return bool(character) and (character.isalnum() or character == "_") and not _substring_script(character)
 
 
 def expanded_memory_query_tokens(value: str) -> set[str]:
@@ -452,12 +561,64 @@ def expanded_memory_query_tokens(value: str) -> set[str]:
     return expanded
 
 
+# Negation words in common spaced languages, matched as whole words.
+NEGATION_WORDS_MULTILINGUAL = {
+    "nunca", "jamás", "jamas", "jamais", "nicht", "nie", "niemals", "kein", "keine",
+    "não", "nao", "niet", "nooit", "inte", "aldrig", "ikke",
+    "не", "никогда", "нельзя", "ні", "ніколи", "nigdy",
+    "नहीं", "मत", "कभी", "لا", "ليس", "أبدا", "لن", "değil", "asla",
+    "không", "đừng", "tidak", "jangan", "huwag",
+}
+# Left out on purpose: "non", "mai" and "hindi" are also ordinary English
+# words ("non-blocking", "the Hindi docs"); counting them would invent
+# negations in English claims.
+# Scripts written without spaces carry negation inside words, so these match
+# as substrings: Japanese ない/ません/禁止/決して, Chinese 不/别/禁止/勿,
+# Korean 않/못/금지/말.
+NEGATION_SUBSTRINGS_UNSPACED = (
+    "ない", "ません", "禁止", "決して", "するな", "不", "别", "別", "勿", "않", "못", "금지", "마세요", "말고",
+)
+# Everyday words that contain a marker without negating anything: 特别
+# "especially", 区别 "difference", 個別 "individual", 危ない "dangerous",
+# 少ない "few", 不具合 "bug", 不可欠 "essential". Removed before the check, so
+# "发布前特别要运行测试" does not read as the opposite of "发布前运行测试".
+_NEGATION_FALSE_COMPOUNDS = (
+    "特别", "特別", "区别", "區別", "区別", "分别", "分別", "个别", "個別", "差别", "差別", "告别", "告別",
+    "类别", "類別", "级别", "級別", "识别", "識別", "性别", "性別", "别名", "別名", "別途", "別々", "別の",
+    "危ない", "少ない", "切ない", "仕方ない", "不具合", "不可欠", "不安", "不動産",
+)
+
+
 def has_negation(value: str) -> bool:
     compact = compact_memory_text(value)
     tokens = set(compact.split())
     if tokens & NEGATION_TERMS:
         return True
-    return bool(re.search(r"\b(?:do not|does not|did not|should not|don't|can't|cannot)\b", value, re.IGNORECASE))
+    if re.search(r"\b(?:do not|does not|did not|should not|don't|can't|cannot)\b", value, re.IGNORECASE):
+        return True
+    if tokens & NEGATION_WORDS_MULTILINGUAL:
+        return True
+    padded = f" {compact} "
+    if " ne " in padded and " pas " in padded:
+        return True  # French ne ... pas
+    if value.isascii():
+        return False
+    stripped = value
+    for compound in _NEGATION_FALSE_COMPOUNDS:
+        if compound in stripped:
+            stripped = stripped.replace(compound, " ")
+    return any(cue in stripped for cue in NEGATION_SUBSTRINGS_UNSPACED)
+
+
+# Options that are only options inside a phrase. Bare, "release" and
+# "development" turned "release notes" and "local development" into branch
+# policies, and supersession then archived unrelated memories.
+CONFLICT_QUALIFIED_OPTIONS = {
+    "branch_policy": {
+        "release": re.compile(r"\breleases?\s+branch", re.IGNORECASE),
+        "development": re.compile(r"\bdevelopment\s+branch", re.IGNORECASE),
+    },
+}
 
 
 def _extract_option_groups(value: str) -> dict[str, set[str]]:
@@ -465,6 +626,9 @@ def _extract_option_groups(value: str) -> dict[str, set[str]]:
     groups: dict[str, set[str]] = {}
     for group, options in CONFLICT_OPTION_GROUPS.items():
         matches = tokens & options
+        for option, phrase in CONFLICT_QUALIFIED_OPTIONS.get(group, {}).items():
+            if phrase.search(value):
+                matches = matches | {option}
         if matches:
             groups[group] = matches
     return groups
@@ -519,8 +683,25 @@ def procedure_steps_excerpt(body: str, max_chars: int = 800) -> str:
     return text
 
 
+def memory_quarantined(record: Mapping[str, object]) -> bool:
+    """An imported memory nobody on this machine has reviewed yet.
+
+    Team-sync brings teammates' memories in with `imported_from: team` and
+    `review_status: pending`. Until the user reviews one it is their
+    teammate's claim, not theirs: it shows in the review inbox, and recall,
+    briefs and the write gates leave it alone.
+    """
+    if not str(record.get("imported_from") or "").strip():
+        return False
+    return str(record.get("review_status") or "pending").lower() in {"pending", "needs_review"}
+
+
 def is_active_memory(record: Mapping[str, object]) -> bool:
-    return str(record.get("status") or "active").lower() not in {"archived", "stale"} and not memory_expired(record)
+    return (
+        str(record.get("status") or "active").lower() not in {"archived", "stale"}
+        and not memory_expired(record)
+        and not memory_quarantined(record)
+    )
 
 
 def _parse_date_field(value: object, field: str) -> date | None:
@@ -591,11 +772,18 @@ def memory_active_at(record: Mapping[str, object], as_of: str) -> bool:
     captured = _memory_date(record.get("date_captured"))
     if captured is not None and captured.date() > day:
         return False
-    if str(record.get("status") or "active").lower() == "archived":
+    status = str(record.get("status") or "active").lower()
+    if status == "archived":
         archived = _memory_date(record.get("archived_at"))
         if archived is None or archived.date() <= day:
             return False
+    elif status == "stale":
+        # Nothing records when a memory went stale, so it cannot be placed
+        # in time; like an undated archive, it is treated as inactive.
+        return False
     if memory_expired(record, today=as_of):
+        return False
+    if memory_quarantined(record):
         return False
     return True
 
@@ -637,6 +825,12 @@ def _heading_title(body: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _frontmatter_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
 def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = True) -> dict[str, object]:
     wiki_root = wiki_dir.expanduser().resolve()
     path = path.expanduser().resolve()
@@ -675,6 +869,13 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "applies_when": str(meta.get("applies_when") or ""),
         "supersedes": str(meta.get("supersedes") or ""),
         "superseded_by": str(meta.get("superseded_by") or ""),
+        "imported_from": str(meta.get("imported_from") or "").strip(),
+        # file:line anchors added when the memory was written inside a repo
+        # (provenance.py); checked by lnk stale and the recall packet.
+        "anchors": _frontmatter_string_list(meta.get("anchors")),
+        # Reviewed rules checked before the agent's tool calls (tool_hooks).
+        "enforce": _frontmatter_string_list(meta.get("enforce")),
+        "enforce_active": _frontmatter_string_list(meta.get("enforce_active")),
         "tags": meta_tags(meta.get("tags", "")),
         "tldr": extract_tldr(body),
         "snippet": first_body_snippet(body),
@@ -684,15 +885,48 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
     return record
 
 
+# Parsed records per memories directory, keyed by file path and reused while
+# the file's (mtime_ns, size, inode) is unchanged. Every CLI command, MCP call
+# and viewer page reads the whole store; re-parsing 20,000 files cost ~1.3 s
+# per call. An edit, an atomic replace or a new file changes the key, so a
+# stale record is never served.
+_RECORD_CACHE: dict[str, dict[str, tuple[tuple[int, int, int], dict[str, object]]]] = {}
+_RECORD_CACHE_LOCK = threading.Lock()
+
+
 def memory_records(wiki_dir: Path, include_body: bool = True) -> list[dict[str, object]]:
     memories_dir = wiki_dir / "memories"
     if not memories_dir.exists():
         return []
+    cache_key = str(memories_dir.resolve())
+    with _RECORD_CACHE_LOCK:
+        cached = _RECORD_CACHE.get(cache_key, {})
+    fresh: dict[str, tuple[tuple[int, int, int], dict[str, object]]] = {}
     records: list[dict[str, object]] = []
     for path in sorted(memories_dir.rglob("*.md")):
         if path.name.startswith("."):
             continue
-        records.append(memory_record_from_page(wiki_dir, path, include_body=include_body))
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        entry = cached.get(str(path))
+        if entry is not None and entry[0] == signature:
+            record = entry[1]
+        else:
+            try:
+                record = memory_record_from_page(wiki_dir, path, include_body=True)
+            except OSError:
+                continue
+        fresh[str(path)] = (signature, record)
+        # Callers get their own dict; the cached one is never handed out.
+        if include_body:
+            records.append(dict(record))
+        else:
+            records.append({key: value for key, value in record.items() if key != "body"})
+    with _RECORD_CACHE_LOCK:
+        _RECORD_CACHE[cache_key] = fresh
     return records
 
 
@@ -729,6 +963,17 @@ def memory_review_issues(
             "message": f"Unknown review_status: {review_status}.",
             "suggested_action": "Use pending, reviewed, or needs_update.",
         })
+    enforce_value = record.get("enforce")
+    for rule in enforce_value if isinstance(enforce_value, list) else []:
+        try:
+            parse_enforce_rule(str(rule))
+        except ValueError as exc:
+            issues.append({
+                "code": "invalid_enforce_rule",
+                "severity": "high",
+                "message": f"Enforce rule {rule!r} is not valid and is ignored: {exc}",
+                "suggested_action": "Fix or remove it with `lnk enforce <memory> ...`.",
+            })
     review_after = str(record.get("review_after") or "").strip()
     if review_after:
         try:
@@ -1086,7 +1331,13 @@ def recall_state(
 ) -> dict[str, object]:
     default_enabled = is_active_memory(record)
     high_issues = [issue for issue in issues if str(issue.get("severity") or "") == "high"]
-    if not default_enabled:
+    if memory_quarantined(record):
+        state = "quarantined"
+        reason = (
+            f"Imported from {record.get('imported_from')} memory and not reviewed on this machine; "
+            "recall leaves it out until you review it."
+        )
+    elif not default_enabled:
         state = "disabled"
         if memory_expired(record):
             reason = f"Memory expired at {record.get('expires_at')}; default recall excludes expired memories."
@@ -1339,6 +1590,74 @@ def replace_markdown_body(text: str, body: str) -> str:
     return body.strip() + "\n"
 
 
+def memory_summary_line(text: str) -> str:
+    """The one-line claim shown as a memory's TLDR (same rule as writes)."""
+    summary = text.strip().splitlines()[0].strip() if text.strip() else ""
+    if len(summary) > 180:
+        summary = summary[:177].rstrip() + "..."
+    return summary
+
+
+def title_restates_claim(title: str, claim: str) -> bool:
+    """Whether a memory's title is its old claim rather than a label.
+
+    Titles are derived from the first sentence when none is given, so most
+    titles say what the memory claimed ("We deploy with Python 3.11"). When
+    the claim changes, such a title would keep asserting the old value.
+    """
+    title_key = compact_memory_text(title)
+    claim_key = compact_memory_text(claim)
+    return bool(title_key) and bool(claim_key) and (
+        claim_key.startswith(title_key)
+        or title_key == compact_memory_text(memory_title(claim))
+    )
+
+
+_ADDITIVE_UPDATE_RE = re.compile(
+    r"^\s*(?:also|additionally|in addition|plus|another|and also|as well as|furthermore|moreover|p\.?s\.?)\b"
+    r"|\b(?:too|as well)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _update_adds_to_claim(update_text: str) -> bool:
+    """True when an update says it adds to the claim rather than replacing it."""
+    first_line = update_text.strip().splitlines()[0] if update_text.strip() else ""
+    return bool(_ADDITIVE_UPDATE_RE.search(first_line))
+
+
+def rewrite_memory_head(body: str, old_title: str, new_text: str) -> tuple[str, str | None]:
+    """Point a memory's TLDR (and a claim-shaped title) at its latest text.
+
+    Recall, briefs, duplicate and conflict checks all read the head, so an
+    update that only appended to the body left agents reading the old claim.
+    The full history stays in the Memory section.
+    """
+    summary = memory_summary_line(new_text)
+    if not summary:
+        return body, None
+    old_tldr = extract_tldr(body)
+    new_title: str | None = None
+    if title_restates_claim(old_title, old_tldr or old_title):
+        candidate = memory_title(new_text)
+        if candidate and candidate != old_title:
+            new_title = candidate
+    tldr_re = re.compile(r"(>\s*\*\*TLDR:\*\*\s*)(.+)")
+    if tldr_re.search(body):
+        body = tldr_re.sub(lambda match: match.group(1) + summary, body, count=1)
+    if new_title:
+        # Only the page's own heading, above its first section: a page with
+        # no H1 must not have a heading inside an appended update renamed.
+        section = re.search(r"^##\s", body, flags=re.MULTILINE)
+        head_end = section.start() if section else len(body)
+        head, rest = body[:head_end], body[head_end:]
+        renamed = re.sub(r"^#\s+.+$", lambda _match: f"# {new_title}", head, count=1, flags=re.MULTILINE)
+        if renamed == head:
+            new_title = None
+        body = renamed + rest
+    return body, new_title
+
+
 def append_memory_update(body: str, update_text: str, timestamp: str, source: str) -> str:
     source_label = source.strip() or "manual"
     update_block = f"Update ({timestamp}, {source_label}):\n\n{update_text.strip()}"
@@ -1468,6 +1787,109 @@ def set_memory_visibility(
     }
 
 
+
+def rules_in_force(record: Mapping[str, object]) -> list[str]:
+    """The rules a memory enforces right now.
+
+    A reviewed memory enforces `enforce`. One sent back to review (a rule
+    added, a claim updated) keeps enforcing the rules the person already
+    approved, kept in `enforce_active`, until they review again: a change
+    that waits for review must never switch off what was reviewed.
+    """
+    if memory_quarantined(record) or not is_active_memory(record):
+        return []
+    status = str(record.get("review_status") or "").lower()
+    if status == "reviewed":
+        value = record.get("enforce")
+    else:
+        value = record.get("enforce_active")
+    return [str(rule) for rule in value if str(rule).strip()] if isinstance(value, list) else []
+
+
+def _keep_rules_active(record: Mapping[str, object], updates: dict[str, object], remove: set[str]) -> None:
+    """Sending a reviewed, rule-bearing memory back to review keeps its rules in force."""
+    if updates.get("review_status") != "pending":
+        return
+    active = rules_in_force(record)
+    if active:
+        updates["enforce_active"] = active
+        remove.discard("enforce_active")
+
+
+def set_memory_enforce(
+    wiki_dir: Path,
+    identifier: str,
+    rules: Iterable[str],
+    timestamp: str,
+    records: Iterable[Mapping[str, object]] | None = None,
+    log_writer: MemoryLogWriter | None = None,
+) -> dict[str, object]:
+    """Set (or with no rules, clear) the rules a memory enforces on tool calls.
+
+    A new rule puts the memory back into review: it acts only after a
+    person approves it. Rules the person already approved keep acting
+    meanwhile. Removing rules needs no review.
+    """
+    page_path, record, error = resolve_memory_page(wiki_dir, identifier, records=records)
+    if error:
+        raise ValueError(error)
+    assert page_path is not None and record is not None
+    if memory_quarantined(record) or not is_active_memory(record):
+        raise ValueError("only an active memory you have reviewed can enforce rules")
+    clean = [parse_enforce_rule(str(rule)).text() for rule in rules if str(rule).strip()]
+    if len(clean) > MAX_ENFORCE_RULES:
+        raise ValueError(f"at most {MAX_ENFORCE_RULES} enforce rules per memory")
+    enforce_value = record.get("enforce")
+    previous = [str(rule) for rule in enforce_value] if isinstance(enforce_value, list) else []
+    changed = clean != previous
+    needs_review = changed and bool(set(clean) - set(previous))
+    if changed:
+        with operation_journal(
+            wiki_dir,
+            "set-memory-enforce",
+            str(record["title"]),
+            timestamp=timestamp,
+            paths=[f"wiki/memories/{page_path.name}", "wiki/log.md"],
+        ):
+            text = page_path.read_text(encoding="utf-8", errors="replace")
+            updates: dict[str, object] = {"enforce": clean} if clean else {}
+            remove = {"enforce", "enforce_active"} if not clean else set()
+            if needs_review:
+                updates["review_status"] = "pending"
+                remove |= {"reviewed_at"}
+                _keep_rules_active(record, updates, remove)
+            elif clean:
+                # Only removals: whatever still holds is the new list.
+                active = [rule for rule in rules_in_force(record) if rule in clean]
+                if str(record.get("review_status") or "").lower() != "reviewed" and active:
+                    updates["enforce_active"] = active
+                else:
+                    remove.add("enforce_active")
+            atomic_write_text(page_path, update_frontmatter_fields(text, updates, remove=remove))
+            if log_writer:
+                log_writer(
+                    timestamp,
+                    "set-memory-enforce",
+                    str(record["title"]),
+                    [f"Updated: memories/{page_path.name}"]
+                    + [f"Rule: {rule}" for rule in clean]
+                    + ([] if clean else ["Rules cleared"])
+                    + (["New review status: pending (new rules act after review; approved ones keep acting)"]
+                       if needs_review else []),
+                )
+    _, updated, _ = resolve_memory_page(wiki_dir, str(record["name"]))
+    return {
+        "updated": changed,
+        "name": record["name"],
+        "path": record["path"],
+        "title": record["title"],
+        "enforce": clean,
+        "previous_enforce": previous,
+        "in_force": rules_in_force(updated or record),
+        "review_status": "pending" if needs_review else record.get("review_status", "pending"),
+        "active": bool(clean) and not needs_review and str(record.get("review_status")) == "reviewed",
+    }
+
 def forget_memory_page(
     wiki_dir: Path,
     identifier: str,
@@ -1577,7 +1999,7 @@ def mark_memory_reviewed(
             paths=[f"wiki/memories/{page_path.name}", "wiki/log.md"],
         ):
             text = page_path.read_text(encoding="utf-8", errors="replace")
-            atomic_write_text(page_path, update_frontmatter_fields(text, updates))
+            atomic_write_text(page_path, update_frontmatter_fields(text, updates, remove={"enforce_active"}))
             if log_writer:
                 log_lines = [
                     f"Reviewed: memories/{page_path.name}",
@@ -1625,6 +2047,8 @@ def update_memory_page(
     if error:
         raise ValueError(error)
     assert page_path is not None and record is not None
+    if memory_quarantined(record):
+        raise ValueError("this memory was imported from your team and is waiting for review; review it first")
     if not is_active_memory(record):
         raise ValueError("cannot update archived or stale memory; restore it first")
     conflict_candidates = memory_conflict_candidates(
@@ -1654,13 +2078,33 @@ def update_memory_page(
     original = page_path.read_text(encoding="utf-8", errors="replace")
     _, body = parse_frontmatter(original)
     updated_body = append_memory_update(body, clean_text, timestamp, clean_source)
-    updates = {
+    # An update revises the claim ("standup moved to 10:00") unless it says
+    # it adds to it ("Also pin pip to 24.0"): an addition is appended and
+    # leaves the claim agents read unchanged. Guessing revisions from shared
+    # words missed most real ones and kept serving the stale value.
+    new_title = None
+    if not _update_adds_to_claim(clean_text):
+        updated_body, new_title = rewrite_memory_head(
+            updated_body, str(record.get("title") or ""), clean_text
+        )
+    updates: dict[str, object] = {
         "updated_at": f'"{timestamp}"',
         "update_count": str(next_update_count),
         "last_update_source": f'"{frontmatter_string(clean_source)}"',
         "review_status": "pending",
     }
-    updated_text = update_frontmatter_fields(original, updates, remove={"reviewed_at", "review_note"})
+    if new_title:
+        updates["title"] = f'"{frontmatter_string(new_title)}"'
+    remove = {"reviewed_at", "review_note"}
+    _keep_rules_active(record, updates, remove)
+    imported_from = str(record.get("imported_from") or "").strip()
+    if imported_from:
+        # The person reviewed this import and is now changing it: it is their
+        # claim from here on. Keeping `imported_from` would put it back in
+        # quarantine the moment the update resets review to pending.
+        updates["originally_imported_from"] = frontmatter_string(imported_from)
+        remove.add("imported_from")
+    updated_text = update_frontmatter_fields(original, updates, remove=remove)
     with operation_journal(
         wiki_dir,
         "update-memory",
@@ -1668,7 +2112,7 @@ def update_memory_page(
         timestamp=timestamp,
         paths=[f"wiki/memories/{page_path.name}", "wiki/_backlinks.json", "wiki/log.md"],
     ):
-        atomic_write_text(page_path, replace_markdown_body(updated_text, updated_body))
+        atomic_write_text(page_path, add_anchors_to_page(replace_markdown_body(updated_text, updated_body), clean_text))
         if log_writer:
             log_writer(
                 timestamp,
@@ -1680,7 +2124,7 @@ def update_memory_page(
                     "New review status: pending",
                     f"Update count: {next_update_count}",
                     f"Source: {clean_source}",
-                ],
+                ] + ([f"Title now: {new_title}"] if new_title else []),
             )
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
 
@@ -1729,6 +2173,15 @@ def write_memory_page(
     allow_secret: bool = False,
     log_writer: MemoryLogWriter | None = None,
     rebuild_backlinks: BacklinkRebuilder | None = None,
+    # Rules checked before the agent's tool calls once the memory is reviewed.
+    enforce: Iterable[str] | None = None,
+    # A ContradictionScorer, None to skip, or "auto" to use the local model
+    # when it is set up. Typed loosely for callers that pass keyword dicts.
+    contradiction_scorer: object = "auto",
+    # True only when the person named the project themselves. Callers also
+    # pass a default project (the workspace or cwd repo name) on every write,
+    # and that default must never turn a user-wide memory into a project one.
+    project_explicit: bool = False,
 ) -> dict[str, object]:
     if memory_type not in MEMORY_TYPES:
         raise ValueError(f"memory_type must be one of: {', '.join(MEMORY_TYPES)}")
@@ -1744,6 +2197,9 @@ def write_memory_page(
     clean_context = " ".join(str(context or "").split())
     if len(clean_context) > 600:
         clean_context = clean_context[:600].rsplit(" ", 1)[0].strip()
+    clean_enforce = [parse_enforce_rule(str(rule)).text() for rule in (enforce or []) if str(rule).strip()]
+    if len(clean_enforce) > MAX_ENFORCE_RULES:
+        raise ValueError(f"at most {MAX_ENFORCE_RULES} enforce rules per memory")
     clean_applies_when = " ".join(str(applies_when or "").split())
     if clean_applies_when:
         if len(clean_applies_when) > 200:
@@ -1784,14 +2240,19 @@ def write_memory_page(
     clean_expires_at = str(expires_at or "").strip()
     if clean_expires_at:
         _parse_expires_date(clean_expires_at)
+    # Naming a project means the memory belongs to it. The project used to be
+    # dropped silently unless --scope project was also given, so
+    # `remember "Use ruff" --project api` saved a user-wide memory.
+    scope_inferred = False
+    if project_explicit and normalize_project(project) and scope == "user":
+        scope = "project"
+        scope_inferred = True
     clean_project = normalize_project(project) if scope == "project" else ""
     derived_title = title
     if not (derived_title and derived_title.strip()) and memory_type == "procedure" and clean_trigger:
         derived_title = clean_trigger
     memory_title_value = memory_title(clean_text, derived_title)
-    summary = clean_text.splitlines()[0].strip()
-    if len(summary) > 180:
-        summary = summary[:177].rstrip() + "..."
+    summary = memory_summary_line(clean_text)
     record_list = [dict(record) for record in records] if records is not None else memory_records(wiki_dir)
     superseded_path: Path | None = None
     superseded_record: dict[str, object] | None = None
@@ -1868,6 +2329,17 @@ def write_memory_page(
             "project": clean_project,
             "candidates": duplicate_candidates,
         }
+    # Meaning-level check, only when the user set up the local NLI model:
+    # flag (never block) stored claims this one may contradict, so review
+    # catches what the word rules above cannot see.
+    scorer = load_contradiction_scorer() if contradiction_scorer == "auto" else contradiction_scorer
+    possible_contradictions: list[dict[str, object]] = []
+    if callable(scorer):
+        possible_contradictions = nli_contradiction_flags(
+            record_list, clean_text, title, memory_type, scope, clean_project,
+            scorer,  # type: ignore[arg-type]  # callable() checked; signature is the caller's contract
+            exclude_names={str(c.get("name")) for c in conflict_candidates} | {superseded_name or ""},
+        )
     memories_dir = wiki_dir / "memories"
     memories_dir.mkdir(parents=True, exist_ok=True)
     page_path = unique_page_path(memories_dir, slugify(memory_title_value))
@@ -1886,6 +2358,12 @@ def write_memory_page(
     )
     supersedes_line = f'supersedes: "{frontmatter_string(superseded_name)}"\n' if superseded_name else ""
     context_line = f'context: "{frontmatter_string(clean_context)}"\n' if clean_context else ""
+    review_note_line = ""
+    if possible_contradictions:
+        disputed = ", ".join(str(flag["name"]) for flag in possible_contradictions)
+        review_note_line = (
+            f'review_note: "{frontmatter_string(f"May contradict {disputed} (local NLI); review before relying on either.")}"\n'
+        )
 
 
     if memory_type == "procedure":
@@ -1910,7 +2388,7 @@ visibility: {clean_visibility}
 date_captured: "{timestamp}"
 source: "{frontmatter_string(clean_source)}"
 review_status: pending
-{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}{supersedes_line}{context_line}reviewed_at: ""
+{review_after_line}{expires_at_line}{trigger_line}{applies_when_line}{supersedes_line}{context_line}{review_note_line}reviewed_at: ""
 tags: {yaml_list(tag_values)}
 ---
 
@@ -1940,6 +2418,9 @@ tags: {yaml_list(tag_values)}
         timestamp=timestamp,
         paths=journal_paths,
     ):
+        page = add_anchors_to_page(page, f"{clean_text}\n{clean_context}")
+        if clean_enforce:
+            page = update_frontmatter_fields(page, {"enforce": clean_enforce})
         atomic_write_text(page_path, page)
         if superseded_path is not None and superseded_record is not None:
             # Supersession is one atomic story: the successor records what it
@@ -1975,6 +2456,11 @@ tags: {yaml_list(tag_values)}
         backlinks_rebuilt = rebuild_backlinks() if rebuild_backlinks else False
     return {
         "created": True,
+        "enforce": clean_enforce,
+        # A constraint naming a command can become an enforced rule; the
+        # person decides (lnk enforce), Link never enables one on its own.
+        "enforce_suggestions": [] if clean_enforce else suggest_enforce_rules(clean_text),
+        "scope_inferred_from_project": scope_inferred,
         "supersedes": superseded_name,
         "name": page_name,
         "path": f"wiki/memories/{page_path.name}",
@@ -1990,7 +2476,72 @@ tags: {yaml_list(tag_values)}
         "duplicate_candidates": duplicate_candidates,
         "conflict_override": bool(conflict_candidates and allow_conflict),
         "conflict_candidates": conflict_candidates,
+        "possible_contradictions": possible_contradictions,
     }
+
+
+# Neighbours checked by the NLI model per write: the closest few, and only
+# when their subject words overlap enough to be about the same thing.
+# scripts/eval_contradiction_flags.py measures it on 20 revisions and 216
+# unrelated pairs sharing a subject word: the model alone flags 107 of the
+# unrelated pairs at 0.9 (it reads two different rules as mutually
+# exclusive); requiring 30% subject overlap removes every one of them.
+NLI_NEIGHBOURS = 5
+NLI_MIN_SUBJECT_OVERLAP = 0.3
+
+
+def nli_contradiction_flags(
+    records: Iterable[Mapping[str, object]],
+    text: str,
+    title: str | None,
+    memory_type: str,
+    scope: str,
+    project: str | None,
+    scorer: ContradictionScorer,
+    *,
+    exclude_names: Collection[str] = (),
+    limit: int = NLI_NEIGHBOURS,
+) -> list[dict[str, object]]:
+    """Stored memories a local NLI model reads as contradicting the new one."""
+    if memory_type not in MEMORY_CONFLICT_TYPES:
+        return []
+    new_claim = memory_summary_line(text) or memory_title(text, title)
+    new_words = cached_stems(frozenset(significant_memory_tokens(f"{memory_title(text, title)} {text}"))) - _CONFLICT_CUE_TOKENS
+    project_name = normalize_project(project)
+    excluded = {name for name in exclude_names if name}
+    neighbours: list[tuple[float, Mapping[str, object]]] = []
+    for record in records:
+        name = str(record.get("name") or "")
+        if name in excluded or not is_active_memory(record):
+            continue
+        record_type = str(record.get("memory_type") or "")
+        if record_type != memory_type and {record_type, memory_type} != {"preference", "decision"}:
+            continue
+        if scope == "project" and not memory_visible_for_project(record, project_name):
+            continue
+        head = f"{record.get('title') or ''} {record.get('tldr') or ''}"
+        head_words = cached_stems(frozenset(significant_memory_tokens(head))) - _CONFLICT_CUE_TOKENS
+        union = new_words | head_words
+        overlap = len(new_words & head_words) / len(union) if union else 0.0
+        if overlap >= NLI_MIN_SUBJECT_OVERLAP:
+            neighbours.append((overlap, record))
+    neighbours.sort(key=lambda item: -item[0])
+    chosen = [record for _, record in neighbours[:limit]]
+    if not chosen:
+        return []
+    try:
+        probabilities = scorer([(str(r.get("tldr") or r.get("title") or ""), new_claim) for r in chosen])
+    except Exception:
+        return []  # a model failure must never break a save
+    flags = []
+    for record, probability in zip(chosen, probabilities):
+        if probability >= CONTRADICTION_THRESHOLD:
+            flags.append({
+                "name": str(record.get("name") or ""),
+                "title": str(record.get("title") or ""),
+                "probability": round(float(probability), 3),
+            })
+    return flags
 
 
 def memory_inbox(
@@ -2316,6 +2867,43 @@ def add_capture_review_to_brief(
     return result
 
 
+# How the agent should answer, format, cite or behave: preferences that hold
+# for every task rather than for a topic.
+_STANDING_PREFERENCE_RE = re.compile(
+    r"\b(?:answers?|repl(?:y|ies)|respon(?:d|ses?)|explain|explanations?|tone|concise|verbose|brief|"
+    r"short|terse|cite|citations?|sources?|format(?:ting)?|markdown|bullets?|emoji|language|english|"
+    r"ask (?:me|before)|confirm before|summar(?:y|ies|ize)|code comments?)\b",
+    re.IGNORECASE,
+)
+STANDING_BRIEF_SLOTS = 2
+
+
+def standing_preferences(
+    records: Iterable[Mapping[str, object]],
+    project: str | None = None,
+    limit: int = STANDING_BRIEF_SLOTS,
+) -> list[Mapping[str, object]]:
+    """Active, unconditional user preferences about how the agent behaves.
+
+    Reviewed ones first, then most recent. A preference fenced with
+    applies_when is conditional by definition and is left to task recall.
+    """
+    project_name = normalize_project(project)
+    found: list[Mapping[str, object]] = []
+    for record in recent_memories(list(records)):
+        if str(record.get("memory_type") or "") != "preference":
+            continue
+        if str(record.get("scope") or "user") != "user" or str(record.get("applies_when") or "").strip():
+            continue
+        if not is_active_memory(record) or not memory_visible_for_project(record, project_name):
+            continue
+        head = f"{record.get('title') or ''} {record.get('tldr') or ''}"
+        if _STANDING_PREFERENCE_RE.search(head):
+            found.append(record)
+    found.sort(key=lambda record: str(record.get("review_status") or "") != "reviewed")
+    return found[:limit]
+
+
 def memory_brief(
     records: Iterable[Mapping[str, object]],
     query: str = "",
@@ -2352,7 +2940,16 @@ def memory_brief(
     else:
         relevant = []
         seen: set[str] = set()
+        # Standing preferences first: how the user wants answers shaped
+        # applies to every task yet shares no words with any of them, so
+        # task recall never finds it and recency alone let it fall out of a
+        # five-item brief (found by the behavioral A/B harness).
+        for record in standing_preferences(record_list, project=project_name, limit=min(STANDING_BRIEF_SLOTS, limit)):
+            relevant.append(slim_memory(record))
+            seen.add(str(record.get("name") or ""))
         for memory_type in ("preference", "decision", "project"):
+            if len(relevant) >= limit:
+                break
             for record in recent_memories(record_list):
                 name = str(record.get("name") or "")
                 if name in seen:
@@ -2390,8 +2987,13 @@ def memory_brief(
 
     guidance = [
         "Use relevant_memories as durable local context before answering or coding.",
-        "Call explain_memory before relying on a surprising, stale, or high-impact memory.",
-        "Only write memory after explicit user approval; use propose_memories for candidates first.",
+        # Named for both surfaces: the default MCP surface has no
+        # explain_memory or propose_memories tools, so naming those sent
+        # agents looking for tools that were not there.
+        "Before relying on a surprising, stale, or high-impact memory, explain it "
+        "(MCP review action=explain, or lnk explain-memory).",
+        "Only write memory after explicit user approval; propose candidates first "
+        "(MCP admin action=propose_memories, or lnk propose-memories).",
         "If a new memory duplicates an existing one, update the existing memory instead of creating another page.",
     ]
     if inbox["review_count"]:
@@ -2416,11 +3018,156 @@ def memory_brief(
     }
 
 
-def score_memory(record: Mapping[str, object], query: str) -> int:
+# Inflections that turn one word into another form of itself. Matching a
+# query word against a field used plain substring tests, which found real
+# forms ("package" in "packages") but also noise: "main" inside "domain",
+# "the" inside "theme", "how" inside "show". A word now matches a field token
+# only when they are equal or differ by one of these endings.
+_INFLECTION_SUFFIXES = frozenset({
+    "s", "es", "d", "ed", "ing", "er", "ers", "ion", "ions", "ment", "ments", "ly", "al",
+})
+
+
+def _same_word(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    if len(short) < 3 or not long_.startswith(short):
+        return False
+    return long_[len(short):] in _INFLECTION_SUFFIXES
+
+
+@functools.lru_cache(maxsize=65_536)
+def _word_forms(token: str) -> frozenset[str]:
+    """Every string that _same_word would accept for this token."""
+    forms = {token + suffix for suffix in _INFLECTION_SUFFIXES}
+    for suffix in _INFLECTION_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            forms.add(token[: -len(suffix)])
+    return frozenset(forms)
+
+
+def _field_has_word(field_tokens: set[str] | frozenset[str], token: str) -> bool:
+    if token in field_tokens:
+        return True
+    if len(token) < 3:
+        return False
+    return not field_tokens.isdisjoint(_word_forms(token))
+
+
+def _plural_forms(token: str) -> tuple[str, ...]:
+    forms = [token + "s", token + "es"]
+    if token.endswith("es"):
+        forms.append(token[:-2])
+    if token.endswith("s"):
+        forms.append(token[:-1])
+    return tuple(forms)
+
+
+def _field_has_exact_word(field_tokens: set[str], token: str) -> bool:
+    """The word itself or its plural: "commit" and "commits" are one word."""
+    return token in field_tokens or any(form in field_tokens for form in _plural_forms(token))
+
+
+@functools.lru_cache(maxsize=1024)
+def _query_terms(q: str) -> tuple[tuple[str, ...], frozenset[str], frozenset[str]]:
+    """A query's words, content words and expansions, computed once per query."""
+    tokens = tuple(token for token in re.split(r"\W+", q) if len(token) >= 3 or token in _KNOWN_ACRONYMS)
+    return tokens, frozenset(significant_memory_tokens(q)), frozenset(expanded_memory_query_tokens(q))
+
+
+@functools.lru_cache(maxsize=1024)
+def _query_vocabulary(q: str) -> frozenset[str]:
+    """Every word form a record must contain for score_memory to be non-zero.
+
+    Used to skip records that share nothing with the query before scoring
+    them. Covers exact words, inflected forms, plurals, stems and the small
+    synonym groups, so skipping never changes a score.
+    """
+    tokens, significant, expanded = _query_terms(q)
+    vocabulary: set[str] = set(tokens) | set(significant) | set(expanded)
+    for token in list(vocabulary):
+        vocabulary |= _word_forms(token)
+        vocabulary |= set(_plural_forms(token))
+        vocabulary.add(stem_memory_token(token))
+    return frozenset(vocabulary)
+
+
+# Stores smaller than this carry too little signal for document frequency
+# to mean anything; every word is weighted 1.0 there.
+IDF_MIN_RECORDS = 20
+
+
+def query_word_weights(records: Sequence[Mapping[str, object]], query: str) -> dict[str, float]:
+    """How much each query word should count, from how rare it is here.
+
+    A word in nearly every memory ("service", "new", "library" in a small
+    store) says little about which memory is meant; a rare one ("database",
+    "vault") says a lot. Weights run from 0.5 for a word in every memory to
+    1.5 for a word in one. Computed per query over the candidate records,
+    offline and deterministic.
+    """
+    words = {token for token in re.split(r"\W+", query.lower()) if len(token) >= 3}
+    words |= significant_memory_tokens(query)
+    if len(records) < IDF_MIN_RECORDS or not words:
+        return {}
+    document_frequency = dict.fromkeys(words, 0)
+    for record in records:
+        present = _record_word_set(record)
+        for word in words:
+            if word in present or stem_memory_token(word) in present:
+                document_frequency[word] += 1
+    total = len(records)
+    scale = math.log(total + 1)
+    weights: dict[str, float] = {}
+    for word, frequency in document_frequency.items():
+        rarity = math.log((total + 1) / (frequency + 1)) / scale if scale else 0.0
+        weights[word] = 0.5 + min(1.0, max(0.0, rarity))
+    return weights
+
+
+def _record_tags(record: Mapping[str, object]) -> list[object]:
+    tags = record.get("tags")
+    return list(tags) if isinstance(tags, (list, tuple, set)) else []
+
+
+_WORD_SET_FIELDS = ("title", "tldr", "trigger", "body", "context")
+
+
+def _record_word_set(record: Mapping[str, object]) -> frozenset[str]:
+    # Keyed on the field text itself, so an edited memory gets a new entry
+    # and recall does not rebuild the same union for every record twice.
+    key = tuple(str(record.get(field) or "") for field in _WORD_SET_FIELDS)
+    return _word_set_of(key + (" ".join(str(tag) for tag in _record_tags(record)),))
+
+
+@functools.lru_cache(maxsize=131_072)
+def _word_set_of(fields: tuple[str, ...]) -> frozenset[str]:
+    tokens: frozenset[str] = frozenset()
+    for value in fields:
+        if value:
+            tokens |= cached_field_tokens(value)
+    return tokens | cached_stems(tokens)
+
+
+@functools.lru_cache(maxsize=262_144)
+def cached_field_tokens(text: str) -> frozenset[str]:
+    return frozenset(memory_tokens(text))
+
+
+@functools.lru_cache(maxsize=262_144)
+def cached_stems(tokens: frozenset[str]) -> frozenset[str]:
+    return frozenset(stemmed_memory_tokens(set(tokens)))
+
+
+def score_memory(
+    record: Mapping[str, object],
+    query: str,
+    word_weights: Mapping[str, float] | None = None,
+) -> int:
+    weight = word_weights or {}
     q = query.lower().strip()
-    tokens = [token for token in re.split(r"\W+", q) if len(token) >= 3]
-    significant_tokens = significant_memory_tokens(q)
-    expanded_tokens = expanded_memory_query_tokens(q)
+    tokens, significant_tokens, expanded_tokens = _query_terms(q)
     title = str(record.get("title", "")).lower()
     tldr = str(record.get("tldr", "")).lower()
     body = str(record.get("body", "")).lower()
@@ -2438,33 +3185,62 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     context = str(record.get("context") or "").lower()
     if context:
         body = f"{body} {context}".strip()
-    title_tokens = memory_tokens(title)
-    tldr_tokens = memory_tokens(tldr)
-    body_tokens = memory_tokens(body)
-    tags_tokens = memory_tokens(tags)
+    # Tokenized once per distinct field text, not once per query: the
+    # record cache hands back the same string objects, whose hashes Python
+    # keeps, so these lookups cost almost nothing after the first query.
+    title_tokens = set(cached_field_tokens(str(record.get("title", ""))))
+    tldr_tokens = set(cached_field_tokens(str(record.get("tldr", ""))))
+    if trigger:
+        tldr_tokens |= cached_field_tokens(str(record.get("trigger") or ""))
+    body_tokens = set(cached_field_tokens(str(record.get("body", ""))))
+    if context:
+        body_tokens |= cached_field_tokens(str(record.get("context") or ""))
+    tags_tokens = set(cached_field_tokens(tags))
     score = 0
-    if q and q in title:
+    if q and _contains_phrase(title, q):
         score += 20
-    if q and (q in tldr or (trigger and q in trigger)):
+    if q and (_contains_phrase(tldr, q) or (trigger and _contains_phrase(trigger, q))):
         score += 12
-    if q and q in tags:
+    if q and _contains_phrase(tags, q):
         score += 8
-    if q and q in body:
+    if q and _contains_phrase(body, q):
         score += 4
+    substring_tokens = {token for token in significant_tokens if _substring_script(token)}
+    for token in substring_tokens:
+        token_points = (
+            (6 if token in title else 0) + (4 if token in tldr else 0)
+            + (3 if token in tags else 0) + (1 if token in body else 0)
+        )
+        score += round(token_points * weight.get(token, 1.0))
     for token in tokens:
-        if token in title:
-            score += 6
-        if token in tldr:
-            score += 4
-        if token in tags:
-            score += 3
-        if token in body:
-            score += 1
+        if token in MEMORY_STOPWORDS or token in substring_tokens:
+            continue
+        # Exact words carry full weight; another form of the word ("required"
+        # for "require") counts a little less, so an exact match wins a tie.
+        token_points = 0
+        if _field_has_exact_word(title_tokens, token):
+            token_points += 6
+        elif _field_has_word(title_tokens, token):
+            token_points += 4
+        if _field_has_exact_word(tldr_tokens, token):
+            token_points += 4
+        elif _field_has_word(tldr_tokens, token):
+            token_points += 3
+        if _field_has_exact_word(tags_tokens, token):
+            token_points += 3
+        elif _field_has_word(tags_tokens, token):
+            token_points += 2
+        if token in body_tokens:
+            token_points += 1
+        score += round(token_points * weight.get(token, 1.0))
     if significant_tokens:
-        searchable = title_tokens | tldr_tokens | tags_tokens | body_tokens
+        head_text = f"{title} {tldr} {tags}"
+        found_head = {token for token in substring_tokens if token in head_text}
+        found_any = found_head | {token for token in substring_tokens if token in body}
+        searchable = title_tokens | tldr_tokens | tags_tokens | body_tokens | found_any
         if significant_tokens <= searchable:
             score += 8
-        if significant_tokens <= (title_tokens | tldr_tokens | tags_tokens):
+        if significant_tokens <= (title_tokens | tldr_tokens | tags_tokens | found_head):
             score += 10
     for token in expanded_tokens - set(tokens):
         if token in title_tokens:
@@ -2478,8 +3254,8 @@ def score_memory(record: Mapping[str, object], query: str) -> int:
     # Stemmed pass: catch close paraphrases ("committing" vs "commit push")
     # that raw token equality misses, at lower weight than exact hits.
     exact_all = title_tokens | tldr_tokens | tags_tokens | body_tokens
-    stemmed_head = stemmed_memory_tokens(title_tokens | tldr_tokens | tags_tokens)
-    stemmed_body = stemmed_memory_tokens(body_tokens)
+    stemmed_head = cached_stems(frozenset(title_tokens | tldr_tokens | tags_tokens))
+    stemmed_body = cached_stems(frozenset(body_tokens))
     for token in significant_tokens:
         if token in exact_all:
             continue
@@ -2509,22 +3285,35 @@ def _memory_date(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def memory_temporal_boost(record: Mapping[str, object]) -> int:
-    """Score current, reviewed memories above old or stale memories."""
+def memory_temporal_boost(record: Mapping[str, object], as_of: str | None = None) -> int:
+    """Score current, reviewed memories above old or stale memories.
+
+    With `as_of`, "current" means current on that date: a memory archived
+    since then was active when asked about, so it is not penalised for
+    today's status, and its age is measured from that date. Penalising it
+    made point-in-time recall rank the answer below unrelated memories.
+    """
     boost = 0
     if str(record.get("review_status") or "").lower() == "reviewed":
         boost += 3
     if str(record.get("review_status") or "").lower() == "needs_update":
         boost -= 6
-    if not is_active_memory(record):
-        boost -= 12
+    as_of_day = _parse_date_field(as_of, "as_of") if as_of else None
+    if as_of and as_of_day is not None:
+        if not memory_active_at(record, as_of):
+            boost -= 12
+        reference = datetime.combine(as_of_day, datetime.min.time(), tzinfo=timezone.utc)
+    else:
+        if not is_active_memory(record):
+            boost -= 12
+        reference = datetime.now(timezone.utc)
     parsed = (
         _memory_date(record.get("updated_at"))
         or _memory_date(record.get("reviewed_at"))
         or _memory_date(record.get("date_captured"))
     )
     if parsed is not None:
-        age_days = (datetime.now(timezone.utc) - parsed).days
+        age_days = (reference - parsed).days
         if age_days <= 30:
             boost += 4
         elif age_days <= 180:
@@ -2542,6 +3331,7 @@ def memory_rank_score(
     match_score: int,
     project: str | None = None,
     salience: Mapping[str, int] | None = None,
+    as_of: str | None = None,
 ) -> int:
     rank_score = match_score
     project_name = normalize_project(project)
@@ -2549,7 +3339,7 @@ def memory_rank_score(
     record_project = normalize_project(str(record.get("project") or ""))
     if project_name and record_scope == "project" and record_project == project_name:
         rank_score += 6
-    rank_score += memory_temporal_boost(record)
+    rank_score += memory_temporal_boost(record, as_of=as_of)
     if salience:
         # Bounded on purpose: usage separates near-equals, it does not outrank
         # a better match. See usage.usage_salience.
@@ -2599,6 +3389,50 @@ def render_recipes_text(recipes: Sequence[Mapping[str, object]], target: object 
     return 0, "\n".join(lines)
 
 
+def _annotate_recall_hit(
+    record: Mapping[str, object],
+    lexical_score: int,
+    semantic_match: Mapping[str, float] | None,
+    applicability: str,
+    *,
+    rank_score: int,
+    score: int,
+    query: str,
+    severity_rank: Mapping[str, int],
+) -> dict[str, object]:
+    lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
+    issues = memory_review_issues(record)
+    slim = slim_memory(record)
+    slim["score"] = score
+    slim["rank_score"] = rank_score
+    if applicability != "unconditional":
+        slim["applicability"] = applicability
+    slim["match"] = (
+        "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
+    )
+    if semantic_match:
+        slim["semantic_similarity"] = float(semantic_match.get("cosine") or 0.0)
+    # A match with no lexical evidence is honest about its basis: a
+    # close paraphrase is at most moderate confidence, never strong.
+    slim["confidence"] = (
+        memory_recall_confidence(record, query) if lexical_hit else semantic_confidence_cap(semantic_match)
+    )
+    if str(record.get("memory_type") or "") == "procedure":
+        # The steps are the value of a recipe; carry a bounded excerpt
+        # so agents can follow it without another file read.
+        slim["steps"] = procedure_steps_excerpt(str(record.get("body") or ""))
+    slim["recall"] = recall_state(record, issues)
+    slim["review_issue_count"] = len(issues)
+    slim["highest_review_severity"] = (
+        "none" if not issues else
+        min(
+            (str(issue.get("severity") or "low") for issue in issues),
+            key=lambda severity: severity_rank.get(severity, 9),
+        )
+    )
+    return slim
+
+
 def recall_memories(
     records: Iterable[Mapping[str, object]],
     query: str,
@@ -2617,9 +3451,15 @@ def recall_memories(
     if as_of:
         _parse_date_field(as_of, "as_of")
     project_name = normalize_project(project)
-    scored: list[tuple[int, int, str, dict[str, object]]] = []
+    candidates: list[tuple[int, int, str, str, tuple]] = []
     severity_rank = {"high": 0, "medium": 1, "low": 2}
-    for record in records:
+    records_by_name: dict[str, Mapping[str, object]] = {}
+    record_list = list(records)
+    word_weights = query_word_weights(record_list, q)
+    # Substring-matched scripts cannot be prefiltered by word forms.
+    query_vocabulary = frozenset() if _substring_script(q) else _query_vocabulary(q.lower())
+    for record in record_list:
+        records_by_name[str(record.get("name") or "")] = record
         if not memory_visible_for_project(record, project_name):
             continue
         if memory_type and str(record.get("memory_type") or "") != memory_type:
@@ -2631,14 +3471,19 @@ def recall_memories(
                 continue
         elif not include_archived and not is_active_memory(record):
             continue
-        lexical_score = score_memory(record, q)
         semantic_match = None
         if semantic_scores:
             semantic_match = semantic_scores.get(str(record.get("name") or ""))
+        if (
+            query_vocabulary
+            and semantic_match is None
+            and _record_word_set(record).isdisjoint(query_vocabulary)
+        ):
+            continue  # shares no word form with the query: its score is 0
+        lexical_score = score_memory(record, q, word_weights)
         score = lexical_score + semantic_match_points(semantic_match)
         if score >= MEMORY_RECALL_MIN_SCORE:
-            lexical_hit = lexical_score >= MEMORY_RECALL_MIN_SCORE
-            rank_score = memory_rank_score(record, score, project=project_name, salience=salience)
+            rank_score = memory_rank_score(record, score, project=project_name, salience=salience, as_of=as_of)
             applicability = memory_applicability(
                 record, query=q, project=project_name, context_path=context_path
             )
@@ -2648,41 +3493,94 @@ def recall_memories(
                 # Conditional memory outside its context: still findable,
                 # but demoted and labeled so agents do not apply it blindly.
                 rank_score = max(1, rank_score - 10)
-            issues = memory_review_issues(record)
-            slim = slim_memory(record)
-            slim["score"] = score
-            slim["rank_score"] = rank_score
-            if applicability != "unconditional":
-                slim["applicability"] = applicability
-            slim["match"] = (
-                "hybrid" if (lexical_hit and semantic_match) else ("semantic" if semantic_match else "lexical")
-            )
-            if semantic_match:
-                slim["semantic_similarity"] = float(semantic_match.get("cosine") or 0.0)
-            # A match with no lexical evidence is honest about its basis: a
-            # close paraphrase is at most moderate confidence, never strong.
-            slim["confidence"] = (
-                memory_recall_confidence(record, q) if lexical_hit else semantic_confidence_cap(semantic_match)
-            )
-            if str(record.get("memory_type") or "") == "procedure":
-                # The steps are the value of a recipe; carry a bounded excerpt
-                # so agents can follow it without another file read.
-                slim["steps"] = procedure_steps_excerpt(str(record.get("body") or ""))
-            slim["recall"] = recall_state(record, issues)
-            slim["review_issue_count"] = len(issues)
-            slim["highest_review_severity"] = (
-                "none" if not issues else
-                min(
-                    (str(issue.get("severity") or "low") for issue in issues),
-                    key=lambda severity: severity_rank.get(severity, 9),
-                )
-            )
             recency = str(record.get("updated_at") or record.get("date_captured") or "")
-            scored.append((rank_score, score, recency, slim))
-    scored.sort(key=lambda item: str(item[3]["title"]).lower())
-    scored.sort(key=lambda item: item[2], reverse=True)
-    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return [record for _, _, _, record in scored[:limit]]
+            candidates.append((rank_score, score, recency, str(record.get("title")).lower(),
+                               (record, lexical_score, semantic_match, applicability)))
+    candidates.sort(key=lambda item: item[3])
+    candidates.sort(key=lambda item: item[2], reverse=True)
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    # Only what can be returned is annotated: confidence, review issues and
+    # the slim copy cost more than scoring, and a large store has thousands
+    # of candidates for a common word. The contradiction check reads the
+    # head, so the head is always annotated too.
+    ranked = [
+        _annotate_recall_hit(*detail, rank_score=rank_score, score=score, query=q, severity_rank=severity_rank)
+        for rank_score, score, _recency, _title, detail in candidates[:max(limit, CONTRADICTION_RERANK_DEPTH)]
+    ]
+    if not as_of and not include_archived:
+        ranked = _demote_contradicted(ranked, records_by_name)
+    return ranked[:limit]
+
+
+# Only the head of the ranking is checked: that is what agents read, and it
+# keeps the pairwise check to at most a few lexical comparisons per query.
+CONTRADICTION_RERANK_DEPTH = 5
+
+
+def _memory_recency(record: Mapping[str, object]) -> str:
+    return str(record.get("updated_at") or record.get("date_captured") or "")
+
+
+def _demote_contradicted(
+    ranked: list[dict[str, object]],
+    records_by_name: Mapping[str, Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Keep the newer of two contradicting memories above the older one.
+
+    Supersession archives an old claim, but contradictions still reach the
+    store: a revision the conflict gate did not recognise, or one saved with
+    allow_conflict. When two top results contradict each other, the older is
+    labelled `contradicted_by` the newer and placed right after it, so an
+    agent reading the packet meets the current claim first and is told the
+    other one is disputed. Lexical only: no model load on the recall path.
+    """
+    head = ranked[:CONTRADICTION_RERANK_DEPTH]
+    if len(head) < 2:
+        return ranked
+    for i in range(len(head)):
+        for j in range(i + 1, len(head)):
+            upper, lower = head[i], head[j]
+            upper_record = records_by_name.get(str(upper.get("name") or ""))
+            lower_record = records_by_name.get(str(lower.get("name") or ""))
+            if upper_record is None or lower_record is None:
+                continue
+            if not _records_contradict(upper_record, lower_record):
+                continue
+            older, newer = (
+                (upper, lower) if _memory_recency(upper_record) < _memory_recency(lower_record)
+                else (lower, upper)
+            )
+            older["contradicted_by"] = str(newer.get("name") or "")
+            if older is upper:
+                head[i], head[j] = lower, upper
+    return head + ranked[CONTRADICTION_RERANK_DEPTH:]
+
+
+def _no_embedder(_texts: list[str]) -> list[list[float]]:
+    return []
+
+
+def _records_contradict(a: Mapping[str, object], b: Mapping[str, object]) -> bool:
+    """Whether either memory, read as a new claim, conflicts with the other.
+
+    Both directions: a revision usually names the value it replaced ("moved
+    from 8080 to 8443"), so only the revision, read against the original,
+    shows the contradiction.
+    """
+    for claim, other in ((a, b), (b, a)):
+        if str(claim.get("memory_type") or "") not in MEMORY_CONFLICT_TYPES:
+            continue
+        if memory_conflict_candidates(
+            [other],
+            memory_claim_text(claim),
+            str(claim.get("title") or ""),
+            str(claim.get("memory_type") or "note"),
+            str(claim.get("scope") or "user"),
+            project=str(claim.get("project") or ""),
+            embedder=_no_embedder,
+        ):
+            return True
+    return False
 
 
 APPLICABILITY_CONDITION_KINDS = ("project", "path", "task")
@@ -2900,8 +3798,9 @@ def memory_duplicate_candidates(
         reasons: list[str] = []
         score = 0
         record_title = compact_memory_text(str(record.get("title") or ""))
-        record_text = compact_memory_text(memory_claim_text(record))
-        record_tokens = memory_tokens(record_text)
+        claim_text = memory_claim_text(record)
+        record_text = compact_memory_text(claim_text)
+        record_tokens = memory_tokens(claim_text)
 
         if new_slug and str(record.get("name") or "") == new_slug:
             score = max(score, 100)
@@ -2939,9 +3838,14 @@ def memory_duplicate_candidates(
 # Memory boilerplate: tokens that appear in most stored claims ("decision",
 # "project", "prefers", ...) and would connect unrelated memories if they
 # counted as evidence of a shared subject.
+# Written as words and passed through the stemmer, so a stemmer change can
+# never silently stop these from matching (dropping a final "e" once turned
+# "anymore" into "anymor" and let it count as shared subject).
 _CONFLICT_CUE_TOKENS = {
-    "decision", "decid", "project", "team", "user", "prefer",
-    "use", "agent", "memory", "through", "now", "anymore",
+    stem_memory_token(word) for word in (
+        "decision", "decided", "decide", "project", "team", "user", "prefer",
+        "use", "agent", "memory", "through", "now", "anymore",
+    )
 }
 
 # Semantic revision tier: lexically disjoint revisions ("SQLite with FTS"
@@ -2974,6 +3878,91 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 
+# Versions, ports, sizes, counts: the values a claim can change while its
+# subject stays the same. The tokenizer drops tokens shorter than three
+# characters, so "3.11" -> "3.12" was invisible to every lexical rule.
+_VALUE_RE = re.compile(r"(?<![\w.])v?(\d+(?:[.:]\d+)*)(?![\w])", re.IGNORECASE)
+
+
+def claim_values(text: str) -> set[str]:
+    return {match.group(1) for match in _VALUE_RE.finditer(text)}
+
+
+# What a revision says has stopped being true: "does not prefer small
+# standalone commits anymore", "no longer deploy on Fridays".
+_NEGATED_OBJECT_RES = (
+    re.compile(
+        r"\b(?:does not|do not|don't|doesn't|did not|didn't|is not|isn't|are not|aren't|not)\s+"
+        r"(?P<obj>[^.;:!?]+?)\s+(?:anymore|any more)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bno longer\s+(?P<obj>[^.;:!?]+)", re.IGNORECASE),
+)
+
+
+# A revision usually names what it replaced: "moved from 8080 to 8443",
+# "Buildkite replaced Jenkins", "instead of 3", "took over from Priya",
+# "on Wednesday, not Thursday". Those words are the old value.
+_VALUE_WORD = r"[\w./:@+-]+"
+# "from X to Y" names a replaced value only after a verb of change: "copy the
+# database from staging to prod" moves data and replaces nothing.
+_CHANGE_VERB = (
+    r"(?:mov(?:e|ed|es|ing)|migrat(?:e|ed|es|ing)|switch(?:ed|es|ing)?|chang(?:e|ed|es|ing)|"
+    r"upgrad(?:e|ed|es|ing)|downgrad(?:e|ed|es|ing)|rais(?:e|ed|es|ing)|lower(?:ed|s|ing)?|"
+    r"increas(?:e|ed|es|ing)|decreas(?:e|ed|es|ing)|bump(?:ed|s|ing)?|go|goes|going|gone|went|shift(?:ed|s|ing)?|"
+    r"convert(?:ed|s|ing)?|ported|transition(?:ed|s|ing)?|updat(?:e|ed|es|ing)|reduc(?:e|ed|es|ing)|cut)"
+)
+_TRANSITION_OLD_RES = (
+    re.compile(
+        rf"\b{_CHANGE_VERB}\b[^.;]*?\bfrom\s+(?:the\s+)?(?:port\s+|node\s+|version\s+)?({_VALUE_WORD})\s+to\b",
+        re.IGNORECASE,
+    ),
+    re.compile(rf"\b{_VALUE_WORD}\s+(?:replaced|replaces|supersedes)\s+({_VALUE_WORD})", re.IGNORECASE),
+    re.compile(rf"\binstead of\s+({_VALUE_WORD})", re.IGNORECASE),
+    re.compile(rf"\b(?:took over|switched|moved|migrated)\b[^.;]*?\bfrom\s+({_VALUE_WORD})\s*[.;,]?\s*$", re.IGNORECASE),
+    re.compile(rf",\s*not\s+({_VALUE_WORD})\s*[.;]?\s*$", re.IGNORECASE),
+)
+
+
+# Words that say how a thing runs, not which thing it is: "The API runs on
+# Node 18" and "API servers now use Node 20" are one subject.
+_GENERIC_SUBJECT_STEMS = frozenset(stem_memory_token(word) for word in (
+    "run", "runs", "running", "use", "uses", "using", "used", "now", "currently", "still",
+    "server", "servers", "service", "services", "host", "hosted", "hosts", "live", "lives",
+    "power", "powered", "powers", "serve", "serves", "sit", "sits", "stay", "stays", "set", "pinned",
+))
+
+
+def _subject_words_only(tokens: set[str], other: set[str]) -> set[str]:
+    """Words naming a subject in `tokens` but not `other` (values, cues and generic verbs aside)."""
+    return {
+        token for token in tokens - other
+        if not _VALUE_RE.fullmatch(token)
+        and stem_memory_token(token) not in _CONFLICT_CUE_TOKENS
+        and stem_memory_token(token) not in _GENERIC_SUBJECT_STEMS
+    }
+
+
+def transition_old_values(text: str) -> set[str]:
+    """Values a revision says it replaced, lowercased."""
+    olds: set[str] = set()
+    for pattern in _TRANSITION_OLD_RES:
+        for match in pattern.finditer(text.strip()):
+            word = match.group(1).strip(".,;:").lower()
+            if word:
+                olds.add(word)
+    return olds
+
+
+def negated_claim_tokens(text: str) -> set[str]:
+    """Stemmed content words of what the text says is no longer true."""
+    words: set[str] = set()
+    for pattern in _NEGATED_OBJECT_RES:
+        for match in pattern.finditer(text):
+            words |= stemmed_memory_tokens(significant_memory_tokens(match.group("obj")))
+    return words - _CONFLICT_CUE_TOKENS
+
+
 def memory_conflict_candidates(
     records: Iterable[Mapping[str, object]],
     text: str,
@@ -3001,6 +3990,10 @@ def memory_conflict_candidates(
     new_negated = has_negation(new_text)
     new_groups = _extract_option_groups(new_text)
     new_pairs = _extract_preference_pairs(new_text)
+    replaced_values = transition_old_values(text)
+    # The value a revision states now: "from 8080 to 8443" is about 8443.
+    new_values = claim_values(new_text) - replaced_values
+    negated_object = negated_claim_tokens(text)
     project_name = normalize_project(project)
     excluded = {name for name in (exclude_names or []) if name}
     candidates: list[tuple[int, dict[str, object]]] = []
@@ -3034,9 +4027,57 @@ def memory_conflict_candidates(
         reasons: list[str] = []
         score = 0
 
-        if new_negated != has_negation(record_text) and len(overlap) >= 1 and overlap_ratio >= 0.45:
-            score = max(score, 92)
-            reasons.append("opposite_negation")
+        if new_negated != has_negation(record_text):
+            # The negation word is the difference under test, not shared
+            # subject; counting it kept short claims ("Never use Ruff" vs
+            # "Use Ruff for linting") below the overlap threshold.
+            new_subject = new_tokens - NEGATION_TERMS
+            record_subject = record_tokens - NEGATION_TERMS
+            subject_overlap = new_subject & record_subject
+            subject_union = new_subject | record_subject
+            subject_ratio = len(subject_overlap) / len(subject_union) if subject_union else 0.0
+            if subject_overlap and subject_ratio >= 0.45:
+                score = max(score, 92)
+                reasons.append("opposite_negation")
+
+        # Same subject, different value: "We deploy with Python 3.11" and
+        # "We deploy with Python 3.12", "API listens on 8080" and "on 9090".
+        # The subject must match closely (every rule above ignores numbers),
+        # and the values must be disjoint, so "Node 20 for the api" never
+        # meets "Node 18 for the worker".
+        # Transition shape: the new text names what it replaced, and this
+        # memory states exactly that on the same subject. "Staging moved
+        # from port 8080 to 8443" revises "The staging server listens on
+        # port 8080"; "Buildkite replaced Jenkins for CI" revises "Our CI
+        # runs on Jenkins".
+        if replaced_values:
+            record_words = memory_tokens(record_text) | {value.lower() for value in claim_values(record_text)}
+            record_lower = record_text.lower()
+            stated_old = {
+                value for value in replaced_values
+                if value in record_words or re.search(rf"(?<![\w.]){re.escape(value)}(?![\w])", record_lower)
+            }
+            if stated_old:
+                subject = [
+                    token for token in overlap
+                    if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS and token not in replaced_values
+                ]
+                if subject:
+                    score = max(score, 90)
+                    reasons.append("replaces_stated_value")
+
+        record_values = claim_values(record_text)
+        if new_values and record_values and not (new_values & record_values):
+            subject = [token for token in overlap if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS]
+            # Two claims about different things can share half their words
+            # ("Node 20 runs the api" / "Node 18 runs the worker"). When each
+            # names something the other does not, they are two subjects with
+            # two values, not one subject that changed value.
+            new_only = _subject_words_only(new_tokens, record_tokens)
+            record_only = _subject_words_only(record_tokens, new_tokens)
+            if len(subject) >= 2 and overlap_ratio >= 0.5 and not (new_only and record_only):
+                score = max(score, 89)
+                reasons.append("changed_value")
 
         # Revision shape: the new text carries a negation or revision cue
         # ("... does not X anymore; we now Y") and covers most of the
@@ -3046,6 +4087,26 @@ def memory_conflict_candidates(
         revision_cue = new_negated or bool(
             re.search(r"\b(?:anymore|no longer|instead of|replace[sd]?|settled on)\b", new_text, re.IGNORECASE)
         )
+        # Negated-object shape: the revision names what stopped being true,
+        # and that phrase is most of the way inside this memory's head. A
+        # long original head ("prefers small, focused commits and pull
+        # requests whose description ...") kept head coverage too low for
+        # the rule below, though the revision negates its core.
+        if negated_object and len(negated_object) >= 2:
+            head_words = stemmed_memory_tokens(significant_memory_tokens(
+                " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")])
+            ))
+            hit = negated_object & head_words
+            # A memory that already says the same thing stopped being true
+            # agrees with the text; that is a restatement, not a conflict.
+            already_negated = negated_claim_tokens(
+                " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")])
+            )
+            restates = len(negated_object & already_negated) >= max(2, int(0.6 * len(negated_object)))
+            if not restates and len(hit) >= 2 and len(hit) / len(negated_object) >= 0.6:
+                score = max(score, 90)
+                reasons.append("negates_existing_claim")
+
         if revision_cue:
             head_tokens = stemmed_memory_tokens(significant_memory_tokens(
                 " ".join([str(record.get("title") or ""), str(record.get("tldr") or "")])
@@ -3091,7 +4152,11 @@ def memory_conflict_candidates(
                 token for token in overlap
                 if stem_memory_token(token) not in _CONFLICT_CUE_TOKENS
             ]
-            if len(meaningful_overlap) >= 2 or context_matches:
+            # Both texts must be about the group's subject. Option words are
+            # ordinary English ("release notes", "local development"), and
+            # two shared words alone once archived a Docker Compose memory
+            # because a rollback note mentioned a "release".
+            if context_matches and (not context or meaningful_overlap):
                 score = max(score, 88)
                 reasons.append(f"different_{group}")
 
@@ -3384,7 +4449,7 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
         action["prompt"] = f"Review possible conflict with {identifier} before saving this proposal."
         return action
 
-    command_parts: list[object] = [
+    command_parts = [
         "python3",
         "link.py",
         "remember",
@@ -3401,7 +4466,7 @@ def memory_proposal_action(proposal: Mapping[str, object], *, command_target: st
         "--source",
         source,
     ]
-    args: dict[str, object] = {
+    args = {
         "memory": memory,
         "title": title,
         "memory_type": memory_type,
@@ -3479,9 +4544,99 @@ _FIRST_PERSON_RE = re.compile(r"\b(?:i|we|my|our|me|us|user|human|please)\b")
 _IMPERATIVE_ABSOLUTE_RE = re.compile(r"^(?:no,?\s+)?(?:please\s+)?(?:always|never|avoid|do not|don't)\b")
 
 
-def classify_memory_segment(segment: str) -> dict[str, object] | None:
+# Measured on real developer sessions: 58 proposals from 12 transcripts, 3
+# worth keeping. The junk fell into a handful of shapes, each rejected here
+# before a segment can classify as memory.
+_REQUEST_TO_AGENT_RE = re.compile(r"\b(?:want|wants|need|needs|would like)\s+(?:you|u|ya)\s+to\b")
+# "I want to know / see / win ..." is an intention for this conversation.
+_INTENTION_RE = re.compile(
+    r"\b(?:i|we|user)\s+(?:want|wants|need|needs)\s+to\s+"
+    r"(?:know|see|win|try|check|understand|learn|confirm|be|have|get|make sure|figure|find|look)\b"
+)
+_THROWAWAY_RE = re.compile(r"\b(?:lol|lmao|haha+|jk|rofl)\b|^(?:what if|let'?s say|lets say|suppose|imagine)\b|\bwhat if\b")
+# Link's own brief lines ("Deploy day (decision · user)") pasted back into a
+# session: an echo of stored memory, not something new.
+_LINK_LISTING_RE = re.compile(
+    r"·\s*(?:user|project|global)\)|\((?:prefe|decis|proje|proced|fact|note)\w*\s*·"
+    r"|\((?:prefe|decis|proje|proced)\w*\.?\s*$"
+)
+# Instructions about the work at hand rather than a standing rule: an
+# imperative "do not" that points at this task's things.
+_TASK_IMPERATIVE_RE = re.compile(r"^(?:no,?\s+)?(?:please\s+)?(?:do not|don't|dont|avoid)\b")
+_TASK_DEIXIS_RE = re.compile(
+    r"\b(?:this|these|that|those|here|now|yet|current|currently|anything|any|it|our|us|we|"
+    r"earlier|above|below|merely|simply|just|prematurely|the project|the repo|the files?)\b"
+)
+_DURABILITY_RE = re.compile(
+    r"\b(?:from now on|going forward|in (?:the )?future|every time|whenever|as a rule|in general|"
+    r"by default|ever again|ever)\b"
+)
+# Someone else's habit, not the user's rule: "she never knows", "they always".
+# "it" is left out: "it should never happen on Fridays" is the user's rule.
+_THIRD_PARTY_ABSOLUTE_RE = re.compile(r"\b(?:she|he|they)\s+(?:\w+\s+)?(?:never|always)\b")
+# "always stays", "never being included": describing how something behaves,
+# not a rule about what to do. A sentence that opens with always/never is an
+# imperative ("Always show the full diff", "Never show emoji") and is exempt.
+_STATIVE_ABSOLUTE_RE = re.compile(
+    r"\b(?:never|always)\s+(?:stay|stays|remain|remains|is|are|was|were|be|being|been|seem|seems|"
+    r"know|knows|happen|happens|get|gets|show|shows|work|works)\b"
+)
+# "I want a ...", "user wants the ...", "we do not want another ...": a
+# deliverable for this conversation. Standing wants are phrased about a
+# practice ("I want tests for every change"), not an article-led object.
+_TASK_GOAL_RE = re.compile(
+    r"\b(?:i|we|user)\s+(?:do not |don't |dont )?(?:want|wants)\s+"
+    r"(?:a|an|the|all|everything|it|this|that|these|like|something|some|more|another|to)\b"
+)
+_TIME_BOUND_RE = re.compile(r"\b(?:today|tomorrow|tonight|yesterday|right now|at the moment)\b")
+
+
+def non_durable_reason(text: str) -> str | None:
+    """Why a sentence is not durable memory, or None if it might be."""
+    lower = text.strip().lower()
+    if _LINK_LISTING_RE.search(text):
+        return "echo of a Link memory listing"
+    if _REQUEST_TO_AGENT_RE.search(lower):
+        return "a request to the agent, not a preference"
+    if _INTENTION_RE.search(lower):
+        return "an intention for this conversation"
+    if _THROWAWAY_RE.search(lower):
+        return "a throwaway or hypothetical"
+    if _THIRD_PARTY_ABSOLUTE_RE.search(lower):
+        return "someone else's habit, not the user's rule"
+    stative = _STATIVE_ABSOLUTE_RE.search(lower)
+    if (
+        stative and not re.match(r"(?:please\s+)?(?:always|never)\b", lower)
+        # "should never happen", "must always be": a modal makes it a rule.
+        and not re.search(r"\b(?:should|must|shall|will|would|can|may|to)\s+$", lower[:stative.start()])
+    ):
+        return "a description of behaviour, not a rule"
+    durable = _DURABILITY_RE.search(lower) or re.search(r"\b(?:always|never)\b", lower)
+    if _TASK_GOAL_RE.search(lower) and not durable:
+        return "a goal for this conversation"
+    if _TIME_BOUND_RE.search(lower):
+        return "tied to today, not durable"
+    # An imperative "do not" at the start of a sentence is almost always an
+    # instruction for the work at hand ("Do not edit any files", "Do not
+    # score the submission"). A standing rule says so: "from now on", "by
+    # default", "every time", or is phrased with never/always.
+    if _TASK_IMPERATIVE_RE.search(lower) and not durable:
+        return "an instruction for the current task"
+    return None
+
+
+def classify_memory_segment(segment: str, *, explicit: bool = False) -> dict[str, object] | None:
+    """Type a sentence as durable memory, or None.
+
+    Session capture proposes memory on its own, so it drops anything that
+    reads like an instruction for the work at hand. `explicit` is for text a
+    person chose to save ("remember: do not use tabs in YAML files"): the
+    choice already says it is durable, so only its type is decided here.
+    """
     text = segment.strip()
     if is_interrogative(text):
+        return None
+    if not explicit and non_durable_reason(text):
         return None
     lower = text.lower()
     if any(cue in lower for cue in ("maybe", "might", "not sure", "wondering", "considering", "could later")):
@@ -3544,6 +4699,11 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
             (
                 _BARE_ABSOLUTE_CUE,
                 r"\b(?:from now on|going forward)\b",
+                # Standing-rule framings. Descriptions that use the same words
+                # ("the pages update whenever we do") are stopped earlier by
+                # non_durable_reason.
+                r"\b(?:by default|as a rule|every time)\b",
+                r"\bwhenever\b.*\b(?:should|must|needs? to|has to|have to)\b",
             ),
         ),
     ]
@@ -3557,6 +4717,7 @@ def classify_memory_segment(segment: str) -> dict[str, object] | None:
                     continue
                 if (
                     pattern is _BARE_ABSOLUTE_CUE
+                    and not explicit
                     and not _FIRST_PERSON_RE.search(candidate_lower)
                     and not _IMPERATIVE_ABSOLUTE_RE.search(candidate_lower)
                 ):
@@ -3584,6 +4745,11 @@ def confidence_label(score: int) -> str:
 
 
 PROCEDURE_STEP_RE = re.compile(r"^\s*(?:\d+[.)]\s+|step\s+\d+\b)", re.IGNORECASE)
+_PROMPT_LIST_LEAD_RE = re.compile(
+    r"^(?:act as|you are|pretend|imagine|give me|rate|score|rank|pick|choose|answer|evaluate|"
+    r"consider|compare|list|here are|options?|criteria|questions?|i want|we want|i need|we need)\b",
+    re.IGNORECASE,
+)
 
 
 def extract_procedure_candidates(text: str, max_candidates: int = 3) -> list[dict[str, str]]:
@@ -3614,6 +4780,10 @@ def extract_procedure_candidates(text: str, max_candidates: int = 3) -> list[dic
                     trigger = previous.rstrip(":").strip()
                     trigger = re.sub(r"^(?:user|assistant)\s*:\s*", "", trigger, flags=re.IGNORECASE)
                 break
+        if trigger and _PROMPT_LIST_LEAD_RE.search(trigger):
+            # "Act as three people:", "Give me a verdict:" - a numbered list
+            # inside a prompt is not a recipe the user wants to keep.
+            continue
         body = ("\n".join([trigger + ":"] if trigger else []) + "\n" + "\n".join(steps)).strip()
         if len(body) > 1500:
             body = body[:1500].rstrip() + " …"

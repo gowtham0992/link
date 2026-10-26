@@ -3,6 +3,14 @@ import Foundation
 /// Bridge to the `lnk` CLI. The CLI's `--json` output is LinkBar's entire
 /// backend: no server, no sockets, no new API surface — the same reviewed
 /// commands every other Link surface uses.
+/// Thread-safe holder for the stderr bytes read on a background queue.
+final class DataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    func set(_ value: Data) { lock.lock(); data = value; lock.unlock() }
+    func get() -> Data { lock.lock(); defer { lock.unlock() }; return data }
+}
+
 enum LinkCLI {
     struct CLIError: Error, CustomStringConvertible {
         let message: String
@@ -93,14 +101,7 @@ enum LinkCLI {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: lnk)
         process.arguments = args
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let (data, errData) = try drain(process)
         if process.terminationStatus != 0 && data.isEmpty {
             let message = String(data: errData, encoding: .utf8) ?? "lnk exited \(process.terminationStatus)"
             throw CLIError(message: message.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -119,13 +120,61 @@ enum LinkCLI {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = Array(command.dropFirst())
-        let stdout = Pipe()
-        process.standardOutput = stdout
-        process.standardError = Pipe()
-        try process.run()
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let (data, errData) = try drain(process)
+        if process.terminationStatus != 0 {
+            let message = String(data: errData, encoding: .utf8) ?? ""
+            throw CLIError(message: lastLine(message) ?? "\(executable) exited \(process.terminationStatus)")
+        }
         return data
+    }
+
+    /// Start `process` and read stdout and stderr at the same time.
+    ///
+    /// Reading one pipe to EOF and then the other deadlocks as soon as the
+    /// child writes more than a pipe buffer (64 KB) to the second one: the
+    /// child blocks writing stderr, never closes stdout, and the read never
+    /// returns. Python tracebacks from a broken venv and pip or model
+    /// download progress are all that size.
+    private static func drain(_ process: Process) throws -> (Data, Data) {
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        let errBox = DataBox()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            errBox.set(stderr.fileHandleForReading.readDataToEndOfFile())
+            group.leave()
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        group.wait()
+        process.waitUntilExit()
+        return (data, errBox.get())
+    }
+
+    /// The last non-empty line of CLI stderr: the part a person can act on.
+    static func lastLine(_ text: String) -> String? {
+        text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+    }
+
+    /// Why the CLI cannot serve this workspace, in words a person can act on.
+    static func diagnose(_ workspace: String) -> String {
+        guard lnkPath() != nil else {
+            return "lnk not found - install Link (brew install gowtham0992/link/link) or set LINK_CLI."
+        }
+        let wiki = (workspace as NSString).appendingPathComponent("wiki")
+        if !FileManager.default.fileExists(atPath: wiki) {
+            return "No Link workspace at \(abbreviated(workspace)) - run lnk setup, or choose one in Settings."
+        }
+        do {
+            _ = try run(["status", workspace, "--json"])
+            return "lnk answered, but its inbox reads failed - try Refresh, or run lnk doctor."
+        } catch {
+            return "lnk failed: " + (lastLine(String(describing: error)) ?? "unknown error")
+        }
     }
 
     /// Fire-and-forget for long-lived processes (the local viewer).

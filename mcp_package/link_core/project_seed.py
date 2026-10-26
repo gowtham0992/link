@@ -209,8 +209,11 @@ def _git_history(project_root: Path, limit: int) -> dict[str, object]:
         result = subprocess.run(
             ["git", "log", "--oneline", "--decorate=no", "-n", str(safe_limit)],
             cwd=project_root,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=3,
             check=False,
         )

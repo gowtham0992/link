@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -251,6 +252,14 @@ def _page_html(page: Mapping[str, Any], body_markdown: str, page_href: Mapping[s
     return _html_shell(title, body, root_prefix="../")
 
 
+def _is_previous_snapshot(directory: Path) -> bool:
+    try:
+        manifest = json.loads((directory / "snapshot.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(manifest, dict) and manifest.get("schema") == SNAPSHOT_SCHEMA
+
+
 def export_snapshot(
     wiki_dir: Path,
     output_dir: Path,
@@ -273,6 +282,7 @@ def export_snapshot(
             "error": "snapshot output cannot be inside wiki/",
             "output": str(output_dir),
         }
+    replace_previous = False
     if output_dir.exists() and any(output_dir.iterdir()):
         if not force:
             return {
@@ -280,7 +290,16 @@ def export_snapshot(
                 "error": "snapshot output directory is not empty; choose another path or use --force",
                 "output": str(output_dir),
             }
-        shutil.rmtree(output_dir)
+        # --force replaces a previous snapshot; it never deletes an arbitrary
+        # directory. `lnk snapshot ~ --force` used to rmtree the home folder.
+        if not _is_previous_snapshot(output_dir):
+            return {
+                "created": False,
+                "error": "--force only replaces a previous Link snapshot (a directory with snapshot.json); "
+                         "this directory is not one, so nothing was deleted",
+                "output": str(output_dir),
+            }
+        replace_previous = True
 
     sensitive_values: list[str] = []
     sensitive_read_errors: list[str] = []
@@ -298,6 +317,10 @@ def export_snapshot(
                 "sensitive_values": sensitive_values,
                 "read_errors": sensitive_read_errors,
             }
+    if replace_previous:
+        # Only after every refusal check: --force used to delete the previous
+        # snapshot and then refuse the new one, leaving nothing.
+        shutil.rmtree(output_dir)
 
     owns_cache = cache is None
     resolved_cache = cache or build_wiki_cache(wiki_dir)

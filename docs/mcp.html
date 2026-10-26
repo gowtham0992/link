@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Install and use Link's MCP server with Codex, Claude, Cursor, Kiro, VS Code, Copilot, and other agents.">
   <title>Link - MCP Setup</title>
-  <link rel="stylesheet" href="assets/site.css">
+  <link rel="stylesheet" href="assets/site.css?v=74addfc189">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
@@ -13,25 +13,20 @@
   <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
-  <script src="assets/site.js" defer></script>
+  <script src="assets/site.js?v=e04a4e8e00" defer></script>
 </head>
 <body>
   <nav class="site-nav" aria-label="Main">
     <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
-      <a href="why-link.html">Why</a>
-      <a href="scale.html">Scale</a>
-      <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
-      <a href="mcp.html" aria-current="page">MCP</a>
-      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
-      <a href="skills.html">Skills</a>
-      <a href="api.html">API</a>
+      <a href="mcp.html" aria-current="page">MCP</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
       <a href="https://github.com/gowtham0992/link">GitHub</a>
+      <button type="button" class="site-search" aria-label="Search the docs">Search <kbd>/</kbd></button>
     </div>
   </nav>
 
@@ -45,6 +40,34 @@
 
   <main class="doc-section">
     <div class="section-inner doc-grid">
+      <aside class="docs-sidebar" aria-label="Documentation">
+        <button type="button" class="docs-sidebar-toggle" aria-expanded="false">Docs menu</button>
+        <div class="docs-sidebar-groups">
+          <div class="docs-group"><strong>Start here</strong>
+            <a href="getting-started.html">Getting started</a>
+            <a href="why-link.html">Why Link</a>
+            <a href="concepts.html">Concepts</a>
+          </div>
+          <div class="docs-group"><strong>Use it</strong>
+            <a href="cli.html">CLI reference</a>
+            <a href="mcp.html" aria-current="page">MCP setup</a>
+            <a href="skills.html">Skills</a>
+            <a href="ui.html">Web UI</a>
+            <a href="obsidian.html">Obsidian</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+          <div class="docs-group"><strong>Trust it</strong>
+            <a href="memory-contract.html">Memory contract</a>
+            <a href="security.html">Security</a>
+            <a href="team-security.html">Team security</a>
+            <a href="scale.html">Scale</a>
+          </div>
+          <div class="docs-group"><strong>Project</strong>
+            <a href="api.html">HTTP API</a>
+            <a href="contributing.html">Contributing</a>
+          </div>
+        </div>
+      </aside>
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#tour">MCP tour</a>
@@ -143,7 +166,7 @@ python3 -m link_mcp --semantic-setup --wiki ~/link/wiki</code></pre>
           <li>Call <code>ingest</code> when the user drops files into <code>raw/</code>.</li>
           <li>Call <code>remember</code> only after the user explicitly approves durable memory.</li>
           <li>At session end, call <code>admin(action="session_end")</code> or <code>capture_session</code> to propose memory candidates without saving them silently.</li>
-          <li>Call <code>review</code> for memory inbox, profile, audit, explain, archive, restore, forget, and visibility workflows.</li>
+          <li>Call <code>review</code> for memory inbox, profile, audit, log, receipt, explain, archive, restore, and forget workflows. Change who a memory is shared with through <code>admin(action="set_visibility")</code>, after the user approves. Rules a memory enforces on tool calls are set with <code>admin(action="set_enforce")</code> only when the user asks; they act after the user reviews the memory, and an agent cannot mark a rule-bearing memory reviewed, clear its rules, or archive, forget or update it over MCP - the person does that in the CLI, the viewer or LinkBar.</li>
           <li>Call <code>admin</code> for backup, migrate, validate, rebuild, graph export, pages, captures, and advanced updates.</li>
         </ol>
 
@@ -155,6 +178,15 @@ remember
 ingest
 review
 admin</code></pre>
+        <p>What each slim tool accepts:</p>
+        <ul>
+          <li><code>status(include_validation)</code>: readiness and safe next actions.</li>
+          <li><code>recall(query, budget, project, mode, limit, context_path, as_of, memory_type)</code>: an empty query returns the session brief. <code>as_of</code> (YYYY-MM-DD) answers what was true on a date, and a time phrase in the query (&ldquo;last quarter&rdquo;) does the same. <code>memory_type</code> narrows memory recall to one kind.</li>
+          <li><code>remember(text, title, memory_type, scope, visibility, project, tags, review_after, expires_at, trigger, applies_when, supersedes, context, enforce, ...)</code>: only after the user asks or approves. <code>enforce</code> takes rules such as <code>ask command: git push --force*</code> (several separated by <code>;</code>), only when the user asks Link to check or stop an action; the result's <code>enforce_suggestions</code> are for the user to accept, never to apply on the agent's own initiative.</li>
+          <li><code>ingest(action)</code>: <code>status</code>, <code>validate</code>, <code>rebuild</code>.</li>
+          <li><code>review(action, ...)</code>: <code>inbox</code>, <code>audit</code>, <code>profile</code>, <code>log</code>, <code>wins</code>, <code>receipt</code>, <code>explain</code>, <code>reviewed</code>, <code>archive</code>, <code>restore</code>, <code>forget</code>, <code>consolidate</code>.</li>
+          <li><code>admin(action, arguments)</code>, where <code>arguments</code> is a JSON object string: <code>backup</code>, <code>migrate</code>, <code>validate</code>, <code>operations</code>, <code>prompts</code>, <code>search</code>, <code>context</code>, <code>pages</code>, <code>backlinks</code>, <code>graph_summary</code>, <code>graph</code>, <code>rebuild_index</code>, <code>rebuild_backlinks</code>, <code>seed_project</code>, <code>propose_memories</code>, <code>capture_session</code>, <code>session_end</code>, <code>capture_inbox</code>, <code>accept_capture</code>, <code>redact_capture</code>, <code>delete_capture</code>, <code>dedup_captures</code>, <code>update_memory</code>, <code>set_visibility</code>, <code>set_enforce</code>, <code>compile</code> (reviewed memories into the repository's agent files; a preview with the diff unless <code>arguments</code> has <code>"write": true</code>).</li>
+        </ul>
         <p>MCP prompts exposed by Link:</p>
         <pre><code>link_start
 link_brief

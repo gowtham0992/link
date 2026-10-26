@@ -83,3 +83,70 @@ class LogCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LogChainHardeningTests(unittest.TestCase):
+    """The chain survives concurrency and odd input, and notices cuts."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="link-log-")
+        self.wiki = Path(self.temp.name) / "wiki"
+        self.wiki.mkdir()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_concurrent_writers_do_not_fork_the_chain(self):
+        import subprocess
+        script = (
+            "import sys; sys.path.insert(0, %r)\n"
+            "from pathlib import Path\n"
+            "from link_core.log import append_log\n"
+            "for i in range(15):\n"
+            "    append_log(Path(%r), '2026-09-26T00:00:00Z', 'test', f'writer {sys.argv[1]} entry {i}', [])\n"
+        ) % (str(ROOT / "mcp_package"), str(self.wiki))
+        procs = [subprocess.Popen([sys.executable, "-c", script, str(n)]) for n in range(4)]
+        for proc in procs:
+            self.assertEqual(proc.wait(timeout=60), 0)
+        report = verify_log_integrity(self.wiki)
+        self.assertTrue(report["passed"], report["findings"])
+        self.assertEqual(report["hashed_entries"], 60)
+
+    def test_newline_in_a_description_keeps_the_entry_verifiable(self):
+        append_log(self.wiki, "2026-09-26T00:00:00Z", "remember", "Title line one\nline two", ["reason\nsecond line"])
+        report = verify_log_integrity(self.wiki)
+        self.assertTrue(report["passed"], report["findings"])
+
+    def _three_entries(self):
+        for i in range(3):
+            append_log(self.wiki, f"2026-09-26T00:00:0{i}Z", "remember", f"entry {i}", [f"detail {i}"])
+
+    def test_cutting_the_head_of_the_log_is_detected(self):
+        self._three_entries()
+        text = (self.wiki / "log.md").read_text(encoding="utf-8")
+        blocks = text.split("## [")
+        (self.wiki / "log.md").write_text(blocks[0] + "## [" + "## [".join(blocks[2:]), encoding="utf-8")
+        report = verify_log_integrity(self.wiki)
+        self.assertFalse(report["passed"])
+        self.assertTrue(any("mid-chain" in f for f in report["findings"]), report["findings"])
+
+    def test_cutting_the_tail_of_the_log_is_detected(self):
+        self._three_entries()
+        text = (self.wiki / "log.md").read_text(encoding="utf-8")
+        (self.wiki / "log.md").write_text(text[: text.rindex("## [")], encoding="utf-8")
+        report = verify_log_integrity(self.wiki)
+        self.assertFalse(report["passed"])
+        self.assertEqual(report["anchor"], "mismatch")
+
+    def test_forget_redacts_rotated_logs_and_keeps_the_chain(self):
+        from link_core.log import redact_log_references
+        for i in range(40):
+            append_log(self.wiki, "2026-09-26T00:00:00Z", "remember", f"Secret project Bluebird note {i}",
+                       ["x" * 200], max_bytes=4000, backups=5)
+        rotated = sorted(self.wiki.glob("log.md.*"))
+        self.assertTrue(rotated, "test needs at least one rotated file")
+        redact_log_references(self.wiki, ["Secret project Bluebird"], "2026-09-26T01:00:00Z", "forget")
+        for path in [self.wiki / "log.md", *rotated]:
+            self.assertNotIn("Bluebird", path.read_text(encoding="utf-8"), path.name)
+        report = verify_log_integrity(self.wiki)
+        self.assertTrue(report["passed"], report["findings"])

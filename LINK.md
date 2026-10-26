@@ -276,6 +276,10 @@ How the answer was derived. Which pages were consulted. What connections were ma
 
 ## Operations
 
+### Enforced rules, approvals and receipts
+
+Some reviewed memories carry **enforce rules**. With Link's tool hooks installed, a tool call that matches one waits for the user's OK or is blocked, and the decision names the memory: follow it, never work around it. Never review, clear, archive, forget or update a memory that carries rules - only the user does that, in `lnk`, the viewer or LinkBar. Add a rule only when the user asks (`lnk enforce <memory> --rule "ask command: ..."`, or MCP `remember(enforce=...)`); it acts after the user reviews the memory. A session brief may end with **Waiting for the user's OK**: show those items at a natural pause and run a listed command only after the user says yes to that item in chat. Recalled memories may carry `verified` or `stale_paths` (checked against the repository): treat a stale one as possibly wrong and say so. `lnk receipt` shows what memory reached each session and whether it arrived whole; `lnk compile` writes reviewed memory into the files agents read; `lnk stale --instructions` checks those files.
+
 ### 1. Remember
 
 When the human says to remember something, capture it as local memory. Prefer the built-in command when `link.py` is available:
@@ -377,7 +381,7 @@ When the human asks a question:
 3. If the human asks what to try after installing Link, call MCP `admin` action `prompts`, run `python3 link.py prompts .`, or call `GET /api/prompts`.
 4. If status reports a missing or old schema marker, run MCP `admin` action `migrate` when available or `python3 link.py migrate .` before other writes.
 5. If the user asks to ingest or says they dropped files into `raw/`, use MCP `ingest`, `python3 link.py ingest-status .`, or `GET /api/ingest-status` to get pending files, the guided ingest plan, and the next prompt/checks. If the state is `blocked_secrets`, do not read or ingest flagged raw files until the human redacts them.
-6. Start with the smart query path when available: MCP `recall`, `python3 link.py query "<question>" .`, or `GET /api/query-link?q=<question>`. This returns a compact context packet with relevant memory, ranked wiki results, graph context, provenance, selection reasons, budget reports, and follow-up tool actions. Use provenance fields to explain why Link knows something. Do not read the whole wiki unless the packet is insufficient; if it is budget-limited, use the returned `follow_up` action first.
+6. Start with the smart query path when available: MCP `recall`, `python3 link.py query "<question>" .`, or `GET /api/query-link?q=<question>`. This returns a compact context packet with relevant memory, ranked wiki results, graph context, provenance, selection reasons, budget reports, and follow-up tool actions. Use provenance fields to explain why Link knows something. Do not read the whole wiki unless the packet is insufficient; if it is budget-limited, use the returned `follow_up` action first. Each item's content appears once, under `memory.items` or `wiki.pages`. `context_packet` is the ranked list of references to those items. A recalled memory marked `verified` was checked against this repository at the given sha, so you can rely on it. One with `stale_paths` names something the repository no longer has; check it against the current code first and suggest the human review it. For "what was true then" questions, pass `as_of` (YYYY-MM-DD) or keep the time phrase in the query ("last quarter", "in March").
 7. If the question only needs session priming or personal/project preferences, use `python3 link.py brief "<question>" .` or MCP `recall` with `mode=brief`. Use `profile`/`review(action="profile")` and `recall` afterward only when you need deeper detail.
 8. **If you need full source-backed context for one topic:** call `GET /api/context?topic=<question>` or MCP `admin` action `context` — returns the best matching page plus related pages via graph traversal.
 9. **If you need graph orientation on a large wiki:** use `python3 link.py graph-summary "<topic>" .`, `GET /api/graph-summary?topic=<topic>`, or MCP `admin` action `graph_summary` before requesting the full graph.
@@ -599,7 +603,7 @@ Used during query to find related pages, and during lint to detect orphans and b
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/page-list?limit=100&offset=0` | Bounded page metadata list for agents and large wikis, with follow-up pagination actions |
-| `GET /api/pages` | Full page metadata list for local UI/export use |
+| `GET /api/pages?limit=500` | Page metadata list for local UI/export use, capped at 500 by default (`limit` up to 5000); `X-Total-Count` and `X-Link-Truncated` headers say when more exist — use `/api/page-list` to paginate |
 | `GET /api/status?validate=true` | Readiness summary with page/memory counts, optional validation summary, and safe next actions |
 | `GET /api/ingest-status` | Raw ingest state with pending files, represented-source completion cards, safety summary, graph health, and next prompts/checks |
 | `GET /api/memory-brief?q=<task>&project=<slug>` | Startup memory context: relevant memories, review warnings, capture status, and safe rules |

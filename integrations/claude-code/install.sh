@@ -34,6 +34,13 @@ else
     bash "$SCRIPT_DIR/../_shared/scaffold.sh" --project
 fi
 
+# Session hooks live in the agent's global settings, so only a global
+# install adds them; a --project install must not rewrite the user's hooks.
+HOOKS_FLAG=""
+if [ "$MODE" = "--global" ]; then HOOKS_FLAG="--hooks"; fi
+link_connect claude-code "${WIKI_PATH%/wiki}" $HOOKS_FLAG
+# Built-in registration, used only when lnk connect is unavailable.
+if [ -z "$LINK_CONNECTED" ]; then
 MCP_PYTHON="python3"
 MCP_MARKER="${WIKI_PATH%/wiki}/.link-mcp-python"
 if [ -f "$MCP_MARKER" ]; then
@@ -66,6 +73,8 @@ else
     echo ""
     echo "  MCP config: add to ~/.claude.json or .mcp.json at project root:"
     echo "  { \"mcpServers\": { \"link\": { \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"] } } }"
+fi
+
 fi
 
 link_print_next_steps "$MODE"

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import html
 import urllib.parse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+
+from .mcp_verify import display_command
 
 from .web_ingest import copy_button
 from .web_layout import render_stat_grid
@@ -212,7 +214,7 @@ def render_profile_page(
         f'{_counts_line("Types", _mapping(profile.get("by_type")))}'
         f'{_counts_line("Scopes", _mapping(profile.get("by_scope")))}'
         f'{_counts_line("Status", _mapping(profile.get("by_status")))}'
-        f'{_render_empty_profile_actions(project) if not int(profile.get("memory_count") or 0) else ""}'
+        f'{_render_empty_profile_actions(project) if not _count(profile.get("memory_count")) else ""}'
         f'{_profile_section("Recent memories", _dict_list(profile.get("recent")), page_href=page_href)}'
         f'{_profile_section("Preferences", _dict_list(profile.get("preferences")), page_href=page_href)}'
         f'{_profile_section("Decisions", _dict_list(profile.get("decisions")), page_href=page_href)}'
@@ -290,7 +292,7 @@ def render_memory_audit_page(
 
 
 def render_captures_page(inbox: Mapping[str, object], *, layout: PageLayout) -> str:
-    warning_count = int(inbox.get("warning_count") or 0)
+    warning_count = _count(inbox.get("warning_count"))
     stats = render_stat_grid([
         (inbox.get("count", 0), "captures"),
         (warning_count, "warnings"),
@@ -302,7 +304,7 @@ def render_captures_page(inbox: Mapping[str, object], *, layout: PageLayout) -> 
             '<div class="memory-next"><strong>Needs redaction</strong>'
             f'<p>{warning_count} raw capture'
             f'{"s contain" if warning_count != 1 else " contains"} secret-looking values.</p>'
-            '<code>python3 link.py redact-capture raw/memory-captures/&lt;capture&gt;.md .</code></div>'
+            f'<code>{html.escape(display_command(["link", "redact-capture", "raw/memory-captures/<capture>.md", "."]))}</code></div>'
         )
     read_warning_html = ""
     read_warnings = _dict_list(inbox.get("read_warnings"))
@@ -348,7 +350,17 @@ def render_inbox_page(
         content = "<p>Inbox is clear.</p>"
     else:
         rows = "".join(_render_inbox_item(item, page_href=page_href) for item in items)
-        content = f"<ul class='page-list'>{rows}</ul>"
+        toolbar = (
+            '<div class="inbox-toolbar" data-inbox-toolbar>'
+            '<button type="button" data-inbox-bulk="review" disabled>Review selected</button>'
+            '<button type="button" data-inbox-bulk="archive" disabled>Archive selected</button>'
+            '<span class="inbox-status" data-inbox-status aria-live="polite"></span>'
+            '<span class="inbox-keys" aria-hidden="true">'
+            '<kbd>j</kbd>/<kbd>k</kbd> move · <kbd>r</kbd> review · <kbd>a</kbd> archive · '
+            '<kbd>e</kbd> edit · <kbd>x</kbd> select</span>'
+            '</div>'
+        )
+        content = f"{toolbar}<ul class='page-list inbox-list' data-inbox-list>{rows}</ul>"
     project = str(inbox.get("project") or "")
     inbox_actions = _copy_actions([(_inbox_prompt(project), "Copy review prompt")])
     body = (
@@ -422,6 +434,7 @@ def render_memory_wins_page(
         f'{render_stat_grid([(wins_payload.get("active_count", 0), "active"), (wins_payload.get("reviewed_active_count", 0), "reviewed"), (wins_payload.get("review_count", 0), "review"), (wins_payload.get("project_count", 0), "projects")])}'
         f'<p>{html.escape(str(wins_payload.get("honest_note") or ""))}</p>'
         f'<section class="memory-grid">{win_cards}</section>'
+        f'{render_last_session(_mapping(wins_payload.get("last_session")), page_href=page_href)}'
         f'{recent_html}'
         '<h2>Try the value loop</h2>'
         f'<ul class="memory-issues">{prompts}</ul>'
@@ -548,9 +561,37 @@ def _render_memory_win_card(win: Mapping[str, object]) -> str:
     )
 
 
+def _rule_parts(rule: str) -> tuple[str, str]:
+    """("asks" | "blocks", "command: git push --force*") for one enforce rule."""
+    action, _, rest = str(rule).strip().partition(" ")
+    return ("blocks" if action.lower() == "deny" else "asks"), rest.strip()
+
+
+def render_rules(rules: Iterable[object]) -> str:
+    """The enforced rules a memory carries, shown before anyone activates them.
+
+    Reviewing a memory with rules turns them on for the agent's tool calls,
+    so the rules are listed where the Review button is, in the words the
+    hook will use: asks (the agent must get the user's OK) or blocks.
+    """
+    items = "".join(
+        f'<li data-rule="{html.escape(str(rule), quote=True)}">'
+        f'<span class="severity">{_rule_parts(str(rule))[0]}</span> '
+        f'<code>{html.escape(_rule_parts(str(rule))[1])}</code></li>'
+        for rule in rules if str(rule).strip()
+    )
+    if not items:
+        return ""
+    return (
+        '<p class="summary"><strong>Enforced rules</strong> (active once reviewed):</p>'
+        f'<ul class="memory-issues memory-rules" data-inbox-rules>{items}</ul>'
+    )
+
+
 def _render_inbox_item(item: Mapping[str, object], *, page_href: PageHref) -> str:
     name = str(item.get("name") or "")
     summary = item.get("tldr") or item.get("snippet") or ""
+    rules_html = render_rules(_list(item.get("enforce")))
     meta = f'{item.get("memory_type", "")} · {item.get("scope", "")} · {item.get("status", "")}'
     issues = "".join(
         f'<li><span class="severity">{html.escape(str(issue.get("severity") or ""))}</span> '
@@ -564,14 +605,92 @@ def _render_inbox_item(item: Mapping[str, object], *, page_href: PageHref) -> st
             f'<p class="summary"><strong>Next:</strong> {html.escape(str(primary.get("label") or ""))} '
             f'- {html.escape(str(primary.get("description") or ""))}</p>'
         )
+    title = str(item.get("title") or name)
+    visibility = str(item.get("visibility") or "")
+    options = "".join(
+        f'<option value="{value}"{" selected" if value == visibility else ""}>{value}</option>'
+        for value in ("private", "project", "team")
+    )
+    # Inline edit: the claim goes through update-memory (so the claim head
+    # moves and conflict checks run), visibility through set-memory-visibility.
+    # Before this the inbox told you to go edit frontmatter in a terminal.
+    edit_html = (
+        '<details class="inbox-edit" data-inbox-edit><summary>Edit</summary>'
+        f'<label>Claim<textarea data-inbox-text rows="3">{html.escape(str(summary))}</textarea></label>'
+        f'<label>Visibility<select data-inbox-visibility>{options}</select></label>'
+        '<button type="button" data-inbox-save>Save</button>'
+        '</details>'
+    )
     return (
-        f'<li><a href="{html.escape(page_href(name), quote=True)}">{html.escape(str(item.get("title") or name))}</a>'
+        f'<li class="inbox-item" data-inbox-item data-memory="{html.escape(name, quote=True)}" tabindex="-1">'
+        f'<input type="checkbox" class="inbox-select" data-inbox-select aria-label="Select {html.escape(title, quote=True)}">'
+        f'<a href="{html.escape(page_href(name), quote=True)}">{html.escape(title)}</a>'
         f'<div class="memory-meta">{html.escape(meta)}</div>'
         f'<div class="memory-meta"><a href="/explain-memory?memory={urllib.parse.quote(name, safe="")}">explain</a></div>'
         f'{f"<small>{html.escape(str(summary))}</small>" if summary else ""}'
+        f'{rules_html}'
         f'<ul class="memory-issues">{issues}</ul>'
         f'{primary_html}'
+        f'{edit_html}'
         f'{render_memory_action_commands(_dict_list(item.get("actions")))}</li>'
+    )
+
+
+def render_last_session(session: Mapping[str, object], *, page_href: PageHref) -> str:
+    """What the last session's agent was given (the `lnk receipt` card, for the viewer)."""
+    if not session:
+        return "<h2>Last session</h2><p>No session recorded yet. Start an agent session with Link connected.</p>"
+    used = _dict_list(session.get("memories_used"))
+    briefs = _dict_list(session.get("briefs"))
+    recalls = _count(session.get("recalls"))
+    surfaces = ", ".join({"hook": "session hook", "mcp": "MCP", "cli": "CLI"}.get(str(s), str(s))
+                         for s in _list(session.get("surfaces")))
+    tokens = session.get("estimated_tokens")
+    facts = [f"{len(used)} memor{'y' if len(used) == 1 else 'ies'} given", f"{recalls} recall{'' if recalls == 1 else 's'}"]
+    if briefs:
+        facts.append(f"{len(briefs)} brief{'' if len(briefs) == 1 else 's'}")
+    if surfaces:
+        facts.append(f"via {surfaces}")
+    if isinstance(tokens, int) and tokens > 0:
+        facts.append(f"about {tokens:,} tokens")
+    notes: list[str] = []
+    delivery = _mapping(session.get("delivery"))
+    if session.get("anything_undelivered"):
+        parts = []
+        if _count(delivery.get("truncated")):
+            parts.append(f"{delivery['truncated']} cut short")
+        if _count(delivery.get("missing")):
+            parts.append(f"{delivery['missing']} never arrived")
+        notes.append('<div class="verify-note">The agent did not get all of its memory: '
+                     + html.escape(" · ".join(parts) or "see lnk receipt") + "</div>")
+    checks = _dict_list(session.get("rule_checks"))
+    if checks:
+        asked = sum(1 for c in checks if str(c.get("decision")) == "ask")
+        blocked = sum(1 for c in checks if str(c.get("decision")) == "deny")
+        parts = [p for p in (f"{asked} asked for your OK" if asked else "", f"{blocked} blocked" if blocked else "") if p]
+        notes.append(f'<p class="summary"><strong>Enforced rules:</strong> {html.escape(" · ".join(parts))}</p>')
+    reminders = _dict_list(session.get("code_reminders"))
+    if reminders:
+        notes.append(f'<p class="summary"><strong>Code reminders:</strong> {len(reminders)} '
+                     f'(memories surfaced when the agent touched the code they describe)</p>')
+    if session.get("anything_truncated"):
+        notes.append('<p class="summary">A size budget left some memories out of a brief or recall.</p>')
+    rows = "".join(
+        (f'<li><a href="{html.escape(page_href(str(m.get("name") or "")), quote=True)}">'
+         f'{html.escape(str(m.get("title") or m.get("name") or ""))}</a>'
+         if m.get("exists", True) else f'<li><s>{html.escape(str(m.get("title") or m.get("name") or ""))}</s>')
+        + (f' <span class="memory-meta">×{int(m.get("times") or 1)}</span>' if int(m.get("times") or 1) > 1 else "")
+        + "</li>"
+        for m in used
+    )
+    return (
+        "<h2>Last session</h2>"
+        f'<p class="summary">{html.escape(" · ".join(facts))}'
+        + (f' <span class="memory-meta">ended {html.escape(str(session.get("ended") or ""))}</span>' if session.get("ended") else "")
+        + "</p>"
+        + "".join(notes)
+        + (f'<ul class="page-list">{rows}</ul>' if rows else "")
+        + '<p class="memory-meta">From the local retrieval ledger (<code>lnk receipt</code>); it never records what you asked.</p>'
     )
 
 
@@ -610,6 +729,14 @@ def _counts_line(title: str, counts: Mapping[str, object]) -> str:
 
 def _project_line(project: str) -> str:
     return f"<p><strong>Project:</strong> {html.escape(project)}</p>" if project else ""
+
+
+def _count(value: object) -> int:
+    """A count from a payload field that mypy only knows as object."""
+    try:
+        return int(value) if isinstance(value, (int, float, str)) and str(value).strip() else 0
+    except ValueError:
+        return 0
 
 
 def _mapping(value: object) -> Mapping[str, object]:

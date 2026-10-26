@@ -92,6 +92,22 @@ class WebHttpCoreTests(unittest.TestCase):
         self.assertEqual(validate_local_browser_source_headers("http://localhost:3000", ""), (True, None))
         self.assertEqual(validate_local_browser_source_headers("", "http://127.0.0.1:3000/graph"), (True, None))
 
+    def test_browser_source_must_be_the_viewers_own_port(self):
+        self.assertEqual(
+            validate_local_browser_source_headers("http://localhost:3777", "", allowed_port=3777), (True, None))
+        self.assertEqual(
+            validate_local_browser_source_headers("", "http://127.0.0.1:3777/memory", allowed_port=3777), (True, None))
+        self.assertFalse(validate_local_browser_source_headers("http://localhost:8080", "", allowed_port=3777)[0])
+        from link_core.web_http import host_header_port
+        self.assertEqual(host_header_port("localhost:8080"), 8080)
+        self.assertEqual(host_header_port("127.0.0.1"), 80)
+        self.assertEqual(host_header_port("[::1]:3000"), 3000)
+        self.assertIsNone(host_header_port(""))
+        self.assertIsNone(host_header_port("localhost:notaport"))
+        self.assertFalse(validate_local_browser_source_headers("http://localhost", "", allowed_port=3777)[0])
+        self.assertFalse(
+            validate_local_browser_source_headers("", "http://127.0.0.1:5173/x", allowed_port=3777)[0])
+
     def test_validate_local_browser_source_headers_rejects_remote_sources(self):
         self.assertEqual(
             validate_local_browser_source_headers("https://attacker.example", ""),

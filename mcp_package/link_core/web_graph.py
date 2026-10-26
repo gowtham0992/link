@@ -102,7 +102,7 @@ def graph_legend_items(colors: Mapping[str, str] = GRAPH_CATEGORY_COLORS) -> str
         '<button type="button" class="graph-legend-item" aria-pressed="false" '
         f'data-graph-category="{html.escape(str(category), quote=True)}" '
         f'title="Filter graph to {html.escape(str(category), quote=True)}">'
-        f'<span style="background:{html.escape(str(color), quote=True)}"></span>'
+        f'<span data-swatch-color="{html.escape(str(color), quote=True)}"></span>'
         f'{html.escape(str(category))}</button>'
         for category, color in colors.items()
         if category != "root"
@@ -123,14 +123,42 @@ def render_graph_script(
     label_json: str = '"sparse"',
     total_node_count: int,
     total_edge_count: int,
+    nonce: str,
 ) -> str:
-    """Render the browser-side graph simulation script."""
+    """Render the browser-side graph simulation script.
+
+    `nonce` is this response's CSP nonce, handed to this one script by the
+    server. It is never a placeholder replaced across the page afterwards:
+    that would also bless any markup that happened to contain the
+    placeholder text.
+    """
     return f"""
-<script>
+<script nonce="{html.escape(nonce, quote=True)}">
 (function() {{
   var nodes = {nodes_json};
   var edges = {edges_json};
   var catColors = {cat_colors_json};
+
+  // Legend swatch colours come from data attributes and are applied through
+  // the CSSOM, which the strict style policy allows (style="" does not).
+  document.querySelectorAll('[data-swatch-color]').forEach(function(el) {{
+    el.style.background = el.getAttribute('data-swatch-color');
+  }});
+
+  // Suggest node titles in the Find box: focusing used to require typing a
+  // title exactly right.
+  var titleList = document.getElementById('graph-node-titles');
+  if (titleList) {{
+    var seenTitles = {{}};
+    nodes.slice(0, 2000).forEach(function(node) {{
+      var title = String(node.title || node.label || node.id || '');
+      if (!title || seenTitles[title]) return;
+      seenTitles[title] = true;
+      var option = document.createElement('option');
+      option.value = title;
+      titleList.appendChild(option);
+    }});
+  }}
 
   var canvas = document.getElementById('graph-canvas');
   var ctx = canvas.getContext('2d');
@@ -1393,7 +1421,8 @@ def render_graph_page_body(
         '<button id="graph-copy-link" type="button">Copy link</button>'
         f"{load_full_button}"
         '<label class="graph-control">Find'
-        '<input id="graph-search" type="search" placeholder="node title"></label>'
+        '<input id="graph-search" type="search" placeholder="node title" list="graph-node-titles" autocomplete="off">'
+        '<datalist id="graph-node-titles"></datalist></label>'
         '<label class="graph-control">Type'
         f'<select id="graph-category">{category_options}</select></label>'
         '<label class="graph-control">Size'

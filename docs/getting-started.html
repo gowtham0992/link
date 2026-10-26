@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="First 10 minutes with Link: demo, source ingest, memory recall, and validation.">
   <title>Link - First 10 Minutes</title>
-  <link rel="stylesheet" href="assets/site.css">
+  <link rel="stylesheet" href="assets/site.css?v=74addfc189">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
@@ -13,25 +13,20 @@
   <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
-  <script src="assets/site.js" defer></script>
+  <script src="assets/site.js?v=e04a4e8e00" defer></script>
 </head>
 <body>
   <nav class="site-nav" aria-label="Main">
     <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
     <div class="nav-links">
       <a href="getting-started.html" aria-current="page">Start</a>
-      <a href="why-link.html">Why</a>
-      <a href="scale.html">Scale</a>
-      <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
-      <a href="mcp.html">MCP</a>
-      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
-      <a href="skills.html">Skills</a>
-      <a href="api.html">API</a>
+      <a href="mcp.html">MCP</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
       <a href="https://github.com/gowtham0992/link">GitHub</a>
+      <button type="button" class="site-search" aria-label="Search the docs">Search <kbd>/</kbd></button>
     </div>
   </nav>
 
@@ -45,6 +40,34 @@
 
   <main class="doc-section">
     <div class="section-inner doc-grid">
+      <aside class="docs-sidebar" aria-label="Documentation">
+        <button type="button" class="docs-sidebar-toggle" aria-expanded="false">Docs menu</button>
+        <div class="docs-sidebar-groups">
+          <div class="docs-group"><strong>Start here</strong>
+            <a href="getting-started.html" aria-current="page">Getting started</a>
+            <a href="why-link.html">Why Link</a>
+            <a href="concepts.html">Concepts</a>
+          </div>
+          <div class="docs-group"><strong>Use it</strong>
+            <a href="cli.html">CLI reference</a>
+            <a href="mcp.html">MCP setup</a>
+            <a href="skills.html">Skills</a>
+            <a href="ui.html">Web UI</a>
+            <a href="obsidian.html">Obsidian</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+          <div class="docs-group"><strong>Trust it</strong>
+            <a href="memory-contract.html">Memory contract</a>
+            <a href="security.html">Security</a>
+            <a href="team-security.html">Team security</a>
+            <a href="scale.html">Scale</a>
+          </div>
+          <div class="docs-group"><strong>Project</strong>
+            <a href="api.html">HTTP API</a>
+            <a href="contributing.html">Contributing</a>
+          </div>
+        </div>
+      </aside>
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#demo">Prove the loop</a>
@@ -59,14 +82,6 @@
         <a href="#semantic">Semantic recall</a>
       </aside>
       <article class="doc-content">
-        <figure class="screenshot-card media-wide" style="margin-top:0">
-          <img src="assets/link-aha.svg" alt="Animated demo: lnk recall finds a memory phrased in completely different words, and a new agent session is greeted with your memory automatically." width="720" style="max-width:100%;border-radius:12px">
-          <figcaption>The two moments Link is built for: recall that matches by meaning, and memory that shows up on its own.</figcaption>
-        </figure>
-        <figure class="screenshot-card media-wide">
-          <img src="assets/link-truth.svg" alt="Animated demo: a new memory conflicts with an old one; Link replaces it with lineage, recall returns only the current truth, and --as-of answers what was true back then." width="720" style="max-width:100%;border-radius:12px">
-          <figcaption>Memory that stays true: conflicts are caught, replacements keep their history, and <code>--as-of</code> answers what was true back then.</figcaption>
-        </figure>
         <h2 id="demo">1. Prove The Memory Loop</h2>
         <p>Start with <code>lnk proof</code>. It creates a clean local workspace, writes one reviewed memory, then recalls it through the same bounded path used by CLI, skills, and MCP. This proves the core product before you configure an agent or open the web viewer.</p>
         <p>macOS with Homebrew:</p>
@@ -128,8 +143,8 @@ lnk seed . ~/link
 lnk query "what is this project about?" ~/link --budget small</code></pre>
         <p>Seeding does not create durable memories. It gives agents a cited project source to retrieve from; preferences and decisions should still go through reviewed memory proposals.</p>
 
-        <h2 id="install">4. Install Link For Your Agent</h2>
-        <p>From the cloned checkout, run the installer for the agent you use. Re-running the same installer updates code and instructions without replacing existing wiki data.</p>
+        <h2 id="install">4. Install Link For Your Agent (source checkouts)</h2>
+        <p>Skip this if you ran <code>lnk setup</code>: it already wired every agent it found. From a cloned checkout, the installers add the agent's instruction block and then call <code>lnk connect --write</code> for the MCP entry (plus session hooks for Claude Code, Codex and Cursor), which verifies the runtime, creates the config if it does not exist, and edits JSON-with-comments settings without losing comments. Re-running an installer updates code and instructions without replacing existing wiki data. The matching <code>uninstall.sh</code> calls <code>lnk disconnect --write</code>, which removes Link's MCP entry and hooks and nothing else.</p>
         <pre><code>bash integrations/codex/install.sh
 bash integrations/kiro/install.sh
 bash integrations/claude-code/install.sh
@@ -138,7 +153,7 @@ bash integrations/copilot/install.sh
 bash integrations/vscode/install.sh
 bash integrations/antigravity/install.sh</code></pre>
         <p>Use <code>--project</code> for a repo-local Link install. Project-scoped memory then stays separate from other project memory while still allowing broad user memory to be recalled.</p>
-        <p>On Windows PowerShell, use the matching <code>install.ps1</code> script:</p>
+        <p>On Windows PowerShell, use the matching <code>install.ps1</code> script. The PowerShell installers add the instruction block and scaffold the workspace but do not call <code>lnk connect</code> or install hooks, so run <code>lnk connect &lt;agent&gt; ~/link --hooks --write</code> after one:</p>
         <pre><code>.\integrations\codex\install.ps1
 .\integrations\kiro\install.ps1
 .\integrations\claude-code\install.ps1
@@ -205,7 +220,7 @@ lnk verify-mcp</code></pre>
         <pre><code>query Link for first Link memory</code></pre>
         <p>If the answer comes from Link, local agent memory is working.</p>
               <h2 id="hooks">9. Make The Loop Automatic (Session Hooks)</h2>
-        <p>Agents with session-hook support — Claude Code, Codex, and Cursor — can run the memory loop without being asked. <code>--hooks</code> installs hooks that inject a bounded memory brief at the start of every new session and store proposal-only session notes at session end. Empty sessions are skipped, duplicate end events are deduplicated, and durable memory still requires your approval. When the review backlog grows, the injected brief nudges the agent to offer a read-only <code>lnk consolidate</code> pass.</p>
+        <p>Agents with session-hook support — Claude Code, Codex, and Cursor — can run the memory loop without being asked. <code>--hooks</code> installs hooks that inject a bounded memory brief at the start of every new session and store proposal-only session notes at session end. Empty sessions are skipped, duplicate end events are deduplicated, and durable memory still requires your approval. When the review backlog grows, the injected brief nudges the agent to offer a read-only <code>lnk consolidate</code> pass. On Claude Code the hooks also run before shell and file tool calls: a reviewed memory\'s enforced rules are checked there (asking for your OK or blocking), and memories anchored to the file being read or edited are surfaced at that moment. On Cursor the shell-command check runs the same way. <code>lnk receipt</code> shows what actually arrived in each session.</p>
         <pre><code>lnk connect claude-code ~/link --hooks --write
 lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no session-end event)
 lnk connect cursor ~/link --hooks --write</code></pre>

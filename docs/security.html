@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Link security model: local-first storage, secret scanning, backups, HTTP safety boundaries, and release hygiene.">
   <title>Link - Security</title>
-  <link rel="stylesheet" href="assets/site.css">
+  <link rel="stylesheet" href="assets/site.css?v=74addfc189">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
@@ -13,25 +13,20 @@
   <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
-  <script src="assets/site.js" defer></script>
+  <script src="assets/site.js?v=e04a4e8e00" defer></script>
 </head>
 <body>
   <nav class="site-nav" aria-label="Main">
     <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
-      <a href="why-link.html">Why</a>
-      <a href="scale.html">Scale</a>
-      <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
-      <a href="mcp.html">MCP</a>
-      <a href="memory-contract.html">Contract</a>
       <a href="cli.html">CLI</a>
-      <a href="skills.html">Skills</a>
-      <a href="api.html">API</a>
+      <a href="mcp.html">MCP</a>
       <a href="security.html" aria-current="page">Security</a>
       <a href="contributing.html">Contribute</a>
       <a href="https://github.com/gowtham0992/link">GitHub</a>
+      <button type="button" class="site-search" aria-label="Search the docs">Search <kbd>/</kbd></button>
     </div>
   </nav>
 
@@ -45,6 +40,34 @@
 
   <main class="doc-section">
     <div class="section-inner doc-grid">
+      <aside class="docs-sidebar" aria-label="Documentation">
+        <button type="button" class="docs-sidebar-toggle" aria-expanded="false">Docs menu</button>
+        <div class="docs-sidebar-groups">
+          <div class="docs-group"><strong>Start here</strong>
+            <a href="getting-started.html">Getting started</a>
+            <a href="why-link.html">Why Link</a>
+            <a href="concepts.html">Concepts</a>
+          </div>
+          <div class="docs-group"><strong>Use it</strong>
+            <a href="cli.html">CLI reference</a>
+            <a href="mcp.html">MCP setup</a>
+            <a href="skills.html">Skills</a>
+            <a href="ui.html">Web UI</a>
+            <a href="obsidian.html">Obsidian</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+          <div class="docs-group"><strong>Trust it</strong>
+            <a href="memory-contract.html">Memory contract</a>
+            <a href="security.html" aria-current="page">Security</a>
+            <a href="team-security.html">Team security</a>
+            <a href="scale.html">Scale</a>
+          </div>
+          <div class="docs-group"><strong>Project</strong>
+            <a href="api.html">HTTP API</a>
+            <a href="contributing.html">Contributing</a>
+          </div>
+        </div>
+      </aside>
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#privacy">Privacy model</a>
@@ -64,7 +87,8 @@
           <li>Raw sources and generated wiki pages are ignored by git by default.</li>
           <li>SQLite search, when available, is an in-memory derived index. Markdown remains the source of truth.</li>
           <li>Optional semantic recall stays local: embedding models load offline-only at recall time (only the explicit <code>lnk semantic --setup</code> may fetch a model, once), embeddings live in plain JSON under <code>.link-cache/</code>, and CI blocks outbound network code in the runtime.</li>
-          <li>Automatic session hooks store proposal-only notes; no durable memory is written without explicit review, and transcript extraction skips tool calls and tool outputs.</li>
+          <li>Automatic session hooks store proposal-only notes; no durable memory is written without explicit review. Transcript extraction skips tool calls and tool outputs, and it drops text the harness writes with the user's role but the user never typed: subagent reports, slash-command expansions, local command output, interruption markers, compaction summaries and messages from other sessions. Secret-shaped values are redacted before a capture is written to disk; the inbox still names what was redacted so you know to rotate it.</li>
+          <li>Session handoffs are delivered to the next session on any agent, framed as notes from a previous session rather than instructions. A handoff carrying injection-shaped instructions is labelled, and the agent is told to show it to you and not act on it until you confirm it is yours.</li>
           <li>Retrieval observability is local-only and minimal. So you can answer "are my agents actually using this?", Link records that a brief or recall happened, when, and which memory names came back — in <code>.link-usage.json</code> at the workspace root. It never records your queries, the answers, the conversation, or anything about the machine; it is bounded to the most recent events; it is excluded from <code>lnk sync</code> (behavior is not memory, and it never leaves this machine); and it is switched off entirely with <code>LINK_USAGE=off</code>.</li>
         </ul>
         <p>The public GitHub Pages documentation may use lightweight analytics to understand install interest. It does not run inside Link, read local wiki data, or capture source/memory content.</p>
@@ -93,8 +117,11 @@ lnk backup --include-raw
 lnk doctor --fix</code></pre>
         <p>Run a backup before broad repair work or large generated changes.</p>
 
+        <h2 id="rules">Enforced Rules</h2>
+        <p>A reviewed memory can carry rules that are checked before the agent's tool calls. Because a rule changes what an agent may do, only a person turns one on or off. Over MCP an agent cannot approve, clear, archive or update a memory that carries rules; the viewer activates rules only when the review request repeats the rules it displayed, and never in bulk. The session hook also asks for your OK before an agent runs Link's own review, enforce, archive or forget commands, or edits a memory file directly, so an agent cannot quietly loosen its own constraints.</p>
+
         <h2 id="team">Team Review</h2>
-        <p>For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed <code>wiki/</code> pages can be shared through Git when the team explicitly wants shared memory.</p>
+        <p>For small teams, evaluate Link as a local-first tool first: each developer runs their own CLI/MCP server, then reviewed <code>wiki/</code> pages can be shared through Git when the team explicitly wants shared memory. Teammates' memories arrive through your own review gate: <code>lnk team-sync</code> imports them as pending, and nothing a teammate wrote is recalled, briefed or compiled for you until you review it.</p>
         <p><a class="button" href="team-security.html">Open the team security checklist</a></p>
 
         <h2 id="share">Before Sharing A Repo Or Wiki</h2>

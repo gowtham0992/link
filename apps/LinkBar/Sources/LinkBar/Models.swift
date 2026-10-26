@@ -19,11 +19,15 @@ struct InboxItem: Decodable, Identifiable {
     let memoryType: String
     let tldr: String?
     let highestSeverity: String?
+    /// Rules this memory enforces before tool calls ("ask command: git push
+    /// --force*"). Link 5.0+; a rule acts only after the memory is reviewed.
+    let enforce: [String]?
 
     var id: String { name }
+    var rules: [String] { enforce ?? [] }
 
     enum CodingKeys: String, CodingKey {
-        case name, title, tldr
+        case name, title, tldr, enforce
         case memoryType = "memory_type"
         case highestSeverity = "highest_severity"
     }
@@ -56,13 +60,19 @@ struct CaptureItem: Decodable, Identifiable {
     /// Injection-shaped instruction labels ("guardrail-bypass instruction");
     /// non-empty means: verify you actually said this before accepting.
     let injectionWarnings: [String]?
+    /// "web" / "mcp" when the session read outside content (Link 5.0+):
+    /// words in the capture may have come from a page or a tool, not you.
+    let untrustedInputs: [String]?
 
     enum CodingKeys: String, CodingKey {
         case path, title, project, proposals, snippet
         case decisionTrail = "decision_trail"
         case minedFromUserTurns = "mined_from_user_turns"
         case injectionWarnings = "injection_warnings"
+        case untrustedInputs = "untrusted_inputs"
     }
+
+    var readOutsideContent: Bool { !(untrustedInputs ?? []).isEmpty }
 
     var id: String { path }
     var displayTitle: String {
@@ -523,4 +533,97 @@ struct HandoffsPayload: Decodable {
     }
     let count: Int
     let handoffs: [Handoff]
+}
+
+/// `lnk receipt --json` (Link 5.0): what each recent session's agent was
+/// actually given - briefs, recalls, the memories in them, and whether a
+/// budget cut anything. Older CLIs lack the command; the card then hides.
+struct MemoryReceipt: Decodable {
+    struct Brief: Decodable {
+        let memories: Int
+        let tokens: Int?
+        let truncated: Bool?
+        let delivery: String?
+    }
+    /// One enforced-rule decision before a tool call: "ask" or "deny".
+    struct RuleCheck: Decodable {
+        let decision: String
+        let memories: [String]
+    }
+    struct Used: Decodable, Identifiable {
+        let name: String
+        let title: String
+        let times: Int
+        let exists: Bool?
+        var id: String { name }
+    }
+    struct Session: Decodable {
+        let started: String
+        let ended: String
+        let project: String?
+        let surfaces: [String]
+        let briefs: [Brief]
+        let recalls: Int
+        let memoriesUsed: [Used]
+        let estimatedTokens: Int?
+        let anythingTruncated: Bool?
+        // Link 5.0+: whether what Link sent actually reached the agent, and
+        // the rule checks that ran before tool calls. Absent on older CLIs.
+        let delivery: [String: Int]?
+        let anythingUndelivered: Bool?
+        let ruleChecks: [RuleCheck]?
+
+        enum CodingKeys: String, CodingKey {
+            case started, ended, project, surfaces, briefs, recalls, delivery
+            case memoriesUsed = "memories_used"
+            case estimatedTokens = "estimated_tokens"
+            case anythingTruncated = "anything_truncated"
+            case anythingUndelivered = "anything_undelivered"
+            case ruleChecks = "rule_checks"
+        }
+
+        /// "1 cut short · 1 never arrived", or nil when everything arrived.
+        var undeliveredLabel: String? {
+            guard anythingUndelivered == true, let delivery else { return nil }
+            var parts: [String] = []
+            if let cut = delivery["truncated"], cut > 0 { parts.append("\(cut) cut short") }
+            if let missing = delivery["missing"], missing > 0 { parts.append("\(missing) never arrived") }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        }
+
+        /// "2 asked for your OK · 1 blocked", or nil when no rule fired.
+        var ruleCheckLabel: String? {
+            let checks = ruleChecks ?? []
+            guard !checks.isEmpty else { return nil }
+            let asked = checks.filter { $0.decision == "ask" }.count
+            let blocked = checks.filter { $0.decision == "deny" }.count
+            var parts: [String] = []
+            if asked > 0 { parts.append("\(asked) asked for your OK") }
+            if blocked > 0 { parts.append("\(blocked) blocked") }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        }
+
+        /// "session hook · MCP", or nil when older events never said.
+        var surfaceLabel: String? {
+            let names = surfaces.map { surface -> String in
+                switch surface {
+                case "hook": return "session hook"
+                case "mcp": return "MCP"
+                case "cli": return "CLI"
+                default: return surface
+                }
+            }
+            return names.isEmpty ? nil : names.joined(separator: " · ")
+        }
+
+        /// Zero means "not recorded" (events from before 4.0), not "free".
+        var tokenLabel: String? {
+            guard let tokens = estimatedTokens, tokens > 0 else { return nil }
+            return tokens >= 1000 ? String(format: "~%.1fk tokens", Double(tokens) / 1000) : "~\(tokens) tokens"
+        }
+    }
+    let recording: Bool
+    let sessions: [Session]
+
+    var last: Session? { sessions.first }
 }

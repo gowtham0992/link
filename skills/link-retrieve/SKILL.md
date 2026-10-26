@@ -11,6 +11,7 @@ Use bounded CLI commands so the agent does not dump the whole wiki into context.
    ```bash
    lnk health [link-root]
    ```
+   To ask what was true on a date, add `--as-of YYYY-MM-DD` to `lnk recall` (or say "in March" in the query).
 2. If the user is inside a project repo and Link has no project context yet, seed allowlisted source-backed context before broad searching:
    ```bash
    lnk seed . [link-root]
@@ -36,4 +37,4 @@ Use bounded CLI commands so the agent does not dump the whole wiki into context.
 
 Do not enumerate every page, grep raw files, or request the full graph unless the user explicitly asks for an export or exhaustive audit, or the compact packet is insufficient and tells you which follow-up to use.
 
-Recalled memories carry `confidence` labels and, when the optional local semantic tier is installed, a `match` field: `lexical`, `hybrid`, or `semantic`. Treat `semantic` matches (paraphrase similarity, capped confidence) and `weak` matches as hints to verify with the user, not facts to act on.
+Recalled memories carry `confidence` labels and, when the optional local semantic tier is installed, a `match` field: `lexical`, `hybrid`, or `semantic`. Treat `semantic` matches (paraphrase similarity, capped confidence) and `weak` matches as hints to verify with the user, not facts to act on. Inside a repository, memories about code carry `verified` (what they name was found in place) or `stale_paths` (what moved or disappeared, with evidence): treat a stale memory as possibly wrong and say so rather than acting on it.

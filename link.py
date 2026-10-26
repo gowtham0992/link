@@ -56,10 +56,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Callable
 
@@ -151,6 +152,7 @@ from link_core.memory import (
     recent_memories as _core_recent_memories,
     resolve_memory_page as _core_resolve_memory_page,
     set_memory_status as _core_set_memory_status,
+    set_memory_enforce as _core_set_memory_enforce,
     set_memory_visibility as _core_set_memory_visibility,
     top_tags as _core_top_tags,
     update_memory_page as _core_update_memory_page,
@@ -279,8 +281,28 @@ from link_core.agent_instructions import (
     instruction_file_status as _core_instruction_file_status,
     refresh_instruction_file as _core_refresh_instruction_file,
 )
+from link_core.tool_hooks import (
+    anchored_reminders as _core_anchored_reminders,
+    cached_repo_identity as _core_cached_repo_identity,
+    evaluate_tool_call as _core_evaluate_tool_call,
+    find_repo_root as _core_find_repo_root,
+    load_hook_index as _core_load_hook_index,
+    load_shown as _core_load_shown,
+    new_delivery_id as _core_new_delivery_id,
+    remember_shown as _core_remember_shown,
+    render_touch_text as _core_render_touch_text,
+    tool_call as _core_tool_call,
+    verify_deliveries as _core_verify_deliveries,
+    wrap_for_delivery as _core_wrap_for_delivery,
+)
 from link_core.usage import (
+    load_usage as _core_load_usage,
+    record_delivery as _core_record_delivery,
+    memory_receipts as _core_memory_receipts,
+    estimated_tokens as _core_estimated_tokens,
+    record_query_packet as _core_record_query_packet,
     record_retrieval as _core_record_retrieval,
+    usage_disabled as _core_usage_disabled,
     usage_summary as _core_usage_summary,
 )
 from link_core.sync import (
@@ -327,6 +349,7 @@ from link_core.agent_hooks import (
     extract_transcript_text as _core_extract_transcript_text,
     hook_supported_agents as _core_hook_supported_agents,
     supports_agent_hooks as _core_supports_agent_hooks,
+    transcript_untrusted_inputs as _core_transcript_untrusted_inputs,
 )
 from link_core.consolidate import (
     build_consolidation_plan as _core_build_consolidation_plan,
@@ -769,6 +792,8 @@ def _write_memory_page(
     applies_when: str | None = None,
     supersedes: str | None = None,
     context: str | None = None,
+    project_explicit: bool = False,
+    enforce: list[str] | None = None,
 ) -> dict[str, object]:
     wiki_dir, records = _memory_runtime(target)
     clean_text = _required_memory_text(text, "memory text required")
@@ -784,7 +809,7 @@ def _write_memory_page(
         supersedes=supersedes,
         context=context,
         allow_duplicate=allow_duplicate, allow_conflict=allow_conflict,
-        allow_secret=allow_secret,
+        allow_secret=allow_secret, project_explicit=project_explicit, enforce=enforce,
         **options,
     )
 
@@ -1101,9 +1126,26 @@ def team_sync(
                 parts.append(f"shared {len(exported)}")
             if imported:
                 parts.append(f"imported {len(imported)}")
+            rejected_obj = payload.get("rejected")
+            rejected: list[object] = rejected_obj if isinstance(rejected_obj, list) else []
+            if rejected:
+                parts.append(f"rejected {len(rejected)}")
             _print_text("Team sync: " + (", ".join(parts) if parts else "already up to date"))
+            sync_obj = payload.get("sync")
+            if isinstance(sync_obj, dict) and sync_obj.get("synced") is False:
+                _print_text("  Push to the team remote stopped — secrets never leave this machine:")
+                findings_obj = sync_obj.get("secret_findings")
+                for finding in findings_obj if isinstance(findings_obj, list) else []:
+                    if isinstance(finding, dict):
+                        _print_text(f"    {finding.get('path')}: {finding.get('label')}")
+                _print_text(f"  {sync_obj.get('message') or ''}")
             for name in imported:
-                _print_text(f"  new from the team: {name}")
+                _print_text(f"  new from the team, pending your review: {name}")
+            if imported:
+                _print_text("  Review them: " + _shell_words_for_target("memory-inbox", target))
+            for item in rejected:
+                if isinstance(item, dict):
+                    _print_text(f"  not imported: {item.get('name')} ({item.get('reason')})")
             if conflicts:
                 _print_text(f"  {len(conflicts)} memory(ies) differ from the team version — kept yours:")
                 for name in conflicts:
@@ -1234,7 +1276,114 @@ def import_obsidian(
     return _emit_json_or_text(payload, json_output, _core_render_import_obsidian_text)
 
 
-def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) -> int:
+def _stale_instructions(target: Path, wiki_dir: Path, repo_dir: Path, *, json_output: bool = False) -> int:
+    """`lnk stale --instructions`: the repository's agent instruction files, checked like memories."""
+    from link_core.instruction_lint import lint_instructions
+    from link_core.nli import load_contradiction_scorer
+
+    # The contradiction model is used when it is already on disk; this
+    # command never downloads it (that is `lnk semantic --setup --nli`).
+    scorer = load_contradiction_scorer(allow_download=False)
+    report = lint_instructions(
+        repo_dir, _core_memory_records(wiki_dir),
+        cache_path=_resolve_link_root(target) / ".link-cache" / "staleness-v1.json", scorer=scorer,
+    )
+    if json_output:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 1 if report["flagged"] else 0
+    files = report["files"]
+    if not files:
+        print(f"No agent instruction files in {report['repo']}.")
+        return 0
+    for finding in report["findings"]:
+        where = f"{finding['file']}:{finding['line']}" if finding.get("line") else str(finding["file"])
+        label = {"stale": "stale", "budget": "too long" if finding.get("severity") == "truncated" else "long",
+                 "contradiction": "contradicts"}.get(str(finding["kind"]), str(finding["kind"]))
+        print(f"{where}  [{label}] {finding['reason']}")
+        if finding["kind"] == "contradiction":
+            print(f"    {finding.get('text', '')}\n    vs {finding.get('other_text', '')}")
+    names = ", ".join(sorted({str(f["path"]) for f in files})[:6]) + (" ..." if len(files) > 6 else "")
+    if not report["findings"]:
+        print(f"No problems in {len(files)} instruction files ({names}).")
+        return 0
+    guidance = len(report["findings"]) - int(report["flagged"])
+    print(f"\n{report['flagged']} finding(s) in {len(files)} instruction files"
+          + (f", plus {guidance} length warning(s) that do not fail the check" if guidance else "")
+          + ". Nothing was changed.")
+    if not report["contradiction_model"]:
+        print("Contradictions were checked with word rules; `lnk semantic --setup --nli` adds the local model.")
+    return 1 if report["flagged"] else 0
+
+
+def compile_memories(
+    target: Path,
+    *,
+    repo: Path = Path("."),
+    targets: str = "",
+    check: bool = False,
+    dry_run: bool = False,
+    include_private: bool = False,
+    project: str = "",
+    json_output: bool = False,
+) -> int:
+    """Render reviewed memories into this repository's agent instruction files."""
+    from link_core.compile import TARGET_KEYS, apply_plan, plan_changes, plan_compile, plan_diff, plan_summary
+
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    repo_dir = Path(repo).expanduser().resolve()
+    if not repo_dir.is_dir():
+        print(f"{repo_dir} is not a directory", file=sys.stderr)
+        return 2
+    chosen = [key.strip() for key in targets.split(",") if key.strip()] if targets else None
+    unknown = [key for key in chosen or [] if key not in TARGET_KEYS and key != "all"]
+    if unknown:
+        print(f"Unknown target(s): {', '.join(unknown)}. Choose from: {', '.join(TARGET_KEYS)}", file=sys.stderr)
+        return 2
+    plan = plan_compile(_core_memory_records(wiki_dir), repo_dir, project=project or None, targets=chosen,
+                        include_private=include_private)
+    changes = plan_changes(plan)
+    if not (check or dry_run):
+        apply_plan(plan)
+    summary = plan_summary(plan, changes)
+    summary["mode"] = "check" if check else "dry-run" if dry_run else "write"
+    if json_output:
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    elif check:
+        if changes:
+            print(f"Compiled agent files are out of date in {plan.repo} (run `lnk compile` to update):")
+            for change in changes:
+                print(f"  {change['action']:7} {change['path']}")
+        else:
+            print(f"Compiled agent files match the reviewed memories ({plan.repo}).")
+    else:
+        if dry_run:
+            diff = plan_diff(plan)
+            print(diff if diff else "No changes.")
+        else:
+            for change in changes:
+                print(f"{change['action']:7} {change['path']}")
+            if not changes:
+                print(f"Up to date: compiled agent files in {plan.repo} already match the reviewed memories.")
+        counts = {key: len(names) for key, names in plan.included.items()}
+        if counts:
+            print("\nCompiled: " + ", ".join(f"{key} {count}" for key, count in sorted(counts.items())))
+        for item in plan.dropped:
+            print(f"Left out of {item['path']} (size limit): {item['title'] or item['name']} - {item['reason']}")
+        for item in plan.conflicts:
+            print(f"Not touched: {item['path']} - {item['reason']}")
+        reasons: dict[str, int] = {}
+        for item in plan.excluded:
+            reasons[item["reason"]] = reasons.get(item["reason"], 0) + 1
+        for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+            print(f"Not compiled ({count}): {reason}")
+    if check:
+        return 1 if changes else 0
+    return 0
+
+
+def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False) -> int:
     """Report memories that name repository paths git no longer has.
 
     Read-only by design. A memory that mentions something that moved is a
@@ -1247,14 +1396,32 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     repo_dir = Path(repo).expanduser().resolve()
+    inside = subprocess.run(
+        ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    ) if repo_dir.is_dir() else None
+    if inside is None or inside.returncode != 0 or inside.stdout.strip() != "true":
+        # Saying "no stale references" about a folder git cannot read was a
+        # false all-clear; a script checking the exit code believed it.
+        message = f"{repo_dir} is not a git repository; lnk stale checks memories against git history"
+        if json_output:
+            print(json.dumps({"repo": str(repo_dir), "error": message}, indent=2))
+        else:
+            print(message, file=sys.stderr)
+        return 2
+    if instructions:
+        return _stale_instructions(target, wiki_dir, repo_dir, json_output=json_output)
     # Archived and expired memories are already out of the way; questioning
     # them would only add noise to a report that must stay quiet by default.
     records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
-    checker = StalenessChecker(repo_dir)
+    # History answers are cached per HEAD beside the workspace's other
+    # caches, so re-running `lnk stale` on a large repository is fast.
+    checker = StalenessChecker(repo_dir, cache_path=_resolve_link_root(target) / ".link-cache" / "staleness-v1.json")
     flagged: list[dict[str, object]] = []
     for record in records:
         text = f"{record.get('body') or ''}\n{record.get('context') or ''}"
-        findings = checker.findings(text)
+        anchors = record.get("anchors")
+        findings = checker.findings(text) + checker.anchor_findings(anchors if isinstance(anchors, list) else None)
         if not findings:
             continue
         flagged.append({
@@ -1262,12 +1429,17 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
             "title": str(record.get("title") or record.get("name") or ""),
             "path": str(record.get("path") or ""),
             "findings": [
-                {"path": finding.get("path", ""), "successor": finding.get("successor", "")}
+                {
+                    key: finding.get(key, "")
+                    for key in ("kind", "path", "reference", "reason", "successor", "evidence")
+                    if key in finding or key in {"path", "successor"}
+                }
                 for finding in findings
             ],
             "lines": describe_findings(findings),
         })
     checked = len(records)
+    checker.save_cache()
     if json_output:
         # Same facts as the text report, for surfaces such as LinkBar that
         # show them without re-running git themselves.
@@ -1278,7 +1450,7 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
             "memories": flagged,
             "changed": False,
         }, indent=2, ensure_ascii=False))
-        return 0
+        return 1 if flagged else 0
     for entry in flagged:
         print(entry["name"] or entry["path"])
         for line in entry["lines"]:  # type: ignore[union-attr]
@@ -1287,9 +1459,91 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False) ->
         print(f"No stale repository references in {checked} active memories ({repo_dir}).")
         return 0
     print(
-        f"\n{len(flagged)} of {checked} active memories name paths that moved in {repo_dir}."
+        f"\n{len(flagged)} of {checked} active memories name things that changed in {repo_dir}."
         "\nNothing was changed. Review each one and update or archive it."
     )
+    # Exit 1 when anything is flagged, like a linter, so CI and scripts can
+    # act on it; 2 is reserved for "could not check".
+    return 1
+
+
+def receipt(target: Path, *, sessions: int = 3, json_output: bool = False) -> int:
+    """What reached the agents from memory, session by session.
+
+    Built from the local retrieval ledger, which never records queries: the
+    receipt says which memories an agent was given and what it cost, not
+    what was asked.
+    """
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    root = _resolve_link_root(target)
+    receipts = _core_memory_receipts(_core_load_usage(root), sessions=max(1, min(sessions, 20)))
+    titles = {str(record.get("name") or ""): str(record.get("title") or "") for record in _core_memory_records(wiki_dir)}
+    for item in receipts:
+        used_list = item.get("memories_used")
+        for used in used_list if isinstance(used_list, list) else []:
+            if isinstance(used, dict):
+                used["title"] = titles.get(str(used.get("name") or ""), "")
+                used["exists"] = str(used.get("name") or "") in titles
+    if json_output:
+        print(json.dumps({
+            "recording": not _core_usage_disabled(),
+            "sessions": receipts,
+        }, indent=2, ensure_ascii=False))
+        return 0
+    if _core_usage_disabled():
+        print("Link is not recording retrievals (LINK_USAGE=off), so there is no receipt to show.")
+        return 0
+    if not receipts:
+        print("No memory has reached an agent yet. Start a session with Link connected, then run this again.")
+        return 0
+    lines = [f"Link memory receipt - last {len(receipts)} session(s)", ""]
+    for item in receipts:
+        started = str(item["started"]).replace("T", " ").replace("Z", " UTC")
+        surfaces = ", ".join(item["surfaces"]) or "unknown surface"  # type: ignore[arg-type]
+        project_note = f" · project {item['project']}" if item["project"] else ""
+        lines.append(f"Session from {started}{project_note} · via {surfaces}")
+        arrival = {"delivered": "arrived", "truncated": "ARRIVED CUT OFF", "missing": "DID NOT ARRIVE",
+                   "unverified": "arrival not checked"}
+        for brief in item["briefs"]:  # type: ignore[union-attr]
+            size = f" · ~{brief['tokens']} tokens" if brief.get("tokens") else ""
+            cut = " · cut to fit" if brief.get("truncated") else ""
+            landed = f" · {arrival.get(str(brief['delivery']), brief['delivery'])}" if brief.get("delivery") else ""
+            lines.append(f"  Session brief: {brief['memories']} memories{size}{cut}{landed}")
+        lines.append(f"  Recalls: {item['recalls']}")
+        if item["guard_reminders"]:
+            lines.append(f"  Guard reminders: {', '.join(item['guard_reminders'])}")  # type: ignore[arg-type]
+        reminders = item.get("code_reminders") or []
+        if reminders:
+            named = sorted({name for entry in reminders for name in entry.get("memories", [])})  # type: ignore[union-attr]
+            lines.append(f"  Shown when the agent opened anchored code: {', '.join(named)}")
+        checks = item.get("rule_checks") or []
+        if checks:
+            asked = sum(1 for check in checks if check.get("decision") == "ask")  # type: ignore[union-attr]
+            blocked = sum(1 for check in checks if check.get("decision") == "deny")  # type: ignore[union-attr]
+            lines.append(f"  Rules enforced on tool calls: {asked} asked for your OK, {blocked} blocked")
+        delivery = item.get("delivery") or {}
+        if item.get("anything_undelivered"):
+            lines.append(
+                "  Warning: the transcript shows "
+                f"{delivery.get('missing', 0)} injection(s) never arrived and {delivery.get('truncated', 0)} "  # type: ignore[union-attr]
+                "arrived cut off; the agent worked without some of that memory."
+            )
+        used_list = item["memories_used"]
+        if used_list:
+            lines.append("  Memories your agent was given:")
+            for used in used_list:  # type: ignore[union-attr]
+                label = used.get("title") or used.get("name")
+                gone = "" if used.get("exists") else " (no longer in the store)"
+                lines.append(f"    - {label} [{used['name']}] x{used['times']}{gone}")
+        total = item["estimated_tokens"]
+        size_line = f"  About {total} tokens of memory in total" if total else "  Size not recorded (older events)"
+        lines.append(size_line + ("; something was cut to fit a budget." if item["anything_truncated"] else "."))
+        lines.append("")
+    lines.append(f"Why is a memory there? {_display_command(['lnk', 'explain-memory', '<name>', str(target)])}")
+    lines.append(f"Wrong? {_display_command(['lnk', 'forget-memory', '<name>', str(target), '--confirm'])}")
+    print("\n".join(lines))
     return 0
 
 
@@ -1348,6 +1602,7 @@ def remember(
     applies_when: str | None = None,
     supersedes: str | None = None,
     context: str | None = None,
+    enforce: list[str] | None = None,
     json_output: bool = False,
 ) -> int:
     if not text or not text.strip():
@@ -1357,7 +1612,7 @@ def remember(
         # "I prefer X" saved as a generic note gets the wrong trust window
         # and misses preference-scoped conflict checks. When the user didn't
         # choose a type, use the same cues the capture pipeline trusts.
-        classified = _core_classify_memory_segment(text.strip().splitlines()[0])
+        classified = _core_classify_memory_segment(text.strip().splitlines()[0], explicit=True)
         memory_type = str(classified["memory_type"]) if classified else "note"
     try:
         result = _write_memory_page(
@@ -1372,6 +1627,7 @@ def remember(
             allow_conflict=allow_conflict,
             allow_secret=allow_secret,
             project=project or _default_project(target),
+            project_explicit=bool(project),
             visibility=visibility,
             review_after=review_after,
             expires_at=expires_at,
@@ -1379,6 +1635,7 @@ def remember(
             applies_when=applies_when,
             supersedes=supersedes,
             context=context,
+            enforce=enforce,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not remember: {exc}", file=sys.stderr)
@@ -1527,6 +1784,7 @@ def session_end(
     conversation_id: str | None = None,
     exclude_fingerprints: Collection[str] = (),
     json_output: bool = False,
+    untrusted_inputs: list[str] | None = None,
 ) -> int:
     target = target.expanduser().resolve()
     root = _resolve_link_root(target)
@@ -1551,6 +1809,7 @@ def session_end(
         proposal_text=proposal_text,
         decision_trail=decision_trail,
         conversation_id=conversation_id,
+        untrusted_inputs=untrusted_inputs,
     )
     rel_path = str(capture_record["path"])
     # The raw capture keeps the full session for review context, but memory
@@ -2033,6 +2292,69 @@ def update_memory(
     )
 
 
+def enforce_memory(
+    target: Path,
+    identifier: str,
+    rules: list[str] | None = None,
+    clear: bool = False,
+    suggest: bool = False,
+    json_output: bool = False,
+) -> int:
+    """Set, clear or suggest the rules a memory enforces on tool calls."""
+    wiki_dir, records = _memory_runtime(target)
+    if suggest:
+        page_path, record, error = _core_resolve_memory_page(wiki_dir, identifier, records=records)
+        if error or record is None:
+            print(f"Could not suggest rules: {error}", file=sys.stderr)
+            return 1
+        from link_core.enforce_rules import suggest_enforce_rules
+
+        suggestions = suggest_enforce_rules(f"{record.get('title')}\n{record.get('tldr')}")
+        payload = {"name": record["name"], "title": record["title"], "suggestions": suggestions,
+                   "enforce": list(record.get("enforce") or [])}
+        if json_output:
+            print(json.dumps(payload, indent=2))
+            return 0
+        if not suggestions:
+            current = [str(rule) for rule in record.get("enforce") or []]
+            if current:
+                print(f"{record['name']} already enforces: " + "; ".join(current))
+            else:
+                print(f"No rule to suggest for {record['name']}: it names no command in backticks.")
+            return 0
+        print(f"Rules Link can enforce for {record['name']}:")
+        for rule in suggestions:
+            print("  " + _display_command(["lnk", "enforce", str(record["name"]), str(_resolve_link_root(target)),
+                                            "--rule", rule]))
+        return 0
+    if not clear and not rules:
+        print("Give at least one --rule, or --clear, or --suggest.", file=sys.stderr)
+        return 1
+    try:
+        result = _core_set_memory_enforce(
+            wiki_dir, identifier, [] if clear else list(rules or []),
+            timestamp=_utc_timestamp(), records=records, log_writer=_log_writer_for(wiki_dir),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Could not set rules: {exc}", file=sys.stderr)
+        return 1
+    if json_output:
+        print(json.dumps(result, indent=2))
+        return 0
+    if not result["enforce"]:
+        print(f"{result['name']}: no rules." if not result["updated"] else f"{result['name']}: rules cleared.")
+        return 0
+    print(f"{result['name']}:")
+    for rule in result["enforce"]:
+        print(f"  {rule}")
+    if result["review_status"] == "pending":
+        print("These rules act after you review the memory: "
+              + _display_command(["lnk", "review-memory", str(result["name"]), str(_resolve_link_root(target))]))
+    print("Install the tool hook once so agents are checked: "
+          + _display_command(["lnk", "connect", "claude-code", str(_resolve_link_root(target)), "--hooks", "--write"]))
+    return 0
+
+
 def set_memory_visibility(
     target: Path,
     identifier: str,
@@ -2092,6 +2414,7 @@ def recall(
     _core_record_retrieval(
         _resolve_link_root(target), "recall",
         [str(item.get("name") or "") for item in results], project=project_name or "",
+        surface="cli", tokens=_core_estimated_tokens(results) if results else 0,
     )
 
     if json_output:
@@ -2359,6 +2682,8 @@ def query(
     query_text = _clean_text_input(query_text, max_len=500)
     project_name = project or _default_project(target)
     payload = _query_link(wiki_dir, query_text, budget=budget, project=project_name)
+    # AGENTS.md sends CLI-only agents here; unrecorded, their sessions had no receipt.
+    _core_record_query_packet(_resolve_link_root(target), payload, project=project_name or "", surface="cli")
     if json_output:
         print(json.dumps(payload, indent=2))
         return 0
@@ -2445,6 +2770,13 @@ def brief(
         payload,
         _capture_review_summary(target, project=project_name),
     )
+    relevant_obj = payload.get("relevant_memories")
+    _core_record_retrieval(
+        _resolve_link_root(target), "brief",
+        [str(item.get("name") or "") for item in (relevant_obj if isinstance(relevant_obj, list) else [])
+         if isinstance(item, dict)],
+        project=project_name or "", surface="cli",
+    )
 
     if json_output:
         print(json.dumps(payload, indent=2))
@@ -2483,7 +2815,7 @@ def start(
     _core_record_retrieval(
         _resolve_link_root(target), "brief",
         [str(item.get("name") or "") for item in relevant_list if isinstance(item, dict)],
-        project=project_name or "",
+        project=project_name or "", surface="cli",
     )
     relevant_count = int(brief_payload.get("relevant_count") or len(relevant_list))
     project_seed_recommended = bool(status_payload.get("ready")) and not relevant_count and not int(
@@ -2563,7 +2895,9 @@ def _read_hook_stdin() -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_output: bool = False) -> int:
+def semantic(
+    target: Path, setup: bool = False, rebuild: bool = False, json_output: bool = False, nli: bool = False,
+) -> int:
     """Show, set up, or rebuild the optional local semantic recall layer."""
     target = target.expanduser().resolve()
     root = _resolve_link_root(target)
@@ -2600,9 +2934,11 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                     _print_text(f"  {note}")
             if outcome.get("ready"):
                 rerun = [str(outcome["python"]), str(ROOT / "link.py"), "semantic", str(root), "--setup"]
+                if nli:
+                    rerun.append("--nli")
                 if json_output:
                     rerun.append("--json")
-                return subprocess.run(rerun, check=False).returncode
+                return subprocess.run(rerun, check=False, stdin=subprocess.DEVNULL).returncode
             action_error = (
                 "Could not provision the semantic extras into ~/.link-mcp-venv. "
                 "Create it by hand: python3 -m venv ~/.link-mcp-venv && "
@@ -2640,6 +2976,21 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
                     "the MCP server loads it once and stays fast. Prefer instant CLI recall? "
                     "Set LINK_SEMANTIC_PROVIDER=model2vec (fast tier)."
                 )
+    if setup and nli:
+        # The contradiction model is its own opt-in: flags at write time,
+        # never on the recall path, and never downloaded without --nli.
+        from link_core.nli import setup_nli
+
+        nli_outcome = setup_nli()
+        if nli_outcome.get("ready"):
+            action_result = (action_result + " " if action_result else "") + (
+                "Contradiction flags ready: new memories that may contradict a stored one are "
+                "noted for review (never blocked)."
+            )
+        else:
+            action_error = (action_error + " " if action_error else "") + (
+                f"Contradiction model not set up: {nli_outcome.get('reason') or 'download failed'}."
+            )
     payload = _core_build_semantic_status(
         root,
         memory_count=total_count,
@@ -2647,6 +2998,9 @@ def semantic(target: Path, setup: bool = False, rebuild: bool = False, json_outp
         python_cmd=sys.executable,
         externally_managed=_core_python_is_externally_managed(),
     )
+    from link_core.nli import nli_status
+
+    payload["contradiction_flags"] = nli_status()
     if action_result:
         payload["action_result"] = action_result
     if action_error:
@@ -2761,7 +3115,9 @@ def _hook_session_start(
     )
     _, brief_text = _core_render_brief_text(brief_payload, query="", project=project_name)
     captures_payload = brief_payload.get("captures") if isinstance(brief_payload.get("captures"), dict) else {}
+    approvals = _pending_approvals(target, wiki_dir, captures_payload)
     _, text = _core_render_session_start_hook_text({
+        "approvals": approvals,
         "target": str(target),
         "project": project_name,
         "status": status_payload,
@@ -2772,8 +3128,33 @@ def _hook_session_start(
     })
     if handoff_block:
         text = handoff_block + "\n\n" + text
+    # Delivery tokens let session end check the brief actually arrived, and
+    # the budget keeps it under the size some hosts silently drop.
+    delivery_id = _core_new_delivery_id()
+    text, cut = _core_wrap_for_delivery(text, delivery_id)
     _emit_session_start(text, emit)
+    # The push path most sessions start from; it was never recorded, so the
+    # receipt and "never retrieved" counts missed every hook-delivered brief.
+    relevant_obj = brief_payload.get("relevant_memories")
+    _core_record_retrieval(
+        _resolve_link_root(target), "brief",
+        [str(item.get("name") or "") for item in (relevant_obj if isinstance(relevant_obj, list) else [])
+         if isinstance(item, dict)],
+        project=project_name or "", surface="hook", tokens=max(1, (len(text) + 3) // 4),
+        truncated=cut, session=str(hook_event.get("session_id") or hook_event.get("conversation_id") or ""),
+        delivery=delivery_id,
+    )
     return 0
+
+
+# The user's own messages a session needs before it may propose memory,
+# unless one of them states a standing rule outright.
+MIN_SESSION_USER_TURNS = 3
+_STANDING_RULE_RE = re.compile(
+    r"\b(?:from now on|going forward|always|never|by default|as a rule|every time|"
+    r"we decided|we agreed|i prefer|we prefer|remember that|don't ever|do not ever)\b",
+    re.IGNORECASE,
+)
 
 
 def _session_end_hook_state_path(target: Path) -> Path:
@@ -2801,11 +3182,20 @@ def _hook_session_end(
         _trace("no transcript_path in the hook event; nothing to capture.")
         return 0
     transcript_path = Path(transcript_value).expanduser()
+    delivery = _verify_session_delivery(target, hook_event, transcript_path)
+    if delivery:
+        missed = sorted(key for key, state in delivery.items() if state != "delivered")
+        _trace(
+            f"Checked {len(delivery)} injection(s) against the transcript: "
+            + ("all arrived." if not missed else f"{len(missed)} did not arrive whole (see lnk receipt).")
+        )
     extraction_stats: dict[str, int] = {}
     notes = _core_extract_transcript_text(transcript_path, stats=extraction_stats)
     _trace(
         f"Read the session: kept {extraction_stats.get('kept_messages', 0)} messages, "
-        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own injected output (echo guard, layer 1)."
+        f"dropped {extraction_stats.get('dropped_link_output', 0)} carrying Link's own injected output (echo guard, layer 1)"
+        f" and {extraction_stats.get('dropped_harness_text', 0)} the harness wrote in your name"
+        " (subagent reports, command output, compaction summaries)."
     )
     if len(notes.strip()) < 200:
         _trace("skipped: under 200 characters of conversation — nothing memory-worthy in a trivial session.")
@@ -2816,10 +3206,29 @@ def _hook_session_end(
     # still keeps the full transcript for review context.
     # Mine from a head+tail window so an opening standing rule ("from now on…")
     # survives even in a long session, where a recency-only window would drop it.
+    user_stats: dict[str, int] = {}
     user_notes = _core_extract_transcript_text(
-        transcript_path, roles=("user",), max_chars=9000, keep_head=True
+        transcript_path, roles=("user",), max_chars=9000, keep_head=True, stats=user_stats,
     )
     _trace("Mined memory only from your own turns — the assistant's prose is never proposed as your preference.")
+    # Evidence before proposing: a short exchange is where one-off
+    # instructions dominate, so it proposes only when the user's own words
+    # say they set a standing rule ("from now on", "we decided", "never").
+    if (
+        int(user_stats.get("kept_messages") or 0) < MIN_SESSION_USER_TURNS
+        and not _STANDING_RULE_RE.search(user_notes)
+    ):
+        _trace(
+            f"skipped: fewer than {MIN_SESSION_USER_TURNS} of your own messages and no standing rule "
+            "stated — too little to propose from."
+        )
+        return 0
+    untrusted = _core_transcript_untrusted_inputs(transcript_path)
+    if untrusted:
+        _trace(
+            "This session read outside content (" + ", ".join(untrusted) + "); its proposals are marked so "
+            "you can check each one came from you, not from a page or tool output."
+        )
     # Skip duplicate firings for the same conversation content (e.g. /clear
     # immediately followed by exit, or repeated end events).
     state_path = _session_end_hook_state_path(target)
@@ -2873,12 +3282,14 @@ def _hook_session_end(
         if _core_is_existing_memory_echo(records, str(proposal.get("memory") or "")):
             _trace(f"dropped '{title}': restates an existing memory (echo guard, layer 2).")
             continue
-        fingerprint = _core_proposal_fingerprint(str(proposal.get("memory") or ""))
-        if fingerprint in dismissed:
+        # Its own name: reusing `fingerprint` overwrote the session's, so the
+        # duplicate-end-event check stored the last proposal's instead.
+        proposal_fingerprint = _core_proposal_fingerprint(str(proposal.get("memory") or ""))
+        if proposal_fingerprint in dismissed:
             _trace(f"dropped '{title}': you already dismissed this proposal.")
             continue
-        if fingerprint in pending:
-            _trace(f"dropped '{title}': already waiting for review in {pending[fingerprint]}.")
+        if proposal_fingerprint in pending:
+            _trace(f"dropped '{title}': already waiting for review in {pending[proposal_fingerprint]}.")
             continue
         injection_labels = _core_injected_instruction_warnings(str(proposal.get("memory") or ""))
         if injection_labels:
@@ -2905,6 +3316,7 @@ def _hook_session_end(
         decision_trail=trail,
         conversation_id=conversation_id,
         exclude_fingerprints=dismissed | set(pending),
+        untrusted_inputs=untrusted,
     )
     if code == 0:
         try:
@@ -2935,17 +3347,199 @@ def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str
         # work - one reminder is a guard, ten is a nag.
         if _core_recently_guarded(root, str(reminder.get("name") or "")):
             return 0
+        delivery_id = _core_new_delivery_id()
         _core_record_retrieval(
             root, "guard", [str(reminder.get("name") or "")],
-            project=project_name or "",
+            project=project_name or "", surface="hook",
+            session=str(hook_event.get("session_id") or ""), delivery=delivery_id,
         )
-        print(_core_render_guard_text(reminder))
+        print(_core_wrap_for_delivery(_core_render_guard_text(reminder), delivery_id)[0])
         return 0
     # No constraint in play - but a stop/switch announcement is the moment
     # the handoff should suggest itself.
     if _core_switch_intent(prompt):
         print(_core_render_switch_nudge())
     return 0
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _pending_approvals(target: Path, wiki_dir: Path, captures: Mapping[str, object]) -> list[dict[str, object]]:
+    """What is waiting for the person's OK, with the exact command for each.
+
+    Proposals from session captures (newest first) and enforce rules that do
+    nothing until their memory is reviewed. The agent shows them at a pause
+    and runs a command only when the person says yes in chat.
+    """
+    root = _resolve_link_root(target)
+    approvals: list[dict[str, object]] = []
+    records = _memory_records(wiki_dir)
+    items = captures.get("items") if isinstance(captures.get("items"), list) else []
+    for capture in items or []:
+        if not isinstance(capture, dict):
+            continue
+        for index, proposal in enumerate(capture.get("proposals") or [], start=1):
+            if not isinstance(proposal, dict) or len(approvals) >= 3:
+                continue
+            # Already accepted (or already remembered another way): not waiting.
+            if _core_is_existing_memory_echo(records, str(proposal.get("memory") or "")):
+                continue
+            approvals.append({
+                "kind": "proposal",
+                "text": _clip(str(proposal.get("memory") or proposal.get("title") or ""), 200),
+                "untrusted": list(capture.get("untrusted_inputs") or []),
+                "command": _display_command(
+                    ["lnk", "accept-capture", str(capture.get("path")), str(root), "--index", str(index)]
+                ),
+            })
+    for record in records:
+        if len(approvals) >= 5:
+            break
+        rules = record.get("enforce") or []
+        if rules and str(record.get("review_status") or "") != "reviewed" and _core_is_active_memory(record):
+            approvals.append({
+                "kind": "rule",
+                "text": f"{record.get('title')}: " + "; ".join(str(rule) for rule in rules),
+                "untrusted": [],
+                "command": _display_command(["lnk", "review-memory", str(record.get("name")), str(root)]),
+            })
+    return approvals
+
+
+def _hook_project(target: Path, hook_event: dict[str, object], project: str | None) -> str:
+    """The project the agent is working in: its repository's, wherever in it the cwd is.
+
+    Tool hooks fire with the agent's current directory, which follows every
+    `cd`; naming the project from that directory alone left project rules
+    unscoped in any subdirectory.
+    """
+    if project:
+        return project
+    project_dir = _hook_project_dir(hook_event)
+    if not project_dir:
+        return ""
+    repo_root = _core_find_repo_root(Path(project_dir))
+    return _default_project(repo_root) if repo_root else ""
+
+
+def _hook_pre_tool(target: Path, hook_event: dict[str, object], project: str | None, emit: str) -> int:
+    """Reviewed rules ask before (or block) the tool calls they name."""
+    def allow() -> int:
+        if emit == "cursor":
+            print(json.dumps({"permission": "allow"}))
+        return 0
+
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return allow()
+    root = _resolve_link_root(target)
+    index = _core_load_hook_index(wiki_dir, root)
+    if not index.get("rules"):
+        return allow()
+    project_dir = _hook_project_dir(hook_event)
+    repo_root = _core_find_repo_root(Path(project_dir)) if project_dir else None
+    decision = _core_evaluate_tool_call(
+        index, hook_event, project=_hook_project(target, hook_event, project), repo_root=repo_root,
+        context_path=project_dir or None, protected=[wiki_dir / "memories"],
+    )
+    if decision is None:
+        return allow()
+    _core_record_retrieval(
+        root, "enforce", [str(name) for name in decision["memories"]],  # type: ignore[union-attr]
+        project=_hook_project(target, hook_event, project), surface="hook",
+        session=str(hook_event.get("session_id") or hook_event.get("conversation_id") or ""),
+        decision=str(decision["decision"]),
+    )
+    if emit == "cursor":
+        print(json.dumps({
+            "permission": decision["decision"],
+            "userMessage": decision["reason"],
+            "agentMessage": decision["reason"],
+        }))
+        return 0
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision["decision"],
+        "permissionDecisionReason": decision["reason"],
+    }}))
+    return 0
+
+
+def _hook_post_tool(target: Path, hook_event: dict[str, object], project: str | None) -> int:
+    """After a file is read or edited, the reviewed memories anchored to it."""
+    call = _core_tool_call(hook_event)
+    if call is None or call[0] not in {"read", "write"}:
+        return 0
+    file_path = Path(call[1]).expanduser()
+    if not file_path.is_absolute():
+        project_dir = _hook_project_dir(hook_event)
+        file_path = Path(project_dir or ".") / file_path
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return 0
+    root = _resolve_link_root(target)
+    index = _core_load_hook_index(wiki_dir, root)
+    anchors = index.get("anchors") if isinstance(index.get("anchors"), dict) else {}
+    if not anchors:
+        return 0
+    repo_root = _core_find_repo_root(file_path)
+    if repo_root is None:
+        return 0
+    try:
+        rel = file_path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return 0
+    if rel not in anchors:  # type: ignore[operator]
+        return 0  # the common case, decided before any git call
+    session = str(hook_event.get("session_id") or "")
+    entries = _core_anchored_reminders(
+        index, str(file_path), repo_root=repo_root, identity=_core_cached_repo_identity(root, repo_root),
+        project=_hook_project(target, hook_event, project),
+        already_shown=_core_load_shown(root, session) if session else (),
+    )
+    if not entries:
+        return 0
+    names = [str(entry.get("name") or "") for entry in entries]
+    delivery_id = _core_new_delivery_id()
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "additionalContext": _core_render_touch_text(entries, rel, delivery_id),
+    }}))
+    if session:
+        _core_remember_shown(root, session, names)
+    _core_record_retrieval(
+        root, "touch", names, project=_hook_project(target, hook_event, project), surface="hook",
+        session=session, delivery=delivery_id,
+    )
+    return 0
+
+
+def _verify_session_delivery(target: Path, hook_event: dict[str, object], transcript_path: Path) -> dict[str, str]:
+    """Did this session's hook injections reach the agent? Checked in its transcript."""
+    session = str(hook_event.get("session_id") or hook_event.get("conversation_id") or "")
+    if not session:
+        return {}
+    root = _resolve_link_root(target)
+    tokens = [
+        str(event.get("delivery")) for event in _core_load_usage(root)
+        if str(event.get("session") or "") == session and event.get("delivery")
+    ]
+    if not tokens:
+        return {}
+    try:
+        transcript = transcript_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    results = _core_verify_deliveries(transcript, tokens)
+    if all(state == "missing" for state in results.values()) and '"hookEvent"' not in transcript:
+        # This agent's transcript does not record hook output at all, so
+        # absence proves nothing: say so instead of reporting a loss.
+        results = {token: "unverified" for token in results}
+    _core_record_delivery(root, session, results)
+    return results
 
 
 def run_agent_hook(
@@ -2962,6 +3556,10 @@ def run_agent_hook(
             return _hook_session_end(target, hook_event, limit, project, explain=explain)
         if event == "prompt-check":
             return _hook_prompt_check(target, hook_event, project)
+        if event == "pre-tool":
+            return _hook_pre_tool(target, hook_event, project, emit)
+        if event == "post-tool":
+            return _hook_post_tool(target, hook_event, project)
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
@@ -3039,7 +3637,26 @@ def _lnk_on_path_runs_this_runtime() -> bool:
         shim = Path(lnk).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    return str(ROOT / "link.py") in shim
+    if str(ROOT / "link.py") in shim:
+        return True
+    # pip's console script imports link_cli and sits in the same bin
+    # directory as the interpreter running us (a venv or --user install).
+    first_line = shim.splitlines()[0] if shim else ""
+    return "link_cli" in shim and (
+        first_line.lstrip("#!").strip() == sys.executable
+        or Path(lnk).parent.resolve() == Path(sys.executable).parent.resolve()
+    )
+
+
+def _cli_program_name() -> str:
+    """"lnk" when that is how the user runs Link, else "link.py".
+
+    Every help screen used to say `usage: link.py`, which is not a command
+    that exists on a Homebrew or pip install.
+    """
+    if Path(sys.argv[0]).name in {"lnk", "lnk.exe"} or _lnk_on_path_runs_this_runtime():
+        return "lnk"
+    return "link.py"
 
 
 def _configure_link_command_display() -> None:
@@ -3048,7 +3665,9 @@ def _configure_link_command_display() -> None:
     elif _lnk_on_path_runs_this_runtime():
         _core_set_link_command_override(None)
     else:
-        _core_set_link_command_override([sys.executable, str(ROOT / "link.py")])
+        # The file actually running: link.py in a checkout, link_cli.py in a
+        # pip install (which ships no link.py, so naming it gave dead hints).
+        _core_set_link_command_override([sys.executable, str(Path(__file__).resolve())])
 
 
 def verify_mcp(
@@ -3090,7 +3709,7 @@ def verify_mcp(
     status = _core_build_mcp_verify_status(
         target=target,
         wiki_dir=wiki_dir,
-        init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+        init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
         expected_version=LINK_VERSION,
         python_cmd=python_cmd,
         default_python=sys.executable,
@@ -3106,6 +3725,49 @@ def verify_mcp(
         _print_text(agent_note + "\n")
     _print_text(text)
     return code
+
+
+def disconnect_agent(
+    agent: str,
+    *,
+    write: bool = False,
+    config_path: str | None = None,
+    hooks_settings: str | None = None,
+    json_output: bool = False,
+) -> int:
+    """Remove Link from one agent: its MCP entry and its session hooks."""
+    from link_core.mcp_connect import build_disconnect_payload
+
+    try:
+        payload = build_disconnect_payload(agent, config_path=config_path, hooks_settings=hooks_settings, write=write)
+    except (ValueError, json.JSONDecodeError) as exc:
+        print(f"Disconnect failed: {exc}", file=sys.stderr)
+        return 1
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    mcp = payload["mcp"] if isinstance(payload["mcp"], dict) else {}
+    hooks = payload["hooks"] if isinstance(payload["hooks"], dict) else {}
+    verb = "Removed" if write else "Would remove"
+    lines = [f"Link in {payload['display_name']}:"]
+    if mcp.get("found"):
+        lines.append(f"  {verb} the MCP server entry from {mcp.get('path')}")
+    else:
+        lines.append(f"  No Link MCP entry in {mcp.get('path')}")
+    found_hooks = hooks.get("found") if isinstance(hooks.get("found"), list) else []
+    if found_hooks:
+        lines.append(f"  {verb} session hooks ({', '.join(str(e) for e in found_hooks)}) from {hooks.get('path')}")
+    elif hooks.get("supported"):
+        lines.append(f"  No Link hooks in {hooks.get('path')}")
+    if not payload["found"]:
+        lines.append("Nothing to remove.")
+    elif write:
+        lines.append(str(payload["restart_hint"]))
+        lines.append("Other servers, other hooks and comments in those files were left as they were.")
+    else:
+        lines.append("Preview only. Run again with --write to remove.")
+    _print_text("\n".join(lines))
+    return 0
 
 
 def connect_mcp(
@@ -3130,7 +3792,7 @@ def connect_mcp(
         wiki_dir=wiki_dir,
         agent=agent,
         expected_version=LINK_VERSION,
-        init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+        init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
         python_cmd=python_cmd,
         default_python=sys.executable,
         config_path=config_path,
@@ -3424,6 +4086,17 @@ def sync(
             else:
                 lines.append("Add your private remote: " + _shell_words_for_target("sync", target, "--init", "--remote", "<git-url>"))
             lines.append("raw/ captures and the runtime never sync; reviewed memory does.")
+            init_findings_obj = payload.get("secret_findings")
+            init_findings: list[object] = init_findings_obj if isinstance(init_findings_obj, list) else []
+            if init_findings:
+                lines.append("Nothing committed yet — these files contain secret-looking values:")
+                for finding in init_findings:
+                    if isinstance(finding, dict):
+                        lines.append(f"  {finding.get('path')}: {finding.get('label')}")
+                lines.append("Redact them, then run the daily sync.")
+            init_warnings_obj = payload.get("warnings")
+            for warning in init_warnings_obj if isinstance(init_warnings_obj, list) else []:
+                lines.append(f"Warning: {warning}")
             lines.append(f"Daily: {_shell_words_for_target('sync', target)}")
             _print_text("\n".join(lines))
             return 0
@@ -3454,7 +4127,10 @@ def sync(
             lines = ["Sync stopped before push — secrets never leave this machine."]
             for finding in findings:
                 if isinstance(finding, dict):
-                    lines.append(f"  {finding.get('path')}: {finding.get('label')}")
+                    commits_obj = finding.get("commits")
+                    commits = [str(c) for c in commits_obj] if isinstance(commits_obj, list) else []
+                    where = f" (in unpushed commit {', '.join(commits[:3])})" if commits else ""
+                    lines.append(f"  {finding.get('path')}: {finding.get('label')}{where}")
             lines.append(str(payload.get("message") or ""))
             _print_text("\n".join(lines))
             return 1
@@ -3467,6 +4143,14 @@ def sync(
         if payload.get("pushed"):
             parts.append("pushed")
         lines = ["Synced: " + (", ".join(parts) if parts else "already up to date")]
+        restored_obj = payload.get("restored_private")
+        restored: list[object] = restored_obj if isinstance(restored_obj, list) else []
+        if restored:
+            lines.append(f"Kept {len(restored)} private file(s) on this machine that the pulled changes "
+                         "stopped tracking (they stay local and never sync).")
+        warnings_obj = payload.get("warnings")
+        for warning in warnings_obj if isinstance(warnings_obj, list) else []:
+            lines.append(f"Warning: {warning}")
         both_obj = payload.get("both_versions")
         both: list[object] = both_obj if isinstance(both_obj, list) else []
         if both:
@@ -3583,7 +4267,7 @@ def setup(
                             subprocess.run(
                                 [str(outcome["python"]), str(ROOT / "link.py"),
                                  "semantic", str(_resolve_link_root(target)), "--setup"],
-                                check=False,
+                                check=False, stdin=subprocess.DEVNULL,
                             )
         except Exception as exc:
             if not json_output:
@@ -3703,7 +4387,7 @@ def onboard(
                 wiki_dir=wiki_dir,
                 agent=agent,
                 expected_version=LINK_VERSION,
-                init_command=[sys.executable, str(ROOT / "link.py"), "init", str(target)],
+                init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
                 default_python=sys.executable,
                 write=write,
             )
@@ -3894,7 +4578,8 @@ def serve_wiki(target: Path, port: int = 3000) -> int:
         return 1
     try:
         return subprocess.run(
-            [sys.executable, str(serve_path), "--root", str(target), "--port", str(port)]
+            [sys.executable, str(serve_path), "--root", str(target), "--port", str(port)],
+            stdin=subprocess.DEVNULL,
         ).returncode
     except KeyboardInterrupt:
         return 130
@@ -4157,14 +4842,14 @@ _WORKSPACE_COMMANDS = {
     "remember", "recall", "recipes", "query", "query-link", "brief", "start",
     "session-end", "end", "propose-memories", "capture-session",
     "capture-inbox", "accept-capture", "redact-capture", "delete-capture",
-    "dedup-captures", "update-memory", "set-memory-visibility",
+    "dedup-captures", "update-memory", "set-memory-visibility", "enforce",
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
     "semantic", "status", "sync", "digest", "import", "handoff", "handoffs", "health", "doctor", "validate", "operations",
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
-    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale",
+    "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale", "receipt",
     "verify-mcp", "connect",
 }
 
@@ -4228,7 +4913,9 @@ def main(argv: list[str] | None = None) -> int:
             "Docs: https://gowtham0992.github.io/link/",
         ]))
         return 0
-    parser = _core_build_cli_parser(default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR)
+    parser = _core_build_cli_parser(
+        default_demo_dir=DEFAULT_DEMO_DIR, default_proof_dir=DEFAULT_PROOF_DIR, prog=_cli_program_name(),
+    )
     args = parser.parse_args(argv)
     _normalize_review_all_args(args)
     _apply_default_workspace(args)
@@ -4276,6 +4963,7 @@ def main(argv: list[str] | None = None) -> int:
             "dedup-captures": dedup_captures,
             "update-memory": update_memory,
             "set-memory-visibility": set_memory_visibility,
+            "enforce": enforce_memory,
             "recall": recall,
             "query": query,
             "graph-summary": graph_summary,
@@ -4299,8 +4987,11 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
             "stale": stale,
+            "compile": compile_memories,
+            "receipt": receipt,
             "verify-mcp": verify_mcp,
             "connect": connect_mcp,
+            "disconnect": disconnect_agent,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,
         })
     except ValueError as exc:

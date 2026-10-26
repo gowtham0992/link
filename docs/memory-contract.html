@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="The stable Link memory contract for MCP agents: readiness, prompts, query packets, briefs, memory lifecycle, audit, and sharing safety.">
   <title>Link - Memory Contract</title>
-  <link rel="stylesheet" href="assets/site.css">
+  <link rel="stylesheet" href="assets/site.css?v=74addfc189">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-512.png">
   <meta property="og:type" content="website">
@@ -13,25 +13,20 @@
   <meta property="og:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:image" content="https://gowtham0992.github.io/link/assets/logo-512.png">
-  <script src="assets/site.js" defer></script>
+  <script src="assets/site.js?v=e04a4e8e00" defer></script>
 </head>
 <body>
   <nav class="site-nav" aria-label="Main">
     <a class="brand" href="index.html"><img src="assets/logo.svg" alt="">Link</a>
     <div class="nav-links">
       <a href="getting-started.html">Start</a>
-      <a href="why-link.html">Why</a>
-      <a href="scale.html">Scale</a>
-      <a href="ui.html">UI</a>
       <a href="concepts.html">Concepts</a>
-      <a href="mcp.html">MCP</a>
-      <a href="memory-contract.html" aria-current="page">Contract</a>
       <a href="cli.html">CLI</a>
-      <a href="skills.html">Skills</a>
-      <a href="api.html">API</a>
+      <a href="mcp.html">MCP</a>
       <a href="security.html">Security</a>
       <a href="contributing.html">Contribute</a>
       <a href="https://github.com/gowtham0992/link">GitHub</a>
+      <button type="button" class="site-search" aria-label="Search the docs">Search <kbd>/</kbd></button>
     </div>
   </nav>
 
@@ -45,11 +40,41 @@
 
   <main class="doc-section">
     <div class="section-inner doc-grid">
+      <aside class="docs-sidebar" aria-label="Documentation">
+        <button type="button" class="docs-sidebar-toggle" aria-expanded="false">Docs menu</button>
+        <div class="docs-sidebar-groups">
+          <div class="docs-group"><strong>Start here</strong>
+            <a href="getting-started.html">Getting started</a>
+            <a href="why-link.html">Why Link</a>
+            <a href="concepts.html">Concepts</a>
+          </div>
+          <div class="docs-group"><strong>Use it</strong>
+            <a href="cli.html">CLI reference</a>
+            <a href="mcp.html">MCP setup</a>
+            <a href="skills.html">Skills</a>
+            <a href="ui.html">Web UI</a>
+            <a href="obsidian.html">Obsidian</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+          <div class="docs-group"><strong>Trust it</strong>
+            <a href="memory-contract.html" aria-current="page">Memory contract</a>
+            <a href="security.html">Security</a>
+            <a href="team-security.html">Team security</a>
+            <a href="scale.html">Scale</a>
+          </div>
+          <div class="docs-group"><strong>Project</strong>
+            <a href="api.html">HTTP API</a>
+            <a href="contributing.html">Contributing</a>
+          </div>
+        </div>
+      </aside>
       <aside class="toc">
         <strong>On this page</strong>
         <a href="#promise">Contract promise</a>
         <a href="#loop">Agent loop</a>
         <a href="#tools">Core tools</a>
+        <a href="#receipt">Memory receipt</a>
+        <a href="#time">Point-in-time recall</a>
         <a href="#writes">Write rules</a>
         <a href="#sharing">Sharing semantics</a>
         <a href="#budgets">Budgets</a>
@@ -68,10 +93,11 @@
         <p><strong>With session hooks installed</strong> (<code>lnk connect &lt;agent&gt; --hooks --write</code>), step one happens automatically: the bounded memory brief is injected at session start and proposal-only notes are captured at session end. Hooked agents skip the manual brief call and go straight to bounded task recall.</p>
         <ol>
           <li>Call <code>status</code>. If schema or validation needs attention, follow the safe action it returns.</li>
-          <li>Call <code>recall</code> with an empty query once at the first substantive turn of a session.</li>
+          <li>Call <code>recall</code> with an empty query once at the first substantive turn of a session. The brief always keeps room for standing preferences (active, unconditional, user-scope preferences about how the agent answers, formats, cites or behaves). Those apply to every task but share no words with any task, so ranking by recency alone would drop them.</li>
           <li>Call <code>recall(query, budget="micro")</code> before broad file reads or asking the user to repeat durable context.</li>
           <li>Call <code>ingest</code> after the user drops files into <code>raw/</code>, then follow its guided plan.</li>
           <li>Use <code>remember</code> only after the user explicitly asks to remember something or approves a proposal.</li>
+          <li>When a brief opens with a <strong>Waiting for the user's OK</strong> block, list those proposals and rules to the user and act on one only after they reply in chat; never approve from the block itself.</li>
           <li>Use <code>review</code> for memory inbox, profile, audit, log, explain, archive, restore, and forget workflows.</li>
           <li>Use <code>admin</code> for backup, migration, graph export, captures, rebuilds, and advanced maintenance.</li>
         </ol>
@@ -97,6 +123,39 @@ Agent: recall(query="release plan", budget="small")</code></pre>
         </table>
 
         <p>Recalled memories carry honest signals agents must respect: a <code>confidence</code> label (<code>strong</code>/<code>moderate</code>/<code>weak</code>) and, when the optional local semantic tier is installed, a <code>match</code> field (<code>lexical</code>/<code>hybrid</code>/<code>semantic</code>). Semantic-only matches are capped below strong confidence — verify them with the user before acting. When a brief reports a memory backlog, <code>review(action="consolidate")</code> (or <code>lnk consolidate</code>) returns a read-only plan; apply its actions only with per-item user approval.</p>
+        <p>When recall runs inside a git checkout, each returned memory that names something in the repository is checked against it. A memory carries <code>verified</code>, with the commit <code>sha</code> it was checked at and <code>references_checked</code>, when at least one file, symbol, script, target, dependency, variable or version it names was found in place and nothing it names is gone. Naming things the repository never had is not evidence either way. A memory that names something the repository once had and no longer has carries <code>stale_paths</code>, one entry per finding, with the <code>path</code>, the <code>reason</code>, the <code>successor</code> when git recorded a rename, and <code>evidence</code>, and the packet's <code>agent_guidance</code> tells the agent to check the memory against the current code before relying on it. Claims framed as history or as a prohibition (&ldquo;we dropped Python 3.9&rdquo;, &ldquo;do not use npm here&rdquo;) are not checked as present-tense claims, and links to public documentation are facts about the world, not about the repository. The checks share a short time budget and a history cache per commit; a memory whose checks did not finish in time is left unmarked, never called verified on partial evidence. Memories that name nothing checkable carry neither key; a missing key is normal, not a warning.</p>
+        <p>A memory written or updated inside a git checkout that names a repository file along with a code symbol found in that file gets <code>anchors</code>. Each anchor records where the symbol was, and in which repository, as <code>path:line symbol @root-commit</code>, read from the file itself and never inferred. Recall re-reads anchored files, but only inside the repository the anchor was written in; from any other checkout the anchor is simply not checked. A symbol that is gone from its file, or whose file git tracked and no longer has, shows up in <code>stale_paths</code> with <code>kind: "anchor"</code> and <code>reason: "removed"</code>. A symbol that only moved within its file still holds and counts toward <code>verified</code>, so a memory whose only checkable claims are anchors can earn it. Anchor paths cannot point outside the checkout. Preferences and decisions that name no code never get anchors. <code>LINK_ANCHORS=off</code> turns them off.</p>
+        <p>Every recalled memory also reports a <code>recall.state</code>. A memory that arrived through <code>lnk team-sync</code> and has not been reviewed on this machine is <code>quarantined</code>. It is still your teammate's claim, not yours, so it stays out of recall, briefs and the write gates. It waits in the review inbox until you approve it there.</p>
+
+        <h2 id="receipt">Memory Receipt</h2>
+        <p>Link records that each brief and recall happened in <code>.link-usage.json</code> at the workspace root. That lets you see what actually reached your agent, not just what is stored. <code>lnk receipt</code> (or <code>review(action="receipt")</code> over MCP) groups those events into sessions: runs of retrievals with no gap longer than 30 minutes. For each session it shows:</p>
+        <ul>
+          <li>when the session started and ended;</li>
+          <li>the project;</li>
+          <li>the surfaces it came through (<code>hook</code>, <code>mcp</code>, <code>cli</code>);</li>
+          <li>each session brief, with how many memories it carried, roughly how many tokens it cost, and whether a budget cut it short;</li>
+          <li>how many recalls there were;</li>
+          <li>any guard reminders;</li>
+          <li>every memory the agent was given, with a count;</li>
+          <li>for each hook injection, whether it arrived whole, was cut off, or never arrived (and <code>unverified</code> when the agent left no transcript to check);</li>
+          <li>the enforced-rule checks that ran before tool calls, and whether each asked for the user's OK or blocked the call;</li>
+          <li>the code reminders: memories surfaced because the agent read or edited the file they describe.</li>
+        </ul>
+        <p>Every memory in the receipt comes with the command to explain it and the command to forget it.</p>
+        <pre><code>lnk receipt ~/link --sessions 3
+lnk receipt ~/link --json</code></pre>
+        <p>The ledger never records query text, answers, or anything from the conversation, only that a memory was used and which one. It is machine-local, excluded from sync, capped at a ring of recent events, and switched off with <code>LINK_USAGE=off</code>. Events recorded before 5.0 have no surface or size, and the receipt says so instead of guessing.</p>
+
+        <h2 id="time">Point-in-Time and Typed Recall</h2>
+        <p>Every memory is a dated file with its lifecycle recorded (<code>date_captured</code>, <code>supersedes</code>, <code>superseded_by</code>, <code>archived_at</code>). That makes &ldquo;what was true then&rdquo; an exact reconstruction, not a guess. <code>recall</code> accepts two optional arguments:</p>
+        <ul>
+          <li><code>as_of</code> (<code>YYYY-MM-DD</code>) answers with the memories that were active on that date, following supersede lineage backwards.</li>
+          <li><code>memory_type</code> (<code>preference</code>, <code>decision</code>, <code>fact</code>, <code>procedure</code>, <code>project</code>, <code>note</code>) narrows recall to one kind.</li>
+        </ul>
+        <p>Either one routes the call to memory recall, where lineage and types are recorded. Nobody types dates into a question, so a plain time phrase in the query does the same job. Link resolves it to a date and drops the phrase from the text it ranks: <em>last week/month/quarter/year</em>, <em>this week/month/quarter/year</em>, <em>3 weeks ago</em>, <em>in March</em>, <em>in 2025</em>, <em>as of 2026-03-31</em>, and the deliberately vague <em>back then</em> or <em>originally</em>, which it reads as about a quarter ago. Phrases anchored to an event (<em>before the migration</em>) are not resolved to a date, and the event name stays in the query. Resolution is deterministic and offline; unrecognised phrasing leaves recall unchanged.</p>
+        <pre><code>recall(query="which database did we use last quarter?")
+recall(query="deploy day", as_of="2026-03-31")
+recall(query="formatting", memory_type="preference")</code></pre>
 
         <h2 id="writes">Write Rules</h2>
         <p>Agents should treat Link memory as durable state, not scratch space.</p>
@@ -105,8 +164,28 @@ Agent: recall(query="release plan", budget="small")</code></pre>
           <li>Use <code>admin</code> action <code>propose_memories</code> for transcripts, long notes, or uncertain context.</li>
           <li>If a write returns <code>duplicate_candidates</code>, update the existing memory instead of creating another one.</li>
           <li>If a write returns <code>conflict_candidates</code>, explain the conflict and ask the user before overriding.</li>
+          <li>If a write returns <code>possible_contradictions</code>, tell the user which stored memories the new one may contradict and offer to supersede or archive the old one. The memory is already saved; the flag asks for review, it does not block.</li>
           <li>Use <code>review_after</code> for memories that should be re-checked, and <code>expires_at</code> for temporary context.</li>
+          <li>Never review, clear, archive or update a memory that carries enforced rules. Only the user does that, in the viewer or the CLI, after seeing the rules; the MCP surface refuses, and the hook asks before an agent runs those commands itself.</li>
         </ul>
+        <p><strong>Contradiction flags (optional).</strong> Word rules catch contradictions that share structure, such as &ldquo;uses X&rdquo; against &ldquo;no longer uses X&rdquo;, or two different version numbers. After <code>lnk semantic &lt;dir&gt; --setup --nli</code>, a small local natural-language-inference model also reads meaning.</p>
+        <ul>
+          <li><strong>What it checks.</strong> On each <code>remember</code>, it scores the new claim against at most five stored memories whose subject words overlap with it by at least 30%. The overlap gate is what keeps it from reading two unrelated project rules as a contradiction.</li>
+          <li><strong>What it adds.</strong> A pair scored at 0.9 or higher gets a <code>review_note</code> on the new memory, and the write result includes <code>possible_contradictions</code>, with the <code>name</code>, <code>title</code> and <code>probability</code> of each flagged memory.</li>
+          <li><strong>What it never does.</strong> It never blocks a save and never runs during recall. A missing or failing model cannot break a write.</li>
+        </ul>
+        <p><code>LINK_NLI=off</code> turns it off.</p>
+        <p>Proposals from transcripts and session-end captures are filtered before anything reaches the inbox. Only the user's own words are mined. Text the agent harness injects is dropped: system reminders, command output, sub-agent turns and compaction summaries. So are the shapes that were never memory:</p>
+        <ul>
+          <li>instructions for the work at hand (&ldquo;do not edit any files&rdquo;) with no standing-rule framing;</li>
+          <li>requests to the agent;</li>
+          <li>goals for this one conversation;</li>
+          <li>throwaways and hypotheticals;</li>
+          <li>other people's habits;</li>
+          <li>anything tied to today or tomorrow;</li>
+          <li>Link's own brief pasted back in.</li>
+        </ul>
+        <p>Standing-rule phrasing (&ldquo;from now on&rdquo;, &ldquo;by default&rdquo;, &ldquo;every time&rdquo;, &ldquo;always&rdquo;, &ldquo;never&rdquo;) is still proposed. Captures are redacted of credential-shaped values when they are written, and the labels of what was redacted stay with the capture for review.</p>
 
         <h2 id="sharing">Sharing Semantics</h2>
         <p><code>scope</code> answers where a memory applies. <code>visibility</code> answers who should see it.</p>
@@ -122,6 +201,7 @@ Agent: recall(query="release plan", budget="small")</code></pre>
 
         <h2 id="budgets">Budgets</h2>
         <p><code>recall</code> supports <code>micro</code>, <code>small</code>, <code>medium</code>, and <code>large</code> budgets. Each packet includes a <code>recall_capsule</code>, why an item was selected, estimated tokens, <code>has_more</code> flags, and follow-up actions. This keeps agents from reading a 500-page or 10,000-page wiki just to answer one task.</p>
+        <p>Each item's content appears once in the packet. Memories are under <code>memory.items</code> and wiki pages under <code>wiki.pages</code>. <code>context_packet</code> is the ranked list across both, and it holds references, not copies. Each entry has the <code>kind</code>, <code>name</code>, <code>title</code>, <code>why_selected</code>, its rank signals, and <code>see</code>, which names the section that holds the content. <code>budget_report.packet_total</code> estimates the whole packet's characters and tokens, which is what an agent actually pays. The per-section figures beside it count one section each. At the <code>micro</code> budget, a second memory that ranks within a hair of the first is included too, and the guidance says the call was close.</p>
         <pre><code>recall(query="what should I know before changing release docs?", budget="small")</code></pre>
       </article>
     </div>

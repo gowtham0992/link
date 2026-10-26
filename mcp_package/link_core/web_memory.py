@@ -12,6 +12,13 @@ MemoryActionHints = Callable[[dict[str, object]], list[dict[str, object]]]
 PageHref = Callable[[str], str]
 
 
+
+def _cmd(rest: str) -> str:
+    """A copyable Link command in the runtime the viewer was started with (lnk, or this checkout)."""
+    from .mcp_verify import display_command
+
+    return display_command(["link"]) + " " + rest
+
 def memory_dashboard_next_actions(
     *,
     memory_count: int,
@@ -28,7 +35,7 @@ def memory_dashboard_next_actions(
             "label": "Redact capture warnings",
             "detail": f"{capture_warning_count} raw capture{'s' if capture_warning_count != 1 else ''} contain secret-looking values.",
             "href": "/captures",
-            "command": "python3 link.py redact-capture raw/memory-captures/<capture>.md .",
+            "command": _cmd("redact-capture raw/memory-captures/<capture>.md ."),
             "priority": "high",
         })
     if review_count:
@@ -38,7 +45,7 @@ def memory_dashboard_next_actions(
             "label": "Review pending memories",
             "detail": f"{review_count} {memory_label} {verb} confirmation or metadata cleanup.",
             "href": "/inbox",
-            "command": "python3 link.py memory-inbox .",
+            "command": _cmd("memory-inbox ."),
             "priority": "high",
         })
     if updated_count:
@@ -46,7 +53,7 @@ def memory_dashboard_next_actions(
             "label": "Audit recent memory updates",
             "detail": f"{updated_count} memory update{'s' if updated_count != 1 else ''} should be checked for accuracy.",
             "href": "/memory",
-            "command": "python3 link.py profile .",
+            "command": _cmd("profile ."),
             "priority": "medium",
         })
     if archived_count:
@@ -54,7 +61,7 @@ def memory_dashboard_next_actions(
             "label": "Inspect archived memory",
             "detail": f"{archived_count} archived memory page{'s' if archived_count != 1 else ''} remain inspectable but hidden from default recall.",
             "href": "/profile",
-            "command": "python3 link.py profile .",
+            "command": _cmd("profile ."),
             "priority": "low",
         })
     if capture_count and not capture_warning_count:
@@ -62,7 +69,7 @@ def memory_dashboard_next_actions(
             "label": "Review raw captures",
             "detail": f"{capture_count} saved raw capture{'s' if capture_count != 1 else ''} can be accepted, redacted, or deleted.",
             "href": "/captures",
-            "command": "python3 link.py accept-capture raw/memory-captures/<capture>.md . --index 1",
+            "command": _cmd("accept-capture raw/memory-captures/<capture>.md . --index 1"),
             "priority": "medium",
         })
     if not memory_count:
@@ -70,7 +77,7 @@ def memory_dashboard_next_actions(
             "label": "Create the first memory",
             "detail": "Save an explicit preference, decision, project fact, or note for local agents.",
             "href": "",
-            "command": 'python3 link.py remember "User prefers ..." . --type preference --scope user',
+            "command": _cmd('remember "User prefers ..." . --type preference --scope user'),
             "priority": "high",
         })
     if not actions:
@@ -78,7 +85,7 @@ def memory_dashboard_next_actions(
             "label": "Memory is recall-ready",
             "detail": "No pending review items or recent updates need attention.",
             "href": "/profile",
-            "command": "python3 link.py profile .",
+            "command": _cmd("profile ."),
             "priority": "info",
         })
     return actions[:3]
@@ -163,6 +170,10 @@ def render_memory_card(
         meta_parts.append(f'review after {record["review_after"]}')
     if record.get("expires_at"):
         meta_parts.append(f'expires {record["expires_at"]}')
+    enforce_value = record.get("enforce")
+    rules = [str(rule) for rule in enforce_value if str(rule).strip()] if isinstance(enforce_value, list) else []
+    if rules:
+        meta_parts.append(f'{len(rules)} enforced rule{"" if len(rules) == 1 else "s"}')
     meta = " · ".join(part for part in meta_parts if part)
     issues_html = ""
     if include_issues and record.get("issues"):
@@ -248,6 +259,16 @@ def render_capture_card(capture: dict[str, object]) -> str:
             '<p class="summary"><strong>Secret-looking values:</strong> '
             + html.escape(", ".join(warnings))
             + "</p>"
+        )
+    # A session that read web pages or MCP tool output can carry their
+    # words into a proposal; the person accepting it should know.
+    untrusted_value = capture.get("untrusted_inputs")
+    outside = [str(item) for item in untrusted_value if str(item)] if isinstance(untrusted_value, list) else []
+    if outside:
+        sources = "/".join("MCP" if item == "mcp" else item for item in outside)
+        warning_html += (
+            f'<div class="verify-note" data-untrusted-inputs>Session read {html.escape(sources)} content '
+            '- check these are your words before accepting.</div>'
         )
 
     # What Accept will save, and how Link decided — the pipeline made reviewable.

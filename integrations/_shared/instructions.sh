@@ -62,3 +62,32 @@ link_print_next_steps() {
         echo "    ingest raw/<file> into Link"
     fi
 }
+
+# Prefer Link's own `connect` and `disconnect`. They verify that the chosen
+# Python can actually serve link-mcp, edit JSON-with-comments configs without
+# deleting comments, create the config file when it does not exist yet, and
+# install session hooks for the agents that have them. The inline fallbacks
+# below each installer only run when no Link CLI is reachable.
+link_cli() {
+    local repo_cli="$SCRIPT_DIR/../../link.py"
+    if [ -f "$repo_cli" ] && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        python3 "$repo_cli" "$@"
+    elif command -v lnk >/dev/null 2>&1; then
+        lnk "$@"
+    else
+        return 127
+    fi
+}
+
+# link_connect <agent> <workspace-root> [extra flags...]; sets LINK_CONNECTED=1 on success.
+link_connect() {
+    local agent="$1"
+    local root="$2"
+    shift 2
+    LINK_CONNECTED=""
+    if link_cli connect "$agent" "$root" --write "$@"; then
+        LINK_CONNECTED=1
+    else
+        echo "  · lnk connect was not available or failed; using the built-in registration"
+    fi
+}

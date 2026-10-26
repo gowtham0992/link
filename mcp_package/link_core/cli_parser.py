@@ -28,10 +28,10 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
         "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
-        "set-memory-visibility", "memory-log", "memory-audit",
+        "set-memory-visibility", "enforce", "memory-log", "memory-audit",
     )),
     ("Agents & automation", (
-        "connect", "hook", "verify-mcp",
+        "connect", "disconnect", "hook", "verify-mcp", "compile",
     )),
     ("Workspace & health", (
         "status", "health", "doctor", "validate", "migrate", "backup",
@@ -43,7 +43,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "compliance-export",
     )),
     ("Utilities", (
-        "version", "benchmark", "wins", "profile", "rebuild-index",
+        "version", "benchmark", "wins", "receipt", "profile", "rebuild-index",
         "rebuild-backlinks", "query-link", "stale",
     )),
 )
@@ -58,24 +58,29 @@ class _GroupedCommandHelp(argparse.RawDescriptionHelpFormatter):
         return super()._format_action(action)
 
 
-def _grouped_epilog() -> str:
+def _grouped_epilog(prog: str = "lnk") -> str:
     lines = ["commands:"]
     for group, names in COMMAND_GROUPS:
         lines.append(f"\n  {group}:")
         lines.append("    " + ", ".join(names))
-    lines.append("\nRun `link.py <command> --help` for that command's options.")
+    lines.append(f"\nRun `{prog} <command> --help` for that command's options.")
     return "\n".join(lines)
 
 
 def build_cli_parser(
     default_demo_dir: str = DEFAULT_DEMO_DIR,
     default_proof_dir: str = DEFAULT_PROOF_DIR,
+    prog: str = "lnk",
 ) -> argparse.ArgumentParser:
-    """Build the Link CLI argument parser."""
+    """Build the Link CLI argument parser.
+
+    `prog` is the name help and usage lines show. Installed Link runs as
+    `lnk`; a clone run directly shows `link.py`, which is what works there.
+    """
     parser = argparse.ArgumentParser(
-        prog="link.py",
-        description="Link — local, review-gated memory for AI agents. New? Run: link.py try",
-        epilog=_grouped_epilog(),
+        prog=prog,
+        description=f"Link — local, review-gated memory for AI agents. New? Run: {prog} try",
+        epilog=_grouped_epilog(prog),
         formatter_class=_GroupedCommandHelp,
     )
     parser.add_argument("--version", action="version", version=f"Link {LINK_VERSION}")
@@ -293,7 +298,7 @@ def build_cli_parser(
         epilog=(
             "one rule for the knobs: finding it -> --trigger · fencing it -> --applies-when · "
             "owning it -> --scope/--project/--visibility · replacing it -> --supersedes (name or title) · "
-            "aging it -> --review-after/--expires-at. When in doubt, use none; every knob can be added later."
+            "aging it -> --review-after/--expires-at · holding it -> --enforce (a rule checked before the agent's tool calls, after review). When in doubt, use none; every knob can be added later."
         ),
     )
     remember_cmd.add_argument("text", help="memory text to save")
@@ -312,6 +317,11 @@ def build_cli_parser(
     remember_cmd.add_argument("--applies-when", default=None, dest="applies_when", help='scoping conditions, e.g. "project:link, task:cutting a release, path:*repo*" (OR semantics)')
     remember_cmd.add_argument("--supersedes", default=None, help="name of the active memory this one replaces; the old memory is archived with lineage")
     remember_cmd.add_argument("--context", default=None, help="surrounding text from the memory's origin; helps recall find it, never part of the claim (600 chars max)")
+    remember_cmd.add_argument(
+        "--enforce", action="append", default=None, metavar="RULE",
+        help="rule checked before the agent's tool calls once you review the memory, e.g. "
+             "\"ask command: git push --force*\" or \"deny write: migrations/**\" (repeatable)",
+    )
     remember_cmd.add_argument("--allow-duplicate", action="store_true", help="create a new memory even if a strong duplicate exists")
     remember_cmd.add_argument("--allow-secret", action="store_true", help="save even if the text looks like a credential (memory is plain files read by every agent)")
     remember_cmd.add_argument("--allow-conflict", action="store_true", help="create a memory even if it may conflict with an active memory")
@@ -396,6 +406,23 @@ def build_cli_parser(
     visibility_cmd.add_argument("target", nargs="?", default=".")
     visibility_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
+    enforce_cmd = sub.add_parser(
+        "enforce",
+        help="set the rules a memory enforces on the agent's tool calls (they act after review)",
+        epilog=(
+            "rules: [ask|deny] command|write|read: <glob>. ask is the default: the agent's tool "
+            "call waits for your OK. deny blocks it. New rules put the memory back into review."
+        ),
+    )
+    enforce_cmd.add_argument("identifier", help="memory page name, title, or path")
+    enforce_cmd.add_argument("target", nargs="?", default=".")
+    enforce_cmd.add_argument("--rule", action="append", default=None, dest="rules", metavar="RULE",
+                             help='e.g. "ask command: git push --force*" (repeatable)')
+    enforce_cmd.add_argument("--clear", action="store_true", help="remove every rule from the memory")
+    enforce_cmd.add_argument("--suggest", action="store_true",
+                             help="show rules Link can derive from the memory's text, without changing it")
+    enforce_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
+
     recall_cmd = sub.add_parser("recall", help="search local agent memories")
     recall_cmd.add_argument("query", help="memory query")
     recall_cmd.add_argument("target", nargs="?", default=".")
@@ -443,7 +470,10 @@ def build_cli_parser(
     start_cmd.add_argument("--json", action="store_true", help="print machine-readable startup packet")
 
     hook_cmd = sub.add_parser("hook", help="run an agent session hook (invoked by installed agent hooks)")
-    hook_cmd.add_argument("event", choices=["session-start", "session-end", "prompt-check"], help="agent session lifecycle event")
+    hook_cmd.add_argument(
+        "event", choices=["session-start", "session-end", "prompt-check", "pre-tool", "post-tool"],
+        help="agent session lifecycle event",
+    )
     hook_cmd.add_argument("target", nargs="?", default=".")
     hook_cmd.add_argument("--limit", type=int, default=5, help="maximum memories in the session-start brief")
     hook_cmd.add_argument("--project", default=None, help="include user/global memories plus this project's memories")
@@ -464,6 +494,10 @@ def build_cli_parser(
     semantic_cmd.add_argument("--setup", action="store_true", help="fetch the local embedding model once and build the index")
     semantic_cmd.add_argument("--rebuild", action="store_true", help="rebuild the semantic index offline")
     semantic_cmd.add_argument("--json", action="store_true", help="print machine-readable semantic status")
+    semantic_cmd.add_argument(
+        "--nli", action="store_true",
+        help="with --setup: also fetch the local contradiction model (~87 MB) that flags possible contradictions at write time",
+    )
 
     recipes_cmd = sub.add_parser("recipes", help="list saved procedure memories (recipes) with their triggers")
     recipes_cmd.add_argument("target", nargs="?", default=".")
@@ -544,6 +578,14 @@ def build_cli_parser(
     rebuild_cmd = sub.add_parser("rebuild-backlinks", help="rebuild wiki/_backlinks.json")
     rebuild_cmd.add_argument("target", nargs="?", default=".")
 
+    receipt_cmd = sub.add_parser(
+        "receipt",
+        help="what reached your agents from memory, session by session",
+    )
+    receipt_cmd.add_argument("target", nargs="?", default=".", help="Link workspace")
+    receipt_cmd.add_argument("--sessions", type=int, default=3, help="how many recent sessions (default 3)")
+    receipt_cmd.add_argument("--json", action="store_true", help="machine-readable receipts")
+
     stale_cmd = sub.add_parser(
         "stale",
         help="list memories that name repository paths git no longer has",
@@ -553,7 +595,31 @@ def build_cli_parser(
         "--repo", default=".",
         help="repository to check the memories against (default: current directory)",
     )
+    stale_cmd.add_argument(
+        "--instructions", action="store_true",
+        help="check the repository's agent instruction files (AGENTS.md, CLAUDE.md, rules) instead of memories",
+    )
     stale_cmd.add_argument("--json", action="store_true", help="machine-readable report")
+
+    compile_cmd = sub.add_parser(
+        "compile",
+        help="write reviewed memories into this repository's agent instruction files, rules and skills",
+    )
+    compile_cmd.add_argument("target", nargs="?", default=".", help="Link workspace")
+    compile_cmd.add_argument("--repo", default=".", help="repository to write into (default: current directory)")
+    compile_cmd.add_argument(
+        "--targets", default="",
+        help="comma-separated: agents-md, claude-md, gemini-md, copilot, cursor-rules, claude-rules, "
+             "copilot-rules, windsurf, windsurf-rules, kiro, kiro-rules, claude-skills, or all "
+             "(default: AGENTS.md plus the agents this repository already has files for)",
+    )
+    compile_cmd.add_argument("--check", action="store_true",
+                             help="write nothing; exit 1 when the files differ from the reviewed memories (for CI)")
+    compile_cmd.add_argument("--dry-run", action="store_true", dest="dry_run", help="show the diff; write nothing")
+    compile_cmd.add_argument("--include-private", action="store_true", dest="include_private",
+                             help="also write private memories (these files are usually committed)")
+    compile_cmd.add_argument("--project", default="", help="project slug (default: the repository folder name)")
+    compile_cmd.add_argument("--json", action="store_true", help="machine-readable plan and result")
 
     verify_mcp_cmd = sub.add_parser(
         "verify-mcp",
@@ -568,7 +634,7 @@ def build_cli_parser(
     verify_mcp_cmd.add_argument("--python", default=None, help="Python executable to verify")
 
     connect_cmd = sub.add_parser("connect", help="print or write MCP config for a local agent")
-    connect_cmd.add_argument("agent", help="agent to connect: codex, kiro, claude-code, cursor, antigravity, vscode, copilot")
+    connect_cmd.add_argument("agent", help="agent to connect: codex, kiro, claude-code, cursor, antigravity, windsurf, zed, vscode, copilot")
     connect_cmd.add_argument("target", nargs="?", default=".")
     connect_cmd.add_argument("--write", action="store_true", help="update the detected agent config file")
     connect_cmd.add_argument("--config", default=None, help="override the agent config file path")
@@ -576,7 +642,7 @@ def build_cli_parser(
     connect_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also configure session hooks so new sessions start with the Link brief (Claude Code, Codex, Cursor)",
+        help="also install hooks: the session brief at start, proposals at end, and on Claude Code (shell commands on Cursor) enforce rules checked before tool calls and memories surfaced when the agent opens anchored code",
     )
     connect_cmd.add_argument(
         "--hooks-settings",
@@ -585,6 +651,16 @@ def build_cli_parser(
         help="override the hooks settings file, e.g. .claude/settings.json inside a repo for project-scoped hooks",
     )
     connect_cmd.add_argument("--json", action="store_true", help="print machine-readable connection plan")
+
+    disconnect_cmd = sub.add_parser(
+        "disconnect", help="remove Link's MCP entry and session hooks from a local agent (preview unless --write)",
+    )
+    disconnect_cmd.add_argument("agent", help="agent to disconnect: codex, kiro, claude-code, cursor, antigravity, windsurf, zed, vscode, copilot")
+    disconnect_cmd.add_argument("--write", action="store_true", help="actually edit the agent's config files")
+    disconnect_cmd.add_argument("--config", default=None, help="override the agent config file path")
+    disconnect_cmd.add_argument("--hooks-settings", default=None, dest="hooks_settings",
+                                help="override the hooks settings file")
+    disconnect_cmd.add_argument("--json", action="store_true", help="print the removal plan as JSON")
 
     return parser
 
@@ -784,6 +860,16 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             allow_duplicate=args.allow_duplicate,
             allow_conflict=args.allow_conflict,
             allow_secret=args.allow_secret,
+            enforce=args.enforce,
+            json_output=args.json,
+        )
+    if command == "enforce":
+        return handlers["enforce"](
+            Path(args.target),
+            args.identifier,
+            rules=args.rules or [],
+            clear=args.clear,
+            suggest=args.suggest,
             json_output=args.json,
         )
     if command == "propose-memories":
@@ -946,7 +1032,9 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "consolidate":
         return handlers["consolidate"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "semantic":
-        return handlers["semantic"](Path(args.target), setup=args.setup, rebuild=args.rebuild, json_output=args.json)
+        return handlers["semantic"](
+            Path(args.target), setup=args.setup, rebuild=args.rebuild, json_output=args.json, nli=bool(args.nli),
+        )
     if command == "profile":
         return handlers["profile"](Path(args.target), limit=args.limit, project=args.project, json_output=args.json)
     if command == "wins":
@@ -985,8 +1073,17 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["rebuild-index"](Path(args.target))
     if command == "rebuild-backlinks":
         return handlers["rebuild-backlinks"](Path(args.target))
+    if command == "receipt":
+        return handlers["receipt"](Path(args.target), sessions=int(args.sessions), json_output=bool(args.json))
     if command == "stale":
-        return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json))
+        return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json),
+                                 instructions=bool(args.instructions))
+    if command == "compile":
+        return handlers["compile"](
+            Path(args.target), repo=Path(args.repo), targets=str(args.targets), check=bool(args.check),
+            dry_run=bool(args.dry_run), include_private=bool(args.include_private), project=str(args.project),
+            json_output=bool(args.json),
+        )
     if command == "verify-mcp":
         from .mcp_connect import agent_alias_matches
 
@@ -998,6 +1095,11 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
                 agent=str(args.target),
             )
         return handlers["verify-mcp"](Path(args.target), json_output=args.json, python_cmd=args.python)
+    if command == "disconnect":
+        return handlers["disconnect"](
+            args.agent, write=args.write, config_path=args.config,
+            hooks_settings=args.hooks_settings, json_output=args.json,
+        )
     if command == "connect":
         return handlers["connect"](
             Path(args.target),

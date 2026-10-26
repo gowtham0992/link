@@ -186,6 +186,7 @@ class WebGraphCoreTests(unittest.TestCase):
             label_json='"neighbors"',
             total_node_count=10,
             total_edge_count=20,
+            nonce="abc123",
         )
 
         self.assertIn('var nodes = [{"id":"a","title":"A","category":"concepts"}];', script)
@@ -241,3 +242,11 @@ class WebGraphCoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GraphFindAutocompleteTests(unittest.TestCase):
+    def test_find_box_has_a_title_datalist(self):
+        import link_core.web_graph as graph
+        source = Path(graph.__file__).read_text(encoding="utf-8")
+        self.assertIn('list="graph-node-titles"', source)
+        self.assertIn("getElementById('graph-node-titles')", source)

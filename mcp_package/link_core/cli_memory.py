@@ -115,11 +115,21 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
         lines.append(f"Review after: {result['review_after']}")
     if result.get("expires_at"):
         lines.append(f"Expires at: {result['expires_at']}")
+    enforce_value = result.get("enforce")
+    rules = [str(rule) for rule in enforce_value] if isinstance(enforce_value, list) else []
+    if rules:
+        lines.append("Enforces (after you review it): " + "; ".join(rules))
     lines.extend([
         "",
         "Next:",
         f"  {_shell_words('python3', 'link.py', 'recall', result['title'], target)}",
     ])
+    suggestion_value = result.get("enforce_suggestions")
+    suggestions = [str(rule) for rule in suggestion_value] if isinstance(suggestion_value, list) else []
+    if suggestions:
+        lines.append("  This reads like a rule agents should not break. To have Link ask before it happens:")
+        for rule in suggestions:
+            lines.append(f"  {_shell_words('python3', 'link.py', 'enforce', result['name'], target, '--rule', rule)}")
     return 0, "\n".join(lines)
 
 
@@ -287,6 +297,9 @@ def render_recall_text(
         summary = record.get("tldr") or record.get("snippet")
         if summary:
             lines.append(f"  {summary}")
+        disputed_by = str(record.get("contradicted_by") or "")
+        if disputed_by:
+            lines.append(f"  Disputed by a newer memory: {disputed_by} - check which one is current.")
     if results and all(str(record.get("confidence") or "") == "weak" for record in results):
         lines.extend([
             "",

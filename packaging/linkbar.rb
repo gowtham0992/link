@@ -20,9 +20,8 @@ cask "linkbar" do
   # Homebrew quarantines staged apps by default, which would block first
   # launch of an unsigned bundle; clearing the flag here restores the normal
   # double-click experience. Verified on macOS 15 and 26.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/LinkBar.app"]
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/LinkBar.app"]
   end
 
   zap trash: []

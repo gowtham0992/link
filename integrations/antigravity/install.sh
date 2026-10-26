@@ -32,6 +32,14 @@ else
     bash "$SCRIPT_DIR/../_shared/scaffold.sh" --project
 fi
 
+# ~/.gemini/settings.json is global: only a global install writes it. A
+# --project install prints the entry instead, as 3.x did.
+LINK_CONNECTED=""
+if [ "$MODE" = "--global" ]; then
+    link_connect antigravity "${WIKI_PATH%/wiki}"
+fi
+# Built-in registration, used only when lnk connect is unavailable.
+if [ -z "$LINK_CONNECTED" ]; then
 MCP_PYTHON="python3"
 MCP_MARKER="${WIKI_PATH%/wiki}/.link-mcp-python"
 if [ -f "$MCP_MARKER" ]; then
@@ -41,5 +49,7 @@ fi
 echo ""
 echo "  MCP: add to ~/.gemini/settings.json:"
 echo "  { \"mcpServers\": { \"link\": { \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"] } } }"
+
+fi
 
 link_print_next_steps "$MODE"
