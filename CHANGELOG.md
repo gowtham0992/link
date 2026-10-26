@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-10-25
+
 Memory that checks itself against the code, and holds at the moment the
 agent acts. Two lines of work ship together. First, memory that keeps
 itself honest: it verifies what it says about files, scripts, dependencies
