@@ -164,9 +164,15 @@ def index_entry(page: str, label: str, content: str) -> dict[str, object]:
     }
 
 
-def asset_versions() -> dict[str, str]:
+def _content_hash(path: Path) -> str:
+    # Hash the text, not the bytes: a Windows checkout rewrites line endings,
+    # and the version must not change with the machine that stamped it.
     import hashlib
-    return {name: hashlib.sha256((DOCS / name).read_bytes()).hexdigest()[:10] for name in VERSIONED_ASSETS}
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:10]
+
+
+def asset_versions() -> dict[str, str]:
+    return {name: _content_hash(DOCS / name) for name in VERSIONED_ASSETS}
 
 
 def version_assets(content: str, versions: dict[str, str]) -> str:
@@ -207,9 +213,8 @@ LANDING_GIF_RE = re.compile(r'(assets\\u002F' + re.escape(LANDING_GIF) + r')(?:\
 
 
 def landing_with_versioned_gif() -> str:
-    import hashlib
     content = LANDING.read_text(encoding="utf-8")
-    digest = hashlib.sha256((DOCS / "assets" / LANDING_GIF).read_bytes()).hexdigest()[:10]
+    digest = _content_hash(DOCS / "assets" / LANDING_GIF)
     return LANDING_GIF_RE.sub(lambda m: f"{m.group(1)}?v={digest}", content)
 
 
