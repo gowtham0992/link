@@ -745,6 +745,17 @@ def build_disconnect_payload(
     hooks: dict[str, object] = {"supported": False, "found": [], "removed": False}
     if hook_config is not None:
         hooks = remove_link_hooks(_settings_path(hook_config.default_settings, hooks_settings), config.name, write=write)
+        # Antigravity and Gemini CLI share ~/.gemini and are connected as one
+        # agent: take the companion's hooks out too.
+        found = list(hooks.get("found") or [])  # type: ignore[call-overload]
+        for name in hook_config.companions:
+            other = _find_hook_agent(name)
+            if other is None:
+                continue
+            extra = remove_link_hooks(_settings_path(other.default_settings, None), other.name, write=write)
+            found += list(extra.get("found") or [])  # type: ignore[call-overload]
+            hooks["removed"] = bool(hooks.get("removed")) or bool(extra.get("removed"))
+        hooks["found"] = sorted(set(found))
     found_anything = bool(mcp.get("found")) or bool(hooks.get("found"))
     return {
         "agent": config.name,

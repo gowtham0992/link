@@ -18,7 +18,7 @@ class HomebrewFormulaTests(unittest.TestCase):
         self.assertIn('desc "Local Markdown memory for AI agents"', formula)
         self.assertIn('license "MIT"', formula)
         self.assertIn('depends_on "python@3.14"', formula)
-        self.assertIn('libexec.install "link.py", "serve.py", "LINK.md", ".linkignore"', formula)
+        self.assertIn('libexec.install "link.py", "link_hook.py", "serve.py", "LINK.md", ".linkignore"', formula)
         self.assertIn('(libexec/"mcp_package").install "mcp_package/link_core"', formula)
         # The shim prefers the managed venv when it hosts link-mcp, so the
         # optional semantic/rerank tiers work under Homebrew's PEP 668 python.

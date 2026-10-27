@@ -42,6 +42,8 @@ _CURSOR_ASK_EVENTS = {"beforeShellExecution", "beforeMCPExecution"}
 SHELL_TOOLS = {
     "bash", "powershell", "shell", "run_shell_command", "terminal", "exec", "execute_bash", "run_command",
 }
+# Devin CLI's tool names: it runs the hooks in ~/.claude/settings.json with these.
+_DEVIN_TOOLS = {"exec", "read", "write", "edit", "apply_patch", "notebook_read", "notebook_edit", "grep", "glob"}
 READ_TOOLS = {
     "read", "view", "notebookread", "notebook_read", "grep", "read_file", "read_many_files", "view_file", "fs_read",
 }
@@ -93,7 +95,16 @@ def _from_tool(name: str, args: Mapping[str, object]) -> list[tuple[str, str]]:
     lowered = name.strip().lower()
     if lowered in SHELL_TOOLS:
         command = next((args.get(key) for key in _COMMAND_KEYS if args.get(key)), None)
-        return [("command", _command_text(command))] if command else []
+        if not command:
+            return []
+        text = _command_text(command)
+        found: list[tuple[str, str]] = [("command", text)]
+        # Codex can also apply a patch through the shell (`apply_patch <<'EOF'`,
+        # or the older ["apply_patch", "<patch>"] form): its headers name the files it writes.
+        patch = "\n".join(str(part) for part in command) if isinstance(command, list) else text
+        if "*** Begin Patch" in patch:
+            found += [("write", path) for path in patch_paths(patch)]
+        return found
     if lowered == "apply_patch":
         patch = str(args.get("command") or args.get("patch") or args.get("input") or "")
         return [("write", path) for path in patch_paths(patch)]
@@ -151,6 +162,8 @@ def native_emit(emit: str, event: Mapping[str, object], environ: Mapping[str, st
         return "cursor"
     if environ.get("DEVIN_PROJECT_DIR") and not environ.get("CLAUDE_PROJECT_DIR"):
         return "devin"
+    if str(event.get("tool_name") or "") in _DEVIN_TOOLS:
+        return "devin"  # Claude Code's own tools are capitalised; these lowercase names are Devin's
     return emit
 
 

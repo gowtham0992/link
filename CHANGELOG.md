@@ -22,7 +22,15 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   reads and writes, and one writer answers each agent the way it reads:
   Claude's `hookSpecificOutput`, Cursor's `permission`, Gemini's and
   Antigravity's `decision`, Copilot's `permissionDecision`, or exit code 2
-  with the reason on stderr (Windsurf, Kiro).
+  with the reason on stderr (Windsurf, Kiro). PowerShell calls are checked
+  too; a patch applied through the shell counts as the writes it makes; and
+  project rules and path fences use whichever directory the agent reports
+  (`cwd`, Cursor's workspace roots, Windsurf's `tool_info`, Antigravity's
+  workspace paths, Devin's project variable) or, failing that, the folder
+  of the file the call names. `lnk connect --hooks` refreshes a workspace
+  runtime that lacks the hook entry point, so an older workspace can no
+  longer leave hooks that fail - which several agents treat as a block on
+  every call - and Homebrew and the installer scripts ship it.
 - **Held calls and `lnk approve`.** Codex, Windsurf, Devin and Cursor's
   file checks can only allow or block, so an `ask` rule could not ask. On
   those agents the call is now held: blocked with a message telling the

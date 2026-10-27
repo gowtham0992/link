@@ -72,7 +72,7 @@ class AgentHooksCoreTests(unittest.TestCase):
                        {"beforeShellExecution": None, "beforeReadFile": None, "preToolUse": "Write|Delete"}, "cursor"),
             "gemini": ("~/.gemini/settings.json",
                        {"BeforeTool": "run_shell_command|read_file|read_many_files|write_file|replace"}, "gemini"),
-            "copilot": ("~/.copilot/hooks/link.json", {"preToolUse": "bash|view|create|edit"}, "copilot"),
+            "copilot": ("~/.copilot/hooks/link.json", {"preToolUse": "bash|powershell|view|create|edit"}, "copilot"),
             "windsurf": ("~/.codeium/windsurf/hooks.json",
                          {"pre_run_command": None, "pre_read_code": None, "pre_write_code": None}, "windsurf"),
         }
@@ -86,6 +86,36 @@ class AgentHooksCoreTests(unittest.TestCase):
                 entry = snippet["hooks"][event_name][0]
                 found = entry.get("matcher") if "matcher" in entry else None
                 self.assertEqual(found, matcher, (agent, event_name))
+
+    def test_powershell_calls_are_checked_too(self):
+        claude = json.loads(str(build_agent_hooks_payload(target=Path("/tmp/link"), agent="claude-code",
+                                                          runtime_script=Path("/tmp/link/link.py"),
+                                                          python_cmd="python3")["snippet"]))
+        self.assertIn("PowerShell", claude["hooks"]["PreToolUse"][0]["matcher"].split("|"))
+        copilot = json.loads(str(build_agent_hooks_payload(target=Path("/tmp/link"), agent="copilot",
+                                                           runtime_script=Path("/tmp/link/link.py"),
+                                                           python_cmd="python3")["snippet"]))
+        self.assertIn("powershell", copilot["hooks"]["preToolUse"][0]["matcher"].split("|"))
+
+    def test_disconnecting_antigravity_or_gemini_removes_both_hook_sets(self):
+        from link_core.mcp_connect import build_disconnect_payload  # noqa: PLC0415
+
+        for name in ("antigravity", "gemini"):
+            with tempfile.TemporaryDirectory() as temp:
+                home = Path(temp)
+                old_home = os.environ.get("HOME")
+                os.environ["HOME"] = str(home)
+                try:
+                    build_agent_hooks_payload(target=home / "link", agent="antigravity",
+                                              runtime_script=home / "link" / "link.py", python_cmd="python3",
+                                              write=True)
+                    result = build_disconnect_payload(agent=name, write=True)
+                finally:
+                    if old_home is not None:
+                        os.environ["HOME"] = old_home
+                self.assertTrue(result["hooks"]["removed"], name)
+                for settings in (home / ".gemini" / "settings.json", home / ".gemini" / "config" / "hooks.json"):
+                    self.assertNotIn("hook pre-tool", settings.read_text(encoding="utf-8"), (name, settings))
 
     def test_gemini_counts_milliseconds_and_copilot_names_its_timeout(self):
         gemini = json.loads(str(build_agent_hooks_payload(
@@ -123,6 +153,7 @@ class AgentHooksCoreTests(unittest.TestCase):
             self.assertIn("mine", written, "another hook set in the same file is kept")
             self.assertEqual(written["link"]["PreToolUse"][0]["matcher"].split("|")[0], "run_command")
             self.assertIn("command", written["link"]["SessionStart"][0], "lifecycle events take handlers directly")
+            self.assertEqual(written["link"]["SessionStart"][0]["type"], "command")
             [gemini] = payload["companions"]
             self.assertTrue(gemini["write"]["ok"], gemini["write"])
             self.assertIn("BeforeTool", json.loads((home / ".gemini" / "settings.json").read_text(encoding="utf-8"))["hooks"])
@@ -391,6 +422,28 @@ class AgentHooksCoreTests(unittest.TestCase):
     def test_extract_transcript_handles_missing_file(self):
         self.assertEqual(extract_transcript_text(Path("/nonexistent/transcript.jsonl")), "")
 
+
+
+class ConnectRefreshTests(unittest.TestCase):
+    def test_connect_refreshes_a_runtime_missing_the_hook_entry_point(self):
+        import subprocess  # noqa: PLC0415
+
+        root = Path(__file__).resolve().parents[1]
+        link = [sys.executable, str(root / "link.py")]
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / "home"
+            home.mkdir()
+            ws = Path(temp) / "ws"
+            env = {**os.environ, "HOME": str(home), "LINK_USAGE": "off"}
+            subprocess.run([*link, "init", str(ws)], check=True, capture_output=True, env=env)
+            (ws / "link_hook.py").unlink()  # a workspace copied by an older Link
+            (ws / "link_core" / "tool_events.py").unlink()
+            subprocess.run([*link, "connect", "codex", str(ws), "--hooks", "--write"], capture_output=True, env=env)
+            self.assertTrue((ws / "link_hook.py").exists())
+            self.assertTrue((ws / "link_core" / "tool_events.py").exists())
+            hooks = json.loads((home / ".codex" / "hooks.json").read_text(encoding="utf-8"))
+            command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            self.assertIn("link_hook.py", command)
 
 if __name__ == "__main__":
     unittest.main()

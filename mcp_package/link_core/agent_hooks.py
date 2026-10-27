@@ -46,7 +46,7 @@ GUARD_TIMEOUT_SECONDS = 10
 TOOL_HOOK_TIMEOUT_SECONDS = 10
 # Claude Code's tools, then Devin CLI's: Devin runs the hooks in
 # ~/.claude/settings.json by default, with its own tool names.
-PRE_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|exec|read|write|edit|apply_patch"
+PRE_TOOL_MATCHER = "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|exec|read|write|edit|apply_patch"
 POST_TOOL_MATCHER = "Read|Edit|Write|MultiEdit"
 
 _HOOK_SCRIPT_MARKERS = ("link.py", "link_hook.py")
@@ -169,7 +169,7 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         end_event=None,
         start_matcher=None,
         start_emit="copilot",
-        pre_tool=(("preToolUse", "bash|view|create|edit"),),
+        pre_tool=(("preToolUse", "bash|powershell|view|create|edit"),),
         pre_tool_emit="copilot",
     ),
     AgentHookConfig(
@@ -244,7 +244,8 @@ def _hook_command(
 def _entry(config: AgentHookConfig, command: str, timeout: int, *, grouped: bool,
            matcher: str | None = None) -> dict[str, object]:
     """One hook handler in this agent's shape."""
-    entry: dict[str, object] = {"type": "command", "command": command} if grouped else {"command": command}
+    typed = grouped or config.schema == "named"  # Antigravity's lifecycle handlers carry a type too
+    entry: dict[str, object] = {"type": "command", "command": command} if typed else {"command": command}
     entry.update(dict(config.entry_extra))
     if config.timeout_key:
         entry[config.timeout_key] = timeout * config.timeout_scale

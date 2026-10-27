@@ -292,5 +292,53 @@ class HeldCallTests(unittest.TestCase):
         self.assertNotIn("lnk approve", decision["permissionDecisionReason"])
 
 
+
+class ReachTests(unittest.TestCase):
+    """Project rules, patches and agents the 6.0 review found the hooks missing."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        base = Path(self.temp.name)
+        self.ws = base / "ws"
+        self.repo = base / "myrepo"
+        (self.repo / "migrations").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        subprocess.run([*LINK, "demo", str(self.ws), "--force"], check=True, capture_output=True)
+        subprocess.run([*LINK, "remember", "Migrations are generated, never hand-edited", str(self.ws),
+                        "--scope", "project", "--project", "myrepo", "--enforce", "deny write: migrations/**"],
+                       check=True, capture_output=True)
+        name = next(p.stem for p in (self.ws / "wiki" / "memories").glob("migrations-are-generated*.md"))
+        subprocess.run([*LINK, "review-memory", name, str(self.ws)], check=True, capture_output=True)
+        self.migration = str(self.repo / "migrations" / "001.sql")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _hook(self, emit, payload, env=None):
+        return subprocess.run([*HOOK, "hook", "pre-tool", str(self.ws), "--emit", emit], input=json.dumps(payload),
+                              capture_output=True, text=True, check=False, env=env)
+
+    def test_project_rules_fire_on_every_agents_payload(self):
+        cases = {
+            "windsurf": {"agent_action_name": "pre_write_code", "tool_info": {"file_path": self.migration}},
+            "antigravity": {"toolCall": {"name": "write_to_file", "args": {"TargetFile": self.migration}},
+                            "workspacePaths": [str(self.repo)]},
+            "devin": {"tool_name": "write", "tool_input": {"file_path": self.migration}},
+            "text": {"tool_name": "Write", "tool_input": {"file_path": self.migration}, "cwd": str(self.repo)},
+        }
+        for emit, payload in cases.items():
+            reply = self._hook(emit, payload)
+            blocked = reply.returncode == 2 or "deny" in reply.stdout or "block" in reply.stdout
+            self.assertTrue(blocked, (emit, reply.stdout, reply.stderr))
+        env = {**os.environ, "DEVIN_PROJECT_DIR": str(self.repo)}
+        devin = self._hook("text", {"tool_name": "write", "tool_input": {"file_path": "migrations/001.sql"}}, env)
+        self.assertEqual(json.loads(devin.stdout)["decision"], "block", "Devin running Claude Code's hook")
+
+    def test_a_patch_through_the_shell_is_a_write(self):
+        patch = "*** Begin Patch\n*** Update File: migrations/001.sql\n@@\n-a\n+b\n*** End Patch\n"
+        for command in (f"apply_patch <<'EOF'\n{patch}EOF", ["apply_patch", patch]):
+            payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(self.repo)}
+            self.assertIn("deny", self._hook("codex", payload).stdout, command)
+
 if __name__ == "__main__":
     unittest.main()

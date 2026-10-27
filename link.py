@@ -292,6 +292,7 @@ from link_core.agent_instructions import (
     migrate_codex_instructions as _core_migrate_codex_instructions,
     refresh_instruction_file as _core_refresh_instruction_file,
 )
+from link_core.tool_events import render_reply as _core_render_reply
 from link_core.tool_hooks import (
     hook_project as _core_hook_project,
     hook_project_dir as _core_hook_project_dir,
@@ -3630,6 +3631,12 @@ def run_agent_hook(
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
+        if event == "pre-tool":
+            # Cursor blocks a permission hook that prints nothing; answer
+            # "allow" the way each agent reads it, as the fast path does.
+            allow = _core_render_reply(None, emit, hook_event).stdout
+            if allow:
+                print(allow)
     return 0
 
 
@@ -3874,7 +3881,15 @@ def connect_mcp(
             # make every installed hook fail with an argparse error, and an
             # older runtime silently runs old capture behavior after upgrades.
             stale_version = _core_workspace_runtime_is_older(target, LINK_VERSION)
-            if not (target / "link_core" / "agent_hooks.py").exists():
+            # A runtime missing the hook entry point or the agent adapters
+            # would make every installed tool hook exit 2 (argparse or "can't
+            # open file"), which Codex, Copilot, Windsurf and Gemini treat as
+            # a block on every call.
+            missing_hook_files = not all(
+                (target / name).exists()
+                for name in ("link_hook.py", "link_core/agent_hooks.py", "link_core/tool_events.py")
+            )
+            if missing_hook_files:
                 if write:
                     _copy_runtime_files(target)
                     runtime_note = f"Refreshed the Link runtime at {target}: it predated session hooks."

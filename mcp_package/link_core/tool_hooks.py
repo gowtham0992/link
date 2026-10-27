@@ -170,6 +170,8 @@ def _fence_matches(applies_when: str, project: str | None, context_path: str | N
         conditions = parse_applies_when(applies_when)
     except ValueError:
         return False
+    if not conditions:
+        return True  # "," parses to nothing: unconditional, as recall reads it
     current = normalize_project(project or "")
     for kind, argument in conditions:
         if kind == "project" and argument and argument == current:
@@ -572,14 +574,28 @@ def read_hook_event(stream: object) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-def hook_project_dir(event: Mapping[str, object]) -> str:
-    """The project directory the hook fired in, across agent schemas."""
-    hook_cwd = str(event.get("cwd") or "").strip()
-    if hook_cwd:
-        return hook_cwd
-    roots = event.get("workspace_roots")
-    if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0].strip():
-        return roots[0].strip()
+def hook_project_dir(event: Mapping[str, object], environ: Mapping[str, str] | None = None) -> str:
+    """The project directory the hook fired in, across agent schemas.
+
+    Claude Code, Codex, Gemini and Copilot send `cwd`; Cursor sends
+    `workspace_roots`; Windsurf puts `cwd` in `tool_info`; Antigravity sends
+    `workspacePaths` and a command's `Cwd`; Devin sets DEVIN_PROJECT_DIR.
+    Without it, project rules and path fences cannot apply.
+    """
+    env = os.environ if environ is None else environ
+    info = event.get("tool_info") if isinstance(event.get("tool_info"), dict) else {}
+    call = event.get("toolCall") if isinstance(event.get("toolCall"), dict) else {}
+    args = call.get("args") if isinstance(call, dict) and isinstance(call.get("args"), dict) else {}
+    candidates: list[object] = [event.get("cwd"), info.get("cwd") if isinstance(info, dict) else None,
+                                args.get("Cwd") if isinstance(args, dict) else None]
+    for key in ("workspace_roots", "workspacePaths"):
+        roots = event.get(key)
+        if isinstance(roots, list) and roots:
+            candidates.append(roots[0])
+    candidates += [env.get("DEVIN_PROJECT_DIR"), env.get("CLAUDE_PROJECT_DIR")]
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return ""
 
 
@@ -597,6 +613,14 @@ def hook_project(event: Mapping[str, object], project: str | None) -> str:
         return ""
     repo_root = find_repo_root(Path(project_dir))
     return default_project_for_target(repo_root) if repo_root else ""
+
+
+def _target_dir(event: Mapping[str, object]) -> str:
+    """With no directory in the payload, the folder of the first absolute file the call names."""
+    for kind, value in tool_calls(event):
+        if kind in {"read", "write"} and Path(value).expanduser().is_absolute():
+            return str(Path(value).expanduser().parent)
+    return ""
 
 
 def _workspace(target: Path) -> tuple[Path, Path]:
@@ -644,9 +668,9 @@ def pre_tool_reply(target: Path, event: Mapping[str, object], *, project: str | 
     index = load_hook_index(wiki_dir, root)
     if not index.get("rules"):
         return render_reply(None, emit, event)
-    project_dir = hook_project_dir(event)
+    project_dir = hook_project_dir(event) or _target_dir(event)
     repo_root = find_repo_root(Path(project_dir)) if project_dir else None
-    project_name = hook_project(event, project)
+    project_name = project or (default_project_for_target(repo_root) if repo_root else "")
     decision = evaluate_tool_call(
         index, event, project=project_name, repo_root=repo_root, context_path=project_dir or None,
         protected=[wiki_dir / "memories", root / ".link-cache"],
