@@ -1,6 +1,8 @@
 """Proactive guard: precision-first constraint reminders."""
 import sys
+import os
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,6 +119,13 @@ class SwitchIntentTests(unittest.TestCase):
 class GuardCooldownTests(unittest.TestCase):
     """One reminder is a guard, ten is a nag."""
 
+    def setUp(self):
+        # The cooldown lives in the usage ledger; a developer's LINK_USAGE=off must not change these tests.
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("LINK_USAGE", None)
+
     def test_same_memory_does_not_repeat_within_cooldown(self):
         import tempfile
         from pathlib import Path as P
@@ -133,6 +142,13 @@ class GuardCooldownTests(unittest.TestCase):
 
 class McpGuardTests(unittest.TestCase):
     """Every agent gets the guard through recall - not just the hooked one."""
+
+    def setUp(self):
+        # The cooldown lives in the usage ledger; a developer's LINK_USAGE=off must not change these tests.
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("LINK_USAGE", None)
 
     def test_recall_packet_carries_guard_on_conflicting_query(self):
         import json

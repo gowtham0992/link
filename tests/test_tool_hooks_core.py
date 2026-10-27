@@ -239,7 +239,7 @@ class PreToolHookTests(unittest.TestCase):
         self.assertEqual(json.loads(_hook("pre-tool", self.ws, {"command": "git push --force"}, "--emit",
                                           "cursor"))["permission"], "ask")
 
-    def test_the_small_entry_point_answers_exactly_like_the_cli(self):
+    def test_the_small_entry_point_answers_exactly_like_the_full_cli(self):
         calls = [
             ("pre-tool", {"session_id": "s", "tool_name": "Bash", "tool_input": {"command": "cd x && git push --force"}}, ()),
             ("pre-tool", {"tool_name": "Bash", "tool_input": {"command": "ls"}}, ()),
@@ -251,7 +251,10 @@ class PreToolHookTests(unittest.TestCase):
             for event, payload, extra in calls:
                 fast = subprocess.run([sys.executable, str(script), "hook", event, str(self.ws), *extra],
                                       input=json.dumps(payload), capture_output=True, text=True, check=True)
-                self.assertEqual(fast.stdout, _hook(event, self.ws, payload, *extra), (script, event, payload))
+                full = subprocess.run([*LINK, "hook", event, str(self.ws), *extra], input=json.dumps(payload),
+                                      capture_output=True, text=True, check=True,
+                                      env={**os.environ, "LINK_HOOK_FULL_CLI": "1"})
+                self.assertEqual(fast.stdout, full.stdout, (script, event, payload))
                 self.assertEqual(fast.stderr, "", (script, event))
 
     def test_arguments_it_does_not_know_go_to_the_cli(self):

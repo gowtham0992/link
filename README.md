@@ -65,12 +65,14 @@ What each agent gets depends on what it lets Link plug into:
 "Asks you": the agent shows you the call and waits. "Held": the agent can
 only allow or block, so Link blocks the call and the agent asks you in chat;
 `lnk approve <id>` lets that exact call through once. For agents with no
-session-start hook, `lnk compile --global` (run by `lnk setup`) writes your
-reviewed personal memory into the instruction file they read every session,
-and keeps it in step as memories change. Recall, review, stale
+session-start hook, `lnk compile --global` writes your reviewed personal
+memory into the instruction file they read every session, and keeps it in
+step as memories change. Recall, review, stale
 checks, receipts, sync and `lnk compile` work the same for every agent.
 Enforcement is measured end to end on Claude Code; on the others it follows
 each vendor's documented hook schema and is new in 6.0 - report what you see.
+Devin CLI does not document its file tools' arguments, so its file checks
+read the usual path fields.
 
 ```bash
 lnk status                                   # is it wired up and being used?
@@ -167,7 +169,7 @@ that have one everywhere:
 | **Memory hygiene** — junk stored over a simulated multi-month session stream we wrote | **0%** (a CI regression floor on our own fixtures) | the same pipeline with governance off: 35.7% |
 | **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (a CI regression floor on attacks we wrote) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
 | **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
-| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls; the same matcher serves every agent in the table above | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
+| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls; the same matcher serves every agent with rule checks in the table above | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
 | **Staleness checks** — memories and instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) checked against the repository | **0 false flags**: 345 memory references in Link's own docs and 604 instruction-file references across eight public repositories; every planted deletion caught | a reference is reported only when git history shows the thing existed |
 | **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 

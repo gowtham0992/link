@@ -750,7 +750,7 @@ references. Track 9 is unchanged by them: 0 false flags, 7 of 7 removals.
 
 Measured 2026-09-28 on the 5.0.0 branch with `scripts/eval_enforcement.py`
 (pinned by `tests/test_enforcement_eval.py`); hook timing re-measured
-2026-10-26 after the tool hooks moved to `link_hook.py`. A store of 50 memories, 10 of
+2026-10-26 after the tool hooks moved to `link_hook.py` (median of three runs on an Apple-silicon Mac). A store of 50 memories, 10 of
 them reviewed memories carrying 15 enforced rules, checked against the tool
 calls a coding agent makes:
 
@@ -758,9 +758,10 @@ calls a coding agent makes:
 |---|---|
 | forbidden calls caught (inside `cd ... &&` chains, behind `sudo` and `env` prefixes, with extra flags, by absolute path) | 17 of 17 |
 | ordinary calls stopped (`rm -rf dist`, `git push origin feature/x`, `terraform plan`, reading `.envrc.example`, writing under `src/`) | 0 of 34 |
-| decision time, p95, in process | 0.149 ms |
-| hook command, median, end to end (`link_hook.py`, what installed hooks run) | 45 ms (5.0: 99 ms) |
-| the same decision through the full `link.py hook` CLI | 71 ms |
+| decision time, p95, in process | 0.12 ms |
+| hook command, median, end to end (`link_hook.py`, what installed hooks run) | 33 ms (5.0: 99 ms) |
+| older hooks that still call `link.py hook`, which takes a fast path inside the CLI | 57 ms |
+| the same decision through the full CLI (`LINK_HOOK_FULL_CLI=1`), for comparison | 105 ms |
 
 The hook reads a compiled rule index in `.link-cache/` that is rebuilt only
 when a memory changes. In 5.0 most of each call was spent before the

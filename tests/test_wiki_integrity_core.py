@@ -70,6 +70,63 @@ class WikiIntegrityTests(unittest.TestCase):
         self.assertTrue({"wiki/concepts/local-first.md", "wiki/concepts/local-first-software.md"} & duplicates,
                         "an alias that names another page")
 
+    def test_a_page_older_than_the_raw_change_stays_flagged_after_its_source_is_refreshed(self):
+        raw = self.ws / "raw" / "agent-memory-session.md"
+        source = self.ws / "wiki" / "sources" / "agent-memory-session.md"
+        later = time.time() + 5
+        os.utime(raw, (later, later))
+        os.utime(source, (later + 5, later + 5))  # the source page was re-compiled; agent-memory.md was not
+        flagged = self._kinds()
+        self.assertNotIn(("source-changed", "wiki/sources/agent-memory-session.md"), flagged)
+        self.assertIn(("cites-changed-source", "wiki/concepts/agent-memory.md"), flagged)
+
+    def test_a_deleted_raw_file_is_reported(self):
+        (self.ws / "raw" / "local-release-notes.md").unlink()
+        flagged = self._kinds()
+        self.assertIn(("source-raw-missing", "wiki/sources/local-release-notes.md"), flagged)
+
+    def test_citation_forms_and_targets(self):
+        concepts = self.ws / "wiki" / "concepts"
+        (concepts / "bold.md").write_text(_page("concept", "Bold", "A claim. **Source:** [[agent-memory-session]]"),
+                                          encoding="utf-8")
+        (concepts / "resources.md").write_text(_page("concept", "Resources", "Resources: [[nothing-here]]"),
+                                               encoding="utf-8")
+        (concepts / "from-memory.md").write_text(
+            _page("concept", "From memory", "A preference. *Source: [[prefer-local-personal-memory]]*"),
+            encoding="utf-8")
+        (concepts / "via-alias.md").write_text(  # the demo source page's alias
+            _page("concept", "Via alias", "A claim. *Source: [[Memory demo note]]*"), encoding="utf-8")
+        flagged = self._kinds()
+        for page in ("bold", "resources", "from-memory", "via-alias"):
+            self.assertEqual([k for k, p in flagged if p == f"wiki/concepts/{page}.md"], [], page)
+
+    def test_the_same_file_name_in_two_folders_is_two_pages(self):
+        entities = self.ws / "wiki" / "entities"
+        (entities / "agent-memory.md").write_text(_page("entity", "Agent memory (product)",
+                                                        "A product. *Source: [[gone-source]]*"), encoding="utf-8")
+        flagged = self._kinds()
+        self.assertIn(("cites-missing-source", "wiki/entities/agent-memory.md"), flagged)
+        self.assertIn(("possible-duplicate", "wiki/entities/agent-memory.md"), flagged, "one name, two pages")
+
+    def test_titles_in_any_script_and_shared_boilerplate(self):
+        concepts = self.ws / "wiki" / "concepts"
+        template = ("This page was compiled by the ingest agent from the sources listed below and follows the "
+                    "standard layout used across the whole wiki for every concept that gets its own page. ")
+        for index, (title, text) in enumerate([("記憶", "ローカルの記憶について。"), ("検索", "検索について。"),
+                                               ("Один", "Первая страница."), ("Два", "Вторая страница.")]):
+            (concepts / f"page-{index}.md").write_text(
+                _page("concept", title, template * 2 + text + " *Source: [[agent-memory-session]]*"),
+                encoding="utf-8")
+        duplicates = [p for k, p in self._kinds() if k == "possible-duplicate"]
+        self.assertEqual(duplicates, [], "distinct non-Latin titles and a shared template are not duplicates")
+
+    def test_findings_make_the_command_exit_1(self):
+        (self.ws / "wiki" / "concepts" / "ghost.md").write_text(
+            _page("concept", "Ghost", "A claim. *Source: [[never-ingested]]*"), encoding="utf-8")
+        result = subprocess.run([*LINK, "stale", str(self.ws), "--wiki"], capture_output=True, text=True,
+                                env={**os.environ, "LINK_USAGE": "off"})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
     def test_the_command_reports_and_writes_nothing(self):
         before = {p: p.read_bytes() for p in (self.ws / "wiki").rglob("*.md")}
         out = subprocess.run([*LINK, "stale", str(self.ws), "--wiki"], capture_output=True, text=True, check=True,

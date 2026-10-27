@@ -6,8 +6,6 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
-## [Unreleased]
-
 ### Added
 
 - **Rules hold on every agent with a pre-tool hook, not just Claude Code.**
@@ -59,26 +57,33 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   Windsurf, Kiro and Zed read one instruction file of their own at the
   start of every session (`~/.codeium/windsurf/memories/global_rules.md`,
   `~/.kiro/steering/`, `~/.config/zed/AGENTS.md`), and Link had no way to
-  hand them the brief. `lnk compile --global` (and `lnk setup`, for the
-  agents it finds) writes your reviewed personal memories there, in one
-  Link-owned block that keeps the rest of the file byte for byte and fits
-  the vendor's limit for the whole file (Windsurf: 6,000 characters,
-  counting what you wrote). Project memories, unreviewed ones and memories
-  fenced to a project, path or task stay out. When a memory is reviewed,
-  archived, forgotten or changed, the files Link already wrote follow at
-  once, not at the next setup.
+  hand them the brief. `lnk compile --global` writes your reviewed
+  personal memories there, in one Link-owned block that keeps the rest of
+  the file byte for byte, with its permissions, and fits the vendor's limit
+  for the whole file (Windsurf: 6,000 characters, counting what you wrote).
+  Project memories, unreviewed ones and memories fenced to a project, path
+  or task stay out. It will not write through a symlink or into a git work
+  tree such as a dotfiles repository. When a memory in your personal
+  workspace is reviewed, archived, forgotten or changed - from the CLI, an
+  agent over MCP or the viewer - the files Link already wrote follow at
+  once. `lnk setup` refreshes those files and names the agents that could
+  use one, but never creates one.
 - **`lnk stale --wiki`: is the compiled wiki still standing on its
   sources?** Agents write the wiki from raw sources, and it goes wrong in
   the ways people building on the LLM-wiki pattern report most. The check
-  lists pages that cite a source whose raw file changed after it was
-  compiled - every page built on an edited note, not just its source page -
-  citations to pages that do not exist, pages whose every citation is
-  another wiki page (so nothing they claim reaches `raw/`), and pairs of
-  pages that look like one concept written twice (a shared title or alias,
-  or half the shorter page's text in the other). Deterministic, read-only,
-  no repository needed. Quiet on the demo wiki and on a 23-page personal
-  wiki; every planted case caught. A small sample, so the precision claim is
-  modest until more wikis are measured.
+  lists every page written before a raw file it rests on was edited (not
+  just the source page, and still after the source page is refreshed),
+  source pages whose raw file was deleted, citations to pages that do not
+  exist, pages whose every citation is another wiki page (so nothing they
+  claim reaches `raw/` or a memory), and pairs of pages that look like one
+  concept written twice (a shared name, title or alias, or half the shorter
+  page's distinctive text in the other; text that many pages share, like a
+  template, does not count). Deterministic, read-only, no repository
+  needed; exits 1 when it finds something. The demo wiki is quiet. On a
+  23-page personal wiki it reported 16 findings, each confirmed by opening
+  the files: three raw notes had been deleted and one edited after the
+  pages built on it. A small sample, so the precision claim is modest until
+  more wikis are measured.
 - The docs (getting started, security, CLI, the installers' README) describe
   per-agent rule checks and held calls, and the Antigravity installer adds
   hooks for Antigravity and Gemini CLI on a global install.
@@ -102,23 +107,24 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Changed
 
-- **Tool hooks are about twice as fast.** The pre-tool and post-tool hooks
-  run around every shell command and file access, and in 5.0 each call cost
-  ~100 ms, most of it Python recompiling the 4,900-line CLI and importing
-  the whole memory module before the decision began. Installed tool hooks
-  now run `link_hook.py`, a small entry point that loads only the rule
-  matcher (45 ms median end to end in the enforcement benchmark, 0.14 ms of
-  it the decision); hooks still pointing at `link.py` take a fast path too
-  (71 ms). Re-run `lnk setup` after upgrading to switch. Decisions are
-  unchanged: a test runs the same calls through both entry points and
-  requires identical output, and `applies_when` fences are judged by the
-  same rules recall uses.
+- **Tool hooks are about three times as fast.** The pre-tool and
+  post-tool hooks run around every shell command and file access, and in
+  5.0 each call cost ~100 ms, most of it Python recompiling the 4,900-line
+  CLI and importing the whole memory module before the decision began.
+  Installed tool hooks now run `link_hook.py`, a small entry point that
+  loads only the rule matcher (33 ms median end to end in the enforcement
+  benchmark, 0.12 ms of it the decision); hooks still pointing at `link.py`
+  take a fast path too (57 ms). Re-run `lnk setup` after upgrading to
+  switch. Decisions are unchanged: a test runs the same calls through the
+  small entry point and the full CLI and requires identical output, and
+  `applies_when` fences are judged by the same rules recall uses.
 
 - **The README and site say which agent gets what.** A coverage table near
-  the top shows how memory reaches each agent and where rules are enforced
-  before the tool call: Claude Code (shell, file reads and writes, Grep),
-  Cursor (shell commands), and nowhere else yet; on the other agents rules
-  arrive as instructions. Claims that outran their evidence are corrected:
+  the top shows, for each agent, how memory arrives, which session hooks
+  it has, which tool calls rules are checked on and whether it can ask you
+  or only hold the call, and says that enforcement is measured end to end
+  on Claude Code and follows the vendors' documented hook schemas
+  elsewhere. Claims that outran their evidence are corrected:
   `lnk setup` wires every agent *it finds*, not every agent you have; the
   LoCoMo 84.8% says it was measured on Link 3.x and not yet re-run; the
   hygiene and poisoning zeros are labelled as CI regression floors on
@@ -132,9 +138,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   `~/AGENTS.md`, which Codex does not read (it reads `~/.codex/AGENTS.md`
   and walks from the project root down) - and which Claude Code does read,
   as a parent folder of every project under your home directory. They now
-  go to `~/.codex/AGENTS.md` (or `$CODEX_HOME`), and `lnk setup` moves an
-  existing section there, leaving anything else in `~/AGENTS.md` alone and
-  removing the file only if Link's section was all it held.
+  go to `~/.codex/AGENTS.md` (or `$CODEX_HOME`), and `lnk setup` copies an
+  existing section there. The copy in `~/AGENTS.md` is removed only when
+  Claude Code has Link's instructions of its own; everything else in that
+  file keeps its bytes, line endings and permissions, and a file Link
+  cannot read exactly is left alone. The installers' section handling
+  follows the same rules: Link's section ends at the next heading of any
+  level, so nothing written after it is taken with it.
 - **Cursor got Link's reasons in keys it does not read.** Link answered
   Cursor with `userMessage`/`agentMessage`; Cursor reads `user_message` and
   `agent_message`, and blocks a permission hook whose output does not match

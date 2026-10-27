@@ -3,10 +3,11 @@
 Memories are checked against the repository (staleness.py). The wiki layer
 is written by agents from raw sources, and it goes wrong in its own ways,
 the ones people building on the LLM-wiki pattern report most: a page keeps
-asserting what a source said after the source was edited; a citation points
-at nothing; a page cites only other wiki pages, so its claims rest on the
-wiki itself rather than on anything a person put in raw/; and concurrent
-ingests write the same concept twice under different names.
+asserting what a source said after the source was edited or deleted; a
+citation points at nothing; a page cites only other wiki pages, so its
+claims rest on the wiki itself rather than on anything a person put in
+raw/; and concurrent ingests write the same concept twice under different
+names.
 
 Every check is deterministic, reads only files, and reports evidence. Like
 the memory checks it holds to a precision rule: a finding names a concrete
@@ -16,21 +17,31 @@ findings are for a person (or an agent the person asks) to act on.
 from __future__ import annotations
 
 import re
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .frontmatter import parse_frontmatter
 
-# Directories inside wiki/ whose pages are not compiled knowledge.
+# Directories inside wiki/ whose pages are not compiled knowledge (but are valid link targets).
 _SKIP_DIRS = {"memories"}
 _SKIP_FILES = {"index.md", "log.md"}
-_SOURCE_LINE_RE = re.compile(r"Sources?:\s*((?:\[\[[^\]]+\]\][\s,;and&]*)+)", re.IGNORECASE)
+_LINKS = r"((?:\[\[[^\]]+\]\](?:\s*(?:,|;|&|\band\b)\s*|\s*)?)+)"
+# "Source: [[a]]", "Sources: [[a]], [[b]] and [[c]]", "**Source:** [[a]]", "**Sources**: [[a]]";
+# never the tail of another word ("Resources: [[x]]" is not a citation).
+_SOURCE_LINE_RE = re.compile(r"(?<![^\W\d_])Sources?\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*" + _LINKS, re.IGNORECASE)
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
-_SOURCES_SECTION_RE = re.compile(r"^##\s+Sources?\s*$(.*?)(?=^##\s|\Z)", re.IGNORECASE | re.MULTILINE | re.DOTALL)
-_WORD_RE = re.compile(r"[a-z0-9]+")
+_SOURCES_SECTION_RE = re.compile(r"^#{2,6}\s+Sources?\s*$(.*?)(?=^#{1,6}\s|\Z)", re.IGNORECASE | re.MULTILINE | re.DOTALL)
+_RAW_PATH_RE = re.compile(r"(?<![\w/])raw/[^\s)\]>`'\"|,;*]+\.[A-Za-z0-9]{1,8}\b")
+_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]*`", re.DOTALL)
+_URL_RE = re.compile(r"https?://\S+")
+_WORD_RE = re.compile(r"[^\W_]+")
 SHINGLE = 5
 DUPLICATE_OVERLAP = 0.5
+MIN_SHINGLES = 20       # a page this short has too little prose to call it a copy of anything
+MIN_SHARED = 10         # and two pages must share at least this much distinctive text
+COMMON_SHARE = 0.1      # a shingle on more than this share of pages (and more than 3) is boilerplate
 
 
 @dataclass
@@ -46,7 +57,10 @@ class WikiPage:
 
 
 def _norm(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    """A link target's identity: its last path segment, case-folded, any script."""
+    stem = name.strip().replace("\\", "/").rsplit("/", 1)[-1]
+    stem = stem[:-3] if stem.lower().endswith(".md") else stem
+    return re.sub(r"[\W_]+", "-", stem.casefold()).strip("-")
 
 
 def _citations(body: str) -> list[str]:
@@ -55,99 +69,199 @@ def _citations(body: str) -> list[str]:
         cited += [_norm(link) for link in _WIKILINK_RE.findall(match.group(1))]
     for section in _SOURCES_SECTION_RE.finditer(body):
         cited += [_norm(link) for link in _WIKILINK_RE.findall(section.group(1))]
-    return sorted(set(cited))
+    return sorted({c for c in cited if c})
 
 
-def load_pages(wiki_dir: Path) -> dict[str, WikiPage]:
+def _read_page(path: Path) -> tuple[dict[str, object], str, float] | None:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    meta, body = parse_frontmatter(text)
+    return meta, body, mtime
+
+
+def _aliases(meta: dict[str, object]) -> list[str]:
+    raw = meta.get("aliases")
+    if isinstance(raw, list):
+        return [str(a) for a in raw]
+    return [str(raw)] if isinstance(raw, str) and raw.strip() else []
+
+
+@dataclass
+class Wiki:
+    pages: dict[str, WikiPage]  # knowledge pages, by wiki-relative path
+    targets: dict[str, set[str]]  # every link target name (file stem or alias) -> the paths it reaches
+    other_kinds: dict[str, str]  # memory pages, index.md, log.md: valid targets, not checked
+
+    def kind_of(self, rel: str) -> str:
+        page = self.pages.get(rel)
+        return page.kind if page else self.other_kinds.get(rel, "page")
+
+
+def load_pages(wiki_dir: Path) -> Wiki:
     pages: dict[str, WikiPage] = {}
+    targets: dict[str, set[str]] = defaultdict(set)
+    other_kinds: dict[str, str] = {}
+    if not wiki_dir.exists():
+        return Wiki(pages, targets, other_kinds)
     for path in sorted(wiki_dir.rglob("*.md")):
         rel = path.relative_to(wiki_dir)
-        if rel.parts[0] in _SKIP_DIRS or (len(rel.parts) == 1 and rel.name in _SKIP_FILES) or path.name.startswith("."):
+        if path.name.startswith("."):
             continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            mtime = path.stat().st_mtime
-        except OSError:
+        rel_text = f"wiki/{rel.as_posix()}"
+        checked = not (rel.parts[0] in _SKIP_DIRS or (len(rel.parts) == 1 and rel.name in _SKIP_FILES))
+        read = _read_page(path)
+        if read is None:
             continue
-        meta, body = parse_frontmatter(text)
-        raw_aliases = meta.get("aliases")
-        aliases = raw_aliases if isinstance(raw_aliases, list) else []
+        meta, body, mtime = read
+        aliases = _aliases(meta)
+        for label in [path.stem, *aliases]:
+            if _norm(label):
+                targets[_norm(label)].add(rel_text)
+        if not checked:
+            other_kinds[rel_text] = "memory" if rel.parts[0] == "memories" else "page"
+            continue
         kind = str(meta.get("type") or (rel.parts[0].rstrip("s") if len(rel.parts) > 1 else "page"))
-        page = WikiPage(name=_norm(path.stem), rel=f"wiki/{rel.as_posix()}", kind=kind,
-                        title=str(meta.get("title") or path.stem), aliases=[str(a) for a in aliases],
-                        body=body, mtime=mtime)
+        page = WikiPage(name=_norm(path.stem), rel=rel_text, kind=kind,
+                        title=str(meta.get("title") or path.stem), aliases=aliases, body=body, mtime=mtime)
         page.citations = _citations(body)
-        pages[page.name] = page
-    return pages
+        pages[rel_text] = page
+    return Wiki(pages, targets, other_kinds)
+
+
+def _prose(body: str) -> str:
+    text = _CODE_RE.sub(" ", body)
+    text = _URL_RE.sub(" ", text)
+    text = _SOURCES_SECTION_RE.sub(" ", text)
+    return _WIKILINK_RE.sub(" ", text)
 
 
 def _shingles(text: str) -> set[tuple[str, ...]]:
-    words = _WORD_RE.findall(text.lower())
+    words = [w.casefold() for w in _WORD_RE.findall(_prose(text))]
     return {tuple(words[i:i + SHINGLE]) for i in range(max(0, len(words) - SHINGLE + 1))}
 
 
 def _duplicates(pages: Iterable[WikiPage]) -> list[dict[str, object]]:
     knowledge = [page for page in pages if page.kind != "source"]
     findings: list[dict[str, object]] = []
+    named: set[frozenset[str]] = set()
     seen: dict[str, WikiPage] = {}
     for page in knowledge:
-        for label in [page.title, *page.aliases]:
-            key = _norm(label).removesuffix("s")
-            other = seen.get(key)
-            if other is not None and other.name != page.name:
-                findings.append({"kind": "possible-duplicate", "page": page.rel, "other": other.rel,
-                                 "evidence": f"both are titled or aliased \"{label}\""})
-            seen.setdefault(key, page)
-    shingled = [(page, _shingles(page.body)) for page in knowledge]
-    named = {(str(f["page"]), str(f["other"])) for f in findings}
-    for index, (page, mine) in enumerate(shingled):
-        for other, theirs in shingled[index + 1:]:
-            if not mine or not theirs or (page.rel, other.rel) in named or (other.rel, page.rel) in named:
+        labels = {_norm(page.title): page.title, page.name: page.name}
+        labels.update({_norm(alias): alias for alias in page.aliases})
+        for key, label in labels.items():
+            if not key:
                 continue
-            overlap = len(mine & theirs) / min(len(mine), len(theirs))
-            if overlap >= DUPLICATE_OVERLAP:
-                findings.append({"kind": "possible-duplicate", "page": other.rel, "other": page.rel,
-                                 "evidence": f"{overlap:.0%} of the shorter page's text appears in the other"})
+            other = seen.get(key)
+            if other is not None and other.rel != page.rel and frozenset((page.rel, other.rel)) not in named:
+                named.add(frozenset((page.rel, other.rel)))
+                findings.append({"kind": "possible-duplicate", "page": page.rel, "other": other.rel,
+                                 "evidence": f"both are named, titled or aliased \"{label}\""})
+            seen.setdefault(key, page)
+    shingled = {page.rel: _shingles(page.body) for page in knowledge}
+    postings: dict[tuple[str, ...], list[str]] = defaultdict(list)
+    for rel, shingles in shingled.items():
+        for shingle in shingles:
+            postings[shingle].append(rel)
+    common_limit = max(3, int(len(knowledge) * COMMON_SHARE))
+    distinctive = {rel: {s for s in shingles if len(postings[s]) <= common_limit} for rel, shingles in shingled.items()}
+    shared: Counter[tuple[str, str]] = Counter()
+    for shingle, rels in postings.items():
+        if 1 < len(rels) <= common_limit:
+            for i, first in enumerate(rels):
+                for second in rels[i + 1:]:
+                    shared[(first, second) if first < second else (second, first)] += 1
+    for (first, second), count in sorted(shared.items()):
+        smaller = min(len(distinctive[first]), len(distinctive[second]))
+        if count < MIN_SHARED or smaller < MIN_SHINGLES or frozenset((first, second)) in named:
+            continue
+        overlap = count / smaller
+        if overlap >= DUPLICATE_OVERLAP:
+            findings.append({"kind": "possible-duplicate", "page": second, "other": first,
+                             "evidence": f"{overlap:.0%} of the shorter page's distinctive text appears in the other"})
     return findings
+
+
+def _raw_backing(target: Path, wiki_dir: Path) -> tuple[dict[str, float], dict[str, list[str]]]:
+    """(source page name -> newest mtime of the raw files it names, source page name -> raw files it names that are gone)."""
+    from .ingest import raw_source_files, source_matches_by_raw, source_page_index
+
+    records = source_page_index(wiki_dir)
+    raw_files = raw_source_files(target / "raw")
+    raw_rels = [path.relative_to(target).as_posix() for path in raw_files]
+    mtimes: dict[str, float] = {}
+    for path, rel in zip(raw_files, raw_rels):
+        try:
+            mtimes[rel] = path.stat().st_mtime
+        except OSError:
+            continue
+    newest: dict[str, float] = {}
+    for rel, names in source_matches_by_raw(records, raw_rels).items():
+        for name in names:
+            key = _norm(name)
+            newest[key] = max(newest.get(key, 0.0), mtimes.get(rel, 0.0))
+    existing = set(raw_rels)
+    gone: dict[str, list[str]] = {}
+    for name, record in records.items():
+        named = sorted({m.rstrip(".") for m in _RAW_PATH_RE.findall(str(record.get("text") or ""))})
+        missing = [rel for rel in named if rel not in existing and not (target / rel).exists()]
+        if missing and _norm(name) not in newest:
+            gone[_norm(name)] = missing
+    return newest, gone
 
 
 def wiki_findings(target: Path) -> dict[str, object]:
     """Integrity findings for the compiled wiki at a Link workspace."""
-    from .ingest import collect_ingest_status
-
     target = target.expanduser().resolve()
     wiki_dir = target / "wiki"
-    pages = load_pages(wiki_dir)
-    status = collect_ingest_status(target)
-    changed: dict[str, str] = {}
-    stale_raw = status.get("stale_raw")
-    for item in stale_raw if isinstance(stale_raw, list) else []:
-        sources = item.get("source_pages") if isinstance(item, dict) and item.get("stale") else None
-        for source in sources if isinstance(sources, list) else []:
-            changed[_norm(str(source))] = str(item.get("raw") or "")
+    wiki = load_pages(wiki_dir)
+    pages, targets = wiki.pages, wiki.targets
+    raw_mtime, raw_gone = _raw_backing(target, wiki_dir)
+    sources = {page.name: page for page in pages.values() if page.kind == "source"}
     findings: list[dict[str, object]] = []
     for page in pages.values():
         if page.kind == "source":
-            if page.name in changed:
+            newest = raw_mtime.get(page.name, 0.0)
+            if newest > page.mtime + 0.001:
                 findings.append({"kind": "source-changed", "page": page.rel,
-                                 "evidence": f"{changed[page.name]} changed after this source page was written"})
+                                 "evidence": "a raw file it names changed after this source page was written"})
+            if page.name in raw_gone:
+                findings.append({"kind": "source-raw-missing", "page": page.rel,
+                                 "evidence": "names " + ", ".join(raw_gone[page.name])
+                                             + ", which is no longer in raw/; its claims have nothing under them"})
             continue
+        grounded = False
+        resolved_any = False
         for cited in page.citations:
-            if cited in changed:
-                findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
-                                 "evidence": f"cites [[{cited}]], whose raw file {changed[cited]} changed after "
-                                             "it was compiled; its claims may no longer match"})
-            elif cited not in pages:
+            reached = sorted(targets.get(cited, ()))
+            if not reached:
                 findings.append({"kind": "cites-missing-source", "page": page.rel, "source": cited,
                                  "evidence": f"cites [[{cited}]], which is no page in the wiki"})
-        cited_pages = [pages[c] for c in page.citations if c in pages]
-        if cited_pages and all(c.kind != "source" for c in cited_pages):
+                continue
+            resolved_any = True
+            kinds = {wiki.kind_of(rel) for rel in reached}
+            if kinds & {"source", "memory"}:
+                grounded = True
+            source = sources.get(cited)
+            if source is None:
+                continue
+            newest = raw_mtime.get(cited, 0.0)
+            if newest > page.mtime + 0.001 or newest > source.mtime + 0.001:
+                findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
+                                 "evidence": f"cites [[{cited}]], whose raw file changed after this page was "
+                                             "written; its claims may no longer match"})
+            elif cited in raw_gone:
+                findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
+                                 "evidence": f"cites [[{cited}]], whose raw file is no longer in raw/"})
+        if resolved_any and not grounded:
             findings.append({"kind": "wiki-only-support", "page": page.rel,
                              "evidence": "every citation is another wiki page ("
-                                         + ", ".join(f"[[{c.name}]]" for c in cited_pages)
-                                         + "); none reaches a source in raw/"})
+                                         + ", ".join(f"[[{c}]]" for c in page.citations if c in targets)
+                                         + "); none reaches a source in raw/ or a memory"})
     findings += _duplicates(pages.values())
-    order = {"cites-changed-source": 0, "source-changed": 1, "cites-missing-source": 2,
-             "wiki-only-support": 3, "possible-duplicate": 4}
+    order = {"cites-changed-source": 0, "source-changed": 1, "source-raw-missing": 2, "cites-missing-source": 3,
+             "wiki-only-support": 4, "possible-duplicate": 5}
     findings.sort(key=lambda f: (order.get(str(f["kind"]), 9), str(f["page"])))
     return {"pages_checked": len(pages), "findings": findings}

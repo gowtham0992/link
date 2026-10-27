@@ -127,7 +127,8 @@ if (_BUNDLED_CORE / "link_core").exists():
 # The pre-tool and post-tool hooks run around every shell command and file
 # access an agent makes. They are decided here, before the rest of the CLI
 # loads; anything the fast path does not recognise falls through to it.
-if sys.argv[1:2] == ["hook"]:
+# LINK_HOOK_FULL_CLI=1 skips it, so tests and benchmarks can compare the two paths.
+if sys.argv[1:2] == ["hook"] and not os.environ.get("LINK_HOOK_FULL_CLI"):
     from link_core.tool_hooks import fast_tool_hook
 
     _fast_hook_exit = fast_tool_hook(sys.argv[2:])
@@ -1396,8 +1397,9 @@ def compile_memories(
 
 
 _WIKI_FINDING_LABELS = {
-    "cites-changed-source": "Cites a source that changed after it was compiled",
+    "cites-changed-source": "Cites a source that changed or is gone since the page was written",
     "source-changed": "Source page older than its raw file",
+    "source-raw-missing": "Source page whose raw file is gone",
     "cites-missing-source": "Cites a source that does not exist",
     "wiki-only-support": "Supported only by other wiki pages",
     "possible-duplicate": "Possible duplicate",
@@ -1413,7 +1415,7 @@ def _stale_wiki(root: Path, *, json_output: bool) -> int:
     assert isinstance(findings, list)
     if json_output:
         print(json.dumps(report, indent=2, ensure_ascii=False))
-        return 0
+        return 1 if findings else 0
     if not findings:
         print(f"Wiki checked: {report['pages_checked']} pages; every citation reaches a current source and no "
               "two pages look like the same one.")
@@ -1429,7 +1431,7 @@ def _stale_wiki(root: Path, *, json_output: bool) -> int:
         if finding.get("other"):
             print(f"    and {finding['other']}")
     print("\nRe-read the changed sources and refresh the pages that cite them; nothing was rewritten.")
-    return 0
+    return 1
 
 
 def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool, json_output: bool,
