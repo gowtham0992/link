@@ -124,6 +124,16 @@ _BUNDLED_CORE = ROOT / "mcp_package"
 if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
+# The pre-tool and post-tool hooks run around every shell command and file
+# access an agent makes. They are decided here, before the rest of the CLI
+# loads; anything the fast path does not recognise falls through to it.
+if sys.argv[1:2] == ["hook"]:
+    from link_core.tool_hooks import fast_tool_hook
+
+    _fast_hook_exit = fast_tool_hook(sys.argv[2:])
+    if _fast_hook_exit is not None:
+        sys.exit(_fast_hook_exit)
+
 from link_core.memory import (
     classify_memory_segment as _core_classify_memory_segment,
     list_recipes as _core_list_recipes,
@@ -282,16 +292,12 @@ from link_core.agent_instructions import (
     refresh_instruction_file as _core_refresh_instruction_file,
 )
 from link_core.tool_hooks import (
-    anchored_reminders as _core_anchored_reminders,
-    cached_repo_identity as _core_cached_repo_identity,
-    evaluate_tool_call as _core_evaluate_tool_call,
-    find_repo_root as _core_find_repo_root,
-    load_hook_index as _core_load_hook_index,
-    load_shown as _core_load_shown,
+    hook_project as _core_hook_project,
+    hook_project_dir as _core_hook_project_dir,
     new_delivery_id as _core_new_delivery_id,
-    remember_shown as _core_remember_shown,
-    render_touch_text as _core_render_touch_text,
-    tool_call as _core_tool_call,
+    post_tool_output as _core_post_tool_output,
+    pre_tool_output as _core_pre_tool_output,
+    read_hook_event as _core_read_hook_event,
     verify_deliveries as _core_verify_deliveries,
     wrap_for_delivery as _core_wrap_for_delivery,
 )
@@ -2880,19 +2886,7 @@ def start(
 
 def _read_hook_stdin() -> dict[str, object]:
     """Read the agent hook event JSON from stdin, if one was piped in."""
-    if sys.stdin is None or sys.stdin.isatty():
-        return {}
-    try:
-        raw = sys.stdin.read()
-    except OSError:
-        return {}
-    if not raw.strip():
-        return {}
-    try:
-        payload = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return _core_read_hook_event(sys.stdin)
 
 
 def semantic(
@@ -3060,13 +3054,7 @@ def consolidate(target: Path, limit: int = 50, project: str | None = None, json_
 
 def _hook_project_dir(hook_event: dict[str, object]) -> str:
     """Return the project directory the hook fired in, across agent schemas."""
-    hook_cwd = str(hook_event.get("cwd") or "").strip()
-    if hook_cwd:
-        return hook_cwd
-    roots = hook_event.get("workspace_roots")
-    if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0].strip():
-        return roots[0].strip()
-    return ""
+    return _core_hook_project_dir(hook_event)
 
 
 def _emit_session_start(text: str, emit: str) -> None:
@@ -3410,110 +3398,22 @@ def _pending_approvals(target: Path, wiki_dir: Path, captures: Mapping[str, obje
 
 
 def _hook_project(target: Path, hook_event: dict[str, object], project: str | None) -> str:
-    """The project the agent is working in: its repository's, wherever in it the cwd is.
-
-    Tool hooks fire with the agent's current directory, which follows every
-    `cd`; naming the project from that directory alone left project rules
-    unscoped in any subdirectory.
-    """
-    if project:
-        return project
-    project_dir = _hook_project_dir(hook_event)
-    if not project_dir:
-        return ""
-    repo_root = _core_find_repo_root(Path(project_dir))
-    return _default_project(repo_root) if repo_root else ""
+    return _core_hook_project(hook_event, project)
 
 
 def _hook_pre_tool(target: Path, hook_event: dict[str, object], project: str | None, emit: str) -> int:
     """Reviewed rules ask before (or block) the tool calls they name."""
-    def allow() -> int:
-        if emit == "cursor":
-            print(json.dumps({"permission": "allow"}))
-        return 0
-
-    wiki_dir = _resolve_wiki_dir(target)
-    if not wiki_dir.exists():
-        return allow()
-    root = _resolve_link_root(target)
-    index = _core_load_hook_index(wiki_dir, root)
-    if not index.get("rules"):
-        return allow()
-    project_dir = _hook_project_dir(hook_event)
-    repo_root = _core_find_repo_root(Path(project_dir)) if project_dir else None
-    decision = _core_evaluate_tool_call(
-        index, hook_event, project=_hook_project(target, hook_event, project), repo_root=repo_root,
-        context_path=project_dir or None, protected=[wiki_dir / "memories"],
-    )
-    if decision is None:
-        return allow()
-    _core_record_retrieval(
-        root, "enforce", [str(name) for name in decision["memories"]],  # type: ignore[union-attr]
-        project=_hook_project(target, hook_event, project), surface="hook",
-        session=str(hook_event.get("session_id") or hook_event.get("conversation_id") or ""),
-        decision=str(decision["decision"]),
-    )
-    if emit == "cursor":
-        print(json.dumps({
-            "permission": decision["decision"],
-            "userMessage": decision["reason"],
-            "agentMessage": decision["reason"],
-        }))
-        return 0
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": decision["decision"],
-        "permissionDecisionReason": decision["reason"],
-    }}))
+    output = _core_pre_tool_output(target, hook_event, project=project, emit=emit)
+    if output:
+        print(output)
     return 0
 
 
 def _hook_post_tool(target: Path, hook_event: dict[str, object], project: str | None) -> int:
     """After a file is read or edited, the reviewed memories anchored to it."""
-    call = _core_tool_call(hook_event)
-    if call is None or call[0] not in {"read", "write"}:
-        return 0
-    file_path = Path(call[1]).expanduser()
-    if not file_path.is_absolute():
-        project_dir = _hook_project_dir(hook_event)
-        file_path = Path(project_dir or ".") / file_path
-    wiki_dir = _resolve_wiki_dir(target)
-    if not wiki_dir.exists():
-        return 0
-    root = _resolve_link_root(target)
-    index = _core_load_hook_index(wiki_dir, root)
-    anchors = index.get("anchors") if isinstance(index.get("anchors"), dict) else {}
-    if not anchors:
-        return 0
-    repo_root = _core_find_repo_root(file_path)
-    if repo_root is None:
-        return 0
-    try:
-        rel = file_path.resolve().relative_to(repo_root.resolve()).as_posix()
-    except (OSError, ValueError):
-        return 0
-    if rel not in anchors:  # type: ignore[operator]
-        return 0  # the common case, decided before any git call
-    session = str(hook_event.get("session_id") or "")
-    entries = _core_anchored_reminders(
-        index, str(file_path), repo_root=repo_root, identity=_core_cached_repo_identity(root, repo_root),
-        project=_hook_project(target, hook_event, project),
-        already_shown=_core_load_shown(root, session) if session else (),
-    )
-    if not entries:
-        return 0
-    names = [str(entry.get("name") or "") for entry in entries]
-    delivery_id = _core_new_delivery_id()
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PostToolUse",
-        "additionalContext": _core_render_touch_text(entries, rel, delivery_id),
-    }}))
-    if session:
-        _core_remember_shown(root, session, names)
-    _core_record_retrieval(
-        root, "touch", names, project=_hook_project(target, hook_event, project), surface="hook",
-        session=session, delivery=delivery_id,
-    )
+    output = _core_post_tool_output(target, hook_event, project=project)
+    if output:
+        print(output)
     return 0
 
 

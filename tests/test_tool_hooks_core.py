@@ -20,7 +20,9 @@ from link_core.memory import (  # noqa: E402
     update_frontmatter_fields,
     write_memory_page,
 )
+from link_core.memory import memory_applicability  # noqa: E402
 from link_core.tool_hooks import (  # noqa: E402
+    _fence_matches,
     evaluate_tool_call,
     load_hook_index,
     verify_deliveries,
@@ -195,6 +197,19 @@ class RuleTests(_Store):
         self.assertIsNone(evaluate_tool_call(index, event, project="web"))
         self.assertIsNone(evaluate_tool_call(index, event, project=""), "outside any project it stays quiet")
 
+    def test_fences_are_judged_as_recall_judges_them(self):
+        # The hook judges applies_when without loading memory.py; it must
+        # agree with memory_applicability for a call that carries no task text.
+        cases = [
+            ("project:api", "api", None), ("project:api", "web", None), ("project:API", "api", "/x"),
+            ("path:*/services/*", "", "/repo/services/api"), ("path:*/services/*", "", "/repo/web"),
+            ("task:deploying, project:api", "api", None), ("task:deploying", "api", "/repo"),
+            ("project:api, path:*web*", "other", "/repo/web"), ("nonsense:x", "api", "/repo"), ("project:!!!", "", None),
+        ]
+        for fence, project, context in cases:
+            expected = memory_applicability({"applies_when": fence}, project=project, context_path=context) != "out_of_context"
+            self.assertEqual(_fence_matches(fence, project, context), expected, (fence, project, context))
+
 
 class PreToolHookTests(unittest.TestCase):
     def setUp(self):
@@ -223,6 +238,27 @@ class PreToolHookTests(unittest.TestCase):
                          {"permission": "allow"})
         self.assertEqual(json.loads(_hook("pre-tool", self.ws, {"command": "git push --force"}, "--emit",
                                           "cursor"))["permission"], "ask")
+
+    def test_the_small_entry_point_answers_exactly_like_the_cli(self):
+        calls = [
+            ("pre-tool", {"session_id": "s", "tool_name": "Bash", "tool_input": {"command": "cd x && git push --force"}}, ()),
+            ("pre-tool", {"tool_name": "Bash", "tool_input": {"command": "ls"}}, ()),
+            ("pre-tool", {"command": "git push --force"}, ("--emit", "cursor")),
+            ("pre-tool", {"command": "ls"}, ("--emit", "cursor")),
+            ("post-tool", {"tool_name": "Read", "tool_input": {"file_path": str(self.ws / "README.md")}}, ()),
+        ]
+        for script in (ROOT / "link_hook.py", self.ws / "link_hook.py"):  # the checkout's and the workspace's copy
+            for event, payload, extra in calls:
+                fast = subprocess.run([sys.executable, str(script), "hook", event, str(self.ws), *extra],
+                                      input=json.dumps(payload), capture_output=True, text=True, check=True)
+                self.assertEqual(fast.stdout, _hook(event, self.ws, payload, *extra), (script, event, payload))
+                self.assertEqual(fast.stderr, "", (script, event))
+
+    def test_arguments_it_does_not_know_go_to_the_cli(self):
+        payload = {"tool_name": "Bash", "tool_input": {"command": "git push --force"}}
+        out = subprocess.run([sys.executable, str(ROOT / "link_hook.py"), "hook", "pre-tool", str(self.ws),
+                              "--limit", "3"], input=json.dumps(payload), capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
 
     def test_the_hook_is_fast_on_a_large_store(self):
         memories = self.ws / "wiki" / "memories"

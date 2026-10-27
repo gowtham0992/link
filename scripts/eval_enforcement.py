@@ -13,8 +13,9 @@ same code the pre-tool hook runs:
   normal pushes, edits under src/, reading the README); none may be stopped.
 
 It reports catches, false blocks (the number that decides whether people
-keep the feature on; it must be 0) and latency, in process and for the real
-hook command. No model, no network.
+keep the feature on; it must be 0) and latency, in process and for the hook
+command agents actually run (link_hook.py; the full `link.py hook` CLI is
+timed alongside for comparison). No model, no network.
 
     python3 scripts/eval_enforcement.py [--json]
 """
@@ -126,15 +127,18 @@ def run() -> dict[str, object]:
                 timings.append((time.perf_counter() - started) * 1000)
         workspace = base
         (workspace / "raw").mkdir(exist_ok=True)
-        hook_ms = []
+        hook_ms: list[float] = []
+        cli_ms: list[float] = []
         for call in (ORDINARY[0], FORBIDDEN[0]) * 5:
             payload = json.dumps({"tool_name": call[0], "tool_input": call[1], "cwd": str(repo)})
-            started = time.perf_counter()
-            subprocess.run([sys.executable, str(ROOT / "link.py"), "hook", "pre-tool", str(workspace)],
-                           input=payload, capture_output=True, text=True, check=True)
-            hook_ms.append((time.perf_counter() - started) * 1000)
+            for script, times in ((ROOT / "link_hook.py", hook_ms), (ROOT / "link.py", cli_ms)):
+                started = time.perf_counter()
+                subprocess.run([sys.executable, str(script), "hook", "pre-tool", str(workspace)],
+                               input=payload, capture_output=True, text=True, check=True)
+                times.append((time.perf_counter() - started) * 1000)
     timings.sort()
     hook_ms.sort()
+    cli_ms.sort()
     return {
         "rules": sum(len(rules) for _, rules in RULES),
         "forbidden_calls": len(FORBIDDEN),
@@ -145,6 +149,7 @@ def run() -> dict[str, object]:
         "false_block_calls": [f"{tool} {data}" for tool, data in false_blocks],
         "decision_ms_p95": round(timings[int(len(timings) * 0.95) - 1], 3),
         "hook_process_ms_median": round(statistics.median(hook_ms), 1),
+        "cli_process_ms_median": round(statistics.median(cli_ms), 1),
     }
 
 
@@ -164,7 +169,8 @@ def main() -> int:
         for call in report["false_block_calls"]:  # type: ignore[union-attr]
             print(f"  false block: {call}")
         print(f"decision p95: {report['decision_ms_p95']} ms in process; "
-              f"hook command median {report['hook_process_ms_median']} ms including Python start-up")
+              f"hook command median {report['hook_process_ms_median']} ms end to end "
+              f"(the full CLI: {report['cli_process_ms_median']} ms)")
     return 0 if not report["missed"] and not report["false_blocks"] else 1
 
 

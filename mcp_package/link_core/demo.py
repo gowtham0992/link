@@ -19,7 +19,7 @@ DEMO_DIRECTORIES = (
     "wiki/comparisons",
     "wiki/explorations",
 )
-RUNTIME_FILES = ("serve.py", "link.py", "LINK.md", ".linkignore")
+RUNTIME_FILES = ("serve.py", "link.py", "link_hook.py", "LINK.md", ".linkignore")
 BRAND_FILES = ("logo.png", "logo.svg")
 WORKSPACE_GITIGNORE = """# Link private local source material
 raw/*

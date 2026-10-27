@@ -10,6 +10,18 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Changed
 
+- **Tool hooks are about twice as fast.** The pre-tool and post-tool hooks
+  run around every shell command and file access, and in 5.0 each call cost
+  ~100 ms, most of it Python recompiling the 4,900-line CLI and importing
+  the whole memory module before the decision began. Installed tool hooks
+  now run `link_hook.py`, a small entry point that loads only the rule
+  matcher (45 ms median end to end in the enforcement benchmark, 0.14 ms of
+  it the decision); hooks still pointing at `link.py` take a fast path too
+  (71 ms). Re-run `lnk setup` after upgrading to switch. Decisions are
+  unchanged: a test runs the same calls through both entry points and
+  requires identical output, and `applies_when` fences are judged by the
+  same rules recall uses.
+
 - **The README and site say which agent gets what.** A coverage table near
   the top shows how memory reaches each agent and where rules are enforced
   before the tool call: Claude Code (shell, file reads and writes, Grep),

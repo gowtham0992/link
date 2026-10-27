@@ -13,6 +13,17 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from .project_scope import (
+    _TOKEN_FOLD_PAIRS,
+    _TOKEN_MARKS,
+    _compose,
+    _slug_fold,
+    default_project_for_target,  # noqa: F401 - re-exported; callers import it from memory
+    memory_visible_for_project,
+    normalize_project,
+    parse_applies_when,
+    slugify,
+)
 from .consolidate import memory_backlog_summary
 from .files import atomic_write_text
 from .nli import CONTRADICTION_THRESHOLD, ContradictionScorer, load_contradiction_scorer
@@ -137,65 +148,6 @@ BacklinkRebuilder = Callable[[], bool]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def _slug_fold(value: str) -> str:
-    """Fold a title for use as a filename, keeping every script readable.
-
-    Same rules as the tokenizer: lowercase, Latin accents removed so "Zürich"
-    files as zurich, combining marks in Indic and other scripts kept because
-    they are vowels, everything that is not a letter, digit, or mark becomes a
-    separator. Han, kana, Hangul, Cyrillic, Arabic and the rest survive as
-    themselves; a Japanese title becomes a Japanese filename.
-    """
-    lowered = value.lower()
-    for source, replacement in _TOKEN_FOLD_PAIRS.items():
-        if source in lowered:
-            lowered = lowered.replace(source, replacement)
-    out: list[str] = []
-    base_is_latin = False
-    for character in unicodedata.normalize("NFKD", lowered):
-        if unicodedata.category(character) in _TOKEN_MARKS:
-            if not base_is_latin:
-                out.append(character)
-            continue
-        if character.isalnum():
-            base_is_latin = character.isascii()
-            out.append(character)
-            continue
-        base_is_latin = False
-        out.append("-")
-    return _compose("".join(out))
-
-
-def slugify(value: str, fallback: str = "memory", max_len: int = 80) -> str:
-    """Filename-safe name for a memory page.
-
-    ASCII titles keep their exact historical slugs. Titles in other scripts
-    used to slug to nothing and land on the bare fallback, so every non-Latin
-    memory was called memory.md and the second one was refused as a duplicate
-    of the first. They now keep their own script (accents folded for Latin).
-    """
-    if value.isascii():
-        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    else:
-        slug = re.sub(r"-+", "-", _slug_fold(value)).strip("-")
-    if len(slug.encode("utf-8")) > max_len:
-        # Cap in bytes for filesystem limits (255-byte filenames; a CJK
-        # character is three bytes); cut at a word boundary so truncated
-        # slugs stay readable.
-        head = slug.encode("utf-8")[:max_len].decode("utf-8", "ignore")
-        slug = head.rsplit("-", 1)[0] if "-" in head else head
-    return slug.strip("-") or fallback
-
-
-def normalize_project(value: str | None) -> str:
-    return _normalize_project_cached(value or "")
-
-
-@functools.lru_cache(maxsize=4096)
-def _normalize_project_cached(value: str) -> str:
-    return slugify(value, fallback="")
-
-
 def default_memory_visibility(scope: str) -> str:
     """Return the safest sharing visibility for a memory scope."""
     return "project" if scope == "project" else "private"
@@ -208,15 +160,6 @@ def normalize_memory_visibility(scope: str, visibility: object | None = None) ->
     if value not in MEMORY_VISIBILITIES:
         raise ValueError(f"visibility must be one of: {', '.join(MEMORY_VISIBILITIES)}")
     return value
-
-
-def default_project_for_target(target: Path) -> str:
-    resolved = target.expanduser().resolve()
-    if resolved.name == "wiki" and (resolved / "index.md").exists():
-        resolved = resolved.parent
-    if (resolved / ".git").exists():
-        return normalize_project(resolved.name)
-    return ""
 
 
 def memory_title(text: str, explicit_title: str | None = None) -> str:
@@ -232,13 +175,6 @@ def memory_title(text: str, explicit_title: str | None = None) -> str:
     return first_sentence[:67].rstrip() + "..."
 
 
-# Letters carrying no Unicode decomposition that still need a Latin
-# equivalent, so "Größe" and "grosse" reach the same token.
-_TOKEN_FOLD_PAIRS = {
-    "ß": "ss", "æ": "ae", "œ": "oe", "ø": "o",
-    "đ": "d", "ł": "l", "ð": "d", "þ": "th", "ı": "i",
-}
-_TOKEN_MARKS = {"Mn", "Mc"}
 _ASCII_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
 
 
@@ -274,16 +210,6 @@ def _substring_script(value: str) -> bool:
         or 0x1100 <= ord(character) <= 0x11FF or 0x3130 <= ord(character) <= 0x318F
         for character in value
     )
-
-
-def _compose(value: str) -> str:
-    """Recompose a token after NFKD.
-
-    NFKD splits Hangul syllables into conjoining jamo, so a Korean word would
-    be stored decomposed. Retrieval would still match, since queries decompose
-    the same way, but the tokens belong in the form a person would recognise.
-    """
-    return unicodedata.normalize("NFC", value)
 
 
 def _unicode_memory_tokens(value: str) -> set[str]:
@@ -795,16 +721,6 @@ def memory_expired(record: Mapping[str, object], today: str | None = None) -> bo
     except ValueError:
         return False
     return expires is not None and expires <= _today(today)
-
-
-def memory_visible_for_project(record: Mapping[str, object], project: str | None = None) -> bool:
-    project_name = normalize_project(project)
-    if not project_name:
-        return True
-    if str(record.get("scope") or "").lower() != "project":
-        return True
-    record_project = normalize_project(str(record.get("project") or ""))
-    return not record_project or record_project == project_name
 
 
 def extract_tldr(body: str) -> str:
@@ -1785,7 +1701,6 @@ def set_memory_visibility(
         "visibility": clean_visibility,
         "review_status": record.get("review_status", "pending"),
     }
-
 
 
 def rules_in_force(record: Mapping[str, object]) -> list[str]:
@@ -3581,46 +3496,6 @@ def _records_contradict(a: Mapping[str, object], b: Mapping[str, object]) -> boo
         ):
             return True
     return False
-
-
-APPLICABILITY_CONDITION_KINDS = ("project", "path", "task")
-
-
-def parse_applies_when(value: object) -> list[tuple[str, str]]:
-    """Parse an applies_when string into (kind, argument) conditions.
-
-    Format: comma-separated `kind:argument` conditions with OR semantics,
-    e.g. "project:link, task:cutting a release, path:*picochat*".
-    Raises ValueError for unknown kinds or empty arguments.
-    """
-    text = str(value or "").strip()
-    if not text:
-        return []
-    conditions: list[tuple[str, str]] = []
-    for part in text.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        kind, _, argument = part.partition(":")
-        kind = kind.strip().lower()
-        argument = argument.strip()
-        if kind not in APPLICABILITY_CONDITION_KINDS or not argument:
-            raise ValueError(
-                "applies_when conditions must look like project:<slug>, path:<glob>, or task:<phrase>"
-            )
-        if kind == "project":
-            # Store the slug recall actually compares against, so the
-            # condition matches what it displays — and reject a value that
-            # slugifies to nothing (e.g. "project:!!!"), which would be a
-            # silently-dead scope.
-            normalized = normalize_project(argument)
-            if not normalized:
-                raise ValueError(
-                    f"applies_when project condition has no usable slug: {argument!r}"
-                )
-            argument = normalized
-        conditions.append((kind, argument))
-    return conditions
 
 
 def memory_applicability(

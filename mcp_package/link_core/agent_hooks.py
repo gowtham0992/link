@@ -34,7 +34,11 @@ TOOL_HOOK_TIMEOUT_SECONDS = 10
 PRE_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep"
 POST_TOOL_MATCHER = "Read|Edit|Write|MultiEdit"
 
-_HOOK_SCRIPT_MARKER = "link.py"
+_HOOK_SCRIPT_MARKERS = ("link.py", "link_hook.py")
+# The tool hooks fire around every shell command and file access; they run
+# the small link_hook.py next to the CLI when it is there (link_hook.py says why).
+_FAST_HOOK_SCRIPT = "link_hook.py"
+_FAST_HOOK_EVENTS = ("pre-tool", "post-tool")
 
 
 @dataclass(frozen=True)
@@ -142,7 +146,10 @@ def _hook_command(
     target: Path,
     emit: str = "text",
 ) -> str:
-    parts = [python_cmd, str(runtime_script), "hook", event, str(target)]
+    script = runtime_script
+    if event in _FAST_HOOK_EVENTS and (runtime_script.parent / _FAST_HOOK_SCRIPT).is_file():
+        script = runtime_script.parent / _FAST_HOOK_SCRIPT
+    parts = [python_cmd, str(script), "hook", event, str(target)]
     if emit != "text":
         parts.extend(["--emit", emit])
     return display_command(parts)
@@ -159,9 +166,9 @@ def _flat_entry(command: str, timeout: int) -> dict[str, object]:
 def _is_link_hook_command(command: object, event: str) -> bool:
     if not isinstance(command, str):
         return False
-    # Hooks run the workspace's link.py today; an installed `lnk` launcher
-    # counts too, so disconnect finds either form.
-    launcher = _HOOK_SCRIPT_MARKER in command or re.search(r"(?:^|[\s/\"'])lnk(?:\s|\"|$)", command)
+    # Hooks run the workspace's link.py (link_hook.py for the tool hooks); an
+    # installed `lnk` launcher counts too, so disconnect finds every form.
+    launcher = any(marker in command for marker in _HOOK_SCRIPT_MARKERS) or re.search(r"(?:^|[\s/\"'])lnk(?:\s|\"|$)", command)
     return bool(launcher) and f" hook {event}" in command
 
 

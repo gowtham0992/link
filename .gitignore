@@ -90,6 +90,7 @@ apps/LinkBar/.build/
 
 # Build artifacts staged by mcp_package/hatch_build.py from the repo root
 mcp_package/link_cli.py
+mcp_package/link_hook.py
 mcp_package/serve.py
 mcp_package/LINK.md
 mcp_package/.linkignore

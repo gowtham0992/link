@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.agent_hooks import (  # noqa: E402
+    _is_link_hook_command,
     build_agent_hooks_payload,
     extract_transcript_text,
     hook_supported_agents,
@@ -109,6 +110,25 @@ class AgentHooksCoreTests(unittest.TestCase):
             link_entries = [e for e in starts if "hook session-start" in e.get("command", "")]
             self.assertEqual(len(link_entries), 1)
             self.assertEqual(len(data["hooks"]["sessionEnd"]), 1)
+
+    def test_tool_hooks_run_the_small_entry_point_when_it_is_installed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = Path(temp)
+            (runtime / "link.py").write_text("", encoding="utf-8")
+            payload = build_agent_hooks_payload(target=runtime, agent="claude-code",
+                                                runtime_script=runtime / "link.py", python_cmd="/usr/bin/python3")
+            self.assertNotIn("link_hook.py", json.dumps(payload["events"]), "no small entry point, no change")
+            (runtime / "link_hook.py").write_text("", encoding="utf-8")
+            payload = build_agent_hooks_payload(target=runtime, agent="claude-code",
+                                                runtime_script=runtime / "link.py", python_cmd="/usr/bin/python3")
+            events = payload["events"]
+            for name, event in (("PreToolUse", "pre-tool"), ("PostToolUse", "post-tool")):
+                command = json.dumps(events[name])
+                self.assertIn("link_hook.py", command)
+                self.assertIn(f" hook {event} ", command)
+                self.assertTrue(_is_link_hook_command(
+                    f"/usr/bin/python3 {runtime / 'link_hook.py'} hook {event} {runtime}", event))
+            self.assertNotIn("link_hook.py", json.dumps(events["SessionStart"]), "session hooks keep the CLI")
 
     def test_build_preview_includes_both_events_and_commands(self):
         payload = build_agent_hooks_payload(

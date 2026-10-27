@@ -29,24 +29,23 @@ import fnmatch
 import hashlib
 import json
 import re
-import secrets
+import sys
 from datetime import date
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
-from .enforce_rules import parse_enforce_rules
-from .files import atomic_write_json
-from .memory import (
-    is_active_memory,
-    memory_quarantined,
-    memory_records,
-    memory_applicability,
+from .project_scope import (
+    default_project_for_target,
     memory_visible_for_project,
     normalize_project,
-    rules_in_force,
+    parse_applies_when,
 )
 from .shell_parse import read_shell
-from .provenance import MAX_FILE_BYTES, locate, parse_anchor
+
+# Everything else is imported where it is used: the pre-tool hook runs before
+# every shell command and file access, and deciding against the compiled
+# index needs none of memory.py, provenance.py, the rule parser or the file
+# writers. (link_hook.py says why that matters.)
 
 HOOK_INDEX_VERSION = 2
 # At most this many anchored memories per touched file, each on one line:
@@ -82,6 +81,8 @@ def _memories_signature(wiki_dir: Path) -> str:
 
 def _eligible(record: Mapping[str, object]) -> bool:
     """Reviewed, active, unquarantined memories act on tool calls (anchors and reviewed rules)."""
+    from .memory import is_active_memory, memory_quarantined
+
     return (
         is_active_memory(record)
         and not memory_quarantined(record)
@@ -90,6 +91,10 @@ def _eligible(record: Mapping[str, object]) -> bool:
 
 
 def build_hook_index(wiki_dir: Path) -> dict[str, object]:
+    from .enforce_rules import parse_enforce_rules
+    from .memory import memory_records, rules_in_force
+    from .provenance import parse_anchor
+
     rules: list[dict[str, object]] = []
     anchors: dict[str, list[dict[str, object]]] = {}
     for record in memory_records(wiki_dir, include_body=False):
@@ -131,6 +136,8 @@ def load_hook_index(wiki_dir: Path, link_root: Path) -> dict[str, object]:
     index = build_hook_index(wiki_dir)
     index["signature"] = signature
     try:
+        from .files import atomic_write_json
+
         atomic_write_json(path, index)
     except OSError:
         pass  # a read-only cache costs speed, never correctness
@@ -151,10 +158,27 @@ def _rule_applies(rule: Mapping[str, object], project: str | None, context_path:
         if normalize_project(project or "") != normalize_project(str(rule.get("project"))):
             return False
     if str(rule.get("applies_when") or "").strip():
-        verdict = memory_applicability(rule, project=project, context_path=context_path)
-        if verdict == "out_of_context":
-            return False
+        return _fence_matches(str(rule.get("applies_when")), project, context_path)
     return True
+
+
+def _fence_matches(applies_when: str, project: str | None, context_path: str | None) -> bool:
+    """An applies_when fence, judged the way memory_applicability judges it with no query.
+
+    A tool call carries no task text, so task: conditions never match here;
+    project: and path: conditions do. A malformed fence fails closed.
+    """
+    try:
+        conditions = parse_applies_when(applies_when)
+    except ValueError:
+        return False
+    current = normalize_project(project or "")
+    for kind, argument in conditions:
+        if kind == "project" and argument and argument == current:
+            return True
+        if kind == "path" and context_path and fnmatch.fnmatch(str(context_path).lower(), argument.lower()):
+            return True
+    return False
 
 
 def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Path | None = None) -> bool:
@@ -321,6 +345,8 @@ def anchored_reminders(
     already_shown: Iterable[str] = (),
 ) -> list[dict[str, object]]:
     """Memories anchored to the touched file whose symbol is still in it."""
+    from .provenance import MAX_FILE_BYTES, locate
+
     shown = set(already_shown)
     raw = str(file_path or "").strip()
     if not raw:
@@ -358,6 +384,8 @@ def anchored_reminders(
 
 
 def new_delivery_id() -> str:
+    import secrets
+
     return secrets.token_hex(3)
 
 
@@ -390,7 +418,7 @@ def wrap_for_delivery(text: str, delivery_id: str, *, budget: int = HOOK_OUTPUT_
     return f"{first} {opening}\n{rest}\n{closing}" if rest else f"{first} {opening}\n{closing}", cut
 
 
-def render_touch_text(entries: list[Mapping[str, object]], file_label: str, delivery_id: str) -> str:
+def render_touch_text(entries: Sequence[Mapping[str, object]], file_label: str, delivery_id: str) -> str:
     lines = [f"Link memory for {file_label} (reviewed; follow unless the person says otherwise):"]
     for entry in entries:
         claim = " ".join(str(entry.get("claim") or entry.get("title") or "").split())
@@ -440,6 +468,8 @@ def remember_shown(link_root: Path, session_id: str, names: Iterable[str], *, ke
     while len(payload) > keep_sessions:
         payload.pop(next(iter(payload)))
     try:
+        from .files import atomic_write_json
+
         atomic_write_json(path, payload)
     except OSError:
         pass
@@ -478,7 +508,198 @@ def cached_repo_identity(link_root: Path, repo_root: Path) -> set[str]:
     if roots:
         cache[key] = sorted(roots)
         try:
+            from .files import atomic_write_json
+
             atomic_write_json(path, cache)
         except OSError:
             pass
     return roots
+
+
+# --- The pre-tool and post-tool hooks -------------------------------------
+# Both fire around every shell command and file access, so they run from
+# here: link.py hands `hook pre-tool|post-tool` to fast_tool_hook before the
+# rest of the CLI loads, which is most of what a hook call used to cost.
+
+TOOL_HOOK_EVENTS = ("pre-tool", "post-tool")
+
+
+def read_hook_event(stream: object) -> dict[str, object]:
+    """The agent's hook event JSON from stdin, or {} when none was piped in."""
+    if stream is None or getattr(stream, "isatty", lambda: True)():
+        return {}
+    try:
+        raw = stream.read()  # type: ignore[attr-defined]
+    except OSError:
+        return {}
+    if not str(raw).strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def hook_project_dir(event: Mapping[str, object]) -> str:
+    """The project directory the hook fired in, across agent schemas."""
+    hook_cwd = str(event.get("cwd") or "").strip()
+    if hook_cwd:
+        return hook_cwd
+    roots = event.get("workspace_roots")
+    if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0].strip():
+        return roots[0].strip()
+    return ""
+
+
+def hook_project(event: Mapping[str, object], project: str | None) -> str:
+    """The project the agent is working in: its repository's, wherever in it the cwd is.
+
+    Tool hooks fire with the agent's current directory, which follows every
+    `cd`; naming the project from that directory alone left project rules
+    unscoped in any subdirectory.
+    """
+    if project:
+        return project
+    project_dir = hook_project_dir(event)
+    if not project_dir:
+        return ""
+    repo_root = find_repo_root(Path(project_dir))
+    return default_project_for_target(repo_root) if repo_root else ""
+
+
+def _workspace(target: Path) -> tuple[Path, Path]:
+    """(wiki directory, Link root) for a hook target that names either."""
+    target = target.expanduser().resolve()
+    if target.name == "wiki" and (target / "index.md").exists():
+        return target, target.parent
+    return target / "wiki", target
+
+
+def pre_tool_output(target: Path, event: Mapping[str, object], *, project: str | None, emit: str) -> str:
+    """What the pre-tool hook prints: the agent's answer under the reviewed rules."""
+    allow = json.dumps({"permission": "allow"}) if emit == "cursor" else ""
+    wiki_dir, root = _workspace(target)
+    if not wiki_dir.exists():
+        return allow
+    index = load_hook_index(wiki_dir, root)
+    if not index.get("rules"):
+        return allow
+    project_dir = hook_project_dir(event)
+    repo_root = find_repo_root(Path(project_dir)) if project_dir else None
+    project_name = hook_project(event, project)
+    decision = evaluate_tool_call(
+        index, event, project=project_name, repo_root=repo_root,
+        context_path=project_dir or None, protected=[wiki_dir / "memories"],
+    )
+    if decision is None:
+        return allow
+    from .usage import record_retrieval
+
+    memories = decision.get("memories")
+    record_retrieval(
+        root, "enforce", [str(name) for name in memories] if isinstance(memories, list) else [],
+        project=project_name, surface="hook",
+        session=str(event.get("session_id") or event.get("conversation_id") or ""),
+        decision=str(decision["decision"]),
+    )
+    if emit == "cursor":
+        return json.dumps({
+            "permission": decision["decision"],
+            "userMessage": decision["reason"],
+            "agentMessage": decision["reason"],
+        })
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision["decision"],
+        "permissionDecisionReason": decision["reason"],
+    }})
+
+
+def post_tool_output(target: Path, event: Mapping[str, object], *, project: str | None) -> str:
+    """What the post-tool hook prints: reviewed memories anchored to the file just read or edited."""
+    call = tool_call(event)
+    if call is None or call[0] not in {"read", "write"}:
+        return ""
+    file_path = Path(call[1]).expanduser()
+    if not file_path.is_absolute():
+        file_path = Path(hook_project_dir(event) or ".") / file_path
+    wiki_dir, root = _workspace(target)
+    if not wiki_dir.exists():
+        return ""
+    index = load_hook_index(wiki_dir, root)
+    anchors = index.get("anchors") if isinstance(index.get("anchors"), dict) else {}
+    if not anchors:
+        return ""
+    repo_root = find_repo_root(file_path)
+    if repo_root is None:
+        return ""
+    try:
+        rel = file_path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return ""
+    if rel not in anchors:  # type: ignore[operator]
+        return ""  # the common case, decided before any git call
+    session = str(event.get("session_id") or "")
+    project_name = hook_project(event, project)
+    entries = anchored_reminders(
+        index, str(file_path), repo_root=repo_root, identity=cached_repo_identity(root, repo_root),
+        project=project_name, already_shown=load_shown(root, session) if session else (),
+    )
+    if not entries:
+        return ""
+    names = [str(entry.get("name") or "") for entry in entries]
+    delivery_id = new_delivery_id()
+    if session:
+        remember_shown(root, session, names)
+    from .usage import record_retrieval
+
+    record_retrieval(root, "touch", names, project=project_name, surface="hook", session=session, delivery=delivery_id)
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "additionalContext": render_touch_text(entries, rel, delivery_id),
+    }})
+
+
+def fast_tool_hook(argv: list[str]) -> int | None:
+    """Run `hook pre-tool|post-tool [target] [--emit E] [--project P]` without the CLI.
+
+    Returns None, before reading stdin, for anything it does not recognise,
+    so the full CLI handles it. Like every hook, it never fails the agent's
+    tool call: an error is reported on stderr and the call goes ahead.
+    """
+    if not argv or argv[0] not in TOOL_HOOK_EVENTS:
+        return None
+    event_name, rest = argv[0], argv[1:]
+    target = "."
+    seen_target = False
+    emit = "text"
+    project: str | None = None
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg in {"--emit", "--project"} and index + 1 < len(rest):
+            if arg == "--emit":
+                emit = rest[index + 1]
+            else:
+                project = rest[index + 1]
+            index += 2
+            continue
+        if arg.startswith("-") or seen_target:
+            return None
+        target, seen_target = arg, True
+        index += 1
+    if emit not in {"text", "cursor"}:
+        return None
+    event = read_hook_event(sys.stdin)
+    try:
+        if event_name == "pre-tool":
+            output = pre_tool_output(Path(target), event, project=project, emit=emit)
+        else:
+            output = post_tool_output(Path(target), event, project=project)
+    except Exception as exc:  # a hook must never break the agent's tool call
+        print(f"Link {event_name} hook failed: {exc}", file=sys.stderr)
+        return 0
+    if output:
+        print(output)
+    return 0
