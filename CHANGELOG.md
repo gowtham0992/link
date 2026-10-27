@@ -10,6 +10,32 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Added
 
+- **Rules hold on every agent with a pre-tool hook, not just Claude Code.**
+  `lnk connect <agent> --hooks` now installs rule checks before tool calls
+  for Codex (shell commands and `apply_patch`, reading the files a patch
+  touches from its headers), Cursor (shell commands, file reads, and file
+  writes and deletes), Gemini CLI and Antigravity (`lnk connect antigravity`
+  wires both: they share `~/.gemini`), GitHub Copilot (CLI and VS Code's
+  Copilot harness, `~/.copilot/hooks`) and Windsurf. Devin CLI, which runs
+  Claude Code's hooks by default, is recognised and answered in its own
+  shape. One reader turns every agent's payload into the same commands,
+  reads and writes, and one writer answers each agent the way it reads:
+  Claude's `hookSpecificOutput`, Cursor's `permission`, Gemini's and
+  Antigravity's `decision`, Copilot's `permissionDecision`, or exit code 2
+  with the reason on stderr (Windsurf, Kiro).
+- **Held calls and `lnk approve`.** Codex, Windsurf, Devin and Cursor's
+  file checks can only allow or block, so an `ask` rule could not ask. On
+  those agents the call is now held: blocked with a message telling the
+  agent to ask you in chat, and `lnk approve <id>` lets that exact call
+  through once within ten minutes (`lnk approve` alone lists what is
+  waiting). An approval covers one call, is used up by it, and an agent
+  cannot approve its own: `lnk approve` is a governance command the hook
+  holds, and the approvals file sits in the cache directory it protects.
+  Receipts count held calls and calls let through after approval.
+- When Cursor runs the hooks in `~/.claude/settings.json` (it does by
+  default) and Link has installed its own Cursor hooks too, the Claude copy
+  stands down, so a call is checked once and the brief arrives once.
+
 - **A live-agent enforcement benchmark.** `scripts/eval_live_enforcement.py`
   hands a real coding agent (Claude Code, through its own CLI) tempting and
   ordinary tasks in a throwaway repository with Link's pre-tool hook
@@ -52,6 +78,17 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- **Codex never saw Link's instructions.** They were written to
+  `~/AGENTS.md`, which Codex does not read (it reads `~/.codex/AGENTS.md`
+  and walks from the project root down) - and which Claude Code does read,
+  as a parent folder of every project under your home directory. They now
+  go to `~/.codex/AGENTS.md` (or `$CODEX_HOME`), and `lnk setup` moves an
+  existing section there, leaving anything else in `~/AGENTS.md` alone and
+  removing the file only if Link's section was all it held.
+- **Cursor got Link's reasons in keys it does not read.** Link answered
+  Cursor with `userMessage`/`agentMessage`; Cursor reads `user_message` and
+  `agent_message`, and blocks a permission hook whose output does not match
+  its schema. The reason now reaches both you and the agent.
 - LinkBar builds without warnings: the two hook-state switches spelt the
   "still checking" case as `.none`, which Swift read as the Optional's nil
   (the intended meaning) while warning it could mean `HookState.none`.

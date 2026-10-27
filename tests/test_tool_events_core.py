@@ -1,0 +1,221 @@
+"""One rule matcher for every agent: their payloads read one way, their answers written their way.
+
+Payload shapes come from each agent's hook reference (agent-hook-schemas
+research, 2026-10): Claude Code, Codex (including apply_patch and the older
+argv form), Gemini CLI, Copilot (camelCase and its PascalCase alias),
+Cursor's dedicated events and preToolUse, Windsurf/Devin Desktop (Cascade),
+Kiro CLI, Antigravity and Devin CLI.
+"""
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "mcp_package"))
+
+from link_core.tool_events import can_ask, native_emit, patch_paths, render_reply, tool_calls  # noqa: E402
+
+LINK = [sys.executable, str(ROOT / "link.py")]
+HOOK = [sys.executable, str(ROOT / "link_hook.py")]
+
+PATCH = """*** Begin Patch
+*** Update File: migrations/0001_init.sql
+@@
+-CREATE TABLE users (id INTEGER);
++CREATE TABLE users (id INTEGER, email TEXT);
+*** Add File: src/new.py
++print("hi")
+*** Update File: src/old.py
+*** Move to: src/renamed.py
+*** End Patch
+"""
+
+
+class ToolCallsTests(unittest.TestCase):
+    def test_every_agents_shell_command(self):
+        payloads = {
+            "claude": {"tool_name": "Bash", "tool_input": {"command": "git push --force"}},
+            "codex": {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git push --force"}},
+            "gemini": {"tool_name": "run_shell_command", "tool_input": {"command": "git push --force"}},
+            "copilot-camel": {"toolName": "bash", "toolArgs": json.dumps({"command": "git push --force"})},
+            "copilot-pascal": {"tool_name": "Bash", "tool_input": {"command": "git push --force"}},
+            "cursor-shell": {"hook_event_name": "beforeShellExecution", "command": "git push --force", "cwd": "/r"},
+            "cursor-pretool": {"tool_name": "Shell", "tool_input": {"command": "git push --force"}},
+            "windsurf": {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "git push --force"}},
+            "kiro": {"tool_name": "execute_bash", "tool_input": {"command": "git push --force"}},
+            "antigravity": {"toolCall": {"name": "run_command", "args": {"CommandLine": "git push --force"}}},
+            "devin": {"tool_name": "exec", "tool_input": {"command": "git push --force", "shell_id": "main"}},
+        }
+        for agent, payload in payloads.items():
+            self.assertEqual(tool_calls(payload), [("command", "git push --force")], agent)
+        argv = {"tool_name": "Bash", "tool_input": {"command": ["bash", "-lc", "git push --force"]}}
+        self.assertEqual(tool_calls(argv), [("command", "bash -lc 'git push --force'")], "older Codex argv form")
+
+    def test_every_agents_file_reads_and_writes(self):
+        cases = [
+            ({"tool_name": "Read", "tool_input": {"file_path": ".env"}}, [("read", ".env")]),
+            ({"tool_name": "Edit", "tool_input": {"file_path": "m/x.sql"}}, [("write", "m/x.sql")]),
+            ({"tool_name": "read_file", "tool_input": {"file_path": ".env"}}, [("read", ".env")]),
+            ({"tool_name": "read_many_files", "tool_input": {"include": [".env", "src/**"]}},
+             [("read", ".env"), ("read", "src/**")]),
+            ({"tool_name": "write_file", "tool_input": {"file_path": "m/x.sql"}}, [("write", "m/x.sql")]),
+            ({"tool_name": "replace", "tool_input": {"file_path": "m/x.sql"}}, [("write", "m/x.sql")]),
+            ({"toolName": "view", "toolArgs": {"path": ".env"}}, [("read", ".env")]),
+            ({"toolName": "edit", "toolArgs": json.dumps({"path": "m/x.sql"})}, [("write", "m/x.sql")]),
+            ({"hook_event_name": "beforeReadFile", "file_path": ".env", "content": "x"}, [("read", ".env")]),
+            ({"tool_name": "Write", "tool_input": {"file_path": "m/x.sql", "content": "x"}}, [("write", "m/x.sql")]),
+            ({"tool_name": "Delete", "tool_input": {"file_path": "m/x.sql"}}, [("write", "m/x.sql")]),
+            ({"agent_action_name": "pre_read_code", "tool_info": {"file_path": ".env"}}, [("read", ".env")]),
+            ({"agent_action_name": "pre_write_code", "tool_info": {"file_path": "m/x.sql", "edits": []}},
+             [("write", "m/x.sql")]),
+            ({"tool_name": "fs_read", "tool_input": {"operations": [{"mode": "Line", "path": ".env"}]}},
+             [("read", ".env")]),
+            ({"tool_name": "fs_write", "tool_input": {"command": "create", "path": "m/x.sql"}}, [("write", "m/x.sql")]),
+            ({"toolCall": {"name": "view_file", "args": {"AbsolutePath": "/r/.env"}}}, [("read", "/r/.env")]),
+            ({"toolCall": {"name": "write_to_file", "args": {"TargetFile": "/r/m/x.sql"}}}, [("write", "/r/m/x.sql")]),
+            ({"tool_name": "write", "tool_input": {"file_path": "m/x.sql"}}, [("write", "m/x.sql")]),
+        ]
+        for payload, expected in cases:
+            self.assertEqual(tool_calls(payload), expected, payload)
+
+    def test_a_codex_patch_names_every_file_it_touches(self):
+        self.assertEqual(patch_paths(PATCH), ["migrations/0001_init.sql", "src/new.py", "src/old.py", "src/renamed.py"])
+        calls = tool_calls({"tool_name": "apply_patch", "tool_input": {"command": PATCH}})
+        self.assertIn(("write", "migrations/0001_init.sql"), calls)
+        self.assertEqual(len(calls), 4)
+
+    def test_unknown_tools_and_empty_events_name_nothing(self):
+        for payload in ({}, {"tool_name": "WebFetch", "tool_input": {"url": "x"}}, {"toolCall": {"name": "list_dir"}},
+                        {"agent_action_name": "pre_user_prompt", "tool_info": {"user_prompt": "hi"}}):
+            self.assertEqual(tool_calls(payload), [], payload)
+
+
+class RenderReplyTests(unittest.TestCase):
+    ASK = {"decision": "ask", "reason": "needs your OK"}
+    DENY = {"decision": "deny", "reason": "blocked"}
+
+    def test_each_agent_reads_its_own_shape(self):
+        claude = json.loads(render_reply(self.ASK, "text", {}).stdout)["hookSpecificOutput"]
+        self.assertEqual((claude["permissionDecision"], claude["permissionDecisionReason"]), ("ask", "needs your OK"))
+        cursor = json.loads(render_reply(self.ASK, "cursor", {"hook_event_name": "beforeShellExecution"}).stdout)
+        self.assertEqual(cursor, {"permission": "ask", "user_message": "needs your OK", "agent_message": "needs your OK"})
+        read = json.loads(render_reply(self.DENY, "cursor", {"hook_event_name": "beforeReadFile"}).stdout)
+        self.assertEqual(read, {"permission": "deny", "user_message": "blocked"}, "beforeReadFile takes no agent_message")
+        self.assertEqual(json.loads(render_reply(self.ASK, "gemini", {}).stdout), {"decision": "ask", "reason": "needs your OK"})
+        self.assertEqual(json.loads(render_reply(self.DENY, "antigravity", {}).stdout)["decision"], "deny")
+        copilot = json.loads(render_reply(self.ASK, "copilot", {}).stdout)
+        self.assertEqual(copilot, {"permissionDecision": "ask", "permissionDecisionReason": "needs your OK"})
+        self.assertEqual(json.loads(render_reply(self.DENY, "devin", {}).stdout), {"decision": "block", "reason": "blocked"})
+        for emit in ("windsurf", "kiro"):
+            reply = render_reply(self.DENY, emit, {})
+            self.assertEqual((reply.stdout, reply.stderr, reply.exit_code), ("", "blocked", 2), emit)
+
+    def test_staying_out_of_the_way(self):
+        self.assertEqual(json.loads(render_reply(None, "cursor", {}).stdout), {"permission": "allow"},
+                         "Cursor blocks on an empty answer from a permission hook")
+        for emit in ("text", "codex", "gemini", "copilot", "windsurf", "kiro", "antigravity", "devin"):
+            reply = render_reply(None, emit, {})
+            self.assertEqual((reply.stdout, reply.exit_code), ("", 0), emit)
+
+    def test_agents_running_claude_codes_hooks_get_their_own_answer(self):
+        self.assertEqual(native_emit("text", {"cursor_version": "2.4"}, {}), "cursor")
+        self.assertEqual(native_emit("text", {}, {"DEVIN_PROJECT_DIR": "/r"}), "devin")
+        self.assertEqual(native_emit("text", {}, {"DEVIN_PROJECT_DIR": "/r", "CLAUDE_PROJECT_DIR": "/r"}), "text")
+        self.assertEqual(native_emit("codex", {"cursor_version": "2.4"}, {}), "codex", "an explicit emit wins")
+
+    def test_which_agents_can_ask(self):
+        self.assertTrue(can_ask("text", {}))
+        self.assertTrue(can_ask("cursor", {"hook_event_name": "beforeShellExecution"}))
+        self.assertFalse(can_ask("cursor", {"hook_event_name": "beforeReadFile"}))
+        self.assertFalse(can_ask("cursor", {"hook_event_name": "preToolUse"}))
+        for emit in ("codex", "windsurf", "kiro", "devin"):
+            self.assertFalse(can_ask(emit, {}), emit)
+
+
+class HeldCallTests(unittest.TestCase):
+    """On an agent that cannot ask, an ask rule holds the call until the person approves it once."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.temp.name) / "ws"
+        subprocess.run([*LINK, "demo", str(self.ws), "--force"], check=True, capture_output=True)
+        subprocess.run([*LINK, "remember", "Never run `git push --force` on main", str(self.ws),
+                        "--enforce", "ask command: git push --force*"], check=True, capture_output=True)
+        name = next(p.stem for p in (self.ws / "wiki" / "memories").glob("never-run-git-push*.md"))
+        subprocess.run([*LINK, "review-memory", name, str(self.ws)], check=True, capture_output=True)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _hook(self, emit, payload):
+        return subprocess.run([*HOOK, "hook", "pre-tool", str(self.ws), "--emit", emit],
+                              input=json.dumps(payload), capture_output=True, text=True, check=False)
+
+    def test_held_approved_once_then_held_again(self):
+        push = {"session_id": "s", "tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}}
+        first = self._hook("codex", push)
+        decision = json.loads(first.stdout)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny", "Codex cannot ask; the call is held")
+        self.assertIn("lnk approve ", decision["permissionDecisionReason"])
+        request_id = decision["permissionDecisionReason"].split("lnk approve ")[1].split("`")[0]
+        self.assertEqual(self._hook("codex", push).stdout, first.stdout, "a retry re-uses the same request")
+
+        listing = subprocess.run([*LINK, "approve", str(self.ws), "--json"], capture_output=True, text=True, check=True)
+        self.assertEqual([row["id"] for row in json.loads(listing.stdout)["pending"]], [request_id])
+        subprocess.run([*LINK, "approve", request_id, str(self.ws)], check=True, capture_output=True)
+
+        self.assertEqual(self._hook("codex", push).stdout, "", "the approved call goes through once")
+        self.assertIn("deny", self._hook("codex", push).stdout, "and only once")
+        other = dict(push, tool_input={"command": "git push --force origin release"})
+        self.assertIn("deny", self._hook("codex", other).stdout, "an approval covers that exact call only")
+
+        receipt = subprocess.run([*LINK, "receipt", str(self.ws)], capture_output=True, text=True, check=True).stdout
+        self.assertIn("let through once after your approval", receipt)
+
+    def test_exit_code_agents_are_blocked_with_the_reason_on_stderr(self):
+        payload = {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "git push --force"}}
+        held = self._hook("windsurf", payload)
+        self.assertEqual(held.returncode, 2)
+        self.assertIn("lnk approve", held.stderr)
+        quiet = self._hook("windsurf", {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "ls"}})
+        self.assertEqual((quiet.returncode, quiet.stdout, quiet.stderr), (0, "", ""))
+
+    def test_an_agent_cannot_approve_its_own_request(self):
+        sneaky = {"tool_name": "Bash", "tool_input": {"command": "lnk approve abc123"}}
+        held = json.loads(self._hook("codex", sneaky).stdout)["hookSpecificOutput"]
+        self.assertEqual(held["permissionDecision"], "deny")
+        self.assertNotIn("approve it once", held["permissionDecisionReason"], "no approval path out of governance")
+        ask = json.loads(self._hook("text", sneaky).stdout)["hookSpecificOutput"]
+        self.assertEqual(ask["permissionDecision"], "ask", "Claude Code puts it in front of the person instead")
+        write = {"tool_name": "apply_patch", "tool_input": {"command": "*** Begin Patch\n*** Add File: "
+                                                            f"{self.ws}/.link-cache/approvals.json\n*** End Patch\n"}}
+        self.assertEqual(json.loads(self._hook("codex", write).stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_cursor_running_claudes_hook_stands_down_when_link_has_its_own(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = {"HOME": home, "PATH": "/usr/bin:/bin"}
+            payload = {"cursor_version": "2.4", "tool_name": "Bash", "tool_input": {"command": "git push --force"}}
+
+            def run():
+                return subprocess.run([*HOOK, "hook", "pre-tool", str(self.ws)], input=json.dumps(payload),
+                                      capture_output=True, text=True, check=True, env=env).stdout
+
+            self.assertEqual(json.loads(run())["permission"], "ask", "answered in Cursor's shape")
+            (Path(home) / ".cursor").mkdir()
+            (Path(home) / ".cursor" / "hooks.json").write_text(json.dumps({"version": 1, "hooks": {
+                "beforeShellExecution": [{"command": f"python3 link_hook.py hook pre-tool {self.ws} --emit cursor"}]}}),
+                encoding="utf-8")
+            self.assertEqual(json.loads(run()), {"permission": "allow"}, "Link's own Cursor hook decides instead")
+
+    def test_claude_code_still_asks_natively(self):
+        out = self._hook("text", {"tool_name": "Bash", "tool_input": {"command": "git push --force"}})
+        decision = json.loads(out.stdout)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "ask")
+        self.assertNotIn("lnk approve", decision["permissionDecisionReason"])
+
+
+if __name__ == "__main__":
+    unittest.main()

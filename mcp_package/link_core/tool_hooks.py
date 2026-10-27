@@ -28,6 +28,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import sys
 from datetime import date
@@ -41,6 +42,7 @@ from .project_scope import (
     parse_applies_when,
 )
 from .shell_parse import read_shell
+from .tool_events import EMITS, HookReply, can_ask, native_emit, render_reply, tool_calls
 
 # Everything else is imported where it is used: the pre-tool hook runs before
 # every shell command and file access, and deciding against the compiled
@@ -55,9 +57,6 @@ MAX_TOUCH_REMINDERS = 3
 # a warning; everything Link injects from a hook stays well under it.
 HOOK_OUTPUT_BUDGET = 9000
 
-_WRITE_TOOLS = {"write", "edit", "multiedit", "notebookedit", "str_replace_based_edit_tool", "create_file"}
-_READ_TOOLS = {"read", "view", "notebookread", "grep"}
-_SHELL_TOOLS = {"bash", "powershell", "shell", "run_shell_command", "terminal"}
 
 
 def hook_index_path(link_root: Path) -> Path:
@@ -211,7 +210,7 @@ def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Pa
 # rule active, an agent running them from the shell is asking the person.
 _GOVERNANCE_RE = re.compile(
     r"^(?:lnk|link|python\S*\s+\S*link(?:_cli)?\.py)\s+"
-    r"(?:review-memory|enforce|archive-memory|forget-memory|update-memory|restore-backup)\b"
+    r"(?:review-memory|enforce|archive-memory|forget-memory|update-memory|restore-backup|approve)\b"
 )
 
 
@@ -232,27 +231,6 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
     return False
 
 
-def tool_call(event: Mapping[str, object]) -> tuple[str, str] | None:
-    """(kind, value) for a hook event: a shell command, or a file read or write."""
-    tool = str(event.get("tool_name") or "").strip()
-    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
-    assert isinstance(tool_input, dict)
-    lowered = tool.lower()
-    if lowered in _SHELL_TOOLS or (not tool and event.get("command")):
-        command = tool_input.get("command") if tool else event.get("command")
-        return ("command", str(command or "")) if command else None
-    file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or tool_input.get("path")
-    if not file_path and not tool:
-        file_path = event.get("file_path")
-    if not file_path:
-        return None
-    if lowered in _WRITE_TOOLS:
-        return "write", str(file_path)
-    if lowered in _READ_TOOLS or not tool:
-        return "read", str(file_path)
-    return None
-
-
 def evaluate_tool_call(
     index: Mapping[str, object],
     event: Mapping[str, object],
@@ -270,59 +248,70 @@ def evaluate_tool_call(
     While any rule is active, writing Link's own memory files from a tool
     asks first: editing a rule out by hand would skip the review it needs.
     """
-    call = tool_call(event)
-    if call is None:
+    calls = tool_calls(event)
+    if not calls:
         return None
-    kind, value = call
-    commands: list[str] = []
-    reads: list[str] = []
-    writes: list[str] = []
-    if kind == "command":
-        reading = read_shell(value)
-        commands = [" ".join(words) for words in reading.commands]
-        reads, writes = reading.reads, reading.writes
-    elif kind == "read":
-        reads = [value]
-    else:
-        writes = [value]
+    # Every command, read and write, each remembering the call it came from:
+    # a held call is approved (approvals.py) by the exact call the agent made.
+    commands: list[tuple[str, str]] = []
+    reads: list[tuple[str, str]] = []
+    writes: list[tuple[str, str]] = []
+    for kind, value in calls:
+        origin = f"{kind}:{' '.join(value.split())}"
+        if kind == "command":
+            reading = read_shell(value)
+            commands += [(" ".join(words), origin) for words in reading.commands]
+            reads += [(target, origin) for target in reading.reads]
+            writes += [(target, origin) for target in reading.writes]
+        elif kind == "read":
+            reads.append((value, origin))
+        else:
+            writes.append((value, origin))
     base = Path(context_path) if context_path else None
     rule_values = index.get("rules")
     rules = [rule for rule in (rule_values if isinstance(rule_values, list) else []) if isinstance(rule, dict)]
     matches: list[Mapping[str, object]] = []
+    origins: dict[int, str] = {}
     for rule in rules:
         if not _rule_applies(rule, project, context_path):
             continue
         rule_kind = str(rule.get("kind") or "")
         pattern = str(rule.get("pattern") or "")
+        hit: str | None = None
         if rule_kind == "command":
             wanted = " ".join(pattern.split())
-            hit = any(fnmatch.fnmatchcase(command, wanted) for command in commands)
-        elif rule_kind == "write":
-            hit = any(_path_matches(pattern, target, repo_root, base) for target in writes)
-        elif rule_kind == "read":
-            hit = any(_path_matches(pattern, target, repo_root, base) for target in reads)
-        else:
-            hit = False
-        if hit:
+            hit = next((origin for command, origin in commands if fnmatch.fnmatchcase(command, wanted)), None)
+        elif rule_kind in {"write", "read"}:
+            targets = writes if rule_kind == "write" else reads
+            hit = next((origin for target, origin in targets if _path_matches(pattern, target, repo_root, base)), None)
+        if hit is not None:
             matches.append(rule)
+            origins[id(rule)] = hit
     roots = list(protected)
-    if not matches and rules and any(_GOVERNANCE_RE.match(command) for command in commands):
-        matches.append({
+    governance = next((origin for command, origin in commands if _GOVERNANCE_RE.match(command)), None)
+    if not matches and rules and governance is not None:
+        rule = {
             "name": "link-governance", "title": "Only the person approves, clears or retires rules",
-            "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|...",
-        })
-    if not matches and rules and roots and any(_under(target, roots, base) for target in writes):
-        matches.append({
+            "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|approve|...",
+            "approvable": False,
+        }
+        matches.append(rule)
+        origins[id(rule)] = governance
+    own_files = next((origin for target, origin in writes if roots and _under(target, roots, base)), None)
+    if not matches and rules and own_files is not None:
+        rule = {
             "name": "link-memory-files", "title": "Link memory files change only through Link",
-            "action": "ask", "kind": "write", "pattern": "<Link memories>/**",
-        })
+            "action": "ask", "kind": "write", "pattern": "<Link memories>/**", "approvable": False,
+        }
+        matches.append(rule)
+        origins[id(rule)] = own_files
     if not matches:
         return None
     decision = "deny" if any(rule.get("action") == "deny" for rule in matches) else "ask"
     first = next((rule for rule in matches if rule.get("action") == decision), matches[0])
     names = sorted({str(rule.get("name") or "") for rule in matches
                     if rule.get("name") not in {"link-memory-files", "link-governance"}})
-    rule_kind = str(first.get("kind") or kind)
+    rule_kind = str(first.get("kind") or calls[0][0])
     verb = "blocked" if decision == "deny" else "needs the person's OK"
     reason = (
         f"Link: this {rule_kind} {verb} under a reviewed memory - \"{first.get('title')}\" ({first.get('name')}), "
@@ -332,7 +321,12 @@ def evaluate_tool_call(
         reason += " If the person approves, go ahead; otherwise follow the memory."
     else:
         reason += " Do not work around it; tell the person, who can edit the memory if it no longer holds."
-    return {"decision": decision, "reason": reason, "memories": names, "kind": rule_kind}
+    return {
+        "decision": decision, "reason": reason, "memories": names, "kind": rule_kind,
+        "call": origins.get(id(first), ""), "title": str(first.get("title") or ""),
+        "rule": f"{first.get('action')} {rule_kind}: {first.get('pattern')}",
+        "approvable": first.get("approvable", True) is not False and decision == "ask",
+    }
 
 
 def anchored_reminders(
@@ -576,52 +570,90 @@ def _workspace(target: Path) -> tuple[Path, Path]:
     return target / "wiki", target
 
 
-def pre_tool_output(target: Path, event: Mapping[str, object], *, project: str | None, emit: str) -> str:
-    """What the pre-tool hook prints: the agent's answer under the reviewed rules."""
-    allow = json.dumps({"permission": "allow"}) if emit == "cursor" else ""
+def _event_session(event: Mapping[str, object]) -> str:
+    """The session or conversation id, whichever key this agent uses."""
+    for key in ("session_id", "conversation_id", "sessionId", "trajectory_id", "conversationId"):
+        value = event.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _cursor_runs_link_itself(home: Path | None = None) -> bool:
+    """Has Link installed its own Cursor hooks (so Cursor's copy of Claude's can stand down)?"""
+    try:
+        text = ((home or Path.home()) / ".cursor" / "hooks.json").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return " hook pre-tool " in text and ("link.py" in text or "link_hook.py" in text or "lnk" in text)
+
+
+def pre_tool_reply(target: Path, event: Mapping[str, object], *, project: str | None, emit: str,
+                   environ: Mapping[str, str] | None = None) -> HookReply:
+    """The pre-tool hook's answer to its agent under the reviewed rules.
+
+    An `ask` on an agent that cannot ask (tool_events.can_ask) is held:
+    blocked with a request the person can approve once (approvals.py); the
+    same call repeated after that goes through.
+    """
+    actual = native_emit(emit, event, os.environ if environ is None else environ)
+    if actual == "cursor" and emit == "text" and _cursor_runs_link_itself():
+        # Cursor also runs Claude Code's hooks; Link's own Cursor hook answers this call.
+        return render_reply(None, actual, event)
+    emit = actual
     wiki_dir, root = _workspace(target)
     if not wiki_dir.exists():
-        return allow
+        return render_reply(None, emit, event)
     index = load_hook_index(wiki_dir, root)
     if not index.get("rules"):
-        return allow
+        return render_reply(None, emit, event)
     project_dir = hook_project_dir(event)
     repo_root = find_repo_root(Path(project_dir)) if project_dir else None
     project_name = hook_project(event, project)
     decision = evaluate_tool_call(
-        index, event, project=project_name, repo_root=repo_root,
-        context_path=project_dir or None, protected=[wiki_dir / "memories"],
+        index, event, project=project_name, repo_root=repo_root, context_path=project_dir or None,
+        protected=[wiki_dir / "memories", root / ".link-cache"],
     )
     if decision is None:
-        return allow
+        return render_reply(None, emit, event)
     from .usage import record_retrieval
 
-    memories = decision.get("memories")
+    session = _event_session(event)
+    verdict = str(decision["decision"])
+    if verdict == "ask" and not can_ask(emit, event):
+        from . import approvals
+
+        call = str(decision.get("call") or "")
+        if decision.get("approvable") and call and approvals.take_grant(root, call):
+            verdict = "approved"
+            decision = None
+        else:
+            reason = str(decision["reason"])
+            if decision.get("approvable") and call:
+                request_id = approvals.request(root, call, title=str(decision.get("title") or ""),
+                                               rule=str(decision.get("rule") or ""), agent=emit, session=session)
+                reason = approvals.held_reason(reason, request_id)
+            verdict = "held"
+            decision = {**decision, "decision": "deny", "reason": reason}
+    memories = (decision or {}).get("memories")
     record_retrieval(
         root, "enforce", [str(name) for name in memories] if isinstance(memories, list) else [],
-        project=project_name, surface="hook",
-        session=str(event.get("session_id") or event.get("conversation_id") or ""),
-        decision=str(decision["decision"]),
+        project=project_name, surface="hook", session=session, decision=verdict,
     )
-    if emit == "cursor":
-        return json.dumps({
-            "permission": decision["decision"],
-            "userMessage": decision["reason"],
-            "agentMessage": decision["reason"],
-        })
-    return json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": decision["decision"],
-        "permissionDecisionReason": decision["reason"],
-    }})
+    return render_reply(decision, emit, event)
+
+
+def pre_tool_output(target: Path, event: Mapping[str, object], *, project: str | None, emit: str) -> str:
+    """What the pre-tool hook prints for agents that read stdout (kept for the CLI path)."""
+    return pre_tool_reply(target, event, project=project, emit=emit).stdout
 
 
 def post_tool_output(target: Path, event: Mapping[str, object], *, project: str | None) -> str:
     """What the post-tool hook prints: reviewed memories anchored to the file just read or edited."""
-    call = tool_call(event)
-    if call is None or call[0] not in {"read", "write"}:
+    files = [value for kind, value in tool_calls(event) if kind in {"read", "write"}]
+    if not files:
         return ""
-    file_path = Path(call[1]).expanduser()
+    file_path = Path(files[0]).expanduser()
     if not file_path.is_absolute():
         file_path = Path(hook_project_dir(event) or ".") / file_path
     wiki_dir, root = _workspace(target)
@@ -689,17 +721,27 @@ def fast_tool_hook(argv: list[str]) -> int | None:
             return None
         target, seen_target = arg, True
         index += 1
-    if emit not in {"text", "cursor"}:
+    if emit not in EMITS:
         return None
     event = read_hook_event(sys.stdin)
     try:
         if event_name == "pre-tool":
-            output = pre_tool_output(Path(target), event, project=project, emit=emit)
+            reply = pre_tool_reply(Path(target), event, project=project, emit=emit)
         else:
-            output = post_tool_output(Path(target), event, project=project)
+            reply = HookReply(post_tool_output(Path(target), event, project=project))
     except Exception as exc:  # a hook must never break the agent's tool call
         print(f"Link {event_name} hook failed: {exc}", file=sys.stderr)
+        reply = render_reply(None, emit, event) if event_name == "pre-tool" else HookReply()
+        if reply.stdout:
+            print(reply.stdout)
         return 0
-    if output:
-        print(output)
-    return 0
+    return emit_reply(reply)
+
+
+def emit_reply(reply: HookReply) -> int:
+    """Print a hook reply the way its agent reads it; returns the exit code."""
+    if reply.stdout:
+        print(reply.stdout)
+    if reply.stderr:
+        print(reply.stderr, file=sys.stderr)
+    return reply.exit_code

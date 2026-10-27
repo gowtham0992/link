@@ -34,7 +34,11 @@ INSTRUCTION_MARKERS = (
 AGENT_INSTRUCTION_FILES: dict[str, str] = {
     "kiro": ".kiro/steering/link.md",
     "claude-code": ".claude/CLAUDE.md",
-    "codex": "AGENTS.md",
+    # Codex reads $CODEX_HOME/AGENTS.md (~/.codex by default). Link used to
+    # write ~/AGENTS.md, which Codex never reads (it walks from the project
+    # root down) and Claude Code does, as a parent folder of every project
+    # under the home directory; migrate_codex_instructions moves it.
+    "codex": ".codex/AGENTS.md",
     "cursor": ".cursor/rules/link.mdc",
     "antigravity": ".gemini/GEMINI.md",
 }
@@ -87,7 +91,7 @@ Recalled memories may carry an `applicability` label: `matched` means the memory
 
 After completing a notable multi-step task (a release, a tricky deploy, a recovery), offer to save it as a reusable recipe: propose a `procedure` memory with a short `trigger` phrase describing when it applies, and save it only after the user approves. When starting a recurring task, recall first — approved procedures return with their steps.
 
-Some reviewed memories carry **enforce rules**. With Link's tool hooks installed, a tool call that matches one waits for the user's OK or is blocked, and the decision names the memory: follow it, never work around it. Never review, clear, archive, forget or update a memory that carries rules - only the user does that, in `lnk`, the viewer or LinkBar. Add a rule only when the user asks (`lnk enforce <memory> --rule "ask command: ..."`, or MCP `remember(enforce=...)`); it acts after the user reviews the memory. A session brief may end with **Waiting for the user's OK**: show those items at a natural pause and run a listed command only after the user says yes to that item in chat. Recalled memories may carry `verified` or `stale_paths` (checked against the repository): treat a stale one as possibly wrong and say so. `lnk receipt` shows what memory reached each session and whether it arrived whole; `lnk compile` writes reviewed memory into the files agents read; `lnk stale --instructions` checks those files.
+Some reviewed memories carry **enforce rules**. With Link's tool hooks installed, a tool call that matches one waits for the user's OK or is blocked, and the decision names the memory: follow it, never work around it. On an agent that cannot ask the user itself, the call is held instead: tell the user what you wanted to run and why, give them the `lnk approve <id>` line from the message, and run the exact same call again only after they say they approved it. Never run `lnk approve` yourself. Never review, clear, archive, forget or update a memory that carries rules - only the user does that, in `lnk`, the viewer or LinkBar. Add a rule only when the user asks (`lnk enforce <memory> --rule "ask command: ..."`, or MCP `remember(enforce=...)`); it acts after the user reviews the memory. A session brief may end with **Waiting for the user's OK**: show those items at a natural pause and run a listed command only after the user says yes to that item in chat. Recalled memories may carry `verified` or `stale_paths` (checked against the repository): treat a stale one as possibly wrong and say so. `lnk receipt` shows what memory reached each session and whether it arrived whole; `lnk compile` writes reviewed memory into the files agents read; `lnk stale --instructions` checks those files.
 
 Otherwise, keep working normally after the cheap first recall; do not save durable memory unless the user asks or approves it.
 """
@@ -115,6 +119,42 @@ def upsert_link_section(text: str) -> str:
         return _SECTION_PATTERN.sub(lambda _m: prefix + template, text, count=1).rstrip() + "\n"
     separator = "\n\n" if text.strip() else ""
     return text.rstrip() + separator + template + "\n"
+
+
+def remove_link_section(text: str) -> str:
+    """The file without its Link section; everything else byte for byte."""
+    return _SECTION_PATTERN.sub(lambda match: match.group(1), text, count=1).strip() + "\n"
+
+
+def migrate_codex_instructions(home: Path | None = None, *, write: bool = True) -> dict[str, object]:
+    """Move Link's Codex section from ~/AGENTS.md, where Codex never looks, to ~/.codex/AGENTS.md.
+
+    Only Link's own section moves; the rest of ~/AGENTS.md stays, and the
+    file is removed only if Link's section was all it held.
+    """
+    base = (home or Path.home()).expanduser()
+    old = base / "AGENTS.md"
+    new = base / AGENT_INSTRUCTION_FILES["codex"]
+    result: dict[str, object] = {"from": str(old), "to": str(new), "moved": False}
+    try:
+        text = old.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return result
+    if find_link_section(text) is None:
+        return result
+    result["needed"] = True
+    if not write:
+        return result
+    new.parent.mkdir(parents=True, exist_ok=True)
+    existing = new.read_text(encoding="utf-8", errors="replace") if new.exists() else ""
+    new.write_text(upsert_link_section(existing), encoding="utf-8")
+    rest = remove_link_section(text)
+    if rest.strip():
+        old.write_text(rest, encoding="utf-8")
+    else:
+        old.unlink()
+    result["moved"] = True
+    return result
 
 
 def instruction_file_status(agent: str, home: Path | None = None) -> dict[str, object]:

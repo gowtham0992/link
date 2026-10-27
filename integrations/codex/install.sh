@@ -3,7 +3,7 @@
 # One command: AGENTS.md + wiki scaffold + link-mcp install
 #
 # Usage:
-#   bash install.sh             → global: ~/AGENTS.md + central wiki at ~/link/
+#   bash install.sh             → global: ~/.codex/AGENTS.md (what Codex reads) + central wiki at ~/link/
 #   bash install.sh --project   → project-local: ./AGENTS.md + wiki in current dir
 set -e
 
@@ -13,7 +13,7 @@ MODE="${1:---global}"
 
 if [ "$MODE" = "--global" ]; then
     INSTRUCTIONS_FILE="$SCRIPT_DIR/../_shared/link-instructions.md"
-    TARGET="$HOME/AGENTS.md"
+    TARGET="${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
     WIKI_PATH="$HOME/link/wiki"
 elif [ "$MODE" = "--project" ]; then
     INSTRUCTIONS_FILE="$SCRIPT_DIR/../_shared/link-instructions-project.md"

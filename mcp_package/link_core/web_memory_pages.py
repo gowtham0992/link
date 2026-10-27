@@ -665,9 +665,11 @@ def render_last_session(session: Mapping[str, object], *, page_href: PageHref) -
                      + html.escape(" · ".join(parts) or "see lnk receipt") + "</div>")
     checks = _dict_list(session.get("rule_checks"))
     if checks:
-        asked = sum(1 for c in checks if str(c.get("decision")) == "ask")
+        asked = sum(1 for c in checks if str(c.get("decision")) in {"ask", "held"})
         blocked = sum(1 for c in checks if str(c.get("decision")) == "deny")
-        parts = [p for p in (f"{asked} asked for your OK" if asked else "", f"{blocked} blocked" if blocked else "") if p]
+        approved = sum(1 for c in checks if str(c.get("decision")) == "approved")
+        parts = [p for p in (f"{asked} asked for your OK" if asked else "", f"{blocked} blocked" if blocked else "",
+                             f"{approved} approved once" if approved else "") if p]
         notes.append(f'<p class="summary"><strong>Enforced rules:</strong> {html.escape(" · ".join(parts))}</p>')
     reminders = _dict_list(session.get("code_reminders"))
     if reminders:

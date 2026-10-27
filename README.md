@@ -50,17 +50,24 @@ approve it once, and every other agent recalls it in a new session tomorrow.
 
 What each agent gets depends on what it lets Link plug into:
 
-| Agent | How memory arrives | Session hooks | Enforced rules | Code reminders |
+| Agent | How memory arrives | Session hooks | Rules checked before the tool call | Code reminders |
 |---|---|---|---|---|
-| Claude Code | hooks, MCP, compiled files | start, end, every prompt | shell commands, file reads and writes, Grep | yes |
-| Cursor | hooks, MCP, compiled rules | start, end | shell commands | no |
-| Codex | start hook, MCP, `AGENTS.md` | start only | no | no |
-| Copilot, VS Code, Windsurf, Kiro, Gemini, Zed, Antigravity | MCP (the first tool response carries the brief), compiled files where the agent reads one | no | no | no |
+| Claude Code | hooks, MCP, compiled files | start, end, every prompt | shell, file reads and writes, Grep; asks you | yes |
+| Cursor | hooks, MCP, compiled rules | start, end | shell (asks you); file reads and writes (held) | no |
+| Codex | start hook, MCP, `~/.codex/AGENTS.md` | start | shell commands and patches (held) | no |
+| Gemini CLI | start hook, MCP, `GEMINI.md` | start | shell, file reads and writes; asks you | no |
+| Antigravity | start hook, MCP | start | shell, file reads and writes; asks you | no |
+| Copilot CLI and VS Code | start hook, MCP, compiled files | start | shell, file reads and writes; asks you | no |
+| Windsurf | MCP, compiled rules | none (no such event) | shell, file reads and writes (held) | no |
+| Devin CLI | Claude Code's hooks, which it runs | start, end | shell and files (held) | no |
+| Kiro, Zed | MCP, instruction files | no | no | no |
 
-Recall, review, stale checks, receipts, sync and `lnk compile` work the same
-for every agent. Rules are checked before the tool call only where the agent
-has a pre-tool hook; elsewhere they reach the agent as instructions, which it
-can ignore.
+"Asks you": the agent shows you the call and waits. "Held": the agent can
+only allow or block, so Link blocks the call and the agent asks you in chat;
+`lnk approve <id>` lets that exact call through once. Recall, review, stale
+checks, receipts, sync and `lnk compile` work the same for every agent.
+Enforcement is measured end to end on Claude Code; on the others it follows
+each vendor's documented hook schema and is new in 6.0 - report what you see.
 
 ```bash
 lnk status                                   # is it wired up and being used?
@@ -157,7 +164,7 @@ that have one everywhere:
 | **Memory hygiene** — junk stored over a simulated multi-month session stream we wrote | **0%** (a CI regression floor on our own fixtures) | the same pipeline with governance off: 35.7% |
 | **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (a CI regression floor on attacks we wrote) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
 | **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
-| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls; Claude Code, and shell commands on Cursor | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
+| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls; the same matcher serves every agent in the table above | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
 | **Staleness checks** — memories and instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) checked against the repository | **0 false flags**: 345 memory references in Link's own docs and 604 instruction-file references across eight public repositories; every planted deletion caught | a reference is reported only when git history shows the thing existed |
 | **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 
@@ -244,9 +251,10 @@ Result: proof passed
 the MCP runtime, and wires the agent. Swap `claude-code` for `codex`,
 `cursor`, `kiro`, `copilot`, `antigravity`, `windsurf`, `zed` or `vscode`.
 Session hooks - a brief at session start, proposals captured at session end -
-exist for Claude Code, Cursor and Codex (Codex has no session-end event, so it
-gets the start brief only). The other agents get memory through MCP, where the
-first tool response of a session carries the same brief. Drop `--write` to
+exist for Claude Code and Cursor; Codex, Gemini CLI, Antigravity and Copilot
+get the start brief. Rule checks before tool calls are installed for every
+agent in the table above. Agents without a start hook get memory through MCP,
+where the first tool response of a session carries the same brief. Drop `--write` to
 preview without touching anything, or drop `--agent` to just create the
 workspace. `lnk disconnect <agent> --write` takes Link back out: its MCP entry
 and hooks, nothing else.
@@ -481,16 +489,21 @@ backlog builds up the brief nudges the agent to offer a read-only
 `lnk consolidate` pass. On Claude Code the hooks also run before shell and
 file tool calls: a reviewed memory's enforced rules are checked there, and
 memories anchored to the file being read or edited are surfaced at that
-moment; on Cursor the shell-command check runs the same way. `lnk receipt`
-shows what actually arrived in each session. Durable memory still requires
-your approval. Codex and Cursor hook support is new (wired to their
-documented schemas — report issues).
+moment. The same rule checks run on Cursor, Codex, Gemini CLI, Antigravity,
+Copilot and Windsurf, each through its own hook. `lnk receipt` shows what
+actually arrived in each session and every rule check. Durable memory still
+requires your approval. Hook support beyond Claude Code follows each
+vendor's documented schema and is new - report issues.
 
 ```bash
 lnk connect claude-code ~/link --hooks --write
-lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no session-end event)
+lnk connect codex ~/link --hooks --write        # start brief + rule checks (approve them in Codex's /hooks)
 lnk connect cursor ~/link --hooks --write
-lnk consolidate ~/link                      # read-only backlog plan, apply only with approval
+lnk connect antigravity ~/link --hooks --write  # Antigravity and Gemini CLI (both read ~/.gemini)
+lnk connect copilot ~/link --hooks --write      # Copilot CLI and VS Code's Copilot (~/.copilot/hooks)
+lnk connect windsurf ~/link --hooks --write     # rule checks only: Windsurf has no session-start event
+lnk approve ~/link                              # calls an agent that cannot ask is holding for your OK
+lnk consolidate ~/link                          # read-only backlog plan, apply only with approval
 ```
 
 ### Optional: hybrid semantic recall (still fully local)

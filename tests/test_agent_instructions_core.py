@@ -12,6 +12,7 @@ from link_core.agent_instructions import (  # noqa: E402
     INSTRUCTIONS_TEMPLATE,
     find_link_section,
     instruction_file_status,
+    migrate_codex_instructions,
     refresh_instruction_file,
     upsert_link_section,
 )
@@ -102,6 +103,51 @@ class RefreshFlowTests(unittest.TestCase):
         self.assertFalse(result["refreshed"])
         self.assertEqual(path.read_text(encoding="utf-8"), before)
 
+
+
+class CodexInstructionsMoveTests(unittest.TestCase):
+    """Codex reads ~/.codex/AGENTS.md; ~/AGENTS.md was never read by it (and Claude Code read it instead)."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.home = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_only_links_section_moves_and_the_rest_stays(self):
+        old = self.home / "AGENTS.md"
+        old.write_text("# My notes\n\nKeep PRs small.\n\n" + OLD_ERA_SECTION, encoding="utf-8")
+        preview = migrate_codex_instructions(self.home, write=False)
+        self.assertTrue(preview["needed"])
+        self.assertFalse(preview["moved"])
+        self.assertIsNotNone(find_link_section(old.read_text(encoding="utf-8")), "a preview changes nothing")
+
+        result = migrate_codex_instructions(self.home)
+        self.assertTrue(result["moved"])
+        moved = (self.home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(find_link_section(moved).rstrip(), INSTRUCTIONS_TEMPLATE.rstrip(), "current template, not the old one")
+        rest = old.read_text(encoding="utf-8")
+        self.assertIn("Keep PRs small.", rest)
+        self.assertIsNone(find_link_section(rest))
+        self.assertFalse(migrate_codex_instructions(self.home)["moved"], "nothing left to move")
+
+    def test_a_file_that_held_only_links_section_is_removed(self):
+        (self.home / "AGENTS.md").write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+        codex = self.home / ".codex" / "AGENTS.md"
+        codex.parent.mkdir()
+        codex.write_text("# Codex house rules\n", encoding="utf-8")
+        self.assertTrue(migrate_codex_instructions(self.home)["moved"])
+        self.assertFalse((self.home / "AGENTS.md").exists())
+        text = codex.read_text(encoding="utf-8")
+        self.assertIn("# Codex house rules", text, "what was already there is kept")
+        self.assertIsNotNone(find_link_section(text))
+
+    def test_a_home_without_links_section_is_left_alone(self):
+        (self.home / "AGENTS.md").write_text("# Mine only\n", encoding="utf-8")
+        self.assertFalse(migrate_codex_instructions(self.home).get("needed"))
+        self.assertFalse((self.home / ".codex").exists())
+        self.assertEqual(AGENT_INSTRUCTION_FILES["codex"], ".codex/AGENTS.md")
 
 if __name__ == "__main__":
     unittest.main()

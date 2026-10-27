@@ -289,6 +289,7 @@ from link_core.importers import (
 )
 from link_core.agent_instructions import (
     instruction_file_status as _core_instruction_file_status,
+    migrate_codex_instructions as _core_migrate_codex_instructions,
     refresh_instruction_file as _core_refresh_instruction_file,
 )
 from link_core.tool_hooks import (
@@ -296,7 +297,8 @@ from link_core.tool_hooks import (
     hook_project_dir as _core_hook_project_dir,
     new_delivery_id as _core_new_delivery_id,
     post_tool_output as _core_post_tool_output,
-    pre_tool_output as _core_pre_tool_output,
+    emit_reply as _core_emit_reply,
+    pre_tool_reply as _core_pre_tool_reply,
     read_hook_event as _core_read_hook_event,
     verify_deliveries as _core_verify_deliveries,
     wrap_for_delivery as _core_wrap_for_delivery,
@@ -1473,6 +1475,42 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, in
     return 1
 
 
+def approve_held_call(target: Path, request_id: str | None, *, json_output: bool = False) -> int:
+    """Let one held tool call through once, or list the calls waiting for you."""
+    from link_core import approvals
+
+    root = _resolve_link_root(target)
+    if not request_id:
+        waiting = approvals.pending(root)
+        if json_output:
+            print(json.dumps({"pending": waiting}, indent=2))
+            return 0
+        if not waiting:
+            print("No tool calls are waiting for your OK.")
+            return 0
+        print("Tool calls waiting for your OK (each approval lets the exact call through once):")
+        for row in waiting:
+            kind, _, value = str(row.get("call") or "").partition(":")
+            print(f"  {row['id']}  {kind} {value}")
+            print(f"          memory: {row.get('title')}  rule: {row.get('rule')}  agent: {row.get('agent')}")
+        print(f"Approve one: {_display_command(['lnk', 'approve', '<id>', str(target)])}")
+        return 0
+    entry = approvals.approve(root, request_id)
+    if entry is None:
+        message = f"No held call {request_id!r} is waiting (requests expire after a day, approvals after 10 minutes)."
+        print(json.dumps({"approved": False, "error": message}) if json_output else message,
+              file=sys.stdout if json_output else sys.stderr)
+        return 1
+    kind, _, value = str(entry.get("call") or "").partition(":")
+    if json_output:
+        print(json.dumps({"approved": True, "id": request_id, "call": entry.get("call")}))
+    else:
+        print(f"Approved once: {kind} {value}")
+        print(f"The agent can now run exactly that again within {approvals.GRANT_MINUTES} minutes; "
+              "after that, or for anything different, it asks again.")
+    return 0
+
+
 def receipt(target: Path, *, sessions: int = 3, json_output: bool = False) -> int:
     """What reached the agents from memory, session by session.
 
@@ -1526,9 +1564,12 @@ def receipt(target: Path, *, sessions: int = 3, json_output: bool = False) -> in
             lines.append(f"  Shown when the agent opened anchored code: {', '.join(named)}")
         checks = item.get("rule_checks") or []
         if checks:
-            asked = sum(1 for check in checks if check.get("decision") == "ask")  # type: ignore[union-attr]
-            blocked = sum(1 for check in checks if check.get("decision") == "deny")  # type: ignore[union-attr]
-            lines.append(f"  Rules enforced on tool calls: {asked} asked for your OK, {blocked} blocked")
+            decisions = [str(check.get("decision")) for check in checks]  # type: ignore[union-attr]
+            asked = sum(1 for decision in decisions if decision in {"ask", "held"})
+            blocked = decisions.count("deny")
+            approved = decisions.count("approved")
+            line = f"  Rules enforced on tool calls: {asked} asked for your OK, {blocked} blocked"
+            lines.append(line + (f", {approved} let through once after your approval" if approved else ""))
         delivery = item.get("delivery") or {}
         if item.get("anything_undelivered"):
             lines.append(
@@ -3058,10 +3099,17 @@ def _hook_project_dir(hook_event: dict[str, object]) -> str:
 
 
 def _emit_session_start(text: str, emit: str) -> None:
+    """The session-start brief in the envelope each agent reads (plain text for the rest)."""
     if emit == "cursor":
         print(json.dumps({"additional_context": text}))
-        return
-    print(text)
+    elif emit in {"gemini", "devin"}:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+    elif emit == "copilot":
+        print(json.dumps({"additionalContext": text}))
+    elif emit == "antigravity":
+        print(json.dumps({"injectSteps": [{"systemMessage": text}]}))
+    else:
+        print(text)
 
 
 def _hook_session_start(
@@ -3403,10 +3451,7 @@ def _hook_project(target: Path, hook_event: dict[str, object], project: str | No
 
 def _hook_pre_tool(target: Path, hook_event: dict[str, object], project: str | None, emit: str) -> int:
     """Reviewed rules ask before (or block) the tool calls they name."""
-    output = _core_pre_tool_output(target, hook_event, project=project, emit=emit)
-    if output:
-        print(output)
-    return 0
+    return _core_emit_reply(_core_pre_tool_reply(target, hook_event, project=project, emit=emit))
 
 
 def _hook_post_tool(target: Path, hook_event: dict[str, object], project: str | None) -> int:
@@ -3749,8 +3794,10 @@ def connect_mcp(
         write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
         ok = not write or bool(write_status.get("ok"))
         if write and hooks_payload is not None:
-            hooks_write = hooks_payload.get("write") if isinstance(hooks_payload.get("write"), dict) else {}
-            ok = ok and bool(hooks_write.get("ok"))
+            companions = hooks_payload.get("companions")
+            for part in [hooks_payload, *(companions if isinstance(companions, list) else [])]:
+                hooks_write = part.get("write") if isinstance(part, dict) and isinstance(part.get("write"), dict) else {}
+                ok = ok and bool(hooks_write.get("ok"))
         return 0 if ok else 1
 
     code, text = _core_render_mcp_connect_text(payload)
@@ -4115,6 +4162,12 @@ def setup(
     # Refresh-only: files Link never wrote are never created here.
     refreshed_instructions: list[str] = []
     stale_instructions: list[str] = []
+    if code == 0 and "codex" in detected:
+        moved = _core_migrate_codex_instructions(write=not preview)
+        if moved.get("moved"):
+            refreshed_instructions.append(f"{moved['to']} (moved from {moved['from']}, which Codex never reads)")
+        elif moved.get("needed"):
+            stale_instructions.append(f"{moved['from']} -> {moved['to']} (Codex never reads ~/AGENTS.md)")
     if code == 0:
         for agent in detected:
             status = _core_instruction_file_status(agent)
@@ -4742,7 +4795,7 @@ _WORKSPACE_COMMANDS = {
     "remember", "recall", "recipes", "query", "query-link", "brief", "start",
     "session-end", "end", "propose-memories", "capture-session",
     "capture-inbox", "accept-capture", "redact-capture", "delete-capture",
-    "dedup-captures", "update-memory", "set-memory-visibility", "enforce",
+    "dedup-captures", "update-memory", "set-memory-visibility", "enforce", "approve",
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
@@ -4774,6 +4827,16 @@ def _normalize_review_all_args(args) -> None:
     ):
         args.target = args.identifier
         args.identifier = None
+    # `lnk approve ~/link` lists what is waiting in that workspace: a lone
+    # positional that names a directory is the target, not a request id.
+    if (
+        getattr(args, "command", "") == "approve"
+        and getattr(args, "request", None)
+        and getattr(args, "target", ".") == "."
+        and Path(str(args.request)).expanduser().is_dir()
+    ):
+        args.target = args.request
+        args.request = None
 
 
 def _apply_default_workspace(args) -> None:
@@ -4864,6 +4927,7 @@ def main(argv: list[str] | None = None) -> int:
             "update-memory": update_memory,
             "set-memory-visibility": set_memory_visibility,
             "enforce": enforce_memory,
+            "approve": approve_held_call,
             "recall": recall,
             "query": query,
             "graph-summary": graph_summary,

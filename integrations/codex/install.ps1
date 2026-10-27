@@ -10,7 +10,8 @@ $instructionsFile = if ($Project) {
 } else {
     Join-Path $ScriptDir "..\_shared\link-instructions.md"
 }
-$target = if ($Project) { "AGENTS.md" } else { Join-Path $HOME "AGENTS.md" }
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+$target = if ($Project) { "AGENTS.md" } else { Join-Path $codexHome "AGENTS.md" }
 $wikiPath = if ($Project) { Join-Path (Get-Location).Path "wiki" } else { Join-Path $HOME "link\wiki" }
 
 Link-UpsertInstructions $target $instructionsFile "Link instructions"

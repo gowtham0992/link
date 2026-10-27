@@ -12,7 +12,7 @@ link_cli disconnect codex --write || echo "  · Could not run lnk disconnect; re
 MODE="${1:---global}"
 
 if [ "$MODE" = "--global" ]; then
-    TARGET="$HOME/AGENTS.md"
+    TARGET="${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
 else
     TARGET="AGENTS.md"
 fi

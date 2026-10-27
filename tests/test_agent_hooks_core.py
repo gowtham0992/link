@@ -25,7 +25,7 @@ def _transcript_line(role: str, content: object) -> str:
 class AgentHooksCoreTests(unittest.TestCase):
     def test_hook_supported_agents_include_hook_capable_agents(self):
         agents = hook_supported_agents()
-        for agent in ("claude-code", "codex", "cursor"):
+        for agent in ("claude-code", "codex", "cursor", "gemini", "antigravity", "copilot", "windsurf"):
             self.assertIn(agent, agents)
 
     def test_supports_agent_hooks_accepts_aliases_and_rejects_others(self):
@@ -33,6 +33,7 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertTrue(supports_agent_hooks("claude"))
         self.assertTrue(supports_agent_hooks("codex"))
         self.assertTrue(supports_agent_hooks("cursor"))
+        self.assertTrue(supports_agent_hooks("gemini-cli"))
         self.assertFalse(supports_agent_hooks("kiro"))
         self.assertFalse(supports_agent_hooks("vscode"))
 
@@ -45,7 +46,7 @@ class AgentHooksCoreTests(unittest.TestCase):
                 python_cmd="python3",
             )
 
-    def test_codex_gets_session_start_only(self):
+    def test_codex_gets_session_start_and_rule_checks(self):
         payload = build_agent_hooks_payload(
             target=Path("/tmp/link"),
             agent="codex",
@@ -58,8 +59,73 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertIn("hooks.json", str(payload["settings_path"]))
         self.assertIn(".codex", str(payload["settings_path"]))
         snippet = json.loads(str(payload["snippet"]))
-        self.assertEqual(list(snippet["hooks"].keys()), ["SessionStart"])
+        self.assertEqual(list(snippet["hooks"].keys()), ["SessionStart", "PreToolUse"])
+        self.assertEqual(snippet["hooks"]["PreToolUse"][0]["matcher"], "Bash|apply_patch")
+        self.assertIn("--emit codex", str(payload["events"]["PreToolUse"]))
         self.assertTrue(any("no session-end hook event" in item for item in payload["behavior"]))
+        self.assertTrue(any("lnk approve" in item for item in payload["behavior"]), "Codex cannot ask")
+
+    def test_every_agent_with_a_pre_tool_seam_gets_rule_checks(self):
+        expected = {
+            # agent: (settings file, events with their matchers, emit)
+            "cursor": ("~/.cursor/hooks.json",
+                       {"beforeShellExecution": None, "beforeReadFile": None, "preToolUse": "Write|Delete"}, "cursor"),
+            "gemini": ("~/.gemini/settings.json",
+                       {"BeforeTool": "run_shell_command|read_file|read_many_files|write_file|replace"}, "gemini"),
+            "copilot": ("~/.copilot/hooks/link.json", {"preToolUse": "bash|view|create|edit"}, "copilot"),
+            "windsurf": ("~/.codeium/windsurf/hooks.json",
+                         {"pre_run_command": None, "pre_read_code": None, "pre_write_code": None}, "windsurf"),
+        }
+        for agent, (settings, events, emit) in expected.items():
+            payload = build_agent_hooks_payload(target=Path("/tmp/link"), agent=agent,
+                                                runtime_script=Path("/tmp/link/link.py"), python_cmd="python3")
+            self.assertEqual(payload["settings_path"], str(Path(settings).expanduser()), agent)
+            snippet = json.loads(str(payload["snippet"]))
+            for event_name, matcher in events.items():
+                self.assertIn(f"--emit {emit}", str(payload["events"][event_name]), (agent, event_name))
+                entry = snippet["hooks"][event_name][0]
+                found = entry.get("matcher") if "matcher" in entry else None
+                self.assertEqual(found, matcher, (agent, event_name))
+
+    def test_gemini_counts_milliseconds_and_copilot_names_its_timeout(self):
+        gemini = json.loads(str(build_agent_hooks_payload(
+            target=Path("/tmp/link"), agent="gemini", runtime_script=Path("/tmp/link/link.py"),
+            python_cmd="python3")["snippet"]))
+        self.assertEqual(gemini["hooks"]["BeforeTool"][0]["hooks"][0]["timeout"], 10_000)
+        copilot = json.loads(str(build_agent_hooks_payload(
+            target=Path("/tmp/link"), agent="copilot", runtime_script=Path("/tmp/link/link.py"),
+            python_cmd="python3")["snippet"]))
+        entry = copilot["hooks"]["preToolUse"][0]
+        self.assertEqual((copilot["version"], entry["type"], entry["timeoutSec"]), (1, "command", 10))
+        windsurf = json.loads(str(build_agent_hooks_payload(
+            target=Path("/tmp/link"), agent="windsurf", runtime_script=Path("/tmp/link/link.py"),
+            python_cmd="python3")["snippet"]))
+        self.assertNotIn("SessionStart", windsurf["hooks"], "Windsurf has no session-start event")
+        self.assertNotIn("timeout", windsurf["hooks"]["pre_run_command"][0])
+
+    def test_antigravity_writes_its_own_file_and_gemini_clis(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            antigravity = home / ".gemini" / "config" / "hooks.json"
+            antigravity.parent.mkdir(parents=True)
+            antigravity.write_text(json.dumps({"mine": {"PreToolUse": []}}), encoding="utf-8")
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            try:
+                payload = build_agent_hooks_payload(target=home / "link", agent="antigravity",
+                                                    runtime_script=home / "link" / "link.py",
+                                                    python_cmd="python3", write=True)
+            finally:
+                if old_home is not None:
+                    os.environ["HOME"] = old_home
+            self.assertTrue(payload["write"]["ok"], payload["write"])
+            written = json.loads(antigravity.read_text(encoding="utf-8"))
+            self.assertIn("mine", written, "another hook set in the same file is kept")
+            self.assertEqual(written["link"]["PreToolUse"][0]["matcher"].split("|")[0], "run_command")
+            self.assertIn("command", written["link"]["SessionStart"][0], "lifecycle events take handlers directly")
+            [gemini] = payload["companions"]
+            self.assertTrue(gemini["write"]["ok"], gemini["write"])
+            self.assertIn("BeforeTool", json.loads((home / ".gemini" / "settings.json").read_text(encoding="utf-8"))["hooks"])
 
     def test_cursor_uses_flat_schema_and_cursor_emit(self):
         payload = build_agent_hooks_payload(

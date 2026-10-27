@@ -1,0 +1,150 @@
+"""One-time approvals for held tool calls on agents that cannot ask.
+
+An `ask` rule means "this call needs the person's OK". Claude Code, Copilot,
+Gemini, Antigravity and Cursor's shell event can show the person a
+confirmation themselves. Codex, Windsurf, Kiro, Devin, and Cursor's file
+events can only allow or block. On those, Link blocks the call, files a
+request here, and tells the agent to ask the person in chat. If the person
+agrees, they run `lnk approve <id>` (or approve it in LinkBar) and the agent
+repeats the exact same call, which then goes through once.
+
+A grant is for one exact call (the same command text or file path), is
+used up by the call it lets through, and expires after a few minutes, so an
+approval never becomes a standing exception. Agents cannot approve their
+own requests: `lnk approve` is a governance command the pre-tool hook holds,
+and this file sits under the cache directory the hook protects.
+"""
+from __future__ import annotations
+
+import json
+import secrets
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from .files import atomic_write_text_unlocked, file_lock
+
+GRANT_MINUTES = 10
+REQUEST_HOURS = 24
+MAX_REQUESTS = 200
+
+
+def approvals_path(link_root: Path) -> Path:
+    return link_root / ".link-cache" / "approvals.json"
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _save(path: Path, data: dict[str, dict[str, dict[str, object]]]) -> None:
+    """Write under the lock the caller holds."""
+    atomic_write_text_unlocked(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def _parse(value: object) -> datetime | None:
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _load(path: Path) -> dict[str, dict[str, dict[str, object]]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"requests": {}, "grants": {}}
+    if not isinstance(data, dict):
+        return {"requests": {}, "grants": {}}
+    requests = data.get("requests") if isinstance(data.get("requests"), dict) else {}
+    grants = data.get("grants") if isinstance(data.get("grants"), dict) else {}
+    return {"requests": dict(requests), "grants": dict(grants)}  # type: ignore[arg-type]
+
+
+def _prune(data: dict[str, dict[str, dict[str, object]]], now: datetime) -> None:
+    for name, ttl in (("requests", timedelta(hours=REQUEST_HOURS)), ("grants", timedelta(minutes=GRANT_MINUTES))):
+        bucket = data[name]
+        for key in list(bucket):
+            created = _parse(bucket[key].get("at"))
+            if created is None or now - created > ttl:
+                del bucket[key]
+    if len(data["requests"]) > MAX_REQUESTS:
+        oldest = sorted(data["requests"], key=lambda key: str(data["requests"][key].get("at")))
+        for key in oldest[: len(data["requests"]) - MAX_REQUESTS]:
+            del data["requests"][key]
+
+
+def request(link_root: Path, call: str, *, title: str, rule: str, agent: str, session: str = "",
+            now: datetime | None = None) -> str:
+    """File (or re-use) a pending request for this exact call; returns its id."""
+    moment = now or _now()
+    path = approvals_path(link_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with file_lock(path):
+        data = _load(path)
+        _prune(data, moment)
+        for request_id, entry in data["requests"].items():
+            if entry.get("call") == call:
+                return request_id
+        request_id = secrets.token_hex(3)
+        while request_id in data["requests"]:
+            request_id = secrets.token_hex(3)
+        data["requests"][request_id] = {
+            "call": call, "title": title, "rule": rule, "agent": agent, "session": session, "at": _stamp(moment),
+        }
+        _save(path, data)
+    return request_id
+
+
+def approve(link_root: Path, request_id: str, now: datetime | None = None) -> dict[str, object] | None:
+    """Turn a pending request into a one-time grant. None if there is no such request."""
+    moment = now or _now()
+    path = approvals_path(link_root)
+    if not path.exists():
+        return None
+    with file_lock(path):
+        data = _load(path)
+        _prune(data, moment)
+        entry = data["requests"].pop(request_id.strip().lower(), None)
+        if entry is None:
+            _save(path, data)
+            return None
+        data["grants"][str(entry["call"])] = {**entry, "at": _stamp(moment), "request": request_id}
+        _save(path, data)
+    return entry
+
+
+def take_grant(link_root: Path, call: str, now: datetime | None = None) -> bool:
+    """Use up the grant for this exact call, if the person gave one in the last few minutes."""
+    path = approvals_path(link_root)
+    if not path.exists():
+        return False
+    moment = now or _now()
+    with file_lock(path):
+        data = _load(path)
+        _prune(data, moment)
+        granted = data["grants"].pop(call, None) is not None
+        _save(path, data)
+    return granted
+
+
+def pending(link_root: Path, now: datetime | None = None) -> list[dict[str, object]]:
+    """Requests waiting for the person, newest first."""
+    data = _load(approvals_path(link_root))
+    _prune(data, now or _now())
+    rows = [{"id": request_id, **entry} for request_id, entry in data["requests"].items()]
+    return sorted(rows, key=lambda row: str(row.get("at")), reverse=True)
+
+
+def held_reason(decision_reason: str, request_id: str, command_name: str = "lnk") -> str:
+    """The block message an agent that cannot ask passes on to the person."""
+    base = decision_reason.split(" If the person approves")[0]
+    return (
+        f"{base} This agent cannot ask the person itself, so the call was held, not run. "
+        "Do not retry it and do not work around it: tell the person what you want to run and why. "
+        f"If they agree, they approve it once with `{command_name} approve {request_id}` (or in LinkBar); "
+        "then run exactly the same call again."
+    )

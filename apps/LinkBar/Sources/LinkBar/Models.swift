@@ -545,7 +545,7 @@ struct MemoryReceipt: Decodable {
         let truncated: Bool?
         let delivery: String?
     }
-    /// One enforced-rule decision before a tool call: "ask" or "deny".
+    /// One enforced-rule decision before a tool call: "ask", "deny", "held" or "approved".
     struct RuleCheck: Decodable {
         let decision: String
         let memories: [String]
@@ -595,11 +595,14 @@ struct MemoryReceipt: Decodable {
         var ruleCheckLabel: String? {
             let checks = ruleChecks ?? []
             guard !checks.isEmpty else { return nil }
-            let asked = checks.filter { $0.decision == "ask" }.count
+            // "held": an agent that cannot ask was stopped until you approve the call once.
+            let asked = checks.filter { $0.decision == "ask" || $0.decision == "held" }.count
             let blocked = checks.filter { $0.decision == "deny" }.count
+            let approved = checks.filter { $0.decision == "approved" }.count
             var parts: [String] = []
             if asked > 0 { parts.append("\(asked) asked for your OK") }
             if blocked > 0 { parts.append("\(blocked) blocked") }
+            if approved > 0 { parts.append("\(approved) approved once") }
             return parts.isEmpty ? nil : parts.joined(separator: " · ")
         }
 

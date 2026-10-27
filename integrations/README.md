@@ -32,7 +32,7 @@ query Link for what you know about this project
 | Kiro | `bash integrations/kiro/install.sh` | `.\integrations\kiro\install.ps1` | `~/.kiro/steering/link.md` |
 | Claude Code | `bash integrations/claude-code/install.sh` | `.\integrations\claude-code\install.ps1` | `~/.claude/CLAUDE.md` |
 | Antigravity | `bash integrations/antigravity/install.sh` | `.\integrations\antigravity\install.ps1` | `~/.gemini/GEMINI.md` |
-| Codex | `bash integrations/codex/install.sh` | `.\integrations\codex\install.ps1` | `~/AGENTS.md` |
+| Codex | `bash integrations/codex/install.sh` | `.\integrations\codex\install.ps1` | `~/.codex/AGENTS.md` |
 | Cursor | `bash integrations/cursor/install.sh` | `.\integrations\cursor\install.ps1` | `~/.cursor/rules/link.mdc` |
 | Copilot | `bash integrations/copilot/install.sh` | `.\integrations\copilot\install.ps1` | `.github/copilot-instructions.md` |
 | VS Code | `bash integrations/vscode/install.sh` | `.\integrations\vscode\install.ps1` | `.vscode/settings.json` |

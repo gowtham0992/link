@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from .tool_events import EMITS as HOOK_EMITS
 from .memory import MEMORY_SCOPES, MEMORY_TYPES, MEMORY_VISIBILITIES
 from .version import LINK_VERSION
 
@@ -28,7 +29,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
         "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
-        "set-memory-visibility", "enforce", "memory-log", "memory-audit",
+        "set-memory-visibility", "enforce", "approve", "memory-log", "memory-audit",
     )),
     ("Agents & automation", (
         "connect", "disconnect", "hook", "verify-mcp", "compile",
@@ -160,7 +161,8 @@ def build_cli_parser(
     onboard_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also configure session hooks for selected agents that support them (Claude Code, Codex, Cursor)",
+        help="also configure hooks for selected agents that support them (Claude Code, Codex, Cursor, "
+             "Antigravity and Gemini CLI, Copilot, Windsurf)",
     )
     onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
     onboard_cmd.add_argument(
@@ -423,6 +425,19 @@ def build_cli_parser(
                              help="show rules Link can derive from the memory's text, without changing it")
     enforce_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
+    approve_cmd = sub.add_parser(
+        "approve",
+        help="let one held tool call through once (agents that cannot ask you themselves)",
+        epilog=(
+            "Codex, Windsurf, Kiro, Devin and Cursor's file events can only allow or block. When an "
+            "ask rule fires there, Link holds the call and the agent asks you in chat; approving lets "
+            "the exact same call through once, within 10 minutes. Without an id: list what is waiting."
+        ),
+    )
+    approve_cmd.add_argument("request", nargs="?", default=None, help="the id the agent showed you")
+    approve_cmd.add_argument("target", nargs="?", default=".")
+    approve_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
+
     recall_cmd = sub.add_parser("recall", help="search local agent memories")
     recall_cmd.add_argument("query", help="memory query")
     recall_cmd.add_argument("target", nargs="?", default=".")
@@ -484,9 +499,10 @@ def build_cli_parser(
     )
     hook_cmd.add_argument(
         "--emit",
-        choices=["text", "cursor"],
+        choices=list(HOOK_EMITS),
         default="text",
-        help="session-start output envelope: plain text (Claude Code, Codex) or Cursor additional_context JSON",
+        help="the agent's answer format: text (Claude Code), cursor, codex, gemini, copilot, windsurf, kiro, "
+             "antigravity or devin",
     )
 
     semantic_cmd = sub.add_parser("semantic", help="show or set up optional local semantic recall")
@@ -642,7 +658,9 @@ def build_cli_parser(
     connect_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also install hooks: the session brief at start, proposals at end, and on Claude Code (shell commands on Cursor) enforce rules checked before tool calls and memories surfaced when the agent opens anchored code",
+        help="also install hooks: the session brief at start (where the agent has the event), proposals at end, "
+             "enforce rules checked before tool calls (Claude Code, Cursor, Codex, Gemini CLI, Antigravity, Copilot, "
+             "Windsurf), and on Claude Code memories surfaced when the agent opens anchored code",
     )
     connect_cmd.add_argument(
         "--hooks-settings",
@@ -863,6 +881,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             enforce=args.enforce,
             json_output=args.json,
         )
+    if command == "approve":
+        return handlers["approve"](Path(args.target), args.request, json_output=bool(args.json))
     if command == "enforce":
         return handlers["enforce"](
             Path(args.target),
