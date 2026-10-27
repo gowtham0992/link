@@ -8,6 +8,20 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Changed
+
+- **The README and site say which agent gets what.** A coverage table near
+  the top shows how memory reaches each agent and where rules are enforced
+  before the tool call: Claude Code (shell, file reads and writes, Grep),
+  Cursor (shell commands), and nowhere else yet; on the other agents rules
+  arrive as instructions. Claims that outran their evidence are corrected:
+  `lnk setup` wires every agent *it finds*, not every agent you have; the
+  LoCoMo 84.8% says it was measured on Link 3.x and not yet re-run; the
+  hygiene and poisoning zeros are labelled as CI regression floors on
+  fixtures we wrote; "no LLM in the memory layer" now says the wiki pages
+  compiled from raw sources are written by your agent; and "every other
+  agent-memory system" became "most".
+
 ### Fixed
 
 - LinkBar builds without warnings: the two hook-state switches spelt the

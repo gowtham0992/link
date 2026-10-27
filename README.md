@@ -42,11 +42,25 @@
 
 ```bash
 brew install gowtham0992/link/link   # or: pip install link-mcp
-lnk setup                            # wires every agent you have
+lnk setup                            # wires every agent it finds
 ```
 
 Then work normally. Tell an agent "remember that we deploy on Tuesdays",
 approve it once, and every other agent recalls it in a new session tomorrow.
+
+What each agent gets depends on what it lets Link plug into:
+
+| Agent | How memory arrives | Session hooks | Enforced rules | Code reminders |
+|---|---|---|---|---|
+| Claude Code | hooks, MCP, compiled files | start, end, every prompt | shell commands, file reads and writes, Grep | yes |
+| Cursor | hooks, MCP, compiled rules | start, end | shell commands | no |
+| Codex | start hook, MCP, `AGENTS.md` | start only | no | no |
+| Copilot, VS Code, Windsurf, Kiro, Gemini, Zed, Antigravity | MCP (the first tool response carries the brief), compiled files where the agent reads one | no | no | no |
+
+Recall, review, stale checks, receipts, sync and `lnk compile` work the same
+for every agent. Rules are checked before the tool call only where the agent
+has a pre-tool hook; elsewhere they reach the agent as instructions, which it
+can ignore.
 
 ```bash
 lnk status                                   # is it wired up and being used?
@@ -105,17 +119,18 @@ compound over time.
 
 ## Why Link Is Different
 
-Every other agent-memory system stores memory as embeddings in a vector
-database or as an LLM-extracted graph. Link made five architectural
-commitments those designs cannot bolt on:
+Most agent-memory systems store memory as embeddings in a vector database or
+as an LLM-extracted graph. Link made five architectural commitments that are
+hard to add to those designs:
 
 1. **Memory you can read.** Every memory is a plain Markdown file — open it,
    grep it, git-diff it. If Link disappeared tomorrow, your memory is still yours.
 2. **Review-gated writes.** Agents propose; you approve. Even the automatic
    session hooks capture proposals, never facts.
-3. **No LLM in the memory layer.** Ingestion and recall are deterministic —
-   nothing can hallucinate a fact into your memory, because there is no model
-   in the write path.
+3. **No LLM in the memory layer.** Saving, deduplicating, contradiction checks
+   and recall are deterministic — nothing can hallucinate a fact into your
+   memory, because there is no model in its write path. (Wiki pages compiled
+   from raw sources are written by your agent, and Link treats them that way.)
 4. **Provably local.** CI blocks outbound network code in the runtime, and the
    optional semantic models load offline-only after one explicit setup.
 5. **Memory that holds when the agent acts.** A memory you reviewed can carry a
@@ -137,17 +152,19 @@ that have one everywhere:
 
 | What | Link | For comparison |
 |---|---|---|
-| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
+| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks); measured on Link 3.x, not yet re-run on 5.x | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
-| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 35.7% |
-| **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
+| **Memory hygiene** — junk stored over a simulated multi-month session stream we wrote | **0%** (a CI regression floor on our own fixtures) | the same pipeline with governance off: 35.7% |
+| **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (a CI regression floor on attacks we wrote) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
 | **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
-| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
+| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls; Claude Code, and shell commands on Cursor | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
 | **Staleness checks** — memories and instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) checked against the repository | **0 false flags**: 345 memory references in Link's own docs and 604 instruction-file references across eight public repositories; every planted deletion caught | a reference is reported only when git history shows the thing existed |
 | **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 
-Every number ships with its config, judge model, caveats, and the
-experiments that *lost* — including LongMemEval end-to-end, where we
+The zeros are regression floors: CI fails any change that breaks them, on
+fixtures we wrote, so they say the behaviour cannot silently regress - not
+that a stranger's data will score the same. Every number ships with its
+config, judge model, caveats, and the experiments that *lost* — including LongMemEval end-to-end, where we
 re-judged both sides under the neutral Hunyuan 3 referee: mem0's GPT-5
 answers score 91.0%, Link's budget-model answers 80.6%. Their published
 number holds up, and the gap tracks the answering model, not the memory
