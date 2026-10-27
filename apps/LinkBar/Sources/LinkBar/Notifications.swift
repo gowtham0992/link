@@ -17,6 +17,11 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
     private let captureCategory = "LINK_CAPTURE"
     private let approveRuleAction = "LINK_APPROVE_RULE"
     private let ruleCategory = "LINK_RULE"
+    private let approveHeldAction = "LINK_APPROVE_HELD"
+    private let heldCategory = "LINK_HELD"
+    /// Held tool calls already announced (by request id).
+    private var announcedHeld: Set<String> = []
+    private var heldPrimed = false
     /// Rule memories already announced (by name), primed like captures.
     private var announcedRules: Set<String> = []
     private var rulesPrimed = false
@@ -46,7 +51,12 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
                                                      actions: [approveRule, review],
                                                      intentIdentifiers: [],
                                                      options: [])
-        center.setNotificationCategories([category, ruleCategoryDef])
+        let approveHeld = UNNotificationAction(identifier: approveHeldAction, title: "Approve once", options: [])
+        let heldCategoryDef = UNNotificationCategory(identifier: heldCategory,
+                                                     actions: [approveHeld, review],
+                                                     intentIdentifiers: [],
+                                                     options: [])
+        center.setNotificationCategories([category, ruleCategoryDef, heldCategoryDef])
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             Task { @MainActor in self.authorized = granted }
         }
@@ -86,7 +96,33 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
         }
     }
 
+    /// An agent that cannot ask was stopped by a rule: the person's OK is the
+    /// only way through, so it is offered right on the banner.
+    func announceHeldCalls(_ calls: [HeldCall]) {
+        guard authorized else { return }
+        guard heldPrimed else {
+            announcedHeld.formUnion(calls.map(\.id))
+            heldPrimed = true
+            return
+        }
+        for call in calls where !announcedHeld.contains(call.id) {
+            announcedHeld.insert(call.id)
+            let content = UNMutableNotificationContent()
+            content.title = "\(call.agentName) is waiting for your OK"
+            content.subtitle = call.title
+            content.body = call.value
+            content.categoryIdentifier = heldCategory
+            content.userInfo = ["held": call.id]
+            content.sound = .default
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "held-\(call.id)", content: content, trigger: nil)
+            )
+        }
+    }
+
     func reprime() {
+        heldPrimed = false
+        announcedHeld = []
         rulesPrimed = false
         announcedRules = []
         primed = false
@@ -159,6 +195,10 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
         switch response.actionIdentifier {
         case acceptAction:
             if let path { Task { @MainActor in self.store?.acceptCaptureByPath(path) } }
+        case approveHeldAction:
+            if let held = response.notification.request.content.userInfo["held"] as? String {
+                Task { @MainActor in self.store?.approveHeldCall(id: held) }
+            }
         case approveRuleAction:
             if let memory = response.notification.request.content.userInfo["memory"] as? String {
                 Task { @MainActor in self.store?.markReviewedByName(memory) }

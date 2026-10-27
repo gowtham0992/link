@@ -630,3 +630,44 @@ struct MemoryReceipt: Decodable {
 
     var last: Session? { sessions.first }
 }
+
+
+/// A tool call an agent that cannot ask (Codex, Windsurf, Cursor's file
+/// checks) was stopped from making until the person approves it once.
+/// Read straight from `.link-cache/approvals.json`, the file the pre-tool
+/// hook writes, so showing it costs no extra lnk process per refresh.
+struct HeldCall: Identifiable, Equatable {
+    let id: String
+    let kind: String   // "command", "read" or "write"
+    let value: String
+    let title: String  // the memory whose rule held it
+    let rule: String
+    let agent: String
+    let at: Date
+
+    /// Requests older than a day have expired (approvals.py REQUEST_HOURS).
+    static func load(from workspace: String, now: Date = Date()) -> [HeldCall] {
+        let path = (workspace as NSString).appendingPathComponent(".link-cache/approvals.json")
+        guard let data = FileManager.default.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let requests = root["requests"] as? [String: [String: Any]] else { return [] }
+        let stamp = ISO8601DateFormatter()
+        var calls: [HeldCall] = []
+        for (id, entry) in requests {
+            guard let call = entry["call"] as? String,
+                  let at = (entry["at"] as? String).flatMap(stamp.date(from:)),
+                  now.timeIntervalSince(at) < 24 * 3600 else { continue }
+            let kind = call.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+            let value = call.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? call
+            calls.append(HeldCall(id: id, kind: kind, value: value, title: entry["title"] as? String ?? "",
+                                  rule: entry["rule"] as? String ?? "", agent: entry["agent"] as? String ?? "",
+                                  at: at))
+        }
+        return calls.sorted { $0.at > $1.at }
+    }
+
+    var agentName: String {
+        ["codex": "Codex", "cursor": "Cursor", "windsurf": "Windsurf", "kiro": "Kiro", "devin": "Devin"][agent] ?? agent
+    }
+}
+

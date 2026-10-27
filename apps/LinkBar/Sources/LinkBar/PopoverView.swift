@@ -20,7 +20,8 @@ struct PopoverView: View {
         : ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "settings" ? .settings : .inbox
 
     private var isFullyIdle: Bool {
-        (store.inbox?.items.isEmpty ?? true)
+        store.heldCalls.isEmpty
+            && (store.inbox?.items.isEmpty ?? true)
             && (store.captures?.captures.isEmpty ?? true)
             && store.recallResults.isEmpty
             && store.searchedQuery == nil
@@ -126,6 +127,9 @@ struct PopoverView: View {
                 }
                 if let warning = store.runtimeWarning {
                     runtimeBanner(warning)
+                }
+                if !store.heldCalls.isEmpty {
+                    heldCallsSection
                 }
                 recallField
                 if store.searchedQuery != nil || !store.recallResults.isEmpty {
@@ -638,6 +642,46 @@ struct PopoverView: View {
             .padding(.vertical, 1.5)
             .background(confidenceColor(value).opacity(0.13))
             .clipShape(Capsule())
+    }
+
+    // MARK: held tool calls
+
+    /// Calls an agent that cannot ask was stopped from making. The agent is
+    /// waiting on the person: this outranks the review inbox.
+    private var heldCallsSection: some View {
+        VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+            SectionHeader(title: "Waiting for your OK", count: store.heldCalls.count, highlight: true)
+            ForEach(store.heldCalls) { call in
+                HoverRow {
+                    HStack(alignment: .center, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 5) {
+                                Image(systemName: call.kind == "command" ? "terminal"
+                                      : call.kind == "write" ? "square.and.pencil" : "doc.text")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(LinkBrand.amber)
+                                Text(call.value)
+                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Text("\(call.agentName) \u{00B7} \(call.title)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .help("\(call.agentName) was stopped by \(call.rule) (\(call.title)). " +
+                              "Approving lets exactly this call through once, within 10 minutes.")
+                        Spacer(minLength: 6)
+                        Button("Approve once") { store.approveHeldCall(id: call.id) }
+                            .buttonStyle(.borderedProminent)
+                            .tint(LinkBrand.rust)
+                            .controlSize(.small)
+                            .help("Let exactly this call through once; anything different is held again")
+                    }
+                }
+            }
+        }
     }
 
     // MARK: review inbox

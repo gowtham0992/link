@@ -30,6 +30,8 @@ final class LinkStore: ObservableObject {
     @Published var digest: DigestPayload?
     @Published var syncState: SyncStatus?
     @Published var handoffsWaiting: [HandoffsPayload.Handoff] = []
+    /// Tool calls held until you approve them once (agents that cannot ask).
+    @Published var heldCalls: [HeldCall] = []
     @Published var runtimeWarning: String?
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
@@ -118,6 +120,8 @@ final class LinkStore: ObservableObject {
             (root as NSString).appendingPathComponent("raw/handoffs"),
             (root as NSString).appendingPathComponent("wiki/memories"),
             (root as NSString).appendingPathComponent("wiki"),
+            // Held tool calls land here the moment an agent is stopped.
+            (root as NSString).appendingPathComponent(".link-cache"),
         ]
     }
 
@@ -188,6 +192,7 @@ final class LinkStore: ObservableObject {
             async let receiptRead = Self.fetch(MemoryReceipt.self, ["receipt", workspace, "--sessions", "1", "--json"])
             let sessions = Self.scanAgentSessions()
             let memories = MemoryPage.load(from: workspace)
+            let held = HeldCall.load(from: workspace)
             let (inbox, captures, log, status, handoffs) = await (inboxRead, capturesRead, logRead, statusRead, handoffsRead)
             let receipt = await receiptRead
             // Only when both inbox reads failed: say why, instead of always
@@ -203,6 +208,7 @@ final class LinkStore: ObservableObject {
                 self.activeSessions = sessions
                 self.rememberStaleRepo(from: sessions)
                 self.memories = memories
+                self.heldCalls = held
                 self.lastError = failure
                 self.handoffsWaiting = handoffs?.handoffs ?? self.handoffsWaiting
                 self.receipt = receipt ?? self.receipt
@@ -224,6 +230,7 @@ final class LinkStore: ObservableObject {
                 if let waiting = self.inbox?.items.filter({ !$0.rules.isEmpty }) {
                     NotificationManager.shared.announceWaitingRules(waiting)
                 }
+                NotificationManager.shared.announceHeldCalls(held)
             }
             // Health surfaces are heavier (each spawns a Python probe), so
             // refresh them at most every 15s and after the fast data is on
@@ -665,6 +672,12 @@ final class LinkStore: ObservableObject {
 
     /// Approve a waiting rule from its notification: the same review the
     /// inbox's checkmark runs, by memory name.
+    /// Let one held tool call through once; the agent repeats it within 10 minutes.
+    func approveHeldCall(id: String) {
+        act(["approve", id, LinkCLI.workspace],
+            success: "Approved once \u{2014} the agent can run exactly that call again in the next 10 minutes.")
+    }
+
     func markReviewedByName(_ name: String) {
         act(["review-memory", name, LinkCLI.workspace], success: "Reviewed \u{2014} its rules now apply to tool calls.")
     }

@@ -32,6 +32,11 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   cannot approve its own: `lnk approve` is a governance command the hook
   holds, and the approvals file sits in the cache directory it protects.
   Receipts count held calls and calls let through after approval.
+  LinkBar shows held calls at the top of its inbox ("Waiting for your OK",
+  with the agent, the call and the memory that held it) with an Approve once
+  button, and posts a notification with the same button the moment an
+  agent is stopped; it reads the requests straight from the workspace, so
+  no extra `lnk` process runs per refresh.
 - **Personal memory reaches the agents that have no session-start hook.**
   Windsurf, Kiro and Zed read one instruction file of their own at the
   start of every session (`~/.codeium/windsurf/memories/global_rules.md`,
