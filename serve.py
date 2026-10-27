@@ -284,6 +284,17 @@ class ThreadingLocalTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServe
     allow_reuse_address = True
 
 
+def _memory_changed() -> None:
+    """After a memory joined, changed or left the reviewed set: fresh caches and global files."""
+    _invalidate_pages_cache()
+    try:
+        from link_core.global_compile import refresh_after_memory_change
+
+        refresh_after_memory_change(WIKI_DIR)
+    except Exception:  # the memory change itself already succeeded
+        pass
+
+
 def _invalidate_pages_cache() -> None:
     global _pages_cache, _pages_cache_mtime, _pages_cache_checked_at, _forward_links_index, _fts_index, _search_backend, _cache_read_warnings
     with _cache_lock:
@@ -574,7 +585,7 @@ def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
         log_writer=_append_log,
     )
     if result["updated"]:
-        _invalidate_pages_cache()
+        _memory_changed()
     return result
 
 
@@ -589,7 +600,7 @@ def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[s
         log_writer=_append_log,
     )
     if result["updated"]:
-        _invalidate_pages_cache()
+        _memory_changed()
     return result
 
 
@@ -616,7 +627,7 @@ def _remember_memory_from_web(payload: dict[str, object]) -> dict[str, object]:
         rebuild_backlinks=lambda: bool(_rebuild_backlinks_payload().get("rebuilt")),
     )
     if result.get("created"):
-        _invalidate_pages_cache()
+        _memory_changed()
     return result
 
 
@@ -635,7 +646,7 @@ def _update_memory_from_web(payload: dict[str, object]) -> dict[str, object]:
         rebuild_backlinks=lambda: bool(_rebuild_backlinks_payload().get("rebuilt")),
     )
     if result.get("updated"):
-        _invalidate_pages_cache()
+        _memory_changed()
     return result
 
 

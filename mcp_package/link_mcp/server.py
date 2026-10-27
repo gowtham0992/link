@@ -579,6 +579,17 @@ def _clear_cache() -> None:
     _cache_checked_at = 0.0
 
 
+def _memory_changed() -> None:
+    """After a memory joined, changed or left the reviewed set: fresh caches and global files."""
+    _clear_cache()
+    try:
+        from link_core.global_compile import refresh_after_memory_change
+
+        refresh_after_memory_change(WIKI_DIR)
+    except Exception:  # the memory change itself already succeeded
+        pass
+
+
 def _build_cache() -> dict:
     global _cache, _cache_mtime, _cache_checked_at
     now = time.monotonic()
@@ -748,7 +759,7 @@ def _starter_prompts(project: str = "") -> dict[str, object]:
 
 def _migrate_wiki() -> dict[str, object]:
     payload = _core_migrate_wiki(WIKI_DIR)
-    _clear_cache()
+    _memory_changed()
     return payload
 
 
@@ -1135,7 +1146,7 @@ def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[s
         log_writer=_append_log,
     )
     if result["updated"]:
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1149,7 +1160,7 @@ def _set_memory_visibility(identifier: str, visibility: str) -> dict[str, object
         log_writer=_append_log,
     )
     if result["updated"]:
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1165,7 +1176,7 @@ def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
         rebuild_backlinks=_rebuild_memory_backlinks,
     )
     if result.get("forgotten"):
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1181,7 +1192,7 @@ def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
         log_writer=_append_log,
     )
     if result["updated"]:
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1202,7 +1213,7 @@ def _update_memory_page(
         allow_conflict=allow_conflict,
         **options,
     )
-    _clear_cache()
+    _memory_changed()
     return result
 
 
@@ -1239,7 +1250,7 @@ def _write_mcp_memory_page(
         **options,
     )
     if result.get("created"):
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1988,7 +1999,7 @@ def admin(action: str, arguments: str = "{}") -> str:
                 WIKI_DIR, _str_arg(payload, "identifier"), [] if _bool_arg(payload, "clear", False) else rules,
                 timestamp=_utc_timestamp(), records=_memory_records(), log_writer=_append_log,
             )
-            _clear_cache()
+            _memory_changed()
             return json.dumps({"surface": "slim", "tool": "admin", "action": clean_action, "ok": True, **result})
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "admin", "ok": False, "action": clean_action, "error": str(exc)})

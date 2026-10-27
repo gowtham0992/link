@@ -212,6 +212,9 @@ def select_memories(
         if injections:
             skip(record, "injection-shaped instruction: " + ", ".join(sorted(injections)))
             continue
+        if BLOCK_BEGIN in text or BLOCK_END in text:
+            skip(record, "contains Link's own block marker; compiling it would break the block")
+            continue
         if not _claim(record):
             skip(record, "no claim text")
             continue

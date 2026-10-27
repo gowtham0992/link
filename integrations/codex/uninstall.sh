@@ -17,16 +17,15 @@ else
     TARGET="AGENTS.md"
 fi
 
-if [ ! -f "$TARGET" ]; then echo "No $TARGET found"; exit 0; fi
+link_remove_instructions "$TARGET"
 
-python3 -c "
-import re, os
-text = open('$TARGET').read()
-cleaned = re.sub(r'\n*## Link — (?:Local Agent Memory|Personal Knowledge Wiki)\n.*?(?=\n## |\Z)', '', text, flags=re.DOTALL).rstrip()
-if cleaned:
-    open('$TARGET', 'w').write(cleaned + '\n')
-    print('Link section removed from $TARGET')
-else:
-    os.remove('$TARGET')
-    print('$TARGET was empty after removal — deleted')
-"
+# Link once put Codex's section in ~/AGENTS.md, which Codex never read.
+# Claude Code does read that file, so the old copy is only removed when
+# Claude Code has Link's instructions of its own (or is not installed).
+if [ "$MODE" = "--global" ] && [ -f "$HOME/AGENTS.md" ]; then
+    if [ ! -d "$HOME/.claude" ] || grep -q "^## Link — " "$HOME/.claude/CLAUDE.md" 2>/dev/null; then
+        link_remove_instructions "$HOME/AGENTS.md"
+    elif grep -q "^## Link — " "$HOME/AGENTS.md"; then
+        echo "  · Kept Link's section in ~/AGENTS.md: Claude Code reads it there"
+    fi
+fi

@@ -19,6 +19,7 @@ byte, mirroring integrations/_shared/instructions.sh.
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -96,8 +97,10 @@ Some reviewed memories carry **enforce rules**. With Link's tool hooks installed
 Otherwise, keep working normally after the cheap first recall; do not save durable memory unless the user asks or approves it.
 """
 
+# A Link section runs from its marker to the next heading of any level: a
+# person's own `# Notes` or `### Shell` after it is theirs, not Link's.
 _SECTION_PATTERN = re.compile(
-    r"(^|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\n.*?(?=\n## |\Z)",
+    r"(^|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\r?\n.*?(?=\r?\n#{1,6}[ \t]|\Z)",
     re.DOTALL,
 )
 
@@ -107,52 +110,118 @@ def find_link_section(text: str) -> str | None:
     match = _SECTION_PATTERN.search(text)
     if match is None:
         return None
-    return match.group(0).lstrip("\n")
+    return match.group(0).lstrip("\r\n")
+
+
+def _newline(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _template(newline: str) -> str:
+    return INSTRUCTIONS_TEMPLATE.rstrip().replace("\n", newline)
 
 
 def upsert_link_section(text: str) -> str:
     """Replace the Link section with the current template, preserving the rest."""
-    template = INSTRUCTIONS_TEMPLATE.rstrip()
+    newline = _newline(text)
+    template = _template(newline)
     match = _SECTION_PATTERN.search(text)
     if match:
-        prefix = "\n" if match.group(1) else ""
-        return _SECTION_PATTERN.sub(lambda _m: prefix + template, text, count=1).rstrip() + "\n"
-    separator = "\n\n" if text.strip() else ""
-    return text.rstrip() + separator + template + "\n"
+        prefix = newline if match.group(1) else ""
+        tail = text[match.end():]
+        return text[:match.start()] + prefix + template + (tail if tail.strip() else newline)
+    separator = newline * 2 if text.strip() else ""
+    return text.rstrip("\r\n") + separator + template + newline
 
 
 def remove_link_section(text: str) -> str:
     """The file without its Link section; everything else byte for byte."""
-    return _SECTION_PATTERN.sub(lambda match: match.group(1), text, count=1).strip() + "\n"
+    match = _SECTION_PATTERN.search(text)
+    if match is None:
+        return text
+    newline = _newline(text)
+    head, tail = text[:match.start()], text[match.end():]
+    if not head.strip():
+        return tail.lstrip("\r\n")
+    if not tail.strip():
+        return head.rstrip("\r\n") + newline
+    return head.rstrip("\r\n") + newline * 2 + tail.lstrip("\r\n")
+
+
+def _read_exact(path: Path) -> str | None:
+    """The file's text exactly, None when absent; ValueError when it is not UTF-8 (never guessed at)."""
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    return data.decode("utf-8")
+
+
+def _write_exact(path: Path, text: str) -> None:
+    from .files import atomic_write_bytes
+
+    mode = path.stat().st_mode & 0o777 if path.exists() else None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(path, text.encode("utf-8"))
+    if mode is not None:
+        os.chmod(path, mode)
+
+
+def codex_home(home: Path) -> Path:
+    """Where Codex keeps its global files: $CODEX_HOME, else ~/.codex."""
+    configured = os.environ.get("CODEX_HOME")
+    return Path(configured).expanduser() if configured else home / ".codex"
+
+
+def _instruction_path(agent: str, base: Path) -> Path | None:
+    if agent == "codex":
+        return codex_home(base) / "AGENTS.md"
+    rel = AGENT_INSTRUCTION_FILES.get(agent)
+    return base / rel if rel is not None else None
 
 
 def migrate_codex_instructions(home: Path | None = None, *, write: bool = True) -> dict[str, object]:
-    """Move Link's Codex section from ~/AGENTS.md, where Codex never looks, to ~/.codex/AGENTS.md.
+    """Give Codex Link's section where it reads it ($CODEX_HOME/AGENTS.md, default ~/.codex).
 
-    Only Link's own section moves; the rest of ~/AGENTS.md stays, and the
-    file is removed only if Link's section was all it held.
+    Link used to write it to ~/AGENTS.md, which Codex never reads. Claude
+    Code does read that file (as a parent folder of projects under the home
+    directory), and may have no other copy of Link's instructions: the
+    section is moved out of ~/AGENTS.md only when ~/.claude/CLAUDE.md
+    carries it too, and copied otherwise. Only Link's own section is ever
+    touched; files that are not UTF-8 are left alone, and line endings and
+    permissions are kept.
     """
     base = (home or Path.home()).expanduser()
     old = base / "AGENTS.md"
-    new = base / AGENT_INSTRUCTION_FILES["codex"]
+    new = codex_home(base) / "AGENTS.md"
     result: dict[str, object] = {"from": str(old), "to": str(new), "moved": False}
+    override = new.with_name("AGENTS.override.md")
     try:
-        text = old.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+        old_text = _read_exact(old)
+        new_text = _read_exact(new)
+        claude_text = _read_exact(base / AGENT_INSTRUCTION_FILES["claude-code"])
+        if override.exists() and override.read_text(encoding="utf-8", errors="replace").strip():
+            result["override"] = str(override)  # Codex reads that one instead of AGENTS.md
+    except (OSError, ValueError) as exc:
+        result["error"] = f"left alone: {exc}"
         return result
-    if find_link_section(text) is None:
+    if old_text is None or find_link_section(old_text) is None:
         return result
     result["needed"] = True
+    if new_text is not None and find_link_section(new_text) is not None:
+        result["needed"] = False  # Codex already has it; leave ~/AGENTS.md to Claude Code
+        return result
+    keep_old = claude_text is None or find_link_section(claude_text) is None
+    result["kept_for_claude_code"] = keep_old
     if not write:
         return result
-    new.parent.mkdir(parents=True, exist_ok=True)
-    existing = new.read_text(encoding="utf-8", errors="replace") if new.exists() else ""
-    new.write_text(upsert_link_section(existing), encoding="utf-8")
-    rest = remove_link_section(text)
-    if rest.strip():
-        old.write_text(rest, encoding="utf-8")
-    else:
-        old.unlink()
+    _write_exact(new, upsert_link_section(new_text or ""))
+    if not keep_old:
+        rest = remove_link_section(old_text)
+        if rest.strip():
+            _write_exact(old, rest)
+        else:
+            old.unlink()
     result["moved"] = True
     return result
 
@@ -160,18 +229,17 @@ def migrate_codex_instructions(home: Path | None = None, *, write: bool = True) 
 def instruction_file_status(agent: str, home: Path | None = None) -> dict[str, object]:
     """Whether this agent's Link instruction section exists and is current."""
     base = (home or Path.home()).expanduser()
-    rel = AGENT_INSTRUCTION_FILES.get(agent)
-    if rel is None:
+    path = _instruction_path(agent, base)
+    if path is None:
         return {"agent": agent, "present": False, "stale": False, "path": ""}
-    path = base / rel
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return {"agent": agent, "present": False, "stale": False, "path": str(path)}
-    section = find_link_section(text)
+        text = _read_exact(path)
+    except (OSError, ValueError):
+        text = None
+    section = find_link_section(text) if text is not None else None
     if section is None:
         return {"agent": agent, "present": False, "stale": False, "path": str(path)}
-    stale = section.rstrip() != INSTRUCTIONS_TEMPLATE.rstrip()
+    stale = section.replace("\r\n", "\n").rstrip() != INSTRUCTIONS_TEMPLATE.rstrip()
     return {"agent": agent, "present": True, "stale": stale, "path": str(path)}
 
 
@@ -181,6 +249,6 @@ def refresh_instruction_file(agent: str, home: Path | None = None) -> dict[str, 
     if not status["present"] or not status["stale"]:
         return {**status, "refreshed": False}
     path = Path(str(status["path"]))
-    text = path.read_text(encoding="utf-8", errors="replace")
-    path.write_text(upsert_link_section(text), encoding="utf-8")
+    text = _read_exact(path) or ""
+    _write_exact(path, upsert_link_section(text))
     return {**status, "stale": False, "refreshed": True}

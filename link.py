@@ -1457,7 +1457,11 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
     else:
         verb = "Would update" if (check or dry_run) else "Updated"
         for rel in sorted(plan.files):
-            print(f"{verb}: ~/{rel} ({len(plan.included.get(_global_key(rel), []))} memories)")
+            if plan.files[rel] is None:
+                print(f"{'Would remove' if (check or dry_run) else 'Removed'}: ~/{rel} (no memory left for it)")
+            else:
+                count = len(plan.included.get(_global_key(rel), []))
+                print(f"{verb}: ~/{rel} ({count} {'memory' if count == 1 else 'memories'})")
         for rel in plan.unchanged:
             print(f"Up to date: ~/{rel}")
         if not plan.files and not plan.unchanged:
@@ -1473,33 +1477,24 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
 # Commands after which a memory may have joined, changed or left the reviewed set.
 _MEMORY_CHANGING_COMMANDS = {
     "review-memory", "archive-memory", "restore-memory", "forget-memory", "update-memory", "remember",
-    "accept-capture", "set-memory-visibility", "sync", "team-sync", "import",
+    "accept-capture", "set-memory-visibility", "sync", "team-sync", "import", "enforce", "restore-backup",
+    "migrate",
 }
 
 
 def _refresh_global_files(target: Path, home: Path | None = None) -> None:
     """Keep the global files `lnk compile --global` wrote in step with the reviewed memories.
 
-    Only files that already carry Link's block are rewritten, so nothing new
-    appears in a person's home directory without `lnk compile --global` or
-    `lnk setup`. A forgotten or archived memory leaves those files here,
-    not at the next setup. Never fails the command that triggered it.
+    Only the personal workspace feeds them, so a change in some other
+    workspace (a team's, a scratch one) never rewrites a person's global
+    files. Only files that already carry Link's block are rewritten, so
+    nothing new appears in a home directory without `lnk compile --global`.
+    Never fails the command that triggered it.
     """
     try:
-        from link_core.compile import BLOCK_BEGIN
-        from link_core.global_compile import GLOBAL_TARGETS, apply_global_plan, plan_global_compile
+        from link_core.global_compile import refresh_after_memory_change
 
-        base = (home or Path.home()).expanduser()
-        owned = []
-        for global_target in GLOBAL_TARGETS:
-            try:
-                if BLOCK_BEGIN in (base / global_target.path).read_text(encoding="utf-8"):
-                    owned.append(global_target.key)
-            except (OSError, UnicodeDecodeError):
-                continue
-        wiki_dir = _resolve_wiki_dir(target)
-        if owned and wiki_dir.exists():
-            apply_global_plan(plan_global_compile(_core_memory_records(wiki_dir), base, targets=owned))
+        refresh_after_memory_change(_resolve_wiki_dir(target), home)
     except Exception as exc:  # the memory change itself already succeeded
         print(f"Could not refresh compiled global instruction files: {exc}", file=sys.stderr)
 
@@ -4324,16 +4319,24 @@ def setup(
     if code == 0 and not preview:
         # Windsurf, Kiro and Zed have no session-start hook: their global
         # instruction file is how personal memory reaches them unasked.
-        global_wiki = _resolve_wiki_dir(target)
-        if not global_wiki.exists():
-            global_wiki = _resolve_wiki_dir(_default_workspace())
-        if global_wiki.exists():
-            from link_core.global_compile import apply_global_plan, plan_global_compile
+        # Setup only refreshes files the person already chose with
+        # `lnk compile --global`; it never creates one in their home.
+        from link_core.global_compile import detected_global_targets, owned_global_targets, refresh_global_files
 
-            global_plan = plan_global_compile(_core_memory_records(global_wiki), Path.home())
-            for written in apply_global_plan(global_plan):
+        personal_wiki = _resolve_wiki_dir(_default_workspace())
+        if personal_wiki.exists():
+            for written in refresh_global_files(_core_memory_records(personal_wiki)):
                 if not json_output:
-                    _print_text(f"Compiled reviewed personal memory into {written}")
+                    _print_text(f"Refreshed reviewed personal memory in {written}")
+        from link_core.global_compile import GLOBAL_TARGETS
+
+        owned = owned_global_targets(Path.home())
+        unwritten = [t.agent for t in GLOBAL_TARGETS
+                     if t.key in detected_global_targets(Path.home()) and t.key not in owned]
+        if unwritten and not json_output:
+            names = " and ".join(unwritten) if len(unwritten) < 3 else ", ".join(unwritten[:-1]) + " and " + unwritten[-1]
+            _print_text(f"{names} cannot load your memory at session start. `lnk compile --global` writes your "
+                        "reviewed personal memory into their global rules (preview it with --dry-run).")
     if code == 0 and not preview and not no_semantic:
         # Meaning-based recall by default: the measured gap between the
         # lexical default (hit@1 0.589) and the fast tier (0.703) is the
@@ -4953,7 +4956,7 @@ _WORKSPACE_COMMANDS = {
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale", "receipt",
-    "verify-mcp", "connect",
+    "verify-mcp", "connect", "compile",
 }
 
 

@@ -1,4 +1,5 @@
 """Stale agent instruction files: detected, refreshed, never invented."""
+import os
 import sys
 import tempfile
 import unittest
@@ -111,28 +112,46 @@ class CodexInstructionsMoveTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name)
+        self._codex_home = os.environ.pop("CODEX_HOME", None)
 
     def tearDown(self):
+        if self._codex_home is not None:
+            os.environ["CODEX_HOME"] = self._codex_home
         self.temp.cleanup()
 
-    def test_only_links_section_moves_and_the_rest_stays(self):
+    def _claude_has_link(self):
+        claude = self.home / ".claude" / "CLAUDE.md"
+        claude.parent.mkdir(parents=True, exist_ok=True)
+        claude.write_text("# Mine\n\n" + INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+
+    def test_only_links_section_moves_and_everything_after_it_stays(self):
+        self._claude_has_link()
         old = self.home / "AGENTS.md"
-        old.write_text("# My notes\n\nKeep PRs small.\n\n" + OLD_ERA_SECTION, encoding="utf-8")
+        mine_after = "# Personal rules (not Link)\n- Never push to main.\n\n### Shell\n- Use zsh.\n"
+        old.write_text("   indented first line\n\n" + OLD_ERA_SECTION + "\n" + mine_after, encoding="utf-8")
         preview = migrate_codex_instructions(self.home, write=False)
         self.assertTrue(preview["needed"])
         self.assertFalse(preview["moved"])
-        self.assertIsNotNone(find_link_section(old.read_text(encoding="utf-8")), "a preview changes nothing")
-
-        result = migrate_codex_instructions(self.home)
-        self.assertTrue(result["moved"])
+        self.assertTrue(migrate_codex_instructions(self.home)["moved"])
         moved = (self.home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertEqual(find_link_section(moved).rstrip(), INSTRUCTIONS_TEMPLATE.rstrip(), "current template, not the old one")
+        self.assertEqual(find_link_section(moved).rstrip(), INSTRUCTIONS_TEMPLATE.rstrip(), "current template")
         rest = old.read_text(encoding="utf-8")
-        self.assertIn("Keep PRs small.", rest)
+        self.assertTrue(rest.startswith("   indented first line"), "nothing of the person's is stripped")
+        self.assertIn(mine_after, rest, "headings of any level after Link's section are the person's")
         self.assertIsNone(find_link_section(rest))
         self.assertFalse(migrate_codex_instructions(self.home)["moved"], "nothing left to move")
 
+    def test_claude_code_keeps_its_copy_when_it_has_no_other(self):
+        old = self.home / "AGENTS.md"
+        old.write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+        result = migrate_codex_instructions(self.home)
+        self.assertTrue(result["moved"])
+        self.assertTrue(result["kept_for_claude_code"])
+        self.assertIsNotNone(find_link_section(old.read_text(encoding="utf-8")), "Claude Code still reads it here")
+        self.assertIsNotNone(find_link_section((self.home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")))
+
     def test_a_file_that_held_only_links_section_is_removed(self):
+        self._claude_has_link()
         (self.home / "AGENTS.md").write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
         codex = self.home / ".codex" / "AGENTS.md"
         codex.parent.mkdir()
@@ -142,6 +161,32 @@ class CodexInstructionsMoveTests(unittest.TestCase):
         text = codex.read_text(encoding="utf-8")
         self.assertIn("# Codex house rules", text, "what was already there is kept")
         self.assertIsNotNone(find_link_section(text))
+
+    def test_line_endings_bytes_and_permissions_are_kept(self):
+        self._claude_has_link()
+        old = self.home / "AGENTS.md"
+        old.write_bytes(("# Mine\r\n\r\n" + OLD_ERA_SECTION.replace("\n", "\r\n") + "\r\n# After\r\nok\r\n").encode())
+        os.chmod(old, 0o644)
+        migrate_codex_instructions(self.home)
+        self.assertEqual(old.read_bytes(), b"# Mine\r\n\r\n# After\r\nok\r\n")
+        self.assertEqual(old.stat().st_mode & 0o777, 0o644)
+        latin1 = self.home / "AGENTS.md"
+        latin1.write_bytes(b"caf\xe9\n\n" + OLD_ERA_SECTION.encode())
+        result = migrate_codex_instructions(self.home)
+        self.assertFalse(result["moved"])
+        self.assertIn("left alone", result["error"])
+        self.assertEqual(latin1.read_bytes(), b"caf\xe9\n\n" + OLD_ERA_SECTION.encode(), "never rewritten")
+
+    def test_codex_home_is_honoured(self):
+        self._claude_has_link()
+        (self.home / "AGENTS.md").write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+        os.environ["CODEX_HOME"] = str(self.home / "elsewhere")
+        try:
+            result = migrate_codex_instructions(self.home)
+        finally:
+            del os.environ["CODEX_HOME"]
+        self.assertEqual(result["to"], str(self.home / "elsewhere" / "AGENTS.md"))
+        self.assertTrue((self.home / "elsewhere" / "AGENTS.md").exists())
 
     def test_a_home_without_links_section_is_left_alone(self):
         (self.home / "AGENTS.md").write_text("# Mine only\n", encoding="utf-8")

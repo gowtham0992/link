@@ -19,28 +19,36 @@ function Link-UpsertInstructions {
     )
 
     Link-NewParentDirectory $Target
-    $source = (Get-Content -Raw -Encoding UTF8 $SourceFile).TrimEnd()
+    # Link's section ends at the next heading of any level; everything else in
+    # the file keeps its bytes and line endings, and is written without a BOM.
+    $source = (Get-Content -Raw -Encoding UTF8 $SourceFile).TrimEnd("`r", "`n")
     $existing = ""
     if (Test-Path $Target) {
-        $existing = Get-Content -Raw -Encoding UTF8 $Target
+        $existing = [System.IO.File]::ReadAllText((Resolve-Path $Target).Path, (New-Object System.Text.UTF8Encoding($false, $true)))
     }
 
     $headers = @("## Link — Local Agent Memory", "## Link — Personal Knowledge Wiki")
     $headerPattern = ($headers | ForEach-Object { [regex]::Escape($_) }) -join "|"
-    $pattern = "(?s)(^|`n)(?:$headerPattern)`n.*?(?=`n## |\z)"
+    $pattern = "(?s)(^|`n)(?:$headerPattern)`r?`n.*?(?=`r?`n#{1,6}[ `t]|\z)"
+    $newline = if ($existing.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $block = ($source -replace "`r?`n", "`n") -replace "`n", $newline
 
-    if ([regex]::IsMatch($existing, $pattern)) {
-        $updated = [regex]::Replace($existing, $pattern, {
-            param($match)
-            $prefix = if ($match.Groups[1].Value) { "`n" } else { "" }
-            return $prefix + $source
-        }).TrimEnd() + "`n"
+    if (-not $existing.Trim()) {
+        $updated = $block + $newline
+    } elseif ([regex]::IsMatch($existing, $pattern)) {
+        $match = [regex]::Match($existing, $pattern)
+        $updated = $existing.Substring(0, $match.Index) + $match.Groups[1].Value + $block + $existing.Substring($match.Index + $match.Length)
     } else {
-        $separator = if ($existing.Trim()) { "`n`n" } else { "" }
-        $updated = $existing.TrimEnd() + $separator + $source + "`n"
+        $separator = if ($existing.EndsWith($newline + $newline)) { "" } elseif ($existing.EndsWith($newline)) { $newline } else { $newline + $newline }
+        $updated = $existing + $separator + $block + $newline
     }
 
-    Set-Content -Encoding UTF8 -NoNewline -Path $Target -Value $updated
+    if ($updated -ne $existing) {
+        $full = [System.IO.Path]::GetFullPath($Target)
+        $temp = "$full.link-tmp"
+        [System.IO.File]::WriteAllText($temp, $updated, (New-Object System.Text.UTF8Encoding($false)))
+        Move-Item -Force -Path $temp -Destination $full
+    }
     Write-Host "$Label -> $Target"
 }
 
