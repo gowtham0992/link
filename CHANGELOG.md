@@ -49,6 +49,18 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   fenced to a project, path or task stay out. When a memory is reviewed,
   archived, forgotten or changed, the files Link already wrote follow at
   once, not at the next setup.
+- **`lnk stale --wiki`: is the compiled wiki still standing on its
+  sources?** Agents write the wiki from raw sources, and it goes wrong in
+  the ways people building on the LLM-wiki pattern report most. The check
+  lists pages that cite a source whose raw file changed after it was
+  compiled - every page built on an edited note, not just its source page -
+  citations to pages that do not exist, pages whose every citation is
+  another wiki page (so nothing they claim reaches `raw/`), and pairs of
+  pages that look like one concept written twice (a shared title or alias,
+  or half the shorter page's text in the other). Deterministic, read-only,
+  no repository needed. Quiet on the demo wiki and on a 23-page personal
+  wiki; every planted case caught. A small sample, so the precision claim is
+  modest until more wikis are measured.
 - When Cursor runs the hooks in `~/.claude/settings.json` (it does by
   default) and Link has installed its own Cursor hooks too, the Claude copy
   stands down, so a call is checked once and the brief arrives once.

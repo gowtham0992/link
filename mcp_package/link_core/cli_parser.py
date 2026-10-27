@@ -615,6 +615,11 @@ def build_cli_parser(
         "--instructions", action="store_true",
         help="check the repository's agent instruction files (AGENTS.md, CLAUDE.md, rules) instead of memories",
     )
+    stale_cmd.add_argument(
+        "--wiki", action="store_true",
+        help="check the compiled wiki instead: pages citing a source that changed or does not exist, pages "
+             "supported only by other wiki pages, and likely duplicates (no repository needed)",
+    )
     stale_cmd.add_argument("--json", action="store_true", help="machine-readable report")
 
     compile_cmd = sub.add_parser(
@@ -1102,7 +1107,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["receipt"](Path(args.target), sessions=int(args.sessions), json_output=bool(args.json))
     if command == "stale":
         return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json),
-                                 instructions=bool(args.instructions))
+                                 instructions=bool(args.instructions), wiki=bool(args.wiki))
     if command == "compile":
         return handlers["compile"](
             Path(args.target), repo=Path(args.repo), targets=str(args.targets), check=bool(args.check),

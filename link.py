@@ -1394,6 +1394,43 @@ def compile_memories(
     return 0
 
 
+_WIKI_FINDING_LABELS = {
+    "cites-changed-source": "Cites a source that changed after it was compiled",
+    "source-changed": "Source page older than its raw file",
+    "cites-missing-source": "Cites a source that does not exist",
+    "wiki-only-support": "Supported only by other wiki pages",
+    "possible-duplicate": "Possible duplicate",
+}
+
+
+def _stale_wiki(root: Path, *, json_output: bool) -> int:
+    """`lnk stale --wiki`: is the compiled wiki still standing on its sources?"""
+    from link_core.wiki_integrity import wiki_findings
+
+    report = wiki_findings(root)
+    findings = report["findings"]
+    assert isinstance(findings, list)
+    if json_output:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+    if not findings:
+        print(f"Wiki checked: {report['pages_checked']} pages; every citation reaches a current source and no "
+              "two pages look like the same one.")
+        return 0
+    print(f"Wiki checked: {report['pages_checked']} pages, {len(findings)} finding(s).")
+    current = ""
+    for finding in findings:
+        label = _WIKI_FINDING_LABELS.get(str(finding["kind"]), str(finding["kind"]))
+        if label != current:
+            print(f"\n{label}:")
+            current = label
+        print(f"  {finding['page']}: {finding['evidence']}")
+        if finding.get("other"):
+            print(f"    and {finding['other']}")
+    print("\nRe-read the changed sources and refresh the pages that cite them; nothing was rewritten.")
+    return 0
+
+
 def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool, json_output: bool,
                     home: Path | None = None) -> int:
     """`lnk compile --global`: personal memory into agents' global instruction files."""
@@ -1472,7 +1509,8 @@ def _global_key(rel: str) -> str:
     return next((target.key for target in GLOBAL_TARGETS if target.path == rel), "")
 
 
-def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False) -> int:
+def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False,
+          wiki: bool = False) -> int:
     """Report memories that name repository paths git no longer has.
 
     Read-only by design. A memory that mentions something that moved is a
@@ -1484,6 +1522,8 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, in
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
+    if wiki:
+        return _stale_wiki(_resolve_link_root(target), json_output=json_output)
     repo_dir = Path(repo).expanduser().resolve()
     inside = subprocess.run(
         ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
