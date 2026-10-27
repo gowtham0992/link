@@ -635,6 +635,11 @@ def build_cli_parser(
     compile_cmd.add_argument("--include-private", action="store_true", dest="include_private",
                              help="also write private memories (these files are usually committed)")
     compile_cmd.add_argument("--project", default="", help="project slug (default: the repository folder name)")
+    compile_cmd.add_argument(
+        "--global", action="store_true", dest="global_files",
+        help="write your reviewed personal memory into the global instruction file of agents with no "
+             "session-start hook (Windsurf, Kiro, Zed); --targets then picks among windsurf, kiro, zed",
+    )
     compile_cmd.add_argument("--json", action="store_true", help="machine-readable plan and result")
 
     verify_mcp_cmd = sub.add_parser(
@@ -1102,7 +1107,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["compile"](
             Path(args.target), repo=Path(args.repo), targets=str(args.targets), check=bool(args.check),
             dry_run=bool(args.dry_run), include_private=bool(args.include_private), project=str(args.project),
-            json_output=bool(args.json),
+            json_output=bool(args.json), global_files=bool(args.global_files),
         )
     if command == "verify-mcp":
         from .mcp_connect import agent_alias_matches

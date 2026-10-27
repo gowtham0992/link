@@ -1333,6 +1333,7 @@ def compile_memories(
     include_private: bool = False,
     project: str = "",
     json_output: bool = False,
+    global_files: bool = False,
 ) -> int:
     """Render reviewed memories into this repository's agent instruction files."""
     from link_core.compile import TARGET_KEYS, apply_plan, plan_changes, plan_compile, plan_diff, plan_summary
@@ -1340,6 +1341,8 @@ def compile_memories(
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
+    if global_files:
+        return _compile_global(wiki_dir, targets=targets, check=check, dry_run=dry_run, json_output=json_output)
     repo_dir = Path(repo).expanduser().resolve()
     if not repo_dir.is_dir():
         print(f"{repo_dir} is not a directory", file=sys.stderr)
@@ -1389,6 +1392,84 @@ def compile_memories(
     if check:
         return 1 if changes else 0
     return 0
+
+
+def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool, json_output: bool,
+                    home: Path | None = None) -> int:
+    """`lnk compile --global`: personal memory into agents' global instruction files."""
+    from link_core.global_compile import GLOBAL_TARGET_KEYS, apply_global_plan, plan_global_compile
+
+    chosen = [key.strip() for key in targets.split(",") if key.strip()] if targets else None
+    if chosen == ["all"]:
+        chosen = list(GLOBAL_TARGET_KEYS)
+    unknown = [key for key in chosen or [] if key not in GLOBAL_TARGET_KEYS]
+    if unknown:
+        print(f"Unknown global target(s): {', '.join(unknown)}. Choose from: {', '.join(GLOBAL_TARGET_KEYS)}",
+              file=sys.stderr)
+        return 2
+    plan = plan_global_compile(_core_memory_records(wiki_dir), home or Path.home(), targets=chosen)
+    written = [] if (check or dry_run) else apply_global_plan(plan)
+    summary = {
+        "mode": "check" if check else "dry-run" if dry_run else "write",
+        "changed": sorted(plan.files), "unchanged": plan.unchanged, "written": written,
+        "included": plan.included, "dropped": plan.dropped, "excluded": plan.excluded, "conflicts": plan.conflicts,
+    }
+    if json_output:
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    else:
+        verb = "Would update" if (check or dry_run) else "Updated"
+        for rel in sorted(plan.files):
+            print(f"{verb}: ~/{rel} ({len(plan.included.get(_global_key(rel), []))} memories)")
+        for rel in plan.unchanged:
+            print(f"Up to date: ~/{rel}")
+        if not plan.files and not plan.unchanged:
+            print("No global instruction files to write: no Windsurf, Kiro or Zed install found "
+                  "(or nothing reviewed and personal yet). Pass --targets windsurf,kiro,zed to write anyway.")
+        for item in plan.dropped:
+            print(f"Left out of {item['target']} (size limit): {item['name']} - {item['reason']}")
+        for item in plan.conflicts:
+            print(f"Not touched: ~/{item['path']} - {item['reason']}")
+    return 1 if check and plan.files else 0
+
+
+# Commands after which a memory may have joined, changed or left the reviewed set.
+_MEMORY_CHANGING_COMMANDS = {
+    "review-memory", "archive-memory", "restore-memory", "forget-memory", "update-memory", "remember",
+    "accept-capture", "set-memory-visibility", "sync", "team-sync", "import",
+}
+
+
+def _refresh_global_files(target: Path, home: Path | None = None) -> None:
+    """Keep the global files `lnk compile --global` wrote in step with the reviewed memories.
+
+    Only files that already carry Link's block are rewritten, so nothing new
+    appears in a person's home directory without `lnk compile --global` or
+    `lnk setup`. A forgotten or archived memory leaves those files here,
+    not at the next setup. Never fails the command that triggered it.
+    """
+    try:
+        from link_core.compile import BLOCK_BEGIN
+        from link_core.global_compile import GLOBAL_TARGETS, apply_global_plan, plan_global_compile
+
+        base = (home or Path.home()).expanduser()
+        owned = []
+        for global_target in GLOBAL_TARGETS:
+            try:
+                if BLOCK_BEGIN in (base / global_target.path).read_text(encoding="utf-8"):
+                    owned.append(global_target.key)
+            except (OSError, UnicodeDecodeError):
+                continue
+        wiki_dir = _resolve_wiki_dir(target)
+        if owned and wiki_dir.exists():
+            apply_global_plan(plan_global_compile(_core_memory_records(wiki_dir), base, targets=owned))
+    except Exception as exc:  # the memory change itself already succeeded
+        print(f"Could not refresh compiled global instruction files: {exc}", file=sys.stderr)
+
+
+def _global_key(rel: str) -> str:
+    from link_core.global_compile import GLOBAL_TARGETS
+
+    return next((target.key for target in GLOBAL_TARGETS if target.path == rel), "")
 
 
 def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False) -> int:
@@ -4184,6 +4265,19 @@ def setup(
             _print_text(f"Instruction file is stale (would refresh): {path}")
         for path in refreshed_instructions:
             _print_text(f"Refreshed Link instructions: {path}")
+    if code == 0 and not preview:
+        # Windsurf, Kiro and Zed have no session-start hook: their global
+        # instruction file is how personal memory reaches them unasked.
+        global_wiki = _resolve_wiki_dir(target)
+        if not global_wiki.exists():
+            global_wiki = _resolve_wiki_dir(_default_workspace())
+        if global_wiki.exists():
+            from link_core.global_compile import apply_global_plan, plan_global_compile
+
+            global_plan = plan_global_compile(_core_memory_records(global_wiki), Path.home())
+            for written in apply_global_plan(global_plan):
+                if not json_output:
+                    _print_text(f"Compiled reviewed personal memory into {written}")
     if code == 0 and not preview and not no_semantic:
         # Meaning-based recall by default: the measured gap between the
         # lexical default (hit@1 0.589) and the fast tier (0.703) is the
@@ -4884,7 +4978,7 @@ def main(argv: list[str] | None = None) -> int:
     _apply_default_workspace(args)
     _configure_link_command_display()
     try:
-        return _core_dispatch_cli_command(args, {
+        code = _core_dispatch_cli_command(args, {
             "init": init_wiki,
             "serve": serve_wiki,
             "demo": create_demo,
@@ -4958,6 +5052,9 @@ def main(argv: list[str] | None = None) -> int:
             "disconnect": disconnect_agent,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,
         })
+        if code == 0 and getattr(args, "command", "") in _MEMORY_CHANGING_COMMANDS:
+            _refresh_global_files(Path(str(getattr(args, "target", "."))))
+        return code
     except ValueError as exc:
         parser.error(str(exc))
         return 2

@@ -32,6 +32,18 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   cannot approve its own: `lnk approve` is a governance command the hook
   holds, and the approvals file sits in the cache directory it protects.
   Receipts count held calls and calls let through after approval.
+- **Personal memory reaches the agents that have no session-start hook.**
+  Windsurf, Kiro and Zed read one instruction file of their own at the
+  start of every session (`~/.codeium/windsurf/memories/global_rules.md`,
+  `~/.kiro/steering/`, `~/.config/zed/AGENTS.md`), and Link had no way to
+  hand them the brief. `lnk compile --global` (and `lnk setup`, for the
+  agents it finds) writes your reviewed personal memories there, in one
+  Link-owned block that keeps the rest of the file byte for byte and fits
+  the vendor's limit for the whole file (Windsurf: 6,000 characters,
+  counting what you wrote). Project memories, unreviewed ones and memories
+  fenced to a project, path or task stay out. When a memory is reviewed,
+  archived, forgotten or changed, the files Link already wrote follow at
+  once, not at the next setup.
 - When Cursor runs the hooks in `~/.claude/settings.json` (it does by
   default) and Link has installed its own Cursor hooks too, the Claude copy
   stands down, so a call is checked once and the brief arrives once.

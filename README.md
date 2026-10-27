@@ -58,13 +58,16 @@ What each agent gets depends on what it lets Link plug into:
 | Gemini CLI | start hook, MCP, `GEMINI.md` | start | shell, file reads and writes; asks you | no |
 | Antigravity | start hook, MCP | start | shell, file reads and writes; asks you | no |
 | Copilot CLI and VS Code | start hook, MCP, compiled files | start | shell, file reads and writes; asks you | no |
-| Windsurf | MCP, compiled rules | none (no such event) | shell, file reads and writes (held) | no |
+| Windsurf | MCP, global rules file, compiled rules | none (no such event) | shell, file reads and writes (held) | no |
 | Devin CLI | Claude Code's hooks, which it runs | start, end | shell and files (held) | no |
-| Kiro, Zed | MCP, instruction files | no | no | no |
+| Kiro, Zed | MCP, global steering / `AGENTS.md` file | no | no | no |
 
 "Asks you": the agent shows you the call and waits. "Held": the agent can
 only allow or block, so Link blocks the call and the agent asks you in chat;
-`lnk approve <id>` lets that exact call through once. Recall, review, stale
+`lnk approve <id>` lets that exact call through once. For agents with no
+session-start hook, `lnk compile --global` (run by `lnk setup`) writes your
+reviewed personal memory into the instruction file they read every session,
+and keeps it in step as memories change. Recall, review, stale
 checks, receipts, sync and `lnk compile` work the same for every agent.
 Enforcement is measured end to end on Claude Code; on the others it follows
 each vendor's documented hook schema and is new in 6.0 - report what you see.

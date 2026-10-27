@@ -290,14 +290,17 @@ def _render_list(records: list[Mapping[str, object]]) -> str:
     return "\n\n".join(parts)
 
 
+REPOSITORY_INTRO = ("Reviewed memory for this repository, compiled by Link. These are the user's standing "
+                    "decisions and preferences; follow them.")
+
+
 def render_block(records: list[Mapping[str, object]],
-                 scoped: list[tuple[Mapping[str, object], list[str]]] | None = None) -> str:
+                 scoped: list[tuple[Mapping[str, object], list[str]]] | None = None,
+                 intro: str = REPOSITORY_INTRO) -> str:
     body = _render_list(records)
     if scoped:
         lines = [f"- `{', '.join(globs)}`: {_claim(record)}" for record, globs in scoped]
         body = (body + "\n\n" if body else "") + "### When working on these files\n\n" + "\n".join(lines)
-    intro = ("Reviewed memory for this repository, compiled by Link. These are the user's standing "
-             "decisions and preferences; follow them.")
     return f"{BLOCK_BEGIN}\n## Link memory\n\n{intro}\n\n{body}\n{BLOCK_END}\n"
 
 
