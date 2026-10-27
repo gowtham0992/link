@@ -655,15 +655,17 @@ struct PopoverView: View {
                 HoverRow {
                     HStack(alignment: .center, spacing: 8) {
                         VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 5) {
+                                HStack(alignment: .top, spacing: 5) {
                                 Image(systemName: call.kind == "command" ? "terminal"
                                       : call.kind == "write" ? "square.and.pencil" : "doc.text")
                                     .font(.system(size: 10.5))
                                     .foregroundStyle(LinkBrand.amber)
-                                Text(call.value)
+                                // The whole call, wrapped, never truncated: approving
+                                // something you could not fully see is not approving it.
+                                Text(call.display)
                                     .font(.system(size: 11.5, design: .monospaced))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
                             }
                             Text("\(call.agentName) \u{00B7} \(call.title)")
                                 .font(.caption2)

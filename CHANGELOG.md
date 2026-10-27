@@ -28,9 +28,19 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   those agents the call is now held: blocked with a message telling the
   agent to ask you in chat, and `lnk approve <id>` lets that exact call
   through once within ten minutes (`lnk approve` alone lists what is
-  waiting). An approval covers one call, is used up by it, and an agent
-  cannot approve its own: `lnk approve` is a governance command the hook
-  holds, and the approvals file sits in the cache directory it protects.
+  waiting). An approval covers one whole call - every command, read and
+  write it names, from the same directory, exactly as sent - and is used up
+  by it. An agent cannot approve its own: `lnk approve` and the other
+  governance commands are recognised from the parsed command however they
+  are started (`lnk`, `link.py` by any path or interpreter flags,
+  `python -m link_cli`, `uv run`, `pipx run`, a program named by a variable
+  or substitution), and they win over any approval; writes to the
+  approvals file and the memory files are seen through `cd`, `mv`, `rm`,
+  `find -delete`, `dd`, `git checkout --` and folders that contain them,
+  case-insensitively on macOS and Windows. A malformed approvals file, one
+  with a second hard link, or a grant dated in the future keeps the call
+  held. What a hook cannot see it does not claim to: code an interpreter
+  runs (`python -c` that does not name Link's modules) is out of reach.
   Receipts count held calls and calls let through after approval.
   LinkBar shows held calls at the top of its inbox ("Waiting for your OK",
   with the agent, the call and the memory that held it) with an Approve once

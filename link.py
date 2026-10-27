@@ -1611,9 +1611,9 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
             return 0
         print("Tool calls waiting for your OK (each approval lets the exact call through once):")
         for row in waiting:
-            kind, _, value = str(row.get("call") or "").partition(":")
-            print(f"  {row['id']}  {kind} {value}")
-            print(f"          memory: {row.get('title')}  rule: {row.get('rule')}  agent: {row.get('agent')}")
+            print(f"\n  {row['id']}  held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')})")
+            for line in str(row.get("display") or "").splitlines():
+                print(f"      {line}")
         print(f"Approve one: {_display_command(['lnk', 'approve', '<id>', str(target)])}")
         return 0
     entry = approvals.approve(root, request_id)
@@ -1622,11 +1622,12 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
         print(json.dumps({"approved": False, "error": message}) if json_output else message,
               file=sys.stdout if json_output else sys.stderr)
         return 1
-    kind, _, value = str(entry.get("call") or "").partition(":")
     if json_output:
-        print(json.dumps({"approved": True, "id": request_id, "call": entry.get("call")}))
+        print(json.dumps({"approved": True, "id": request_id, "call": entry.get("display")}))
     else:
-        print(f"Approved once: {kind} {value}")
+        print("Approved once:")
+        for line in str(entry.get("display") or "").splitlines():
+            print(f"  {line}")
         print(f"The agent can now run exactly that again within {approvals.GRANT_MINUTES} minutes; "
               "after that, or for anything different, it asks again.")
     return 0

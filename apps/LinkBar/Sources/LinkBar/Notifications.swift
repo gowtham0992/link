@@ -51,7 +51,9 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
                                                      actions: [approveRule, review],
                                                      intentIdentifiers: [],
                                                      options: [])
-        let approveHeld = UNNotificationAction(identifier: approveHeldAction, title: "Approve once", options: [])
+        // Approving from a locked screen would let anyone at the machine do it.
+        let approveHeld = UNNotificationAction(identifier: approveHeldAction, title: "Approve once",
+                                               options: [.authenticationRequired])
         let heldCategoryDef = UNNotificationCategory(identifier: heldCategory,
                                                      actions: [approveHeld, review],
                                                      intentIdentifiers: [],
@@ -110,7 +112,7 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
             let content = UNMutableNotificationContent()
             content.title = "\(call.agentName) is waiting for your OK"
             content.subtitle = call.title
-            content.body = call.value
+            content.body = call.display
             content.categoryIdentifier = heldCategory
             content.userInfo = ["held": call.id]
             content.sound = .default

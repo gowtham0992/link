@@ -18,6 +18,7 @@ not pretend to.
 """
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -155,14 +156,28 @@ def read_shell(command: str, *, _depth: int = 0) -> ShellReading:
     text = _newlines_outside_quotes_to_semicolons(_drop_heredoc_bodies(command))
     current: list[str] = []
     pending_redirect: str | None = None
+    # `cd x && echo y > z` writes x/z: paths after a cd in the same line are
+    # read relative to where it went, so a rule on x/** still sees them.
+    here = ""
+
+    def at(target: str) -> str:
+        if not here or target.startswith(("/", "~")) or target.startswith("$"):
+            return target
+        return posixpath.join(here, target)
 
     def finish() -> None:
-        nonlocal current
+        nonlocal current, here
         words = _unwrap(current)
         current = []
         if not words:
             return
         name = words[0]
+        if name in {"cd", "pushd"}:
+            destination = next((word for word in words[1:] if not word.startswith("-")), "")
+            if destination:
+                here = destination if destination.startswith(("/", "~")) else posixpath.join(here, destination)
+            reading.commands.append(words)
+            return
         if name in _SHELLS:
             for index, word in enumerate(words[1:], start=1):
                 if word.startswith("-") and "c" in word.lstrip("-") and index + 1 < len(words):
@@ -174,19 +189,29 @@ def read_shell(command: str, *, _depth: int = 0) -> ShellReading:
         reading.commands.append(words)
         arguments = [word for word in words[1:] if not word.startswith("-")]
         if name in _READERS:
-            reading.reads.extend(arguments)
+            reading.reads.extend(at(word) for word in arguments)
         if name in _WRITERS_ALL_ARGS:
-            reading.writes.extend(arguments)
+            reading.writes.extend(at(word) for word in arguments)
         if name in {"cp", "mv", "install", "ln", "rsync"} and len(arguments) >= 2:
-            reading.writes.append(arguments[-1])
+            reading.writes.append(at(arguments[-1]))
             if name in {"cp", "rsync"}:
-                reading.reads.extend(arguments[:-1])
-        if name == "sed" and any(word.startswith("-i") for word in words[1:]):
-            reading.writes.extend(arguments[1:])
+                reading.reads.extend(at(word) for word in arguments[:-1])
+            if name == "mv":  # what is moved away is gone from where it was
+                reading.writes.extend(at(word) for word in arguments[:-1])
+        if name in {"sed", "perl"} and any(word.startswith("-i") or word.startswith("-pi") for word in words[1:]):
+            reading.writes.extend(at(word) for word in arguments[1:])
+        if name == "dd":
+            reading.writes.extend(at(word[3:]) for word in words[1:] if word.startswith("of="))
+        if name == "find" and "-delete" in words and arguments:
+            reading.writes.append(at(arguments[0]))
+        if name == "git" and "--" in words and any(word in {"checkout", "restore", "rm", "clean"} for word in words):
+            where = words[words.index("-C") + 1] if "-C" in words[:-1] else ""
+            reading.writes.extend(at(posixpath.join(where, word) if where else word)
+                                  for word in words[words.index("--") + 1:])
 
     for token in _tokens(text):
         if pending_redirect is not None:
-            (reading.reads if pending_redirect == "<" else reading.writes).append(token)
+            (reading.reads if pending_redirect == "<" else reading.writes).append(at(token))
             pending_redirect = None
             continue
         if token and set(token) <= set("<>&"):

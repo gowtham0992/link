@@ -638,8 +638,10 @@ struct MemoryReceipt: Decodable {
 /// hook writes, so showing it costs no extra lnk process per refresh.
 struct HeldCall: Identifiable, Equatable {
     let id: String
-    let kind: String   // "command", "read" or "write"
-    let value: String
+    let kind: String   // "command", "read" or "write" (of the first part of the call)
+    /// The whole call, every command, read and write it names, line breaks
+    /// kept: what the person is approving, shown in full before they do.
+    let display: String
     let title: String  // the memory whose rule held it
     let rule: String
     let agent: String
@@ -650,16 +652,17 @@ struct HeldCall: Identifiable, Equatable {
         let path = (workspace as NSString).appendingPathComponent(".link-cache/approvals.json")
         guard let data = FileManager.default.contents(atPath: path),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let requests = root["requests"] as? [String: [String: Any]] else { return [] }
+              let requests = root["requests"] as? [String: Any] else { return [] }
         let stamp = ISO8601DateFormatter()
         var calls: [HeldCall] = []
-        for (id, entry) in requests {
-            guard let call = entry["call"] as? String,
+        // One malformed entry must not hide the rest.
+        for (id, value) in requests {
+            guard let entry = value as? [String: Any],
+                  let display = entry["display"] as? String, !display.isEmpty,
                   let at = (entry["at"] as? String).flatMap(stamp.date(from:)),
                   now.timeIntervalSince(at) < 24 * 3600 else { continue }
-            let kind = call.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
-            let value = call.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? call
-            calls.append(HeldCall(id: id, kind: kind, value: value, title: entry["title"] as? String ?? "",
+            let kind = display.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+            calls.append(HeldCall(id: id, kind: kind, display: display, title: entry["title"] as? String ?? "",
                                   rule: entry["rule"] as? String ?? "", agent: entry["agent"] as? String ?? "",
                                   at: at))
         }

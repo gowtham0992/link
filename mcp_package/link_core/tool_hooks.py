@@ -29,7 +29,6 @@ import fnmatch
 import hashlib
 import json
 import os
-import re
 import sys
 from datetime import date
 from collections.abc import Iterable, Mapping, Sequence
@@ -208,26 +207,69 @@ def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Pa
 
 # Link's own commands that approve, clear, retire or rewrite a memory: with a
 # rule active, an agent running them from the shell is asking the person.
-_GOVERNANCE_RE = re.compile(
-    r"^(?:lnk|link|python\S*\s+\S*link(?:_cli)?\.py)\s+"
-    r"(?:review-memory|enforce|archive-memory|forget-memory|update-memory|restore-backup|approve)\b"
-)
+# Link's commands that turn rules on or off, or let a held call through.
+GOVERNANCE_COMMANDS = {
+    "review-memory", "enforce", "archive-memory", "forget-memory", "update-memory", "restore-backup", "approve",
+}
+# Every way Link's CLI is started: the launcher, the script (checkout or
+# workspace copy), the pip module, the package name pipx and uv know.
+_LINK_PROGRAMS = {"lnk", "lnk.exe", "link", "link.py", "link_cli", "link_cli.py", "link_hook.py", "link-mcp"}
+_LINK_MODULES = {"link_cli", "link_mcp", "link_core"}
+
+
+def is_link_governance(words: list[str]) -> bool:
+    """Does this command run one of Link's governance commands, however it is spelt?
+
+    Read from the parsed words, not the text: `python3 -u link.py approve`,
+    `python3 -m link_cli approve`, `uv run link.py approve`, a quoted path
+    with spaces, and a program named by a variable (`$L approve`) all count.
+    Code passed to an interpreter (`python -c`) is only caught when it names
+    Link's modules; anything subtler is out of a pre-tool hook's sight.
+    """
+    if not any(word in GOVERNANCE_COMMANDS for word in words) and not any(
+        module in word for word in words[1:] for module in _LINK_MODULES
+    ):
+        return False
+    if words and words[0] in GOVERNANCE_COMMANDS:
+        return True  # `$(echo lnk) approve`: the program was substituted away, the subcommand is left
+    for index, word in enumerate(words):
+        base = word.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+        if base in _LINK_PROGRAMS:
+            return True
+        if word == "-m" and index + 1 < len(words) and words[index + 1].split(".")[0] in _LINK_MODULES:
+            return True
+        if word in {"-c", "-e"} and index + 1 < len(words) and any(m in words[index + 1] for m in _LINK_MODULES):
+            return True
+        if index == 0 and ("$" in word or "`" in word):
+            return True  # the program is decided at run time
+    return False
+
+
+_CASE_FOLDING_FS = sys.platform in {"darwin", "win32"}
 
 
 def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
+    """Is the path inside one of the roots, or a folder that contains one?
+
+    Deleting or moving `wiki/` removes `wiki/memories` too, so an ancestor
+    counts. macOS and Windows file systems ignore case, so `.LINK-CACHE` is
+    `.link-cache` there.
+    """
     path = Path(str(path_text or "")).expanduser()
     if not path.is_absolute() and base is not None:
         path = base / path
     try:
-        resolved = path.resolve()
+        resolved = str(path.resolve())
     except OSError:
         return False
     for root in roots:
         try:
-            resolved.relative_to(root.resolve())
-            return True
-        except (OSError, ValueError):
+            root_text = str(root.resolve())
+        except OSError:
             continue
+        mine, theirs = (resolved.lower(), root_text.lower()) if _CASE_FOLDING_FS else (resolved, root_text)
+        if mine == theirs or mine.startswith(theirs.rstrip("/") + "/") or theirs.startswith(mine.rstrip("/") + "/"):
+            return True
     return False
 
 
@@ -251,66 +293,58 @@ def evaluate_tool_call(
     calls = tool_calls(event)
     if not calls:
         return None
-    # Every command, read and write, each remembering the call it came from:
-    # a held call is approved (approvals.py) by the exact call the agent made.
-    commands: list[tuple[str, str]] = []
-    reads: list[tuple[str, str]] = []
-    writes: list[tuple[str, str]] = []
+    commands: list[list[str]] = []
+    reads: list[str] = []
+    writes: list[str] = []
     for kind, value in calls:
-        origin = f"{kind}:{' '.join(value.split())}"
         if kind == "command":
             reading = read_shell(value)
-            commands += [(" ".join(words), origin) for words in reading.commands]
-            reads += [(target, origin) for target in reading.reads]
-            writes += [(target, origin) for target in reading.writes]
+            commands += reading.commands
+            reads += reading.reads
+            writes += reading.writes
         elif kind == "read":
-            reads.append((value, origin))
+            reads.append(value)
         else:
-            writes.append((value, origin))
+            writes.append(value)
     base = Path(context_path) if context_path else None
     rule_values = index.get("rules")
     rules = [rule for rule in (rule_values if isinstance(rule_values, list) else []) if isinstance(rule, dict)]
     matches: list[Mapping[str, object]] = []
-    origins: dict[int, str] = {}
     for rule in rules:
         if not _rule_applies(rule, project, context_path):
             continue
         rule_kind = str(rule.get("kind") or "")
         pattern = str(rule.get("pattern") or "")
-        hit: str | None = None
+        hit = False
         if rule_kind == "command":
             wanted = " ".join(pattern.split())
-            hit = next((origin for command, origin in commands if fnmatch.fnmatchcase(command, wanted)), None)
+            hit = any(fnmatch.fnmatchcase(" ".join(words), wanted) for words in commands)
         elif rule_kind in {"write", "read"}:
             targets = writes if rule_kind == "write" else reads
-            hit = next((origin for target, origin in targets if _path_matches(pattern, target, repo_root, base)), None)
-        if hit is not None:
+            hit = any(_path_matches(pattern, target, repo_root, base) for target in targets)
+        if hit:
             matches.append(rule)
-            origins[id(rule)] = hit
+    # Changing Link's own rules or files is checked whatever else the call
+    # does, and wins: an approval for one part of a call must never carry a
+    # rule change or a memory edit through with it.
     roots = list(protected)
-    governance = next((origin for command, origin in commands if _GOVERNANCE_RE.match(command)), None)
-    if not matches and rules and governance is not None:
-        rule = {
+    guards: list[Mapping[str, object]] = []
+    if rules and any(is_link_governance(words) for words in commands):
+        guards.append({
             "name": "link-governance", "title": "Only the person approves, clears or retires rules",
             "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|approve|...",
-            "approvable": False,
-        }
-        matches.append(rule)
-        origins[id(rule)] = governance
-    own_files = next((origin for target, origin in writes if roots and _under(target, roots, base)), None)
-    if not matches and rules and own_files is not None:
-        rule = {
-            "name": "link-memory-files", "title": "Link memory files change only through Link",
-            "action": "ask", "kind": "write", "pattern": "<Link memories>/**", "approvable": False,
-        }
-        matches.append(rule)
-        origins[id(rule)] = own_files
-    if not matches:
+        })
+    if rules and roots and any(_under(target, roots, base) for target in writes):
+        guards.append({
+            "name": "link-memory-files", "title": "Link memory and approval files change only through Link",
+            "action": "ask", "kind": "write", "pattern": "<Link memories and .link-cache>/**",
+        })
+    if not matches and not guards:
         return None
-    decision = "deny" if any(rule.get("action") == "deny" for rule in matches) else "ask"
-    first = next((rule for rule in matches if rule.get("action") == decision), matches[0])
-    names = sorted({str(rule.get("name") or "") for rule in matches
-                    if rule.get("name") not in {"link-memory-files", "link-governance"}})
+    every = [*guards, *matches]
+    decision = "deny" if any(rule.get("action") == "deny" for rule in every) else "ask"
+    first = guards[0] if guards else next((rule for rule in matches if rule.get("action") == decision), matches[0])
+    names = sorted({str(rule.get("name") or "") for rule in matches})
     rule_kind = str(first.get("kind") or calls[0][0])
     verb = "blocked" if decision == "deny" else "needs the person's OK"
     reason = (
@@ -323,9 +357,12 @@ def evaluate_tool_call(
         reason += " Do not work around it; tell the person, who can edit the memory if it no longer holds."
     return {
         "decision": decision, "reason": reason, "memories": names, "kind": rule_kind,
-        "call": origins.get(id(first), ""), "title": str(first.get("title") or ""),
+        "calls": sorted(calls), "title": str(first.get("title") or ""),
         "rule": f"{first.get('action')} {rule_kind}: {first.get('pattern')}",
-        "approvable": first.get("approvable", True) is not False and decision == "ask",
+        # Only a user's ask rule can be let through once; a governance or
+        # Link-file guard is for the person to do themselves.
+        "approvable": decision == "ask" and not guards,
+        "governance": bool(guards),
     }
 
 
@@ -620,27 +657,46 @@ def pre_tool_reply(target: Path, event: Mapping[str, object], *, project: str | 
 
     session = _event_session(event)
     verdict = str(decision["decision"])
+    memories = decision.get("memories")
     if verdict == "ask" and not can_ask(emit, event):
-        from . import approvals
-
-        call = str(decision.get("call") or "")
-        if decision.get("approvable") and call and approvals.take_grant(root, call):
-            verdict = "approved"
-            decision = None
-        else:
-            reason = str(decision["reason"])
-            if decision.get("approvable") and call:
-                request_id = approvals.request(root, call, title=str(decision.get("title") or ""),
-                                               rule=str(decision.get("rule") or ""), agent=emit, session=session)
-                reason = approvals.held_reason(reason, request_id)
-            verdict = "held"
-            decision = {**decision, "decision": "deny", "reason": reason}
-    memories = (decision or {}).get("memories")
+        decision, verdict = _hold(decision, root, project_dir, emit, session)
     record_retrieval(
         root, "enforce", [str(name) for name in memories] if isinstance(memories, list) else [],
         project=project_name, surface="hook", session=session, decision=verdict,
     )
-    return render_reply(decision, emit, event)
+    return render_reply(None if verdict == "approved" else decision, emit, event)
+
+
+def _hold(decision: Mapping[str, object], root: Path, cwd: str, emit: str,
+          session: str) -> tuple[dict[str, object], str]:
+    """An ask on an agent that cannot ask: let a call the person approved through once, else hold it.
+
+    Fails closed: if the approvals file cannot be read or written, the call
+    is held without a way through rather than let past the rule.
+    """
+    from . import approvals
+
+    held = dict(decision)
+    reason = str(decision["reason"])
+    if not decision.get("approvable"):
+        held.update(decision="deny", reason=approvals.self_only_reason(reason))
+        return held, "deny"
+    raw_calls = decision.get("calls")
+    calls = [(str(call[0]), str(call[1])) for call in raw_calls if isinstance(call, (list, tuple)) and len(call) == 2] \
+        if isinstance(raw_calls, list) else []
+    key = approvals.call_key(calls, cwd)
+    try:
+        if approvals.take_grant(root, key):
+            return held, "approved"
+        request_id = approvals.request(
+            root, key, display=approvals.call_display(calls, cwd), title=str(decision.get("title") or ""),
+            rule=str(decision.get("rule") or ""), agent=emit, session=session,
+        )
+        held.update(decision="deny", reason=approvals.held_reason(reason, request_id, root))
+    except Exception:  # a broken approvals file must not open the rule
+        held.update(decision="deny", reason=approvals.self_only_reason(reason)
+                    + " (Link could not record a request for the person to approve.)")
+    return held, "held"
 
 
 def pre_tool_output(target: Path, event: Mapping[str, object], *, project: str | None, emit: str) -> str:

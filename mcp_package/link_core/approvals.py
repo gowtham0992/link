@@ -8,16 +8,21 @@ request here, and tells the agent to ask the person in chat. If the person
 agrees, they run `lnk approve <id>` (or approve it in LinkBar) and the agent
 repeats the exact same call, which then goes through once.
 
-A grant is for one exact call (the same command text or file path), is
-used up by the call it lets through, and expires after a few minutes, so an
-approval never becomes a standing exception. Agents cannot approve their
-own requests: `lnk approve` is a governance command the pre-tool hook holds,
-and this file sits under the cache directory the hook protects.
+A grant is for one exact call - every command, read and write the tool
+call names, from the same directory - is used up by the call it lets
+through, and expires after a few minutes, so an approval never becomes a
+standing exception. Agents cannot approve their own requests: `lnk approve`
+is a governance command the pre-tool hook holds however it is spelt, and
+this file sits under the cache directory the hook protects. A file that is
+not well-formed, or that has a second hard link to it, is treated as empty:
+a held call then stays held.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,6 +31,21 @@ from .files import atomic_write_text_unlocked, file_lock
 GRANT_MINUTES = 10
 REQUEST_HOURS = 24
 MAX_REQUESTS = 200
+# Shorter than the hook's own 10 s timeout, so a stuck lock fails the call
+# closed (held) instead of the agent killing the hook mid-write.
+LOCK_SECONDS = 2.0
+
+
+def call_key(calls: Iterable[tuple[str, str]], cwd: str) -> str:
+    """One exact call: every command, read and write it names, as sent, from one directory."""
+    payload = json.dumps({"cwd": cwd, "calls": sorted(calls)}, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def call_display(calls: Iterable[tuple[str, str]], cwd: str) -> str:
+    """What the person approves: the whole call, line breaks kept."""
+    lines = [f"{kind}: {value}" for kind, value in sorted(calls)]
+    return "\n".join(lines + ([f"(in {cwd})"] if cwd else []))
 
 
 def approvals_path(link_root: Path) -> Path:
@@ -53,15 +73,24 @@ def _parse(value: object) -> datetime | None:
 
 
 def _load(path: Path) -> dict[str, dict[str, dict[str, object]]]:
+    empty: dict[str, dict[str, dict[str, object]]] = {"requests": {}, "grants": {}}
     try:
+        if path.stat().st_nlink > 1:
+            return empty  # a second name for this file could have written a grant
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"requests": {}, "grants": {}}
+        return empty
     if not isinstance(data, dict):
-        return {"requests": {}, "grants": {}}
-    requests = data.get("requests") if isinstance(data.get("requests"), dict) else {}
-    grants = data.get("grants") if isinstance(data.get("grants"), dict) else {}
-    return {"requests": dict(requests), "grants": dict(grants)}  # type: ignore[arg-type]
+        return empty
+    loaded = empty
+    for name in ("requests", "grants"):
+        bucket = data.get(name)
+        for key, entry in (bucket.items() if isinstance(bucket, dict) else []):
+            if isinstance(key, str) and isinstance(entry, dict) and isinstance(entry.get("at"), str) and (
+                name == "grants" or isinstance(entry.get("key"), str)
+            ):
+                loaded[name][key] = entry
+    return loaded
 
 
 def _prune(data: dict[str, dict[str, dict[str, object]]], now: datetime) -> None:
@@ -69,7 +98,7 @@ def _prune(data: dict[str, dict[str, dict[str, object]]], now: datetime) -> None
         bucket = data[name]
         for key in list(bucket):
             created = _parse(bucket[key].get("at"))
-            if created is None or now - created > ttl:
+            if created is None or now - created > ttl or created - now > timedelta(minutes=1):
                 del bucket[key]
     if len(data["requests"]) > MAX_REQUESTS:
         oldest = sorted(data["requests"], key=lambda key: str(data["requests"][key].get("at")))
@@ -77,23 +106,24 @@ def _prune(data: dict[str, dict[str, dict[str, object]]], now: datetime) -> None
             del data["requests"][key]
 
 
-def request(link_root: Path, call: str, *, title: str, rule: str, agent: str, session: str = "",
+def request(link_root: Path, key: str, *, display: str, title: str, rule: str, agent: str, session: str = "",
             now: datetime | None = None) -> str:
     """File (or re-use) a pending request for this exact call; returns its id."""
     moment = now or _now()
     path = approvals_path(link_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with file_lock(path):
+    with file_lock(path, timeout=LOCK_SECONDS):
         data = _load(path)
         _prune(data, moment)
         for request_id, entry in data["requests"].items():
-            if entry.get("call") == call:
+            if entry.get("key") == key:
                 return request_id
         request_id = secrets.token_hex(3)
         while request_id in data["requests"]:
             request_id = secrets.token_hex(3)
         data["requests"][request_id] = {
-            "call": call, "title": title, "rule": rule, "agent": agent, "session": session, "at": _stamp(moment),
+            "key": key, "display": display, "title": title, "rule": rule, "agent": agent, "session": session,
+            "at": _stamp(moment),
         }
         _save(path, data)
     return request_id
@@ -105,28 +135,28 @@ def approve(link_root: Path, request_id: str, now: datetime | None = None) -> di
     path = approvals_path(link_root)
     if not path.exists():
         return None
-    with file_lock(path):
+    with file_lock(path, timeout=LOCK_SECONDS):
         data = _load(path)
         _prune(data, moment)
         entry = data["requests"].pop(request_id.strip().lower(), None)
         if entry is None:
             _save(path, data)
             return None
-        data["grants"][str(entry["call"])] = {**entry, "at": _stamp(moment), "request": request_id}
+        data["grants"][str(entry["key"])] = {**entry, "at": _stamp(moment), "request": request_id}
         _save(path, data)
     return entry
 
 
-def take_grant(link_root: Path, call: str, now: datetime | None = None) -> bool:
+def take_grant(link_root: Path, key: str, now: datetime | None = None) -> bool:
     """Use up the grant for this exact call, if the person gave one in the last few minutes."""
     path = approvals_path(link_root)
     if not path.exists():
         return False
     moment = now or _now()
-    with file_lock(path):
+    with file_lock(path, timeout=LOCK_SECONDS):
         data = _load(path)
         _prune(data, moment)
-        granted = data["grants"].pop(call, None) is not None
+        granted = data["grants"].pop(key, None) is not None
         _save(path, data)
     return granted
 
@@ -139,12 +169,24 @@ def pending(link_root: Path, now: datetime | None = None) -> list[dict[str, obje
     return sorted(rows, key=lambda row: str(row.get("at")), reverse=True)
 
 
-def held_reason(decision_reason: str, request_id: str, command_name: str = "lnk") -> str:
+def held_reason(decision_reason: str, request_id: str, workspace: Path) -> str:
     """The block message an agent that cannot ask passes on to the person."""
+    import shlex
+
     base = decision_reason.split(" If the person approves")[0]
     return (
         f"{base} This agent cannot ask the person itself, so the call was held, not run. "
         "Do not retry it and do not work around it: tell the person what you want to run and why. "
-        f"If they agree, they approve it once with `{command_name} approve {request_id}` (or in LinkBar); "
-        "then run exactly the same call again."
+        f"If they agree, they approve it once with `lnk approve {request_id} {shlex.quote(str(workspace))}` "
+        "(or in LinkBar); then run exactly the same call again. Never run that command yourself."
+    )
+
+
+def self_only_reason(decision_reason: str) -> str:
+    """For a call only the person may make (a rule change, an edit to Link's files)."""
+    base = decision_reason.split(" If the person approves")[0]
+    return (
+        f"{base} Only the person can do this, and this agent cannot ask them itself: do not retry it. "
+        "Tell them what you wanted to do and why; they do it themselves, in their own terminal, the viewer "
+        "or LinkBar."
     )
