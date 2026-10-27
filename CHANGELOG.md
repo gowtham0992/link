@@ -61,6 +61,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   no repository needed. Quiet on the demo wiki and on a 23-page personal
   wiki; every planted case caught. A small sample, so the precision claim is
   modest until more wikis are measured.
+- The docs (getting started, security, CLI, the installers' README) describe
+  per-agent rule checks and held calls, and the Antigravity installer adds
+  hooks for Antigravity and Gemini CLI on a global install.
 - When Cursor runs the hooks in `~/.claude/settings.json` (it does by
   default) and Link has installed its own Cursor hooks too, the Claude copy
   stands down, so a call is checked once and the brief arrives once.

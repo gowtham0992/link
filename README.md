@@ -483,8 +483,9 @@ lnk connect kiro ~/link --write
 lnk verify-mcp ~/link
 ```
 
-For agents with session-hook support — Claude Code, Codex, and Cursor — add
-`--hooks` (works with `lnk onboard` too) to make the memory loop automatic:
+For agents with hook support — Claude Code, Cursor, Codex, Gemini CLI,
+Antigravity, Copilot and Windsurf — add `--hooks` (works with `lnk onboard`
+too) to make the memory loop automatic:
 the brief is injected at session start and proposal-only notes are captured at
 session end, so memory no longer depends on the agent remembering to call
 Link. Empty sessions and duplicate end events are skipped, and when the

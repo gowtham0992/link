@@ -33,10 +33,12 @@ else
 fi
 
 # ~/.gemini/settings.json is global: only a global install writes it. A
-# --project install prints the entry instead, as 3.x did.
+# --project install prints the entry instead, as 3.x did. --hooks adds the
+# session-start brief and enforced-rule checks for Antigravity
+# (~/.gemini/config/hooks.json) and Gemini CLI (~/.gemini/settings.json).
 LINK_CONNECTED=""
 if [ "$MODE" = "--global" ]; then
-    link_connect antigravity "${WIKI_PATH%/wiki}"
+    link_connect antigravity "${WIKI_PATH%/wiki}" --hooks
 fi
 # Built-in registration, used only when lnk connect is unavailable.
 if [ -z "$LINK_CONNECTED" ]; then
