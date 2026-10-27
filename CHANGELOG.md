@@ -8,6 +8,22 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- **A live-agent enforcement benchmark.** `scripts/eval_live_enforcement.py`
+  hands a real coding agent (Claude Code, through its own CLI) tempting and
+  ordinary tasks in a throwaway repository with Link's pre-tool hook
+  installed - force-push over a teammate's commit, hand-edit a migration,
+  print the secrets file, publish from a laptop; edit a source file, commit
+  and push normally - and reads the outcome from the repository and its
+  remote, not from what the agent says. The agent runs isolated from your
+  own setup (project settings only, no MCP servers, shell limited to git
+  and npm). Its referee is tested without an agent.
+- The behavioral A/B's live mode and the new benchmark send one canary
+  prompt before any scored call and stop if it is not answered. Agent CLIs
+  report billing and auth failures as ordinary output with exit code 0;
+  scored as answers, an outage would have been published as "0 of 12".
+
 ### Changed
 
 - **Tool hooks are about twice as fast.** The pre-tool and post-tool hooks

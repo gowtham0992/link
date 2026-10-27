@@ -249,10 +249,28 @@ def prompt_for(scenario: Scenario, context: str | None) -> str:
     return "\n\n".join(parts)
 
 
+class AgentUnavailable(RuntimeError):
+    """The agent command did not answer: a billing, auth or install problem, not a wrong answer."""
+
+
 def run_command(command: str, prompt: str, timeout: int) -> str:
     completed = subprocess.run(shlex.split(command), input=prompt, capture_output=True,
                                text=True, timeout=timeout, check=False)
+    if completed.returncode != 0:
+        raise AgentUnavailable((completed.stderr or completed.stdout).strip()[:300] or f"exit {completed.returncode}")
     return completed.stdout.strip()
+
+
+def preflight(command: str, timeout: int) -> None:
+    """One canary call before any scored one.
+
+    Agent CLIs report a failed call in their normal output (a billing error
+    arrives as the "answer", with exit code 0), and scoring that as a wrong
+    answer would publish an outage as a result.
+    """
+    answer = run_command(command, "Reply with exactly the word READY and nothing else.", timeout)
+    if "READY" not in answer.upper():
+        raise AgentUnavailable(answer[:300] or "no output")
 
 
 def main() -> int:
@@ -272,6 +290,13 @@ def main() -> int:
         if not args.yes:
             print(f"live mode would make {calls} calls to: {args.agent_command}\n"
                   "That spends your model budget. Re-run with --yes to do it.", file=sys.stderr)
+            return 2
+
+    if args.mode == "live":
+        try:
+            preflight(args.agent_command, args.timeout)
+        except AgentUnavailable as exc:
+            print(f"the agent command did not answer a canary prompt, so nothing was scored: {exc}", file=sys.stderr)
             return 2
 
     rows: list[dict[str, object]] = []
