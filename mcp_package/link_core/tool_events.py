@@ -143,27 +143,77 @@ def _named_paths(args: Mapping[str, object]) -> list[str]:
     return found
 
 
-def tool_calls(event: Mapping[str, object]) -> list[tuple[str, str]]:
-    """Every (kind, value) a hook event names: shell commands, files read, files written."""
+def _tool(event: Mapping[str, object]) -> tuple[str, dict[str, object]] | None:
+    """(tool name, arguments) for the payloads that name a tool."""
     call = event.get("toolCall")
     if isinstance(call, dict):  # Antigravity
-        return _from_tool(str(call.get("name") or ""), _as_dict(call.get("args")))
+        return str(call.get("name") or ""), _as_dict(call.get("args"))
+    if str(event.get("agent_action_name") or "") in _WINDSURF_EVENTS:
+        return None
+    if "toolName" in event:  # Copilot, camelCase events
+        return str(event.get("toolName") or ""), _as_dict(event.get("toolArgs"))
+    tool = str(event.get("tool_name") or "")
+    if tool:  # Claude Code, Codex, Devin, Kiro, Gemini, Copilot's PascalCase alias, Cursor preToolUse
+        return tool, _as_dict(event.get("tool_input"))
+    return None
+
+
+def tool_calls(event: Mapping[str, object]) -> list[tuple[str, str]]:
+    """Every (kind, value) a hook event names: shell commands, files read, files written."""
     action = str(event.get("agent_action_name") or "")
     if action in _WINDSURF_EVENTS:  # Windsurf / Devin Desktop (Cascade)
         info = _as_dict(event.get("tool_info"))
         kind = _WINDSURF_EVENTS[action]
         value = info.get("command_line") if kind == "command" else info.get("file_path")
         return [(kind, str(value))] if value else []
-    if "toolName" in event:  # Copilot, camelCase events
-        return _from_tool(str(event.get("toolName") or ""), _as_dict(event.get("toolArgs")))
-    tool = str(event.get("tool_name") or "")
-    if tool:  # Claude Code, Codex, Devin, Kiro, Gemini, Copilot's PascalCase alias, Cursor preToolUse
-        return _from_tool(tool, _as_dict(event.get("tool_input")))
+    named = _tool(event)
+    if named:
+        return _from_tool(*named)
     if event.get("command"):  # Cursor beforeShellExecution
         return [("command", _command_text(event.get("command")))]
     if event.get("file_path"):  # Cursor beforeReadFile
         return [("read", str(event.get("file_path")))]
     return []
+
+
+# Arguments that carry what a file tool writes, and (the first set) what an edit replaces.
+_OLD_CONTENT_KEYS = {"old_str", "old_string", "oldtext", "old", "targetcontent"}
+_NEW_CONTENT_KEYS = {"content", "contents", "file_text", "text", "new_str", "new_string", "newtext", "new",
+                     "codecontent", "replacementcontent", "new_source", "insert_text", "patch", "input"}
+
+
+def call_content(event: Mapping[str, object]) -> str:
+    """What a file tool call writes, as one text: a patch, a file's content, what an edit replaces and with what.
+
+    The same whatever the agent calls its arguments, so Kiro's two hooks,
+    which name them differently, see one call. Empty for a shell command,
+    whose text is the call itself.
+    """
+    named = _tool(event)
+    if not named or named[0].strip().lower() in SHELL_TOOLS:
+        return ""
+    name, args = named
+    old: list[str] = []
+    new: list[str] = []
+    if name.strip().lower() == "apply_patch":
+        new += [str(args.get(key)) for key in ("command", "patch", "input") if args.get(key)][:1]
+
+    def walk(value: object, role: list[str] | None) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                lowered = str(key).lower()
+                walk(item, old if lowered in _OLD_CONTENT_KEYS else new if lowered in _NEW_CONTENT_KEYS else role)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item, role)
+        elif role is not None and isinstance(value, str) and value:
+            role.append(value)
+
+    if not new:
+        walk(args, None)
+    if not old:
+        return "\n".join(sorted(new))
+    return "\n".join([f"replace: {text}" for text in sorted(old)] + [f"with: {text}" for text in sorted(new)])
 
 
 def native_emit(emit: str, event: Mapping[str, object], environ: Mapping[str, str]) -> str:

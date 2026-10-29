@@ -437,6 +437,7 @@ def build_cli_parser(
     approve_cmd.add_argument("request", nargs="?", default=None, help="the id the agent showed you")
     approve_cmd.add_argument("target", nargs="?", default=".")
     approve_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
+    approve_cmd.add_argument("--yes", action="store_true", help="approve without asking to confirm at a terminal")
 
     recall_cmd = sub.add_parser("recall", help="search local agent memories")
     recall_cmd.add_argument("query", help="memory query")
@@ -894,7 +895,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             json_output=args.json,
         )
     if command == "approve":
-        return handlers["approve"](Path(args.target), args.request, json_output=bool(args.json))
+        return handlers["approve"](Path(args.target), args.request, json_output=bool(args.json),
+                                   yes=bool(args.yes))
     if command == "enforce":
         return handlers["enforce"](
             Path(args.target),

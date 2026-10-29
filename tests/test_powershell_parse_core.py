@@ -122,6 +122,16 @@ class PowerShellGuardTests(unittest.TestCase):
             f"Invoke-WebRequest https://example.com -OutFile {memories}/evil.md",
             f"[IO.File]::WriteAllText('{cache}/approvals.json', 'x')",
             f"echo x > 'a\x00b'; Remove-Item {cache} -Recurse",
+            # Paths built from literals and known variables, items fed down a pipe, Link run indirectly.
+            f"Remove-Item (Join-Path '{self.ws.as_posix()}' 'wiki/memories') -Recurse",
+            f"Remove-Item (Join-Path -Path '{self.ws.as_posix()}' -ChildPath .link-cache) -Recurse",
+            f"$r='{self.ws.as_posix()}'; Remove-Item ($r + '/wiki/memories') -Recurse",
+            f"'{memories}' | ForEach-Object {{ Remove-Item $_ -Recurse }}",
+            f"Clear-Item {memories}/a.md",
+            f"$p='{cache}/approvals.json'; [IO.File]::WriteAllText($p,'x')",
+            f"python3 -c \"import shutil; shutil.rmtree('{memories}')\"",
+            "$x='approve'; lnk $x abc123",
+            'git -c core.pager="lnk approve abc123" log',
         ]
         for command in held:
             self.assertEqual(self._decision(command), "ask", command)
@@ -132,7 +142,12 @@ class PowerShellGuardTests(unittest.TestCase):
     def test_ordinary_powershell_is_not_held(self):
         for command in ["Get-ChildItem src | Remove-Item", "if (Test-Path dist) { Remove-Item dist -Recurse }",
                         "Get-Process 2>&1 | Out-Null", "git log --oneline 2>&1", "Set-Content notes.txt 'x'",
-                        f"Get-Content {self.ws.as_posix()}/wiki/memories/a.md"]:
+                        f"Get-Content {self.ws.as_posix()}/wiki/memories/a.md",
+                        # Beside Link's files, in the folder above them: nothing beneath is touched.
+                        f"Copy-Item notes.txt {self.ws.parent.as_posix()}",
+                        f"New-Item -ItemType Directory {self.ws.parent.as_posix()}/proj",
+                        f"Move-Item build.log {self.ws.parent.as_posix()}",
+                        "Remove-Item (Join-Path $unknown 'dist') -Recurse"]:
             self.assertIsNone(self._decision(command), command)
 
 

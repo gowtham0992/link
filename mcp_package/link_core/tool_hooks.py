@@ -29,6 +29,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import date
 from collections.abc import Iterable, Mapping, Sequence
@@ -40,8 +41,8 @@ from .project_scope import (
     normalize_project,
     parse_applies_when,
 )
-from .shell_parse import looks_like_powershell, read_powershell, read_shell
-from .tool_events import EMITS, HookReply, can_ask, native_emit, render_reply, tool_calls
+from .shell_parse import command_forms, looks_like_powershell, read_powershell, read_shell
+from .tool_events import EMITS, HookReply, call_content, can_ask, native_emit, render_reply, tool_calls
 
 # Everything else is imported where it is used: the pre-tool hook runs before
 # every shell command and file access, and deciding against the compiled
@@ -219,27 +220,43 @@ _LINK_PROGRAMS = {"lnk", "lnk.exe", "link", "link.py", "link_cli", "link_cli.py"
 _LINK_MODULES = {"link_cli", "link_mcp", "link_core"}
 
 
+def _link_program_at(words: list[str]) -> int | None:
+    """Where Link's CLI is named in a command (`lnk`, `python3 link.py`, `python3 -m link_cli`), if it is."""
+    for index, word in enumerate(words):
+        if word.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower() in _LINK_PROGRAMS:
+            return index
+        if word == "-m" and index + 1 < len(words) and words[index + 1].split(".")[0] in _LINK_MODULES:
+            return index + 1
+    return None
+
+
 def is_link_governance(words: list[str]) -> bool:
     """Does this command run one of Link's governance commands, however it is spelt?
 
     Read from the parsed words, not the text: `python3 -u link.py approve`,
     `python3 -m link_cli approve`, `uv run link.py approve`, a quoted path
     with spaces, and a program named by a variable (`$L approve`) all count.
+    So does Link's CLI given a subcommand only known at run time (`lnk $A`,
+    `lnk $(echo approve)`): it could be any of them.
     Code passed to an interpreter (`python -c`) is only caught when it names
     Link's modules; anything subtler is out of a pre-tool hook's sight.
     """
+    link_at = _link_program_at(words)
+    if link_at is not None:
+        for word in words[link_at + 1:]:
+            if "$" in word or "`" in word:
+                return True
+            if not word.startswith("-"):
+                break  # the subcommand, as typed
     if not any(word in GOVERNANCE_COMMANDS for word in words) and not any(
         module in word for word in words[1:] for module in _LINK_MODULES
     ):
         return False
     if words and words[0] in GOVERNANCE_COMMANDS:
         return True  # `$(echo lnk) approve`: the program was substituted away, the subcommand is left
+    if link_at is not None:
+        return True
     for index, word in enumerate(words):
-        base = word.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
-        if base in _LINK_PROGRAMS:
-            return True
-        if word == "-m" and index + 1 < len(words) and words[index + 1].split(".")[0] in _LINK_MODULES:
-            return True
         if word in {"-c", "-e"} and index + 1 < len(words) and any(m in words[index + 1] for m in _LINK_MODULES):
             return True
         if index == 0 and ("$" in word or "`" in word):
@@ -250,13 +267,62 @@ def is_link_governance(words: list[str]) -> bool:
 _CASE_FOLDING_FS = sys.platform in {"darwin", "win32"}
 
 
-def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
-    """Is the path inside one of the roots, or a folder that contains one?
+def _tail(root: Path) -> str:
+    """How a protected folder is named relative to Link's root: `wiki/memories`, `.link-cache`."""
+    return root.name if root.name.startswith(".") else f"{root.parent.name}/{root.name}"
 
-    Deleting or moving `wiki/` removes `wiki/memories` too, so an ancestor
-    counts. macOS and Windows file systems ignore case, so `.LINK-CACHE` is
-    `.link-cache` there.
+
+def _fold(text: str) -> str:
+    text = text.replace("\\", "/")
+    return text.lower() if _CASE_FOLDING_FS else text
+
+
+def _names_root(text: str, roots: Iterable[Path], *, tree: bool = False) -> bool:
+    """Text Link cannot resolve (`$X/wiki/memories`, `cd "$LR" && rm -rf wiki`) that names a protected folder.
+
+    With `tree`, a path ending in the folder above one (`$X/wiki`) counts too.
     """
+    folded = _fold(text)
+    for root in roots:
+        tail = _fold(_tail(root))
+        if tail in folded or (tree and re.search(rf"(?:^|/){re.escape(tail.split('/')[0])}/?$", folded)):
+            return True
+    return False
+
+
+def _code_names_link(code: str, roots: Sequence[Path]) -> bool:
+    """Code for an interpreter that names Link's files: a protected folder, or Link's root by its path."""
+    if _names_root(code, roots):
+        return True
+    folded = _fold(code)
+    home = Path.home()
+    for root in roots:
+        if root.name != ".link-cache":
+            continue
+        forms = {root.parent.as_posix(), root.parent.resolve().as_posix()}
+        for place in list(forms):
+            try:
+                relative = Path(place).relative_to(home).as_posix()
+            except ValueError:
+                continue
+            forms |= {f"~/{relative}", f"$HOME/{relative}", f"${{HOME}}/{relative}"}
+        if any(re.search(re.escape(_fold(form)) + r"(?![\w.-])", folded) for form in forms):
+            return True
+    return False
+
+
+def _under(path_text: str, roots: Iterable[Path], base: Path | None, *, tree: bool = False) -> bool:
+    """Is the path inside one of the roots, or (for `tree`) a folder that contains one?
+
+    Deleting or moving `wiki/` removes `wiki/memories` too, so for a write
+    that acts on everything beneath its target an ancestor counts; copying a
+    file into `~` or a plain `chmod 700 ~` does not touch Link's files. A path
+    Link cannot resolve (a variable it does not know) counts when it names a
+    protected folder. macOS and Windows file systems ignore case, so
+    `.LINK-CACHE` is `.link-cache` there.
+    """
+    if "$" in str(path_text) or "`" in str(path_text):
+        return _names_root(str(path_text), roots, tree=tree)
     path = Path(str(path_text or "")).expanduser()
     if not path.is_absolute() and base is not None:
         path = base / path
@@ -273,13 +339,13 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
         # Windows paths use "\\" (and accept "/"): compare in the platform's own separator.
         mine, theirs = mine.replace("/", os.sep), theirs.replace("/", os.sep)
         if mine == theirs or mine.startswith(theirs.rstrip(os.sep) + os.sep) \
-                or theirs.startswith(mine.rstrip(os.sep) + os.sep):
+                or (tree and theirs.startswith(mine.rstrip(os.sep) + os.sep)):
             return True
         if any(ch in mine for ch in "*?["):
             # A wildcard (`Remove-Item .link-cach?`, `rm wiki/mem*`): the root, or a folder above it,
             # matches the pattern, or the part before the first wildcard lies inside the root.
             literal = mine[:min(mine.index(ch) for ch in "*?[" if ch in mine)].rsplit(os.sep, 1)[0]
-            ancestors = [theirs, *(str(parent) for parent in Path(theirs).parents)]
+            ancestors = [theirs, *(str(parent) for parent in Path(theirs).parents)] if tree else [theirs]
             if any(fnmatch.fnmatchcase(candidate, mine) for candidate in ancestors) \
                     or literal == theirs or literal.startswith(theirs.rstrip(os.sep) + os.sep):
                 return True
@@ -309,6 +375,8 @@ def evaluate_tool_call(
     commands: list[list[str]] = []
     reads: list[str] = []
     writes: list[str] = []
+    trees: set[str] = set()
+    code: list[str] = []
     opaque = False
     for kind, value in calls:
         if kind in {"command", "powershell"}:
@@ -319,10 +387,14 @@ def evaluate_tool_call(
                 reading.commands += [words for words in other.commands if words not in reading.commands]
                 reading.reads += other.reads
                 reading.writes += other.writes
+                reading.trees += other.trees
+                reading.code += other.code
                 reading.opaque = reading.opaque or other.opaque
             commands += reading.commands
             reads += reading.reads
             writes += reading.writes
+            trees.update(reading.trees)
+            code += reading.code
             opaque = opaque or reading.opaque
         elif kind == "read":
             reads.append(value)
@@ -340,7 +412,7 @@ def evaluate_tool_call(
         hit = False
         if rule_kind == "command":
             wanted = " ".join(pattern.split())
-            hit = any(fnmatch.fnmatchcase(" ".join(words), wanted) for words in commands)
+            hit = any(fnmatch.fnmatchcase(" ".join(form), wanted) for words in commands for form in command_forms(words))
         elif rule_kind in {"write", "read"}:
             targets = writes if rule_kind == "write" else reads
             hit = any(_path_matches(pattern, target, repo_root, base) for target in targets)
@@ -356,7 +428,8 @@ def evaluate_tool_call(
             "name": "link-governance", "title": "Only the person approves, clears or retires rules",
             "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|approve|...",
         })
-    if rules and roots and (opaque or any(_under(target, roots, base) for target in writes)):
+    if rules and roots and (opaque or any(_under(target, roots, base, tree=target in trees) for target in writes)
+                            or any(_code_names_link(text, roots) for text in code)):
         guards.append({
             "name": "link-memory-files", "title": "Link memory and approval files change only through Link",
             "action": "ask", "kind": "write", "pattern": "<Link memories and .link-cache>/**",
@@ -379,7 +452,7 @@ def evaluate_tool_call(
         reason += " Do not work around it; tell the person, who can edit the memory if it no longer holds."
     return {
         "decision": decision, "reason": reason, "memories": names, "kind": rule_kind,
-        "calls": sorted(calls), "title": str(first.get("title") or ""),
+        "calls": sorted(calls), "content": call_content(event), "title": str(first.get("title") or ""),
         "rule": f"{first.get('action')} {rule_kind}: {first.get('pattern')}",
         # Only a user's ask rule can be let through once; a governance or
         # Link-file guard is for the person to do themselves.
@@ -728,12 +801,13 @@ def _hold(decision: Mapping[str, object], root: Path, cwd: str, emit: str,
     raw_calls = decision.get("calls")
     calls = [(str(call[0]), str(call[1])) for call in raw_calls if isinstance(call, (list, tuple)) and len(call) == 2] \
         if isinstance(raw_calls, list) else []
-    key = approvals.call_key(calls, cwd)
+    content = str(decision.get("content") or "")
+    key = approvals.call_key(calls, cwd, content)
     try:
         if approvals.take_grant(root, key, hook=emit):
             return held, "approved"
         request_id = approvals.request(
-            root, key, display=approvals.call_display(calls, cwd), title=str(decision.get("title") or ""),
+            root, key, display=approvals.call_display(calls, cwd, content), title=str(decision.get("title") or ""),
             rule=str(decision.get("rule") or ""), agent=emit, session=session,
         )
         held.update(decision="deny", reason=approvals.held_reason(reason, request_id, root))

@@ -1655,8 +1655,13 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, in
     return 1
 
 
-def approve_held_call(target: Path, request_id: str | None, *, json_output: bool = False) -> int:
-    """Let one held tool call through once, or list the calls waiting for you."""
+def approve_held_call(target: Path, request_id: str | None, *, json_output: bool = False, yes: bool = False) -> int:
+    """Let one held tool call through once, or list the calls waiting for you.
+
+    The call is shown before anything is granted; at a terminal the person
+    confirms it (`--yes` skips that). LinkBar runs this without a terminal
+    and shows the call itself.
+    """
     from link_core import approvals
 
     root = _resolve_link_root(target)
@@ -1675,19 +1680,33 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
                 print(f"      {line}")
         print(f"Approve one: {_display_command(['lnk', 'approve', '<id>', str(target)])}")
         return 0
+    missing = f"No held call {request_id!r} is waiting (requests expire after a day, approvals after 10 minutes)."
+    row = next((row for row in approvals.pending(root) if row["id"] == request_id.strip().lower()), None)
+    if row is None:
+        print(json.dumps({"approved": False, "error": missing}) if json_output else missing,
+              file=sys.stdout if json_output else sys.stderr)
+        return 1
+    if not json_output:
+        print(f"Held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')}):")
+        for line in str(row.get("display") or "").splitlines():
+            print(f"  {line}")
+        if not yes and sys.stdin.isatty():
+            try:
+                answer = input("Approve once? [y/N] ")
+            except EOFError:
+                answer = ""
+            if answer.strip().lower() not in {"y", "yes"}:
+                print("Not approved; the call stays held.")
+                return 1
     entry = approvals.approve(root, request_id)
     if entry is None:
-        message = f"No held call {request_id!r} is waiting (requests expire after a day, approvals after 10 minutes)."
-        print(json.dumps({"approved": False, "error": message}) if json_output else message,
+        print(json.dumps({"approved": False, "error": missing}) if json_output else missing,
               file=sys.stdout if json_output else sys.stderr)
         return 1
     if json_output:
         print(json.dumps({"approved": True, "id": request_id, "call": entry.get("display")}))
     else:
-        print("Approved once:")
-        for line in str(entry.get("display") or "").splitlines():
-            print(f"  {line}")
-        print(f"The agent can now run exactly that again within {approvals.GRANT_MINUTES} minutes; "
+        print(f"Approved once. The agent can now run exactly that again within {approvals.GRANT_MINUTES} minutes; "
               "after that, or for anything different, it asks again.")
     return 0
 

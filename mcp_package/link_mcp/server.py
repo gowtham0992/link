@@ -1122,14 +1122,15 @@ def _refuse_rule_change(identifier: str, action: str) -> None:
     stopped it. Those changes stay with the person: the CLI, the viewer and
     LinkBar make them.
     """
+    from link_core.memory import carries_rules
     from link_core.memory import resolve_memory_page as _resolve
 
     _path, record, _error = _resolve(WIKI_DIR, _clean_text_input(identifier, max_len=300), records=_memory_records())
-    rules = record.get("enforce") if record else None
-    if isinstance(rules, list) and rules:
+    rules = carries_rules(record) if record else []
+    if rules:
         name = str(record.get("name") if record else identifier)
         raise ValueError(
-            f"{name} enforces rules on tool calls ({'; '.join(str(rule) for rule in rules)}). "
+            f"{name} enforces rules on tool calls ({'; '.join(rules)}). "
             f"Only the person can {action} it: ask them to run `lnk review-memory {name}`, "
             f"`lnk enforce {name} --clear` or use the viewer or LinkBar."
         )

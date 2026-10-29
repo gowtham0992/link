@@ -9,7 +9,7 @@ agrees, they run `lnk approve <id>` (or approve it in LinkBar) and the agent
 repeats the exact same call, which then goes through once.
 
 A grant is for one exact call - every command, read and write the tool
-call names, from the same directory - is used up by the call it lets
+call names, from the same directory, writing the same content - is used up by the call it lets
 through, and expires after a few minutes, so an approval never becomes a
 standing exception. Kiro can check one call twice, from its global hooks
 and from Link's agent profile: the second check, from the other hook,
@@ -23,7 +23,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import secrets
+import shlex
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -40,15 +43,29 @@ MAX_REQUESTS = 200
 LOCK_SECONDS = 2.0
 
 
-def call_key(calls: Iterable[tuple[str, str]], cwd: str) -> str:
-    """One exact call: every command, read and write it names, as sent, from one directory."""
-    payload = json.dumps({"cwd": cwd, "calls": sorted(calls)}, ensure_ascii=False)
+def call_key(calls: Iterable[tuple[str, str]], cwd: str, content: str = "") -> str:
+    """One exact call: every command, read and write it names, as sent, from one directory, writing what it writes."""
+    exact: dict[str, object] = {"cwd": cwd, "calls": sorted(calls)}
+    if content:
+        exact["content"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    payload = json.dumps(exact, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def call_display(calls: Iterable[tuple[str, str]], cwd: str) -> str:
-    """What the person approves: the whole call, line breaks kept."""
+# How much of what a call writes the person sees before approving it.
+CONTENT_LINES = 12
+CONTENT_CHARS = 800
+
+
+def call_display(calls: Iterable[tuple[str, str]], cwd: str, content: str = "") -> str:
+    """What the person approves: the whole call, line breaks kept, and the start of what it writes."""
     lines = [f"{kind}: {value}" for kind, value in sorted(calls)]
+    if content:
+        shown = content[:CONTENT_CHARS].splitlines()[:CONTENT_LINES]
+        rest = len(content) - len("\n".join(shown))
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+        lines += [f"writing (sha256 {digest}):", *(f"  {line}" for line in shown)]
+        lines += [f"  ... and {rest} more characters"] if rest > 0 else []
     return "\n".join(lines + ([f"(in {cwd})"] if cwd else []))
 
 
@@ -192,15 +209,20 @@ def pending(link_root: Path, now: datetime | None = None) -> list[dict[str, obje
     return sorted(rows, key=lambda row: str(row.get("at")), reverse=True)
 
 
+def quote_argument(text: str, *, windows: bool | None = None) -> str:
+    """A path the person can paste into their shell: POSIX quoting, or double quotes for cmd and PowerShell."""
+    if os.name == "nt" if windows is None else windows:
+        return text if re.fullmatch(r"[\w\\/:.~-]+", text) else f'"{text}"'
+    return shlex.quote(text)
+
+
 def held_reason(decision_reason: str, request_id: str, workspace: Path) -> str:
     """The block message an agent that cannot ask passes on to the person."""
-    import shlex
-
     base = decision_reason.split(" If the person approves")[0]
     return (
         f"{base} This agent cannot ask the person itself, so the call was held, not run. "
         "Do not retry it and do not work around it: tell the person what you want to run and why. "
-        f"If they agree, they approve it once with `lnk approve {request_id} {shlex.quote(str(workspace))}` "
+        f"If they agree, they approve it once with `lnk approve {request_id} {quote_argument(str(workspace))}` "
         "(or in LinkBar); then run exactly the same call again. Never run that command yourself."
     )
 

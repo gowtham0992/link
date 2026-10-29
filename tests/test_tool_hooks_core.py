@@ -104,6 +104,17 @@ class RuleTests(_Store):
             with self.subTest(command=command):
                 self.assertIsNotNone(self._decide("Bash", command=command))
 
+    def test_commands_are_matched_in_their_plain_form(self):
+        self._memory("Never force-push to main.", ["ask command: git push --force*", "ask command: git push -f*"])
+        self._memory("Never publish from a laptop.", ["ask command: npm publish*"])
+        for command in ("git push origin +main", "git -C . push -f origin main", "git push origin main --force",
+                        "git --no-pager -c color.ui=never push --force", "npm pub", "npm --registry https://r publish"):
+            with self.subTest(command=command):
+                self.assertIsNotNone(self._decide("Bash", command=command))
+        for command in ("git push origin main", "git -C . push", "npm pack", "npm run publish-docs"):
+            with self.subTest(command=command):
+                self.assertIsNone(self._decide("Bash", command=command))
+
     def test_quoted_text_and_safer_forms_pass(self):
         self._memory("Never force-push to main.", ["ask command: git push --force", "ask command: git push --force *"])
         self._memory("Never delete build by hand.", ["ask command: rm -rf *"])

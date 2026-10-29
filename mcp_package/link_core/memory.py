@@ -1721,6 +1721,30 @@ def rules_in_force(record: Mapping[str, object]) -> list[str]:
     return [str(rule) for rule in value if str(rule).strip()] if isinstance(value, list) else []
 
 
+def carries_rules(record: Mapping[str, object]) -> list[str]:
+    """Every rule a memory carries, approved or waiting: `enforce` and `enforce_active`."""
+    rules: list[str] = []
+    for key in ("enforce", "enforce_active"):
+        value = record.get(key)
+        rules += [str(rule) for rule in value if str(rule).strip() and str(rule) not in rules] \
+            if isinstance(value, list) else []
+    return rules
+
+
+def retire_rule_refusal(record: Mapping[str, object], action: str) -> str:
+    """Why a write that would switch off a memory's rules is refused: only the person retires a rule.
+
+    Superseding archives the old memory, and its rules with it, so an agent
+    could otherwise end a rule that just stopped it by saving a memory.
+    """
+    name = str(record.get("name") or "")
+    return (
+        f"{name} enforces rules on tool calls ({'; '.join(carries_rules(record))}). Only the person can {action} "
+        f"it: ask them to retire the rule themselves, with `lnk enforce {name} --clear` or `lnk archive-memory "
+        f"{name}` in their own terminal, or in the viewer or LinkBar."
+    )
+
+
 def _keep_rules_active(record: Mapping[str, object], updates: dict[str, object], remove: set[str]) -> None:
     """Sending a reviewed, rule-bearing memory back to review keeps its rules in force."""
     if updates.get("review_status") != "pending":
@@ -2180,6 +2204,8 @@ def write_memory_page(
         assert superseded_path is not None and superseded_record is not None
         if not is_active_memory(superseded_record):
             raise ValueError("supersedes target must be an active memory")
+        if carries_rules(superseded_record):
+            raise ValueError(retire_rule_refusal(superseded_record, "supersede"))
     superseded_name = str(superseded_record.get("name")) if superseded_record else ""
     conflict_candidates = memory_conflict_candidates(
         record_list,

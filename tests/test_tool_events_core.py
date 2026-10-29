@@ -6,6 +6,8 @@ argv form), Gemini CLI, Copilot (camelCase and its PascalCase alias),
 Cursor's dedicated events and preToolUse, Windsurf/Devin Desktop (Cascade),
 Kiro CLI, Antigravity and Devin CLI.
 """
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -13,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
@@ -230,13 +233,18 @@ class HeldCallTests(unittest.TestCase):
             "uv run link.py approve abc123", "L=lnk; $L approve abc123", "$(echo lnk) approve abc123",
             "pipx run link-mcp approve abc123", "lnk.exe approve abc123", "lnk enforce x --clear",
             "/opt/homebrew/bin/lnk review-memory x", "python3 -c 'import link_core.approvals as a; a.approve(1, 2)'",
+            # A subcommand only known when it runs, or Link run by git for an alias or a setting.
+            "python3 link.py $(echo approve) abc123", "A=approve; lnk $A abc123", "lnk `echo approve` abc123",
+            "echo '<<X'\nlnk approve abc123\nX", "git -c alias.x='!lnk approve abc123' x",
+            'git config alias.x "!lnk approve abc123" && git x', 'git -c core.pager="lnk approve abc123" log',
         ]
         for command in spellings:
             reply = json.loads(self._hook("codex", {"tool_name": "Bash", "tool_input": {"command": command}}).stdout)
             decision = reply["hookSpecificOutput"]
             self.assertEqual(decision["permissionDecision"], "deny", command)
             self.assertIn("Only the person can do this", decision["permissionDecisionReason"], command)
-        for harmless in ("git commit -m 'approve the link changes'", "grep -rn approve src/", "ls"):
+        for harmless in ("git commit -m 'approve the link changes'", "grep -rn approve src/", "ls",
+                         "lnk recall \"$QUESTION\"", "lnk remember 'Budget is $5k a month'"):
             self.assertEqual(self._hook("codex", {"tool_name": "Bash", "tool_input": {"command": harmless}}).stdout,
                              "", harmless)
 
@@ -296,6 +304,43 @@ class HeldCallTests(unittest.TestCase):
                                               encoding="utf-8")
         os.link(cache / "approvals.json", self.ws / "second-name.json")
         self.assertIn("deny", self._hook("codex", push).stdout, "a file with a second name may have been forged")
+
+    def test_the_person_sees_the_call_before_it_is_approved(self):
+        push = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": "/r"}
+        reason = json.loads(self._hook("codex", push).stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        request_id = reason.split("lnk approve ")[1].split()[0]
+        shown = subprocess.run([*LINK, "approve", request_id, str(self.ws)], capture_output=True, text=True,
+                               check=True, stdin=subprocess.DEVNULL).stdout
+        self.assertLess(shown.index("git push --force origin main"), shown.index("Approved once"),
+                        "without a terminal (LinkBar) it approves, after saying what")
+
+        from link_core import approvals  # noqa: PLC0415
+
+        spec = importlib.util.spec_from_file_location("link_cli_approve", ROOT / "link.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        self.assertEqual(self._hook("codex", push).stdout, "", "the approved call goes through once")
+        held = json.loads(self._hook("codex", push).stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        request_id = held.split("lnk approve ")[1].split()[0]
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch("builtins.input", return_value="n") as asked, \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(cli.approve_held_call(self.ws, request_id), 1)
+        asked.assert_called_once()
+        self.assertIn("git push --force origin main", out.getvalue())
+        self.assertEqual([row["id"] for row in approvals.pending(self.ws)], [request_id], "a no grants nothing")
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch("builtins.input") as asked, mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(cli.approve_held_call(self.ws, request_id, yes=True), 0)
+        asked.assert_not_called()
+        self.assertEqual(self._hook("codex", push).stdout, "", "--yes approved it")
+
+    def test_the_approval_command_is_quoted_for_the_persons_shell(self):
+        from link_core.approvals import quote_argument  # noqa: PLC0415
+
+        self.assertEqual(quote_argument("/Users/me/my link"), "'/Users/me/my link'")
+        self.assertEqual(quote_argument(r"C:\Users\me\link", windows=True), r"C:\Users\me\link")
+        self.assertEqual(quote_argument(r"C:\Users\Jo Smith\link", windows=True), r'"C:\Users\Jo Smith\link"')
 
     def test_claude_code_still_asks_natively(self):
         out = self._hook("text", {"tool_name": "Bash", "tool_input": {"command": "git push --force"}})
@@ -371,6 +416,76 @@ class UndocumentedFileArgumentsTests(unittest.TestCase):
         for event, expected in cases:
             self.assertEqual(tool_calls(event), expected, event)
 
+
+
+class ContentApprovalTests(unittest.TestCase):
+    """A grant covers what the call writes, not only where: approving one patch lets no other through."""
+
+    def setUp(self):
+        from link_core.memory import mark_memory_reviewed, write_memory_page  # noqa: PLC0415
+
+        self.temp = tempfile.TemporaryDirectory()
+        self.base = Path(self.temp.name)
+        wiki = self.base / "wiki"
+        (wiki / "memories").mkdir(parents=True)
+        (wiki / "index.md").write_text("# Index\n", encoding="utf-8")
+        saved = write_memory_page(wiki, "Migrations need my OK.", None, "preference", "user", None, "test",
+                                  "2026-09-28T00:00:00Z", contradiction_scorer=None, enforce=["ask write: migrations/**"])
+        mark_memory_reviewed(wiki, saved["name"], None, "2026-09-28T00:01:00Z")
+        self.repo = self.base / "repo"
+        (self.repo / "migrations").mkdir(parents=True)
+        (self.repo / ".git").mkdir()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _reply(self, emit, tool, tool_input):
+        from link_core.tool_hooks import pre_tool_reply  # noqa: PLC0415
+
+        return pre_tool_reply(self.base, {"tool_name": tool, "tool_input": tool_input, "cwd": str(self.repo)},
+                              project=None, emit=emit, environ={})
+
+    def _approve(self, shown):
+        from link_core import approvals  # noqa: PLC0415
+
+        row = next(row for row in approvals.pending(self.base) if shown in str(row["display"]))
+        approvals.approve(self.base, str(row["id"]))
+        return row
+
+    def test_a_different_patch_to_the_same_file_is_held(self):
+        def patch(body):
+            return {"command": f"*** Begin Patch\n*** Add File: migrations/001.sql\n+{body}\n*** End Patch"}
+
+        self.assertIn("deny", self._reply("codex", "apply_patch", patch("ALTER TABLE users ADD nick text;")).stdout)
+        row = self._approve("nick")
+        self.assertIn("writing (sha256 ", row["display"])
+        self.assertIn("+ALTER TABLE users ADD nick text;", row["display"], "the person sees what is written")
+        self.assertIn("deny", self._reply("codex", "apply_patch", patch("DROP TABLE users;")).stdout)
+        self.assertEqual(self._reply("codex", "apply_patch", patch("ALTER TABLE users ADD nick text;")).stdout, "")
+        edit = {"file_path": "migrations/001.sql", "old_string": "a", "new_string": "b"}
+        self.assertIn("deny", self._reply("codex", "Edit", edit).stdout)
+        self._approve("replace: a")
+        self.assertIn("deny", self._reply("codex", "Edit", dict(edit, new_string="c")).stdout)
+        self.assertIn("deny", self._reply("codex", "Edit", dict(edit, old_string="b", new_string="a")).stdout)
+
+    def test_kiros_two_hooks_name_the_content_differently_and_share_one_approval(self):
+        v2 = {"command": "create", "path": "migrations/001.sql", "file_text": "CREATE TABLE t (id INT);"}
+        v3 = {"path": "migrations/001.sql", "content": "CREATE TABLE t (id INT);"}
+        self.assertEqual(self._reply("kiro", "fs_write", v2).exit_code, 2)
+        self._approve("CREATE TABLE")
+        self.assertEqual(self._reply("kiro", "fs_write", v2).exit_code, 0)
+        self.assertEqual(self._reply("kiro-agent", "write", v3).exit_code, 0, "the same call from the other hook")
+
+    def test_call_content_reads_every_agents_arguments(self):
+        from link_core.tool_events import call_content  # noqa: PLC0415
+
+        self.assertEqual(call_content({"tool_name": "Write", "tool_input": {"file_path": "a", "content": "x"}}), "x")
+        self.assertEqual(call_content({"tool_name": "MultiEdit", "tool_input": {"file_path": "a", "edits": [
+            {"old_string": "a", "new_string": "b"}]}}), "replace: a\nwith: b")
+        self.assertEqual(call_content({"toolCall": {"name": "replace_file_content", "args": {
+            "TargetFile": "a", "ReplacementChunks": [{"TargetContent": "a", "ReplacementContent": "b"}]}}}),
+            "replace: a\nwith: b")
+        self.assertEqual(call_content({"tool_name": "Bash", "tool_input": {"command": "echo x > a"}}), "")
 
 
 class KiroPayloadTests(unittest.TestCase):
