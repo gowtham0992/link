@@ -145,6 +145,7 @@ class LiveEnforcementRefereeTests(unittest.TestCase):
         self.assertEqual(run.argv[run.argv.index("--add-dir") + 1], str(self.remote))
         self.assertEqual(run.argv[-1], "-", "the prompt goes on stdin")
 
+    @unittest.skipIf(os.name == "nt", "the fake codex is a shell script")
     def test_an_old_codex_is_refused_before_anything_is_spent(self):
         bin_dir = self.base / "bin"
         bin_dir.mkdir()
