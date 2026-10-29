@@ -179,7 +179,7 @@ that have one everywhere:
 | **Memory hygiene** — junk stored over a simulated multi-month session stream we wrote | **0%** (a CI regression floor on our own fixtures) | the same pipeline with governance off: 35.7% |
 | **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (a CI regression floor on attacks we wrote) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
 | **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
-| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls; the same matcher serves every agent with rule checks in the table above | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
+| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls; the same matcher serves every agent with rule checks in the table above | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it, and only you approve, clear or retire one; the hook runs as you, so it stops mistaken and disguised calls, not an agent set on escaping it |
 | **Staleness checks** — memories and instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) checked against the repository | **0 false flags**: 345 memory references in Link's own docs and 604 instruction-file references across eight public repositories; every planted deletion caught | a reference is reported only when git history shows the thing existed |
 | **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 
@@ -268,7 +268,7 @@ the MCP runtime, and wires the agent. Swap `claude-code` for `codex`,
 Session hooks - a brief at session start, proposals captured at session end -
 exist for Claude Code and Cursor; Codex, Gemini CLI, Antigravity and Copilot
 get the start brief. Rule checks before tool calls are installed for every
-agent in the table above. Agents without a start hook get memory through MCP,
+agent in the table above except Zed, whose own permission rules carry them. Agents without a start hook get memory through MCP,
 where the first tool response of a session carries the same brief. Drop `--write` to
 preview without touching anything, or drop `--agent` to just create the
 workspace. `lnk disconnect <agent> --write` takes Link back out: its MCP entry
@@ -446,9 +446,12 @@ bash integrations/antigravity/install.sh
 
 Installers create or update `~/link`, install or upgrade `link-mcp`, write
 lightweight agent instructions, and preserve existing wiki data on reinstall.
-Use `--project` when a repo needs separate project memory.
+A global install also adds the agent's hooks; use `--project` when a repo
+needs separate project memory (it leaves your global hooks alone).
 
-On Windows, use the matching PowerShell installer:
+On Windows, use the matching PowerShell installer. It registers the MCP
+server and writes the instructions; add hooks afterwards with
+`lnk connect <agent> ~/link --hooks --write`.
 
 ```powershell
 .\integrations\codex\install.ps1
@@ -496,7 +499,7 @@ lnk verify-mcp ~/link
 ```
 
 For agents with hook support — Claude Code, Cursor, Codex, Gemini CLI,
-Antigravity, Copilot and Windsurf — add `--hooks` (works with `lnk onboard`
+Antigravity, Copilot, Windsurf and Kiro — add `--hooks` (works with `lnk onboard`
 too) to make the memory loop automatic:
 the brief is injected at session start and proposal-only notes are captured at
 session end, so memory no longer depends on the agent remembering to call
@@ -506,7 +509,7 @@ backlog builds up the brief nudges the agent to offer a read-only
 file tool calls: a reviewed memory's enforced rules are checked there, and
 memories anchored to the file being read or edited are surfaced at that
 moment. The same rule checks run on Cursor, Codex, Gemini CLI, Antigravity,
-Copilot and Windsurf, each through its own hook. `lnk receipt` shows what
+Copilot, Windsurf and Kiro, each through its own hook. `lnk receipt` shows what
 actually arrived in each session and every rule check. Durable memory still
 requires your approval. Hook support beyond Claude Code follows each
 vendor's documented schema and is new - report issues.
@@ -518,6 +521,7 @@ lnk connect cursor ~/link --hooks --write
 lnk connect antigravity ~/link --hooks --write  # Antigravity and Gemini CLI (both read ~/.gemini)
 lnk connect copilot ~/link --hooks --write      # Copilot CLI and VS Code's Copilot (~/.copilot/hooks)
 lnk connect windsurf ~/link --hooks --write     # rule checks only: Windsurf has no session-start event
+lnk connect kiro ~/link --hooks --write         # start brief + rule checks (V3 hooks and the `link` agent profile)
 lnk approve ~/link                              # calls an agent that cannot ask is holding for your OK
 lnk consolidate ~/link                          # read-only backlog plan, apply only with approval
 ```

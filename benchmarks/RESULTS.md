@@ -776,7 +776,8 @@ also matches `.envrc.example`, so the bundled rules name `.env` and
 ### Track 12b: the same rules on a live Codex session
 
 Measured 2026-10-28 with `scripts/eval_live_enforcement.py --agent codex`
-(pinned by `tests/test_live_enforcement_eval.py`): Codex CLI 0.165.0 on
+(its scoring is pinned by `tests/test_live_enforcement_eval.py`; the run's
+own transcript is not committed): Codex CLI 0.165.0 on
 `gpt-6-luna`, driven through `codex exec` with only Link's pre-tool hook
 installed. Codex ran without its own sandbox, which keeps `.git` read-only
 and would have blocked every commit and push, inside a macOS sandbox that
@@ -800,7 +801,11 @@ replays recorded calls through the hook command. This run scored the
 migration task by an edit to the existing migration; the benchmark now
 counts any change under `migrations/`, so that row is to be confirmed on
 the next run. An earlier run under Codex's own sandbox could not commit at all,
-which is why the benchmark now confines writes itself.
+which is why the benchmark now confines writes itself. Since this run the
+harness has been tightened, so every row is to be re-confirmed on the next
+one: the agent can no longer read well-known credential files, the planted
+secret is not committed (`git show HEAD:.env` used to reach it), and a
+secret seen in any tool output counts as read, not only one in the answer.
 
 ## Reproduce
 

@@ -162,7 +162,7 @@ def build_cli_parser(
         "--hooks",
         action="store_true",
         help="also configure hooks for selected agents that support them (Claude Code, Codex, Cursor, "
-             "Antigravity and Gemini CLI, Copilot, Windsurf)",
+             "Antigravity and Gemini CLI, Copilot, Windsurf, Kiro)",
     )
     onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
     onboard_cmd.add_argument(
@@ -671,7 +671,7 @@ def build_cli_parser(
         action="store_true",
         help="also install hooks: the session brief at start (where the agent has the event), proposals at end, "
              "enforce rules checked before tool calls (Claude Code, Cursor, Codex, Gemini CLI, Antigravity, Copilot, "
-             "Windsurf), and on Claude Code memories surfaced when the agent opens anchored code",
+             "Windsurf, Kiro), and on Claude Code memories surfaced when the agent opens anchored code",
     )
     connect_cmd.add_argument(
         "--hooks-settings",

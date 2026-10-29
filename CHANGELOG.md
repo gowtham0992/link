@@ -34,20 +34,28 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   those agents the call is now held: blocked with a message telling the
   agent to ask you in chat, and `lnk approve <id>` lets that exact call
   through once within ten minutes (`lnk approve` alone lists what is
-  waiting). An approval covers one whole call - every command, read and
-  write it names, from the same directory, exactly as sent - and is used up
-  by it. An agent cannot approve its own: `lnk approve` and the other
-  governance commands are recognised from the parsed command however they
-  are started (`lnk`, `link.py` by any path or interpreter flags,
-  `python -m link_cli`, `uv run`, `pipx run`, a program named by a variable
-  or substitution), and they win over any approval; writes to the
-  approvals file and the memory files are seen through `cd`, `mv`, `rm`,
-  `find -delete`, `dd`, `git checkout --` and folders that contain them,
-  case-insensitively on macOS and Windows. A malformed approvals file, one
-  with a second hard link, or a grant dated in the future keeps the call
-  held. What a hook cannot see it does not claim to: code an interpreter
-  runs (`python -c` that does not name Link's modules) is out of reach.
-  Receipts count held calls and calls let through after approval.
+  waiting; `lnk approve <id>` shows the call before granting it and asks at
+  a terminal). An approval covers one whole call - every command, read and
+  write it names, and what it writes, from the same directory, exactly as
+  sent - and is used up by it: approving one patch to a file does not let a
+  different patch through. Approving is the person's: `lnk approve` and the
+  other governance commands are held however they are started (`lnk`,
+  `link.py` by any path or interpreter flags, `python -m link_cli`,
+  `uv run`, `pipx run`, a program or subcommand named by a variable or
+  substitution, a git alias, pager or editor setting), and superseding a
+  memory that carries rules is refused. Writes to the approvals file and
+  the memory files are seen through `cd`, `mv`, `rm`, `find`, `xargs`,
+  `tar`, `curl -o`, `git clean`, variables, `~`, braces, here-documents,
+  interpreter one-liners that name them and folders that contain them,
+  case-insensitively on macOS and Windows; a command Link cannot read
+  (`eval "$c"`, an encoded PowerShell command) waits for your OK. A
+  malformed approvals file, one with a second hard link, or a grant dated
+  in the future keeps the call held. The hook runs as you, inside the
+  agent's own permissions: it stops a mistaken or talked-into call, and the
+  ordinary disguises of one, not an agent set on escaping it - one that
+  writes a program to do the forbidden thing, or edits its own hook
+  settings, gets past any check that runs as the same user. Receipts count
+  held calls and calls let through after approval.
   LinkBar shows held calls at the top of its inbox ("Waiting for your OK",
   with the agent, the call and the memory that held it) with an Approve once
   button, and posts a notification with the same button the moment an
@@ -196,8 +204,43 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   Claude Code has Link's instructions of its own; everything else in that
   file keeps its bytes, line endings and permissions, and a file Link
   cannot read exactly is left alone. The installers' section handling
-  follows the same rules: Link's section ends at the next heading of any
-  level, so nothing written after it is taken with it.
+  follows the same rules: Link's section ends at its own last line, before
+  `lnk compile`'s block, or at the next heading, whichever comes first, so a
+  line you add after it is never taken with it.
+- **Installing and uninstalling never cost you a byte.** A line written
+  after Link's instructions was removed by a reinstall, `lnk setup`'s
+  refresh or uninstall, and a reinstall in a project could split
+  `lnk compile`'s block in two; both are kept now, in Python, bash and
+  PowerShell alike. `uninstall.sh --project` no longer removes the global
+  MCP entry and hooks. Codex's `config.toml` keeps your comments and your
+  own keys in Link's table, refuses rather than duplicates an entry it
+  cannot edit safely, and is parsed back before it is written. Hook files
+  keep their encoding, BOM, indent, characters and permissions, a file that
+  is not UTF-8 is refused, and uninstall leaves no empty `hooks` key or
+  skeleton file behind. Config files kept in a dotfiles repo are written
+  through their symlink, and a read-only file is refused. On Windows the
+  installer resolves a project path from PowerShell's own folder, keeps
+  other MCP servers' arrays as arrays, writes no BOM, leaves a JSON file
+  with comments alone, and recognises Link's section on Windows PowerShell
+  5.1. `lnk setup` finds Copilot's hooks folder and keeps its hooks current.
+- **Files `lnk compile --global` wrote stay Link's when empty.** When the
+  last personal memory left, Link's block was removed and auto-refresh
+  stopped for good; the block now stays, empty, and the next memory arrives
+  on its own. `--global` always compiles your personal workspace, wherever
+  it is run.
+- **`lnk stale --wiki` finds what it missed:** raw files with spaces in
+  their names, a missing raw file beside one still there, citations by
+  alias, and names macOS stores decomposed. `--wiki` with `--instructions`
+  is refused rather than half run.
+- **The live benchmark keeps your credentials out of reach.** Each agent
+  gets only its own model's variables; on macOS a sandbox refuses reads of
+  well-known credential files and the other agent's login; key-shaped
+  strings are blanked wherever they appear; the planted secret is never
+  committed, and reading it counts even when the answer leaves it out.
+- **LinkBar approves only in the popover.** A held call's notification
+  showed text macOS cuts short, written by the agent, beside an Approve
+  button; it now opens the popover on the whole call. LinkBar lists exactly
+  the held calls `lnk approve` would accept.
 - **Cursor got Link's reasons in keys it does not read.** Link answered
   Cursor with `userMessage`/`agentMessage`; Cursor reads `user_message` and
   `agent_message`, and blocks a permission hook whose output does not match

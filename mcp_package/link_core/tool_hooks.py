@@ -428,17 +428,27 @@ def evaluate_tool_call(
             "name": "link-governance", "title": "Only the person approves, clears or retires rules",
             "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|approve|...",
         })
-    if rules and roots and (opaque or any(_under(target, roots, base, tree=target in trees) for target in writes)
+    if rules and roots and (any(_under(target, roots, base, tree=target in trees) for target in writes)
                             or any(_code_names_link(text, roots) for text in code)):
         guards.append({
             "name": "link-memory-files", "title": "Link memory and approval files change only through Link",
             "action": "ask", "kind": "write", "pattern": "<Link memories and .link-cache>/**",
         })
-    if not matches and not guards:
+    # A command Link cannot read (`eval "$c"`, an encoded PowerShell command)
+    # might touch anything, so it waits for the person - but it is everyday
+    # shell too (`eval "$(ssh-agent -s)"`), so the person can let it through
+    # once, having seen exactly what it is.
+    unreadable: list[Mapping[str, object]] = []
+    if rules and roots and opaque and not guards:
+        unreadable.append({
+            "name": "link-unreadable-command", "title": "A command Link cannot read waits for the person",
+            "action": "ask", "kind": "command", "pattern": "<eval or an encoded command>",
+        })
+    if not matches and not guards and not unreadable:
         return None
-    every = [*guards, *matches]
+    every = [*guards, *unreadable, *matches]
     decision = "deny" if any(rule.get("action") == "deny" for rule in every) else "ask"
-    first = guards[0] if guards else next((rule for rule in matches if rule.get("action") == decision), matches[0])
+    first = (guards or unreadable or [next((rule for rule in matches if rule.get("action") == decision), matches[0])])[0]
     names = sorted({str(rule.get("name") or "") for rule in matches})
     rule_kind = str(first.get("kind") or calls[0][0])
     verb = "blocked" if decision == "deny" else "needs the person's OK"

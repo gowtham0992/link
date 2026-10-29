@@ -188,6 +188,19 @@ class LinkFilesGuardTests(unittest.TestCase):
                         "cat files.txt | xargs rm", "cp -r dist ~/link"):
             self.assertFalse(self._held(command), command)
 
+    def test_an_unreadable_command_can_be_let_through_once_and_links_files_cannot(self):
+        def decide(command):
+            return evaluate_tool_call(self.index, {"tool_name": "Bash", "tool_input": {"command": command}},
+                                      context_path=str(self.home / "proj"),
+                                      protected=[self.ws / "wiki" / "memories", self.ws / ".link-cache"])
+        for command in ('eval "$(ssh-agent -s)"', 'bash -c "$UNKNOWN_CODE"'):
+            decision = decide(command)
+            self.assertEqual((decision["decision"], decision["approvable"], decision["governance"]),
+                             ("ask", True, False), command)
+        for command in (f"rm -rf {self.ws.as_posix()}/wiki/memories", 'eval "$X"; rm -rf ~/link/.link-cache'):
+            decision = decide(command)
+            self.assertEqual((decision["approvable"], decision["governance"]), (False, True), command)
+
 
 if __name__ == "__main__":
     unittest.main()
