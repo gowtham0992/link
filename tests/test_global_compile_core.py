@@ -44,7 +44,7 @@ class GlobalCompileTests(unittest.TestCase):
             _memory("pending", "Use tabs.", reviewed=False),
             _memory("fenced", "Deploy on Tuesdays.", applies_when="project:api"),
         ]
-        self.assertEqual(detected_global_targets(self.home), ["windsurf", "kiro", "zed"])
+        self.assertEqual(detected_global_targets(self.home), ["windsurf", "kiro", "zed", "zed-permissions"])
         plan = plan_global_compile(records, self.home)
         self.assertEqual(sorted(plan.files), [".codeium/windsurf/memories/global_rules.md",
                                               ".config/zed/AGENTS.md", ".kiro/steering/link-memory.md"])

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -184,7 +185,9 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         version="v1",
         end_event=None,
         start_matcher=None,
-        pre_tool=(("PreToolUse", "shell|read|write"),),
+        # No matcher: every tool, as in the agent profile. Kiro's tags and tool ids
+        # differ by version, and a matcher that misses would leave rules unchecked.
+        pre_tool=(("PreToolUse", None),),
         pre_tool_emit="kiro",
         companions=("kiro-agent",),
         restart_hint=(
@@ -212,7 +215,7 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         end_event=None,
         start_matcher=None,
         pre_tool=(("preToolUse", None),),
-        pre_tool_emit="kiro",
+        pre_tool_emit="kiro-agent",
         restart_hint="",  # Kiro's own hint covers both files
     ),
     AgentHookConfig(
@@ -324,17 +327,21 @@ def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, objec
     text = path.read_text(encoding="utf-8", errors="replace")
     if not text.strip():
         return result
-    settings = json.loads(text)
+    try:
+        settings = json.loads(text)
+    except ValueError as exc:
+        result["error"] = f"{path} is not valid JSON ({exc}); remove Link's hooks by hand"
+        return result
     hooks = settings.get(config.root_key) if isinstance(settings, dict) else None
-    if config.schema == "triggers" and isinstance(hooks, list):
+    if isinstance(hooks, list):  # Kiro's named hooks, in its global file or a migrated agent profile
         kept = [entry for entry in hooks if not _is_link_trigger(entry)]
         result["found"] = sorted({str(e.get("trigger")) for e in hooks if _is_link_trigger(e)})
         if result["found"] and write:
-            if kept or set(settings) - {"version", config.root_key}:
-                settings[config.root_key] = kept
-                atomic_write_json(path, settings)
-            else:
+            settings[config.root_key] = kept
+            if _only_links(settings, config):
                 path.unlink()  # Link's own file, with nothing else in it
+            else:
+                atomic_write_json(path, settings)
             result["removed"] = True
         return result
     if not isinstance(hooks, dict):
@@ -367,9 +374,21 @@ def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, objec
         del settings[config.root_key]
     result["found"] = sorted(set(found))
     if found and write:
-        atomic_write_json(path, settings)
+        if config.file_defaults and _only_links(settings, config):
+            path.unlink()  # the agent profile Link created, with nothing of the person's in it
+        else:
+            atomic_write_json(path, settings)
         result["removed"] = True
     return result
+
+
+def _only_links(settings: Mapping[str, object], config: AgentHookConfig) -> bool:
+    """Is what is left of the file only what Link itself starts it with?"""
+    defaults = dict(config.file_defaults)
+    if config.version is not None:
+        defaults["version"] = config.version
+    return not settings.get(config.root_key) and all(
+        key == config.root_key or (key in defaults and value == defaults[key]) for key, value in settings.items())
 
 
 def _merge_grouped_event(
@@ -454,7 +473,8 @@ def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, 
 
 def _is_link_trigger(entry: object) -> bool:
     action = entry.get("action") if isinstance(entry, dict) else None
-    command = action.get("command") if isinstance(action, dict) else None
+    command = action.get("command") if isinstance(action, dict) else (
+        entry.get("command") if isinstance(entry, dict) else None)
     return any(_is_link_hook_command(command, event) for event in LINK_HOOK_EVENTS)
 
 
@@ -490,14 +510,18 @@ def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, objec
         settings.setdefault(key, value)
     if config.version is not None:
         settings.setdefault("version", config.version)
+    hooks = settings.get(config.root_key)
+    wanted = list if config.schema == "triggers" else dict
+    if hooks is not None and not isinstance(hooks, wanted):
+        # Never replace hooks Link cannot read as its own kind: they are the person's.
+        raise ValueError(f"{path} keeps \"{config.root_key}\" in a form Link does not edit; "
+                         "add Link's hooks by hand from the snippet")
     if config.schema == "triggers":
-        existing = settings.get(config.root_key)
-        kept = [entry for entry in existing if not _is_link_trigger(entry)] if isinstance(existing, list) else []
+        kept = [entry for entry in hooks or [] if not _is_link_trigger(entry)]
         settings[config.root_key] = kept + [item["entry"] for item in plan]
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(path, settings)
         return
-    hooks = settings.get(config.root_key)
     if not isinstance(hooks, dict):
         hooks = {}
         settings[config.root_key] = hooks

@@ -754,6 +754,8 @@ def build_disconnect_payload(
                 continue
             extra = remove_link_hooks(_settings_path(other.default_settings, None), other.name, write=write)
             found += list(extra.get("found") or [])  # type: ignore[call-overload]
+            if extra.get("error"):
+                hooks["error"] = extra["error"]
             hooks["removed"] = bool(hooks.get("removed")) or bool(extra.get("removed"))
         hooks["found"] = sorted(set(found))
     found_anything = bool(mcp.get("found")) or bool(hooks.get("found"))

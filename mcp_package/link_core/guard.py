@@ -54,7 +54,18 @@ COOLDOWN_FILE = ".link-cache/guard-cooldown.json"
 def _now(now: str | None):
     from datetime import datetime, timezone
 
-    return datetime.fromisoformat(now.replace("Z", "+00:00")) if now else datetime.now(timezone.utc)
+    return _when(now) or datetime.now(timezone.utc)
+
+
+def _when(stamp: str | None):
+    """A stamp as an aware time (one without a zone is UTC), or None if it is not one."""
+    from datetime import datetime, timezone
+
+    try:
+        moment = datetime.fromisoformat(str(stamp or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
 def _cooldown(root) -> dict[str, str]:
@@ -75,24 +86,18 @@ def recently_guarded(root, name: str, *, now: str | None = None) -> bool:
     off (LINK_USAGE=off); the usage ledger is still read for reminders
     recorded before that file existed.
     """
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     current = _now(now)
     floor = current - timedelta(minutes=GUARD_COOLDOWN_MINUTES)
-    stamp = _cooldown(root).get(name)
-    if stamp:
-        try:
-            if floor <= datetime.fromisoformat(stamp.replace("Z", "+00:00")) <= current + timedelta(minutes=1):
-                return True
-        except ValueError:
-            pass
+    stamp = _when(_cooldown(root).get(name))
+    if stamp is not None and floor <= stamp <= current + timedelta(minutes=1):
+        return True
     for event in reversed(load_usage(root)):
         if str(event.get("kind")) != "guard":
             continue
-        stamp = str(event.get("at") or "")
-        try:
-            at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        except ValueError:
+        at = _when(str(event.get("at") or ""))
+        if at is None:
             continue
         if at < floor:
             return False  # events are appended in order; older ones only get older
@@ -108,20 +113,18 @@ def note_guarded(root, name: str, *, now: str | None = None) -> None:
     from datetime import timedelta
     from pathlib import Path
 
-    from .files import atomic_write_bytes
+    from .files import atomic_write_text_unlocked, file_lock
 
     try:
         current = _now(now)
         floor = current - timedelta(minutes=GUARD_COOLDOWN_MINUTES)
-        kept = {}
-        for key, stamp in _cooldown(root).items():
-            try:
-                if _now(stamp) >= floor:
-                    kept[key] = stamp
-            except ValueError:
-                continue
-        kept[name] = current.isoformat().replace("+00:00", "Z")
-        atomic_write_bytes(Path(root).expanduser() / COOLDOWN_FILE, json.dumps(kept, sort_keys=True).encode())
+        path = Path(root).expanduser() / COOLDOWN_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with file_lock(path, timeout=2.0):  # read and write as one step: two sessions keep both entries
+            kept = {key: stamp for key, stamp in _cooldown(root).items()
+                    if (moment := _when(stamp)) is not None and moment >= floor}
+            kept[name] = current.isoformat().replace("+00:00", "Z")
+            atomic_write_text_unlocked(path, json.dumps(kept, sort_keys=True))
     except Exception:
         return
 

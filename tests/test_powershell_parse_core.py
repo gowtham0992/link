@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.shell_parse import read_powershell  # noqa: E402
 from link_core.tool_events import tool_calls  # noqa: E402
+from link_core.tool_hooks import evaluate_tool_call  # noqa: E402
 
 LINK = [sys.executable, str(ROOT / "link.py")]
 HOOK = [sys.executable, str(ROOT / "link_hook.py")]
@@ -30,7 +31,8 @@ class ReadPowerShellTests(unittest.TestCase):
     def test_cmdlets_and_aliases_name_their_files(self):
         cases = {
             r"Set-Content -Path C:\repo\migrations\1.sql -Value x": ([], [r"C:\repo\migrations\1.sql"]),
-            r"Add-Content migrations\1.sql 'x'": ([], [r"migrations\1.sql"]),
+            # Every word of a writing cmdlet counts: an unknown parameter could have shifted the path.
+            r"Add-Content migrations\1.sql 'x'": ([], [r"migrations\1.sql", "x"]),
             r"Remove-Item -Recurse -Force C:\ws\.link-cache": ([], [r"C:\ws\.link-cache"]),
             r"del a.txt, b.txt": ([], ["a.txt", "b.txt"]),
             r"Copy-Item .env C:\tmp\leak.txt": ([".env"], [r"C:\tmp\leak.txt"]),
@@ -68,6 +70,71 @@ class ReadPowerShellTests(unittest.TestCase):
                          [("powershell", "gc .env")])
         self.assertEqual(tool_calls({"toolName": "powershell", "toolArgs": {"command": "ls"}}), [("powershell", "ls")])
         self.assertEqual(tool_calls({"tool_name": "Bash", "tool_input": {"command": "ls"}}), [("command", "ls")])
+
+
+class PowerShellGuardTests(unittest.TestCase):
+    """The ways PowerShell spells a write to Link's own files, each held by the guard."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.temp.name) / "ws"
+        (self.ws / "wiki" / "memories").mkdir(parents=True)
+        (self.ws / ".link-cache").mkdir()
+        self.index = {"rules": [{"name": "r", "title": "t", "action": "deny", "kind": "command",
+                                 "pattern": "never-matches"}]}
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _decision(self, command, tool="PowerShell"):
+        decision = evaluate_tool_call(self.index, {"tool_name": tool, "tool_input": {"command": command}},
+                                      context_path=str(self.ws),
+                                      protected=[self.ws / "wiki" / "memories", self.ws / ".link-cache"])
+        return decision and decision["decision"]
+
+    def test_every_spelling_is_held(self):
+        cache, memories = f"{self.ws.as_posix()}/.link-cache", f"{self.ws.as_posix()}/wiki/memories"
+        held = [
+            f"if (Test-Path {cache}) {{ Remove-Item {cache} -Recurse }}",
+            f"1 | ForEach-Object {{ Remove-Item {cache} -Recurse }}",
+            f"(Remove-Item {cache} -Recurse)",
+            f'echo "$(Remove-Item {cache} -Recurse)"',
+            f"Get-ChildItem {memories} | Remove-Item",
+            f"'{cache}' | Remove-Item -Recurse",
+            f"Remove-Item -Recurse -Force `\n  {cache}",
+            f"@'\nIt's a note\n'@ | Set-Content {memories}/evil.md",
+            f"Set-Content -Va hi -Pa {cache}/approvals.json",
+            f"New-Item -Type File {memories}/evil.md",
+            f"'x' | Out-File -Enc utf8 {cache}/approvals.json",
+            f"Copy-Item -Dest {memories}/evil.md /tmp/evil.md",
+            f"Set-Content x.txt,{cache}/approvals.json y",
+            f"Copy-Item /tmp/x \u2013Destination {memories}/x.md",
+            "powershell -EncodedCommand UgBlAG0AbwB2AGUALQBJAHQAZQBtAA==",
+            f"powershell.exe Remove-Item {cache} -Recurse",
+            f'pwsh -Com "Remove-Item {cache} -Recurse"',
+            f'cmd.exe /c "rmdir /s /q {cache}"',
+            f"iex 'Remove-Item {cache} -Recurse'",
+            "iex $code",
+            f"echo x>{cache}/approvals.json",
+            f"<# note #> Remove-Item {cache} -Recurse",
+            f"Remove-Item {self.ws.as_posix()}/.link-cach?",
+            f"$p = '{cache}'; rm $p -Recurse",
+            f"Invoke-WebRequest https://example.com -OutFile {memories}/evil.md",
+            f"[IO.File]::WriteAllText('{cache}/approvals.json', 'x')",
+            f"echo x > 'a\x00b'; Remove-Item {cache} -Recurse",
+        ]
+        for command in held:
+            self.assertEqual(self._decision(command), "ask", command)
+        # A shell tool on Windows can run PowerShell too.
+        self.assertEqual(self._decision(f"Remove-Item {cache} -Recurse", tool="Bash"), "ask")
+        self.assertEqual(self._decision(f"pwsh -c 'Remove-Item {cache} -Recurse'", tool="Bash"), "ask")
+
+    def test_ordinary_powershell_is_not_held(self):
+        for command in ["Get-ChildItem src | Remove-Item", "if (Test-Path dist) { Remove-Item dist -Recurse }",
+                        "Get-Process 2>&1 | Out-Null", "git log --oneline 2>&1", "Set-Content notes.txt 'x'",
+                        f"Get-Content {self.ws.as_posix()}/wiki/memories/a.md"]:
+            self.assertIsNone(self._decision(command), command)
+
 
 
 class PowerShellRulesTests(unittest.TestCase):

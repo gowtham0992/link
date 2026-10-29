@@ -11,7 +11,9 @@ repeats the exact same call, which then goes through once.
 A grant is for one exact call - every command, read and write the tool
 call names, from the same directory - is used up by the call it lets
 through, and expires after a few minutes, so an approval never becomes a
-standing exception. Agents cannot approve their own requests: `lnk approve`
+standing exception. Kiro can check one call twice, from its global hooks
+and from Link's agent profile: the second check, from the other hook,
+within a few seconds, is the same call and goes through with it. Agents cannot approve their own requests: `lnk approve`
 is a governance command the pre-tool hook holds however it is spelt, and
 this file sits under the cache directory the hook protects. A file that is
 not well-formed, or that has a second hard link to it, is treated as empty:
@@ -30,6 +32,8 @@ from .files import atomic_write_text_unlocked, file_lock
 
 GRANT_MINUTES = 10
 REQUEST_HOURS = 24
+# How long a used grant still covers the same call checked again by a different hook (Kiro).
+REPEAT_SECONDS = 5
 MAX_REQUESTS = 200
 # Shorter than the hook's own 10 s timeout, so a stuck lock fails the call
 # closed (held) instead of the agent killing the hook mid-write.
@@ -100,6 +104,10 @@ def _prune(data: dict[str, dict[str, dict[str, object]]], now: datetime) -> None
             created = _parse(bucket[key].get("at"))
             if created is None or now - created > ttl or created - now > timedelta(minutes=1):
                 del bucket[key]
+                continue
+            used = bucket[key].get("used")
+            if used is not None and ((stamp := _parse(used)) is None or now - stamp > timedelta(seconds=REPEAT_SECONDS)):
+                del bucket[key]
     if len(data["requests"]) > MAX_REQUESTS:
         oldest = sorted(data["requests"], key=lambda key: str(data["requests"][key].get("at")))
         for key in oldest[: len(data["requests"]) - MAX_REQUESTS]:
@@ -147,8 +155,12 @@ def approve(link_root: Path, request_id: str, now: datetime | None = None) -> di
     return entry
 
 
-def take_grant(link_root: Path, key: str, now: datetime | None = None) -> bool:
-    """Use up the grant for this exact call, if the person gave one in the last few minutes."""
+def take_grant(link_root: Path, key: str, now: datetime | None = None, *, hook: str = "") -> bool:
+    """Use up the grant for this exact call, if the person gave one in the last few minutes.
+
+    `hook` names the hook checking the call; one check of the same call from
+    a different hook, right after, is let through with it (see above).
+    """
     path = approvals_path(link_root)
     if not path.exists():
         return False
@@ -156,7 +168,18 @@ def take_grant(link_root: Path, key: str, now: datetime | None = None) -> bool:
     with file_lock(path, timeout=LOCK_SECONDS):
         data = _load(path)
         _prune(data, moment)
-        granted = data["grants"].pop(key, None) is not None
+        entry = data["grants"].get(key)
+        if entry is None:
+            granted = False
+        elif "used" not in entry:
+            entry.update(used=_stamp(moment), used_by=hook)
+            granted = True
+        else:
+            granted = bool(hook) and entry.get("used_by") not in {hook, None} and not entry.get("repeated")
+            if granted:
+                entry["repeated"] = True
+            else:
+                del data["grants"][key]
         _save(path, data)
     return granted
 

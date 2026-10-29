@@ -160,7 +160,7 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertTrue(payload["write"]["ok"], payload["write"])
         self.assertEqual(hooks["version"], "v1")
         self.assertEqual([(h["trigger"], h.get("matcher")) for h in hooks["hooks"]],
-                         [("SessionStart", None), ("PreToolUse", "shell|read|write")])
+                         [("SessionStart", None), ("PreToolUse", None)], "every tool, as in the profile")
         self.assertIn("--emit kiro", hooks["hooks"][1]["action"]["command"])
         self.assertEqual(hooks["hooks"][1]["timeout"], 10)
         self.assertEqual(agent["tools"], ["@builtin"], "a profile the person already has keeps its own settings")
@@ -168,9 +168,34 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertEqual(len(agent["hooks"]["agentSpawn"]), 1)
         self.assertEqual(agent["hooks"]["preToolUse"][0]["timeout_ms"], 10_000)
         self.assertNotIn("matcher", agent["hooks"]["preToolUse"][0], "every tool: Link decides what matters")
+        self.assertIn("--emit kiro-agent", agent["hooks"]["preToolUse"][0]["command"], "told apart from V3's hook")
         self.assertTrue(result["hooks"]["removed"])
         self.assertFalse(v3.exists(), "Link's own hooks file goes when nothing else is in it")
         self.assertEqual(after["hooks"], {"stop": [{"command": "say done"}]})
+
+    def test_a_profile_link_created_goes_on_disconnect_and_list_hooks_are_never_replaced(self):
+        from link_core.agent_hooks import remove_link_hooks  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "link.json"
+            kwargs = dict(target=Path("/tmp/link"), agent="kiro-agent", runtime_script=Path("/tmp/link/link.py"),
+                          python_cmd="python3", settings_path=str(path))
+            build_agent_hooks_payload(**kwargs, write=True)
+            remove_link_hooks(path, "kiro-agent", write=True)
+            self.assertFalse(path.exists(), "the profile Link made, with nothing of the person's in it")
+
+            # A profile Kiro migrated to its list form: Link's entries come out, the person's stay.
+            mine = {"name": "mine", "trigger": "Stop", "action": {"type": "command", "command": "say done"}}
+            link = {"name": "Link", "trigger": "PreToolUse",
+                    "action": {"type": "command", "command": "python3 /tmp/link/link.py hook pre-tool /tmp/link"}}
+            path.write_text(json.dumps({"name": "link", "hooks": [mine, link]}), encoding="utf-8")
+            result = build_agent_hooks_payload(**kwargs, write=True)
+            self.assertFalse(result["write"]["ok"], "never replaces hooks it cannot read as its own kind")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["hooks"], [mine, link])
+            self.assertEqual(remove_link_hooks(path, "kiro-agent", write=True)["found"], ["PreToolUse"])
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["hooks"], [mine])
+            path.write_text("{not json", encoding="utf-8")
+            self.assertIn("not valid JSON", remove_link_hooks(path, "kiro-agent", write=True)["error"])
 
     def test_a_new_kiro_profile_has_every_tool_and_the_mcp_servers(self):
         snippet = json.loads(str(build_agent_hooks_payload(

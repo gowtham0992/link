@@ -39,10 +39,13 @@ from collections.abc import Iterable, Mapping
 ZED_SETTINGS = ".config/zed/settings.json"
 MARKER = "// Link: compiled from your reviewed rules by `lnk compile --global`; change the rules in Link"
 _MARKER_PREFIX = "// Link: compiled from your reviewed rules"
-WRITE_TOOLS = ("delete_path", "edit_file", "move_path", "write_file")
+# Zed checks copy_path and move_path against their destination as well as their source.
+WRITE_TOOLS = ("copy_path", "create_directory", "delete_path", "edit_file", "move_path", "write_file")
 _META = set(".+*?()|[]{}^$\\")
 # What Link's shell reader looks past before the program: privilege and environment wrappers.
-_PREFIX = r"^\s*(?:(?:sudo|doas|env|command|exec|nohup|nice|time)(?:\s+-\S+)*\s+|\w+=\S*\s+)*(?:\S*/)?"
+# A wrapper's options may take a value (`sudo -u deploy`, `nice -n 5`, `env -u FOO`).
+_PREFIX = (r"^\s*(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+"
+           r"|\w+=\S*\s+)*(?:\S*/)?\\?")
 
 
 def _escape(text: str) -> str:
@@ -72,8 +75,8 @@ def path_regex(pattern: str) -> str:
     """A Link path glob as a regex over the path an agent names, at any depth."""
     wanted = pattern.replace("\\", "/")
     wanted = wanted[2:] if wanted.startswith("./") else wanted
-    if wanted.endswith("/**"):
-        return r"(?:^|/)" + _glob(wanted[:-3]) + r"/"
+    if wanted.endswith("/**"):  # the folder itself too: deleting or moving it removes what is inside
+        return r"(?:^|/)" + _glob(wanted[:-3]) + r"(?:/|$)"
     return r"(?:^|/)" + _glob(wanted) + r"$"
 
 
@@ -166,22 +169,28 @@ def splice(text: str | None, permissions: Mapping[str, object]) -> str | None:
             before = member - 1
             while masked[before].isspace():
                 before -= 1
-            if _MARKER_PREFIX not in text[before + 1:member]:
+            marker = text.rfind(_MARKER_PREFIX, before + 1, member)
+            if marker < 0:
                 raise ValueError("already has agent.tool_permissions of your own; Link leaves them alone. "
                                  "Merge Link's rules by hand (lnk compile --global --dry-run --json shows them)")
+            # Link's block starts at the line break before its marker: comments of the person's
+            # between the previous member and the marker stay where they are.
+            line = text.rfind("\n", before + 1, marker)
+            start = line if line >= 0 else marker
             if permissions:
-                updated = text[:before + 1] + "\n    " + _block(permissions, "    ") + text[current[1]:]
+                lead = "\n    " if line >= 0 else ""
+                updated = text[:start] + lead + _block(permissions, "    ") + text[current[1]:]
             else:
-                start, end = before + 1, current[1]
+                end = current[1]
                 if masked[before] == ",":
-                    start = before
+                    updated = text[:before] + text[before + 1:start] + text[end:]
                 else:
                     after = end
                     while after < len(masked) and masked[after].isspace():
                         after += 1
                     if after < len(masked) and masked[after] == ",":
                         end = after + 1
-                updated = text[:start] + text[end:]
+                    updated = text[:start] + text[end:]
     check = _jsonc_loads(updated)
 
     def without_link(settings: object) -> object:

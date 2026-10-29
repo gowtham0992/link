@@ -92,15 +92,20 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   Kiro CLI V3 runs in every workspace, and a `link` agent profile for the
   default engine, which runs hooks only from a profile (`kiro-cli agent
   set-default link` makes it yours; it keeps your steering and MCP
-  servers). Kiro can only allow or block, so ask rules hold the call. Zed
-  has no hooks; `lnk compile --global` writes your personal rules into
-  Zed's own `agent.tool_permissions` (deny as `always_deny`, ask as
-  `always_confirm`, commands and file writes; Zed has no rule for reads).
-  Link writes that block only where there is none, marks it with a
-  comment, keeps every other byte and comment of the settings file, and
-  leaves permissions you wrote alone, printing its block for you to merge.
-  Both are wired to the vendors' documented formats and not yet measured
-  on a live session.
+  servers). Kiro can only allow or block, so ask rules hold the call; when
+  both files run, the two checks of one call share its approval, and
+  `lnk disconnect kiro` removes the profile Link made. Hooks Kiro has
+  rewritten in a form Link does not edit are left alone, never replaced.
+  Zed has no hooks; `lnk compile --global --targets zed` writes your
+  personal rules into Zed's own `agent.tool_permissions` (deny as
+  `always_deny`, ask as `always_confirm`, commands and file writes,
+  copies and new folders included; Zed has no rule for reads). Link writes
+  that block only where there is none, marks it with a comment, keeps
+  every other byte and comment of the settings file, and leaves
+  permissions you wrote alone, printing its block for you to merge. After
+  a memory change, Link refreshes `settings.json` only if it already
+  carries Link's block. Both are wired to the vendors' documented formats
+  and not yet measured on a live session.
 - **PowerShell calls are read as PowerShell.** Read with POSIX shell
   rules, `Get-Content C:\repo\.env` lost its backslashes and named no file,
   so path rules, and the guard on Link's own files, never saw a PowerShell
@@ -108,7 +113,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   the files their cmdlets and aliases read and write (`Get-Content`, `gc`,
   `type`, `Set-Content`, `Out-File`, `Remove-Item`, `del`, `Copy-Item`,
   `Move-Item`, redirection and more), follow `Set-Location`, and expand
-  `$env:` variables and `~` as the shell would.
+  `$env:` variables and `~` as the shell would. Commands inside blocks,
+  parentheses and `$( )`, pipeline input, line continuations, here-strings,
+  abbreviated parameters, nested `pwsh`/`cmd /c`/`iex`, wildcards and
+  simple variables are followed too, and PowerShell run through a shell
+  tool is read both ways. An encoded command, or `iex` of something not
+  on the line, cannot be read, so while rules are active it is held
+  before it could touch Link's own files.
 - **Link's own files are guarded on Windows.** The check for writes to the
   memory and approval files compared paths with `/`, which Windows paths do
   not use, so on Windows an agent's write there was not held.
@@ -124,7 +135,10 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   the secrets file on its own; both ordinary tasks were done and none was
   stopped. Codex runs without its own sandbox, which keeps `.git`
   read-only, inside a macOS sandbox that confines writes to the throwaway
-  repository.
+  repository. The agent gets only what it needs to run and reach its own
+  model, not your other credentials, and keys are blanked out of anything
+  the benchmark stores; a new file under `migrations/` counts as breaking
+  the rule, as an edit does.
 - When Cursor runs the hooks in `~/.claude/settings.json` (it does by
   default) and Link has installed its own Cursor hooks too, the Claude copy
   stands down, so a call is checked once and the brief arrives once.
@@ -137,7 +151,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   and push normally - and reads the outcome from the repository and its
   remote, not from what the agent says. The agent runs isolated from your
   own setup (project settings only, no MCP servers, shell limited to git
-  and npm). Its referee is tested without an agent.
+  and npm). Its referee is tested without an agent. It has been run live
+  on Codex (above); a live Claude Code run is still to come.
 - The behavioral A/B's live mode and the new benchmark send one canary
   prompt before any scored call and stop if it is not answered. Agent CLIs
   report billing and auth failures as ordinary output with exit code 0;
@@ -160,9 +175,9 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - **The README and site say which agent gets what.** A coverage table near
   the top shows, for each agent, how memory arrives, which session hooks
   it has, which tool calls rules are checked on and whether it can ask you
-  or only hold the call, and says that enforcement is measured end to end
-  on Claude Code and follows the vendors' documented hook schemas
-  elsewhere. Claims that outran their evidence are corrected:
+  or only hold the call, and says what enforcement is measured on: one
+  live Codex session, recorded tool calls replayed through the installed
+  hook command, and elsewhere the vendors' documented hook schemas. Claims that outran their evidence are corrected:
   `lnk setup` wires every agent *it finds*, not every agent you have; the
   LoCoMo 84.8% says it was measured on Link 3.x and not yet re-run; the
   hygiene and poisoning zeros are labelled as CI regression floors on

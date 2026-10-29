@@ -42,11 +42,15 @@ class TranslationTests(unittest.TestCase):
             self.assertTrue(_hits(regex, command), command)
         for command in ("git push origin main", "echo git push --force", "git pushx --force"):
             self.assertFalse(_hits(regex, command), command)
+        for command in ("sudo -u deploy git push --force", "nice -n 5 git push --force",
+                        "env -u FOO git push --force", "xargs git push --force", "\\git push --force"):
+            self.assertTrue(_hits(regex, command), "a wrapper's option values: " + command)
 
     def test_paths_match_at_any_depth(self):
         self.assertTrue(_hits(path_regex("migrations/**"), "app/migrations/0001_init.sql"))
         self.assertTrue(_hits(path_regex("migrations/**"), "migrations/x.sql"))
         self.assertFalse(_hits(path_regex("migrations/**"), "src/migrations_helper.py"))
+        self.assertTrue(_hits(path_regex("migrations/**"), "proj/migrations"), "deleting the folder itself")
         self.assertTrue(_hits(path_regex(".env"), "project/.env"))
         self.assertFalse(_hits(path_regex(".env"), "project/.env.example"))
         self.assertFalse(_hits(path_regex(".env"), "project/xenv"), "the dot is literal")
@@ -54,7 +58,8 @@ class TranslationTests(unittest.TestCase):
     def test_rules_become_zeds_shape_and_reads_are_reported(self):
         permissions, skipped, names = compile_permissions([_memory()])
         tools = permissions["tools"]
-        self.assertEqual(sorted(tools), ["delete_path", "edit_file", "move_path", "terminal", "write_file"])
+        self.assertEqual(sorted(tools), ["copy_path", "create_directory", "delete_path", "edit_file", "move_path",
+                                         "terminal", "write_file"])
         self.assertEqual(list(tools["terminal"]), ["always_confirm"])
         self.assertEqual(list(tools["edit_file"]), ["always_deny"])
         self.assertEqual([s["reason"] for s in skipped], ["Zed has no rule for reading files"])
@@ -111,7 +116,7 @@ class GlobalCompileZedTests(unittest.TestCase):
     def test_rules_reach_zeds_settings_and_follow_the_memory(self):
         settings = self.home / ".config" / "zed" / "settings.json"
         settings.write_text('{\n  // keep me\n  "theme": "Ayu"\n}\n', encoding="utf-8")
-        apply_global_plan(plan_global_compile([_memory()], self.home, targets=["zed"]))
+        apply_global_plan(plan_global_compile([_memory()], self.home, targets=["zed", "zed-permissions"]))
         parsed = _jsonc_loads(settings.read_text(encoding="utf-8"))
         self.assertIn("terminal", parsed["agent"]["tool_permissions"]["tools"])
         self.assertIn("// keep me", settings.read_text(encoding="utf-8"))
@@ -122,14 +127,43 @@ class GlobalCompileZedTests(unittest.TestCase):
         self.assertNotIn("tool_permissions", json.dumps(_jsonc_loads(settings.read_text(encoding="utf-8"))))
 
     def test_project_rules_stay_out_and_own_permissions_get_a_snippet(self):
-        plan = plan_global_compile([_memory(scope="project", project="api")], self.home, targets=["zed"])
+        plan = plan_global_compile([_memory(scope="project", project="api")], self.home,
+                                   targets=["zed", "zed-permissions"])
         self.assertNotIn(".config/zed/settings.json", plan.files)
         settings = self.home / ".config" / "zed" / "settings.json"
         settings.write_text('{"agent": {"tool_permissions": {"default": "allow"}}}', encoding="utf-8")
-        plan = plan_global_compile([_memory()], self.home, targets=["zed"])
+        plan = plan_global_compile([_memory()], self.home, targets=["zed", "zed-permissions"])
         self.assertNotIn(".config/zed/settings.json", plan.files)
         self.assertIn("tool_permissions", plan.zed_snippet)
         self.assertTrue(any(c["path"] == ".config/zed/settings.json" for c in plan.conflicts))
+
+    def test_a_refresh_never_starts_editing_settings(self):
+        settings = self.home / ".config" / "zed" / "settings.json"
+        settings.write_text('{\n  // mine\n  "theme": "Ayu"\n}\n', encoding="utf-8")
+        apply_global_plan(plan_global_compile([_memory()], self.home, targets=["zed"]))  # AGENTS.md only
+        self.assertEqual(owned_global_targets(self.home), ["zed"])
+        refresh = plan_global_compile([_memory()], self.home, targets=owned_global_targets(self.home))
+        self.assertNotIn(".config/zed/settings.json", refresh.files)
+        settings.unlink()
+        refresh = plan_global_compile([_memory()], self.home, targets=owned_global_targets(self.home))
+        self.assertNotIn(".config/zed/settings.json", refresh.files, "nor creates the file")
+
+    def test_the_persons_comments_beside_links_block_survive(self):
+        permissions, _, _ = compile_permissions([_memory()])
+        other, _, _ = compile_permissions([_memory(rules=["deny command: rm -rf /*"])])
+        start = '{\n  "agent": {\n    "default_model": {"provider": "x"}, // my model note\n  },\n  "theme": "y"\n}\n'
+        written = splice(start, permissions)
+        self.assertIn("// my model note", written)
+        mine = written.replace(MARKER, "// above Link's block\n    " + MARKER)
+        replaced = splice(mine, other)
+        self.assertIn("// my model note", replaced)
+        self.assertIn("// above Link's block", replaced)
+        self.assertEqual(splice(replaced, other), replaced, "applying twice changes nothing")
+        removed = splice(replaced, {})
+        self.assertIn("// my model note", removed)
+        self.assertIn("// above Link's block", removed)
+        self.assertNotIn("tool_permissions", removed)
+        self.assertEqual(splice(splice(start, permissions), {}), start, "the original back, byte for byte")
 
 
 if __name__ == "__main__":

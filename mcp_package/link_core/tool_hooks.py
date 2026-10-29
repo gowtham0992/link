@@ -40,7 +40,7 @@ from .project_scope import (
     normalize_project,
     parse_applies_when,
 )
-from .shell_parse import read_powershell, read_shell
+from .shell_parse import looks_like_powershell, read_powershell, read_shell
 from .tool_events import EMITS, HookReply, can_ask, native_emit, render_reply, tool_calls
 
 # Everything else is imported where it is used: the pre-tool hook runs before
@@ -262,12 +262,12 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
         path = base / path
     try:
         resolved = str(path.resolve())
-    except OSError:
+    except (OSError, ValueError):  # a NUL in the path, an unreadable link
         return False
     for root in roots:
         try:
             root_text = str(root.resolve())
-        except OSError:
+        except (OSError, ValueError):
             continue
         mine, theirs = (resolved.lower(), root_text.lower()) if _CASE_FOLDING_FS else (resolved, root_text)
         # Windows paths use "\\" (and accept "/"): compare in the platform's own separator.
@@ -275,6 +275,14 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
         if mine == theirs or mine.startswith(theirs.rstrip(os.sep) + os.sep) \
                 or theirs.startswith(mine.rstrip(os.sep) + os.sep):
             return True
+        if any(ch in mine for ch in "*?["):
+            # A wildcard (`Remove-Item .link-cach?`, `rm wiki/mem*`): the root, or a folder above it,
+            # matches the pattern, or the part before the first wildcard lies inside the root.
+            literal = mine[:min(mine.index(ch) for ch in "*?[" if ch in mine)].rsplit(os.sep, 1)[0]
+            ancestors = [theirs, *(str(parent) for parent in Path(theirs).parents)]
+            if any(fnmatch.fnmatchcase(candidate, mine) for candidate in ancestors) \
+                    or literal == theirs or literal.startswith(theirs.rstrip(os.sep) + os.sep):
+                return True
     return False
 
 
@@ -301,12 +309,21 @@ def evaluate_tool_call(
     commands: list[list[str]] = []
     reads: list[str] = []
     writes: list[str] = []
+    opaque = False
     for kind, value in calls:
         if kind in {"command", "powershell"}:
             reading = read_powershell(value) if kind == "powershell" else read_shell(value)
+            if kind == "command" and looks_like_powershell(value):
+                # A shell tool on Windows may run PowerShell: read it that way too.
+                other = read_powershell(value)
+                reading.commands += [words for words in other.commands if words not in reading.commands]
+                reading.reads += other.reads
+                reading.writes += other.writes
+                reading.opaque = reading.opaque or other.opaque
             commands += reading.commands
             reads += reading.reads
             writes += reading.writes
+            opaque = opaque or reading.opaque
         elif kind == "read":
             reads.append(value)
         else:
@@ -339,7 +356,7 @@ def evaluate_tool_call(
             "name": "link-governance", "title": "Only the person approves, clears or retires rules",
             "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|approve|...",
         })
-    if rules and roots and any(_under(target, roots, base) for target in writes):
+    if rules and roots and (opaque or any(_under(target, roots, base) for target in writes)):
         guards.append({
             "name": "link-memory-files", "title": "Link memory and approval files change only through Link",
             "action": "ask", "kind": "write", "pattern": "<Link memories and .link-cache>/**",
@@ -713,7 +730,7 @@ def _hold(decision: Mapping[str, object], root: Path, cwd: str, emit: str,
         if isinstance(raw_calls, list) else []
     key = approvals.call_key(calls, cwd)
     try:
-        if approvals.take_grant(root, key):
+        if approvals.take_grant(root, key, hook=emit):
             return held, "approved"
         request_id = approvals.request(
             root, key, display=approvals.call_display(calls, cwd), title=str(decision.get("title") or ""),

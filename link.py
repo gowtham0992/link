@@ -1438,17 +1438,20 @@ def _stale_wiki(root: Path, *, json_output: bool) -> int:
 def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool, json_output: bool,
                     home: Path | None = None) -> int:
     """`lnk compile --global`: personal memory into agents' global instruction files."""
-    from link_core.global_compile import GLOBAL_TARGET_KEYS, apply_global_plan, plan_global_compile
+    from link_core.global_compile import GLOBAL_TARGET_KEYS, ZED_PERMISSIONS, apply_global_plan, plan_global_compile
     from link_core.zed_permissions import ZED_SETTINGS
 
     chosen = [key.strip() for key in targets.split(",") if key.strip()] if targets else None
     if chosen == ["all"]:
         chosen = list(GLOBAL_TARGET_KEYS)
-    unknown = [key for key in chosen or [] if key not in GLOBAL_TARGET_KEYS]
+    known = (*GLOBAL_TARGET_KEYS, ZED_PERMISSIONS)
+    unknown = [key for key in chosen or [] if key not in known]
     if unknown:
-        print(f"Unknown global target(s): {', '.join(unknown)}. Choose from: {', '.join(GLOBAL_TARGET_KEYS)}",
+        print(f"Unknown global target(s): {', '.join(unknown)}. Choose from: {', '.join(known)}",
               file=sys.stderr)
         return 2
+    if chosen and "zed" in chosen and ZED_PERMISSIONS not in chosen:
+        chosen.append(ZED_PERMISSIONS)  # Zed's rules live in its settings, its memory in AGENTS.md
     plan = plan_global_compile(_core_memory_records(wiki_dir), home or Path.home(), targets=chosen)
     written = [] if (check or dry_run) else apply_global_plan(plan)
     summary = {
@@ -1465,7 +1468,7 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
             if plan.files[rel] is None:
                 print(f"{'Would remove' if (check or dry_run) else 'Removed'}: ~/{rel} (no memory left for it)")
             elif rel == ZED_SETTINGS:
-                count = len(plan.included.get("zed-permissions", []))
+                count = len(plan.included.get(ZED_PERMISSIONS, []))
                 print(f"{verb}: ~/{rel} (Zed tool permissions from {count} "
                       f"{'memory' if count == 1 else 'memories'} with rules)")
             else:
@@ -3843,6 +3846,8 @@ def disconnect_agent(
         lines.append(f"  {verb} session hooks ({', '.join(str(e) for e in found_hooks)}) from {hooks.get('path')}")
     elif hooks.get("supported"):
         lines.append(f"  No Link hooks in {hooks.get('path')}")
+    if hooks.get("error"):
+        lines.append(f"  Not touched: {hooks['error']}")
     if not payload["found"]:
         lines.append("Nothing to remove.")
     elif write:

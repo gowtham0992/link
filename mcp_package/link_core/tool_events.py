@@ -34,7 +34,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 # Every agent Link knows how to answer, by its --emit name.
-EMITS = ("text", "cursor", "codex", "gemini", "copilot", "windsurf", "kiro", "antigravity", "devin")
+# "kiro-agent" answers as "kiro" does; the name tells Link's agent-profile hook from its global one.
+EMITS = ("text", "cursor", "codex", "gemini", "copilot", "windsurf", "kiro", "kiro-agent", "antigravity", "devin")
 # Agents (or events) that can show the person a confirmation; the rest can only allow or block.
 ASK_CAPABLE = {"text", "gemini", "copilot", "antigravity"}
 _CURSOR_ASK_EVENTS = {"beforeShellExecution", "beforeMCPExecution"}
@@ -208,7 +209,7 @@ def render_reply(decision: Mapping[str, object] | None, emit: str, event: Mappin
         return HookReply(json.dumps({"permissionDecision": verdict, "permissionDecisionReason": reason}))
     if emit == "devin":
         return HookReply(json.dumps({"decision": "block", "reason": reason}))
-    if emit in {"windsurf", "kiro"}:
+    if emit in {"windsurf", "kiro", "kiro-agent"}:
         return HookReply(stderr=reason, exit_code=2)
     event_name = str(event.get("hook_event_name") or "PreToolUse")
     return HookReply(json.dumps({"hookSpecificOutput": {

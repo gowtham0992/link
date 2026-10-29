@@ -224,7 +224,7 @@ lnk verify-mcp</code></pre>
         <pre><code>lnk connect claude-code ~/link --hooks --write
 lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no session-end event)
 lnk connect cursor ~/link --hooks --write</code></pre>
-        <p>Hook support beyond Claude Code is new in 6.0 and follows each vendor's documented hook schema; enforcement is measured end to end on Claude Code. If a hook misbehaves on another agent, please open an issue.</p>
+        <p>Hook support beyond Claude Code is new in 6.0 and follows each vendor's documented hook schema; enforcement is measured on one live Codex session and by replaying recorded tool calls through the installed hook; a live Claude Code session has not been benchmarked yet. If a hook misbehaves on another agent, please open an issue.</p>
 
         <h2 id="linkbar">10. Optional: LinkBar, the menu bar app (macOS)</h2>
         <p>Hooks make capture automatic; LinkBar makes reviewing it ambient. It puts the review gate in your menu bar: proposals arrive as a native notification with a one-tap <strong>Accept</strong>, a global palette (<code>⌥⌘M</code>) recalls or remembers from any app, a live pulse shows which agent sessions are writing right now, and a Status tab reports the health of every Link surface (CLI, workspace, MCP, hooks, recall tier, viewer) with one-click fixes. It runs the same reviewed <code>lnk</code> commands you just wired — nothing new to trust.</p>

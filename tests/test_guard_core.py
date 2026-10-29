@@ -146,6 +146,22 @@ class GuardCooldownWithoutUsageTests(unittest.TestCase):
             self.assertFalse(recently_guarded(root, "deploy-tuesdays", now="2026-10-29T10:05:00Z"), "it expires")
             (root / ".link-cache" / "guard-cooldown.json").write_text("not json", encoding="utf-8")
             self.assertFalse(recently_guarded(root, "deploy-tuesdays"), "a broken file just means no cooldown")
+            (root / ".link-cache" / "guard-cooldown.json").write_text('{"deploy-tuesdays": "2026-10-28T10:00:00"}',
+                                                                     encoding="utf-8")
+            self.assertTrue(recently_guarded(root, "deploy-tuesdays", now="2026-10-28T10:05:00Z"),
+                            "a stamp without a zone is UTC, not an error")
+            note_guarded(root, "no-force-push", now="2026-10-28T10:06:00Z")
+            self.assertTrue(recently_guarded(root, "deploy-tuesdays", now="2026-10-28T10:07:00Z"), "kept")
+
+    def test_two_sessions_noting_at_once_keep_both(self):
+        import tempfile
+        from concurrent.futures import ProcessPoolExecutor
+        from pathlib import Path as P
+        from link_core.guard import _cooldown, note_guarded
+        with tempfile.TemporaryDirectory() as temp, ProcessPoolExecutor(8) as pool:
+            names = [f"memory-{i}" for i in range(16)]
+            list(pool.map(note_guarded, [temp] * len(names), names))
+            self.assertEqual(sorted(_cooldown(P(temp))), sorted(names))
 
 
 class McpGuardTests(unittest.TestCase):

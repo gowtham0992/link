@@ -177,6 +177,16 @@ class HeldCallTests(unittest.TestCase):
         receipt = subprocess.run([*LINK, "receipt", str(self.ws)], capture_output=True, text=True, check=True).stdout
         self.assertIn("let through once after your approval", receipt)
 
+    def test_kiros_two_hooks_share_one_approval(self):
+        push = {"tool_name": "execute_bash", "tool_input": {"command": "git push --force origin main"}}
+        held = self._hook("kiro", push)
+        self.assertEqual(held.returncode, 2)
+        request_id = held.stderr.split("lnk approve ")[1].split()[0]
+        subprocess.run([*LINK, "approve", request_id, str(self.ws)], check=True, capture_output=True)
+        self.assertEqual(self._hook("kiro", push).returncode, 0, "the approved call, from Kiro's global hook")
+        self.assertEqual(self._hook("kiro-agent", push).returncode, 0, "and the same call from Link's agent profile")
+        self.assertEqual(self._hook("kiro", push).returncode, 2, "then held again")
+
     def test_exit_code_agents_are_blocked_with_the_reason_on_stderr(self):
         payload = {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "git push --force"}}
         held = self._hook("windsurf", payload)

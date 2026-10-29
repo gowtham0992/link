@@ -70,11 +70,12 @@ session-start hook, `lnk compile --global` writes your reviewed personal
 memory into the instruction file they read every session, and keeps it in
 step as memories change. Recall, review, stale
 checks, receipts, sync and `lnk compile` work the same for every agent.
-Enforcement is measured end to end on Claude Code, and on a live Codex
-session the hook stopped every tempting call the model tried while all
-ordinary work went through (one run per task, in RESULTS.md). On the other
-agents it follows each vendor's documented hook schema and is new in 6.0 -
-report what you see.
+On a live Codex session the hook stopped every tempting call the model
+tried while all ordinary work went through (one run per task, in
+RESULTS.md). On Claude Code, recorded tool calls are replayed through the
+installed hook command; a live Claude Code session has not been
+benchmarked yet. On the other agents it follows each vendor's documented
+hook schema and is new in 6.0 - report what you see.
 Kiro's hooks run in Kiro CLI V3 for every workspace, and on the default
 engine through Link's `link` agent profile (`kiro-cli agent set-default
 link`). Zed has no hooks, so `lnk compile --global` writes your personal

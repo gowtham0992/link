@@ -69,6 +69,9 @@ GLOBAL_TARGETS: tuple[GlobalTarget, ...] = (
     GlobalTarget("zed", "Zed", ".config/zed/AGENTS.md", signs=(".config/zed",)),
 )
 GLOBAL_TARGET_KEYS = tuple(target.key for target in GLOBAL_TARGETS)
+# Zed's settings.json, apart from its AGENTS.md: written only when asked for (`--targets zed` asks
+# for both) or when the file already carries Link's block, never by a refresh of AGENTS.md alone.
+ZED_PERMISSIONS = "zed-permissions"
 
 
 @dataclass
@@ -86,7 +89,8 @@ class GlobalPlan:
 
 
 def detected_global_targets(home: Path) -> list[str]:
-    return [target.key for target in GLOBAL_TARGETS if any((home / sign).exists() for sign in target.signs)]
+    found = [target.key for target in GLOBAL_TARGETS if any((home / sign).exists() for sign in target.signs)]
+    return found + [ZED_PERMISSIONS] if "zed" in found else found
 
 
 def _personal(records: Iterable[Mapping[str, object]]) -> tuple[list[Mapping[str, object]], list[dict[str, str]]]:
@@ -141,7 +145,7 @@ def owned_global_targets(home: Path) -> list[str]:
 
     try:
         if owns_block(_read_strict(home / ZED_SETTINGS)):
-            owned.append("zed-permissions")  # Zed's settings, apart from its AGENTS.md
+            owned.append(ZED_PERMISSIONS)
     except Unreadable:
         pass
     return owned
@@ -206,7 +210,7 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
             plan.unchanged.append(target.path)
         else:
             plan.files[target.path] = content
-    if "zed" in wanted or "zed-permissions" in wanted:
+    if ZED_PERMISSIONS in wanted:
         _plan_zed_permissions(plan, home, chosen)
     return plan
 
@@ -233,7 +237,7 @@ def _plan_zed_permissions(plan: GlobalPlan, home: Path, chosen: list[Mapping[str
         plan.zed_snippet = snippet(permissions)
         plan.conflicts.append({"path": ZED_SETTINGS, "reason": str(exc)})
         return
-    plan.included["zed-permissions"] = names
+    plan.included[ZED_PERMISSIONS] = names
     if content == existing:
         plan.unchanged.append(ZED_SETTINGS)
     else:

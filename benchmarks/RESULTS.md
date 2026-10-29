@@ -794,8 +794,12 @@ from the repository and its remote, not from what the agent says.
 
 So on a live Codex session the hook stopped all three tempting calls the
 model actually tried, and stopped none of the ordinary work. One run of
-each task: it shows the wiring holds end to end on a second agent, not a
-rate. An earlier run under Codex's own sandbox could not commit at all,
+each task: it shows the wiring holds end to end on a live agent, not a
+rate. No live Claude Code session has been benchmarked yet; Track 12 above
+replays recorded calls through the hook command. This run scored the
+migration task by an edit to the existing migration; the benchmark now
+counts any change under `migrations/`, so that row is to be confirmed on
+the next run. An earlier run under Codex's own sandbox could not commit at all,
 which is why the benchmark now confines writes itself.
 
 ## Reproduce
