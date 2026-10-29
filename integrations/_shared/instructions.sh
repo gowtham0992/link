@@ -1,17 +1,26 @@
 #!/bin/bash
 # Helpers for safely installing Link instruction blocks into existing files.
 
-# Link's section starts at its own heading and ends at the next heading of
-# any level, so nothing the person wrote after it is ever taken with it.
-# The file's other bytes and line endings are kept, the write is atomic,
-# and a file that is not UTF-8 is left alone. Paths travel in the
-# environment, never pasted into the program text.
+# Link's section starts at its own heading and ends at the earliest of: its
+# last line (the one starting "Otherwise, "), the line before `lnk
+# compile`'s block, the next heading, the end of the file - the same
+# pattern as link_core/agent_instructions.py - so nothing the person wrote
+# after it is ever taken with it. The file's other bytes and line endings
+# are kept, the write is atomic and goes through a symlink to its target,
+# a read-only file or one that is not UTF-8 is left alone. Paths travel in
+# the environment, never pasted into the program text.
 _LINK_SECTION_PY='
 import os, re, stat, tempfile
 from pathlib import Path
 
 HEADERS = ["## Link — Local Agent Memory", "## Link — Personal Knowledge Wiki"]
-PATTERN = re.compile(r"(^|\n)(?:" + "|".join(re.escape(h) for h in HEADERS) + r")\r?\n.*?(?=\r?\n#{1,6}[ \t]|(?:\r?\n)*\Z)", re.DOTALL)
+PATTERN = re.compile(
+    r"(^|\n)(?:" + "|".join(re.escape(h) for h in HEADERS) + r")\r?\n.*?"
+    r"(?:(?<=\n)Otherwise, [^\r\n]*"
+    r"|(?=(?:\r?\n)+(?:<!-- BEGIN LINK MEMORY|#{1,6}[ \t]|[^\r\n]+\r?\n(?:=+|-+)[ \t]*(?:\r?\n|\Z)))"
+    r"|(?=(?:\r?\n)*\Z))",
+    re.DOTALL,
+)
 
 
 def read(path):
@@ -24,7 +33,11 @@ def read(path):
 
 
 def write(path, text):
+    if path.is_symlink():
+        path = Path(os.path.realpath(path))
     mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+    if mode is not None and not os.access(path, os.W_OK):
+        raise SystemExit(f"  · {path} is read-only; left alone. Make it writable and run this again.")
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name + ".")
     with os.fdopen(fd, "wb") as handle:
@@ -35,15 +48,17 @@ def write(path, text):
 
 
 def remove(text):
+    # As link_core.agent_instructions.remove_link_section.
     match = PATTERN.search(text)
     if not match:
         return text
-    rest = text[match.end():]
-    rest = rest[2:] if rest.startswith("\r\n") else rest[1:] if rest.startswith("\n") else rest
-    head = text[:match.start()] + match.group(1)
-    while head.endswith(("\n\n", "\r\n\r\n")) and not rest:
-        head = head[:-2] if head.endswith("\r\n\r\n") else head[:-1]
-    return head + rest
+    newline = "\r\n" if "\r\n" in text else "\n"
+    head, tail = text[:match.start()], text[match.end():]
+    if not head.strip():
+        return tail.lstrip("\r\n")
+    if not tail.strip():
+        return head.rstrip("\r\n") + newline
+    return head.rstrip("\r\n") + newline * 2 + tail.lstrip("\r\n")
 '
 
 link_upsert_instructions() {
@@ -68,7 +83,7 @@ else:
         updated = existing + separator + block + newline
 if updated != existing:
     write(target, updated)
-'
+' || return
     echo "$label → $target"
 }
 
@@ -89,7 +104,7 @@ else:
     else:
         target.unlink()
         print(f"{target} held only Link'"'"'s section; deleted")
-'
+' || return
 }
 
 link_print_next_steps() {

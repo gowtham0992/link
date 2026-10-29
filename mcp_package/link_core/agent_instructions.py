@@ -97,10 +97,21 @@ Some reviewed memories carry **enforce rules**. With Link's tool hooks installed
 Otherwise, keep working normally after the cheap first recall; do not save durable memory unless the user asks or approves it.
 """
 
-# A Link section runs from its marker to the next heading of any level: a
-# person's own `# Notes` or `### Shell` after it is theirs, not Link's.
+# The start of `lnk compile`'s block (compile.BLOCK_BEGIN; a test pins the two).
+BLOCK_BEGIN_PREFIX = "<!-- BEGIN LINK MEMORY"
+
+# A Link section runs from its marker to the earliest of: the end of its
+# last line (every template since 2026-05 ends with one starting
+# "Otherwise, "), the line before `lnk compile`'s block, the next heading
+# (ATX of any level, or setext), the end of the file. Whatever the person
+# writes after it - a plain line, their own `### Shell`, the compiled
+# block - is theirs, not Link's. integrations/_shared/instructions.sh and
+# instructions.ps1 use this same pattern.
 _SECTION_PATTERN = re.compile(
-    r"(^|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\r?\n.*?(?=\r?\n#{1,6}[ \t]|(?:\r?\n)*\Z)",
+    r"(^|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\r?\n.*?"
+    r"(?:(?<=\n)Otherwise, [^\r\n]*"
+    r"|(?=(?:\r?\n)+(?:" + re.escape(BLOCK_BEGIN_PREFIX) + r"|#{1,6}[ \t]|[^\r\n]+\r?\n(?:=+|-+)[ \t]*(?:\r?\n|\Z)))"
+    r"|(?=(?:\r?\n)*\Z))",
     re.DOTALL,
 )
 
@@ -158,13 +169,11 @@ def _read_exact(path: Path) -> str | None:
 
 
 def _write_exact(path: Path, text: str) -> None:
-    from .files import atomic_write_bytes
+    """Through a symlink to its target, keeping the mode; a read-only file is refused (PermissionError)."""
+    from .files import write_config_bytes
 
-    mode = path.stat().st_mode & 0o777 if path.exists() else None
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(path, text.encode("utf-8"))
-    if mode is not None:
-        os.chmod(path, mode)
+    write_config_bytes(path, text.encode("utf-8"))
 
 
 def codex_home(home: Path) -> Path:
@@ -215,13 +224,17 @@ def migrate_codex_instructions(home: Path | None = None, *, write: bool = True) 
     result["kept_for_claude_code"] = keep_old
     if not write:
         return result
-    _write_exact(new, upsert_link_section(new_text or ""))
-    if not keep_old:
-        rest = remove_link_section(old_text)
-        if rest.strip():
-            _write_exact(old, rest)
-        else:
-            old.unlink()
+    try:
+        _write_exact(new, upsert_link_section(new_text or ""))
+        if not keep_old:
+            rest = remove_link_section(old_text)
+            if rest.strip():
+                _write_exact(old, rest)
+            else:
+                old.unlink()
+    except OSError as exc:
+        result["error"] = f"left alone: {exc}"
+        return result
     result["moved"] = True
     return result
 
@@ -250,5 +263,8 @@ def refresh_instruction_file(agent: str, home: Path | None = None) -> dict[str, 
         return {**status, "refreshed": False}
     path = Path(str(status["path"]))
     text = _read_exact(path) or ""
-    _write_exact(path, upsert_link_section(text))
+    try:
+        _write_exact(path, upsert_link_section(text))
+    except OSError as exc:
+        return {**status, "refreshed": False, "error": str(exc)}
     return {**status, "stale": False, "refreshed": True}

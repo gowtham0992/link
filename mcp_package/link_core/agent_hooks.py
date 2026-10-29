@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .files import atomic_write_json
+from .files import write_config_bytes
 from .mcp_verify import display_command
 
 SESSION_START_TIMEOUT_SECONDS = 30
@@ -93,6 +93,9 @@ class AgentHookConfig:
     # Other hook files the same agent install also writes (Gemini CLI and
     # Antigravity share ~/.gemini; Link connects them as one agent).
     companions: tuple[str, ...] = ()
+    # A file that holds hooks only (not the agent's whole settings): removing
+    # Link's hooks deletes it when nothing but Link's own skeleton is left.
+    hooks_only_file: bool = True
     restart_hint: str = "Restart the agent; new sessions will start with the Link memory brief."
 
 
@@ -102,6 +105,7 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         display_name="Claude Code",
         aliases=("claude-code", "claude", "claude-code-cli"),
         default_settings="~/.claude/settings.json",
+        hooks_only_file=False,
         guard_event="UserPromptSubmit",
         pre_tool=(("PreToolUse", PRE_TOOL_MATCHER),),
         post_tool_event="PostToolUse",
@@ -153,6 +157,7 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         display_name="Gemini CLI",
         aliases=("gemini", "gemini-cli"),
         default_settings="~/.gemini/settings.json",
+        hooks_only_file=False,
         end_event=None,
         start_matcher=None,
         start_emit="gemini",
@@ -324,61 +329,61 @@ def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, objec
                                  "found": [], "removed": False}
     if config is None or not path.exists():
         return result
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if not text.strip():
-        return result
     try:
-        settings = json.loads(text)
-    except ValueError as exc:
+        current = _read_json_file(path)
+    except json.JSONDecodeError as exc:
         result["error"] = f"{path} is not valid JSON ({exc}); remove Link's hooks by hand"
         return result
+    except (OSError, ValueError) as exc:
+        result["error"] = f"{exc}; remove Link's hooks by hand"
+        return result
+    if current is None:
+        return result
+    settings = current.settings
     hooks = settings.get(config.root_key) if isinstance(settings, dict) else None
-    if isinstance(hooks, list):  # Kiro's named hooks, in its global file or a migrated agent profile
-        kept = [entry for entry in hooks if not _is_link_trigger(entry)]
-        result["found"] = sorted({str(e.get("trigger")) for e in hooks if _is_link_trigger(e)})
-        if result["found"] and write:
-            settings[config.root_key] = kept
-            if _only_links(settings, config):
-                path.unlink()  # Link's own file, with nothing else in it
-            else:
-                atomic_write_json(path, settings)
-            result["removed"] = True
-        return result
-    if not isinstance(hooks, dict):
-        return result
     found: list[str] = []
-    for event_name in list(hooks):
-        groups = hooks.get(event_name)
-        if not isinstance(groups, list):
-            continue
-        kept_groups: list[object] = []
-        for group in groups:
-            if isinstance(group, dict) and isinstance(group.get("hooks"), list):
-                inner = [h for h in group["hooks"]
-                         if not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
-                                                             for e in LINK_HOOK_EVENTS))]
-                if len(inner) != len(group["hooks"]):
+    if isinstance(hooks, list):  # Kiro's named hooks, in its global file or a migrated agent profile
+        found = sorted({str(e.get("trigger")) for e in hooks if _is_link_trigger(e)})
+        settings[config.root_key] = [entry for entry in hooks if not _is_link_trigger(entry)]
+    elif isinstance(hooks, dict):
+        for event_name in list(hooks):
+            groups = hooks.get(event_name)
+            if not isinstance(groups, list):
+                continue
+            kept_groups: list[object] = []
+            for group in groups:
+                if isinstance(group, dict) and isinstance(group.get("hooks"), list):
+                    inner = [h for h in group["hooks"]
+                             if not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
+                                                                 for e in LINK_HOOK_EVENTS))]
+                    if len(inner) != len(group["hooks"]):
+                        found.append(event_name)
+                    if inner:
+                        kept_groups.append({**group, "hooks": inner})
+                elif isinstance(group, dict) and any(_is_link_hook_command(group.get("command"), e)
+                                                     for e in LINK_HOOK_EVENTS):
                     found.append(event_name)
-                if inner:
-                    kept_groups.append({**group, "hooks": inner})
-            elif isinstance(group, dict) and any(_is_link_hook_command(group.get("command"), e)
-                                                 for e in LINK_HOOK_EVENTS):
-                found.append(event_name)
+                else:
+                    kept_groups.append(group)
+            if kept_groups:
+                hooks[event_name] = kept_groups
             else:
-                kept_groups.append(group)
-        if kept_groups:
-            hooks[event_name] = kept_groups
-        else:
-            del hooks[event_name]
-    if config.schema == "named" and not hooks:
-        del settings[config.root_key]
+                del hooks[event_name]
     result["found"] = sorted(set(found))
-    if found and write:
-        if config.file_defaults and _only_links(settings, config):
-            path.unlink()  # the agent profile Link created, with nothing of the person's in it
+    if not found or not write:
+        return result
+    # Emptied by taking Link's hooks out: the key Link's install added goes too.
+    if not settings.get(config.root_key):
+        settings.pop(config.root_key, None)
+    try:
+        if config.hooks_only_file and _only_links(settings, config):
+            path.unlink()  # nothing of the person's left in it: Link's skeleton only
         else:
-            atomic_write_json(path, settings)
-        result["removed"] = True
+            _write_json_file(path, settings, current)
+    except OSError as exc:
+        result["error"] = f"{exc}; remove Link's hooks by hand"
+        return result
+    result["removed"] = True
     return result
 
 
@@ -389,6 +394,65 @@ def _only_links(settings: Mapping[str, object], config: AgentHookConfig) -> bool
         defaults["version"] = config.version
     return not settings.get(config.root_key) and all(
         key == config.root_key or (key in defaults and value == defaults[key]) for key, value in settings.items())
+
+
+_BOM = "\ufeff"
+
+
+@dataclass
+class _JsonFile:
+    """A JSON file as read, with how it was written: kept when Link writes it back."""
+    settings: Any
+    bom: bool = False
+    newline: str = "\n"
+    indent: str | int = 2
+    final_newline: bool = True
+
+
+def _read_json_file(path: Path) -> _JsonFile | None:
+    """The parsed file and its style; None when absent or blank. Bytes that are not UTF-8 are refused."""
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    try:
+        raw = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path} is not UTF-8 text (byte {exc.start}); Link left it as it was") from exc
+    bom = raw.startswith(_BOM)
+    text = raw[len(_BOM):] if bom else raw
+    if not text.strip():
+        return None
+    indent_match = re.search(r"\n([ \t]+)\S", text)
+    return _JsonFile(
+        settings=json.loads(text),
+        bom=bom,
+        newline="\r\n" if "\r\n" in text else "\n",
+        indent=indent_match.group(1) if indent_match else 2,
+        final_newline=text.endswith("\n"),
+    )
+
+
+def _write_json_file(path: Path, settings: Any, style: _JsonFile | None) -> None:
+    """Write settings in the file's own style: indent, line endings, BOM, characters as typed, mode, symlink."""
+    style = style or _JsonFile(settings)
+    try:
+        text = json.dumps(settings, indent=style.indent, ensure_ascii=False)
+        text.encode("utf-8")
+    except UnicodeEncodeError:  # a lone surrogate the file spelt as \ud800 stays escaped
+        text = json.dumps(settings, indent=style.indent)
+    if style.final_newline:
+        text += "\n"
+    if style.newline == "\r\n":
+        text = text.replace("\n", "\r\n")
+    data = ((_BOM if style.bom else "") + text).encode("utf-8")
+    try:
+        if path.read_bytes() == data:
+            return  # installing twice changes nothing, not even the file's time
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_config_bytes(path, data)
 
 
 def _merge_grouped_event(
@@ -501,11 +565,10 @@ def _merge_plan(hooks: dict[str, Any], plan: list[dict[str, object]]) -> None:
 
 
 def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, object]]) -> None:
-    settings: dict[str, Any] = {}
-    if path.exists() and path.read_text(encoding="utf-8", errors="replace").strip():
-        settings = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        if not isinstance(settings, dict):
-            raise ValueError(f"{path} must contain a JSON object")
+    current = _read_json_file(path)
+    settings: dict[str, Any] = current.settings if current is not None else {}
+    if not isinstance(settings, dict):
+        raise ValueError(f"{path} must contain a JSON object")
     for key, value in config.file_defaults:
         settings.setdefault(key, value)
     if config.version is not None:
@@ -519,15 +582,12 @@ def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, objec
     if config.schema == "triggers":
         kept = [entry for entry in hooks or [] if not _is_link_trigger(entry)]
         settings[config.root_key] = kept + [item["entry"] for item in plan]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(path, settings)
-        return
-    if not isinstance(hooks, dict):
-        hooks = {}
-        settings[config.root_key] = hooks
-    _merge_plan(hooks, plan)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(path, settings)
+    else:
+        if not isinstance(hooks, dict):
+            hooks = {}
+            settings[config.root_key] = hooks
+        _merge_plan(hooks, plan)
+    _write_json_file(path, settings, current)
 
 
 def build_agent_hooks_payload(

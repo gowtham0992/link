@@ -114,8 +114,9 @@ class AgentHooksCoreTests(unittest.TestCase):
                     os.environ.clear()
                     os.environ.update(old_home)
                 self.assertTrue(result["hooks"]["removed"], name)
-                for settings in (home / ".gemini" / "settings.json", home / ".gemini" / "config" / "hooks.json"):
-                    self.assertNotIn("hook pre-tool", settings.read_text(encoding="utf-8"), (name, settings))
+                self.assertNotIn("hook pre-tool", (home / ".gemini" / "settings.json").read_text(encoding="utf-8"))
+                # Antigravity's hooks file held only Link's hooks: it goes, as it came.
+                self.assertFalse((home / ".gemini" / "config" / "hooks.json").exists(), name)
 
     def test_gemini_counts_milliseconds_and_copilot_names_its_timeout(self):
         gemini = json.loads(str(build_agent_hooks_payload(

@@ -29,10 +29,15 @@ instructions_text = open(os.environ["LINK_INSTRUCTIONS_FILE"], encoding="utf-8")
 settings = {}
 if os.path.exists(target):
     try:
-        with open(target) as f:
+        with open(target, encoding="utf-8") as f:
             settings = json.load(f)
     except Exception:
-        pass
+        settings = None
+    if not isinstance(settings, dict):
+        # Usually comments: VS Code settings are JSON with comments, and
+        # rewriting them as plain JSON would lose the person's settings.
+        print(f"  · Could not parse {target}; leaving it unchanged. Add Link's instructions by hand.")
+        raise SystemExit(0)
 key = 'github.copilot.chat.codeGeneration.instructions'
 instructions = settings.get(key, [])
 if not isinstance(instructions, list):

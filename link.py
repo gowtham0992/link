@@ -351,6 +351,7 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    detect_hook_only_agents as _core_detect_hook_only_agents,
     detect_installed_agents as _core_detect_installed_agents,
     read_agent_link_server as _core_read_agent_link_server,
     supported_agents as _core_supported_agents,
@@ -3820,13 +3821,15 @@ def disconnect_agent(
     write: bool = False,
     config_path: str | None = None,
     hooks_settings: str | None = None,
+    hooks: bool = True,
     json_output: bool = False,
 ) -> int:
     """Remove Link from one agent: its MCP entry and its session hooks."""
     from link_core.mcp_connect import build_disconnect_payload
 
     try:
-        payload = build_disconnect_payload(agent, config_path=config_path, hooks_settings=hooks_settings, write=write)
+        payload = build_disconnect_payload(agent, config_path=config_path, hooks_settings=hooks_settings,
+                                           hooks=hooks, write=write)
     except (ValueError, json.JSONDecodeError) as exc:
         print(f"Disconnect failed: {exc}", file=sys.stderr)
         return 1
@@ -4288,11 +4291,13 @@ def setup(
     """
     detected = _core_detect_installed_agents()
     hookable = [name for name in detected if _core_supports_agent_hooks(name)]
+    # Copilot: global hooks, per-project MCP config - setup wires the hooks only.
+    hooks_only = [name for name in _core_detect_hook_only_agents() if name not in detected]
     if not json_output:
-        if detected:
-            display = ", ".join(detected)
+        if detected or hooks_only:
+            display = ", ".join(detected + [f"{name} (session hooks)" for name in hooks_only])
             _print_text(f"Detected agents: {display}")
-            if not preview:
+            if not preview and detected:
                 _print_text("Wiring MCP" + (" + session hooks" if hookable else "") + " for all of them.\n")
         else:
             _print_text(
@@ -4307,6 +4312,20 @@ def setup(
         hooks=bool(hookable) and not preview,
         json_output=json_output,
     )
+    if code == 0 and hooks_only:
+        resolved = target.expanduser().resolve()
+        runtime_script = (resolved / "link.py") if (resolved / "link.py").exists() else ROOT / "link.py"
+        for name in hooks_only:
+            payload = _core_build_agent_hooks_payload(target=resolved, agent=name, runtime_script=runtime_script,
+                                                      python_cmd=sys.executable, write=not preview)
+            if not json_output:
+                status = payload["write"] if isinstance(payload["write"], dict) else {}
+                if preview:
+                    _print_text(f"Would install {payload['display_name']} session hooks in {payload['settings_path']}")
+                elif status.get("ok"):
+                    _print_text(f"{payload['display_name']} session hooks: {payload['settings_path']}")
+                else:
+                    _print_text(f"{payload['display_name']} session hooks not written: {status.get('message')}")
     # Instruction files rot the same way MCP configs do — a steering file
     # from an older Link can name tools the configured server no longer
     # exposes, sending the agent back to grep. Same idempotent treatment:
@@ -4331,6 +4350,8 @@ def setup(
             result = _core_refresh_instruction_file(agent)
             if result.get("refreshed"):
                 refreshed_instructions.append(str(result.get("path")))
+            elif result.get("error"):
+                stale_instructions.append(f"{result.get('path')} (not refreshed: {result['error']})")
     if not json_output:
         for path in stale_instructions:
             _print_text(f"Instruction file is stale (would refresh): {path}")

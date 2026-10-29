@@ -180,6 +180,12 @@ def splice(text: str | None, permissions: Mapping[str, object]) -> str | None:
             if permissions:
                 lead = "\n    " if line >= 0 else ""
                 updated = text[:start] + lead + _block(permissions, "    ") + text[current[1]:]
+            elif (line == agent[0] + 1 and text[current[1]:agent[1]] == "\n  }"
+                  and text[first + 1:agent[0] + 1] == '\n  "agent": {'):
+                # An "agent" setting Link created to hold its block, exactly as Link wrote it:
+                # it goes with the block, so the file is back to the bytes it had.
+                end = agent[1] + 1 if masked[agent[1]:agent[1] + 1] == "," else agent[1]
+                updated = text[:first + 1] + text[end:]
             else:
                 end = current[1]
                 if masked[before] == ",":

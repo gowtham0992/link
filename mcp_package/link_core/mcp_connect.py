@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .files import atomic_write_bytes, atomic_write_json, atomic_write_text
+from .files import atomic_write_text, write_config_bytes
 from .mcp_verify import (
     display_command,
     ensure_link_mcp_runtime,
@@ -136,6 +136,19 @@ def detect_installed_agents(home: Path | None = None) -> list[str]:
     return detected
 
 
+# Agents whose MCP config lives in each project (.vscode/mcp.json) while their
+# session hooks are global: `lnk setup` installs and refreshes the hooks when
+# the agent's home folder exists, and leaves the MCP entry to `lnk connect`
+# run in the project.
+HOOK_ONLY_AGENT_HOMES: tuple[tuple[str, str], ...] = (("copilot", ".copilot"),)
+
+
+def detect_hook_only_agents(home: Path | None = None) -> list[str]:
+    """Agents `lnk setup` wires session hooks for, but not MCP (see HOOK_ONLY_AGENT_HOMES)."""
+    base = (home or Path.home()).expanduser()
+    return [name for name, folder in HOOK_ONLY_AGENT_HOMES if (base / folder).is_dir()]
+
+
 def _agent_by_name(agent: str) -> AgentMcpConfig:
     normalized = agent.strip().lower().replace("_", "-")
     for config in AGENT_CONFIGS:
@@ -174,11 +187,25 @@ def _json_config(config: AgentMcpConfig, python_cmd: str, wiki_dir: Path) -> dic
     }
 
 
+def _codex_args(wiki_dir: Path) -> list[str]:
+    return ["-m", "link_mcp", "--wiki", str(wiki_dir), "--surface", "slim"]
+
+
+def _toml_string(value: str) -> str:
+    # A JSON string is a TOML basic string. Non-ASCII is kept as it is: JSON
+    # would escape it as surrogate pairs, which TOML does not accept.
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _toml_array(values: list[str]) -> str:
+    return "[" + ", ".join(_toml_string(value) for value in values) + "]"
+
+
 def _codex_toml_snippet(python_cmd: str, wiki_dir: Path) -> str:
     return "\n".join([
         "[mcp_servers.link]",
-        f"command = {json.dumps(python_cmd)}",
-        f'args = ["-m", "link_mcp", "--wiki", {json.dumps(str(wiki_dir))}, "--surface", "slim"]',
+        f"command = {_toml_string(python_cmd)}",
+        f"args = {_toml_array(_codex_args(wiki_dir))}",
     ])
 
 
@@ -386,42 +413,140 @@ def _remove_link_entry(text: str, top_key: str) -> tuple[str, bool]:
 _BOM = "\ufeff"
 
 
-def _read_config(path: Path) -> tuple[str, bool, str]:
+def _read_config(path: Path, *, strict: bool = True) -> tuple[str, bool, str]:
     """(text without BOM, had BOM, newline style) - read without newline translation.
 
     Editors on Windows save these files with a UTF-8 BOM and CRLF. A BOM made
     the file unparseable (connect refused it, disconnect and doctor thought
     Link was not configured), and text-mode reading rewrote every CRLF as LF.
+    Bytes that are not UTF-8 are refused (strict) rather than replaced: a
+    write would have turned the person's "café" into "caf\ufffd".
     """
-    raw = path.read_bytes().decode("utf-8", errors="replace")
+    data = path.read_bytes()
+    try:
+        raw = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if strict:
+            raise ValueError(f"{path} is not UTF-8 text (byte {exc.start}); Link left it as it was") from exc
+        raw = data.decode("utf-8", errors="replace")
     bom = raw.startswith(_BOM)
     text = raw[len(_BOM):] if bom else raw
     return text, bom, "\r\n" if "\r\n" in text else "\n"
 
 
 def _write_config_text(path: Path, text: str, *, bom: bool, newline: str) -> None:
+    """Through a symlink to its target, keeping the file's mode; a read-only file is refused."""
     if newline == "\r\n":
         text = re.sub(r"(?<!\r)\n", "\r\n", text)
-    atomic_write_bytes(path, ((_BOM if bom else "") + text).encode("utf-8"))
+    write_config_bytes(path, ((_BOM if bom else "") + text).encode("utf-8"))
 
 
-# Every TOML table that belongs to Link's server: [mcp_servers.link] and its
-# subtables ([mcp_servers.link.env], quoted forms too). A disconnect that left
-# a user-added env table behind produced mcp_servers.link with no command.
-_CODEX_LINK_HEADER = re.compile(r'^\s*\[\[?\s*mcp_servers\s*\.\s*(?:link|"link")\s*(?:\.[^\]]*)?\]\]?\s*(?:#.*)?$')
+def _toml_key(name: str) -> str:
+    return "(?:" + name + '|"' + name + "\"|'" + name + "')"
+
+
+_MCP_LINK_KEY = rf"[ \t]*{_toml_key('mcp_servers')}[ \t]*\.[ \t]*{_toml_key('link')}[ \t]*"
+# Link's own table, however it is spelt: [mcp_servers.link], [mcp_servers."link"],
+# indented, with a comment after it. Connect, disconnect and doctor share it.
+_CODEX_LINK_TABLE = re.compile(rf"^[ \t]*\[{_MCP_LINK_KEY}\][ \t]*(?:#.*)?$")
+# Every TOML table that belongs to Link's server: that one and its subtables
+# ([mcp_servers.link.env]). A disconnect that left a user-added env table
+# behind produced mcp_servers.link with no command.
+_CODEX_LINK_HEADER = re.compile(rf"^[ \t]*\[\[?{_MCP_LINK_KEY}(?:\.[^\]]*)?\]\]?[ \t]*(?:#.*)?$")
 _TOML_HEADER = re.compile(r"^\s*\[")
+_TOML_TRIVIA = re.compile(r"^[ \t]*(?:#.*)?$")  # a blank or comment-only line
+_TOML_QUOTES = ('"""', "'''", '"', "'")
+
+
+def _toml_headers(lines: list[str]) -> list[int]:
+    return [index for index, line in enumerate(lines) if _TOML_HEADER.match(line)]
 
 
 def _remove_codex_link_tables(text: str) -> tuple[str, bool]:
-    kept: list[str] = []
-    inside = found = False
-    for line in text.splitlines(keepends=True):
-        if _TOML_HEADER.match(line):
-            inside = bool(_CODEX_LINK_HEADER.match(line.rstrip("\r\n")))
-            found = found or inside
-        if not inside:
-            kept.append(line)
-    return "".join(kept), found
+    """Codex's config without Link's tables; everything else byte for byte.
+
+    A table runs to its last key: the comments and blank lines after it lead
+    into the next table (`# GitHub MCP, do not remove`) and stay with it.
+    """
+    lines = text.splitlines(keepends=True)
+    headers = _toml_headers(lines)
+    drop: set[int] = set()
+    for number, start in enumerate(headers):
+        if not _CODEX_LINK_HEADER.match(lines[start].rstrip("\r\n")):
+            continue
+        end = headers[number + 1] if number + 1 < len(headers) else len(lines)
+        last = max([i for i in range(start + 1, end) if not _TOML_TRIVIA.match(lines[i].rstrip("\r\n"))],
+                   default=start)
+        drop.update(range(start, last + 1))
+        # The blank lines after it go too when a blank line (or nothing) already comes before it.
+        if start == 0 or not lines[start - 1].strip() or start - 1 in drop:
+            after = last + 1
+            while after < end and not lines[after].strip():
+                drop.add(after)
+                after += 1
+    return "".join(line for index, line in enumerate(lines) if index not in drop), bool(drop)
+
+
+def _toml_value_end(text: str, start: int) -> int:
+    """Where the TOML value starting at `start` ends (strings, arrays, inline tables, bare values)."""
+    if start >= len(text):
+        raise ValueError("a key without a value")
+    quote = next((q for q in _TOML_QUOTES if text.startswith(q, start)), None)
+    if quote is not None:
+        index = start + len(quote)
+        while index < len(text):
+            if quote[0] == '"' and text[index] == "\\":
+                index += 2
+                continue
+            if text.startswith(quote, index):
+                index += len(quote)
+                if len(quote) == 3:  # up to two quotes of the content may come before the closing three
+                    for _ in range(2):
+                        if index < len(text) and text[index] == quote[0]:
+                            index += 1
+                return index
+            if len(quote) == 1 and text[index] in "\r\n":
+                break
+            index += 1
+        raise ValueError("an unterminated string")
+    if text[start] in "[{":
+        depth = 0
+        index = start
+        while index < len(text):
+            char = text[index]
+            if char in "\"'":
+                index = _toml_value_end(text, index)
+                continue
+            if char == "#":
+                newline = text.find("\n", index)
+                index = len(text) if newline < 0 else newline
+                continue
+            if char in "[{":
+                depth += 1
+            elif char in "]}":
+                depth -= 1
+                if depth == 0:
+                    return index + 1
+            index += 1
+        raise ValueError("an unterminated array or table")
+    bare = re.compile(r"[^#\r\n]*").match(text, start)
+    assert bare is not None
+    return start + len(bare.group(0).rstrip())
+
+
+def _set_toml_key(body: str, key: str, value: str) -> str:
+    """The table body with `key` set to `value`; its other keys, comments and spacing kept."""
+    match = re.compile(rf"^[ \t]*{_toml_key(key)}[ \t]*=[ \t]*", re.MULTILINE).search(body)
+    if match is None:
+        return f"{key} = {value}\n" + body
+    return body[:match.end()] + value + body[_toml_value_end(body, match.end()):]
+
+
+def _write_owned(path: Path, text: str, *, bom: bool, newline: str) -> None:
+    try:
+        _write_config_text(path, text, bom=bom, newline=newline)
+    except PermissionError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def remove_link_mcp_entry(path: Path, config: "AgentMcpConfig", *, write: bool) -> dict[str, object]:
@@ -433,12 +558,15 @@ def remove_link_mcp_entry(path: Path, config: "AgentMcpConfig", *, write: bool) 
     if config.config_format == "codex-toml":
         updated, found = _remove_codex_link_tables(text)
         if not found:
+            if _codex_link_server(text) is not None:
+                raise ValueError(f"{path} defines Link's server in a form Link does not edit (an inline table "
+                                 "or dotted keys); remove it by hand")
             return result
         result["found"] = True
         if write:
             updated = updated.rstrip() + newline if updated.strip() else ""
             _check_codex_without_link(path, updated)
-            _write_config_text(path, updated, bom=bom, newline=newline)
+            _write_owned(path, updated, bom=bom, newline=newline)
             result["removed"] = True
         return result
     try:
@@ -458,7 +586,7 @@ def remove_link_mcp_entry(path: Path, config: "AgentMcpConfig", *, write: bool) 
         check = _jsonc_loads(updated)
         if not isinstance(check, dict) or "link" in (check.get(config.top_key) or {}):
             raise ValueError(f"could not edit {path} safely; remove the link entry by hand")
-        _write_config_text(path, updated, bom=bom, newline=newline)
+        _write_owned(path, updated, bom=bom, newline=newline)
         result["removed"] = True
     return result
 
@@ -516,7 +644,8 @@ def _write_json_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki
     entry = _server_config(config, python_cmd, wiki_dir)
     text, bom, newline = _read_config(path) if path.exists() else ("", False, "\n")
     if not text.strip():
-        atomic_write_json(path, {config.top_key: {"link": entry}})
+        _write_config_text(path, json.dumps({config.top_key: {"link": entry}}, indent=2) + "\n",
+                           bom=bom, newline=newline)
         return
     try:
         payload = _jsonc_loads(text)
@@ -539,16 +668,79 @@ def _write_json_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki
 
 
 def _write_codex_config(path: Path, python_cmd: str, wiki_dir: Path) -> None:
-    block = _codex_toml_snippet(python_cmd, wiki_dir) + "\n"
+    """Point Codex's Link server at this Python and wiki, changing nothing else.
+
+    Only `command` and `args` in Link's table are rewritten: keys the person
+    added to it (startup_timeout_sec, env), its comments and the tables
+    around it stay as they were. The result is parsed back and compared
+    with the file before it is written; anything Link cannot edit that way
+    is refused, never guessed at.
+    """
+    args = _codex_args(wiki_dir)
     text, bom, newline = _read_config(path) if path.exists() else ("", False, "\n")
-    pattern = re.compile(r"(?ms)^\[mcp_servers\.link\]\r?\n.*?(?=^\[|\Z)")
-    if pattern.search(text):
-        text = pattern.sub(block, text)
-        if not text.endswith("\n"):
-            text += "\n"
+    lines = text.splitlines(keepends=True)
+    headers = _toml_headers(lines)
+    table = next((n for n, i in enumerate(headers) if _CODEX_LINK_TABLE.match(lines[i].rstrip("\r\n"))), None)
+    if table is None:
+        if _codex_link_server(text) is not None:
+            raise ValueError(f"{path} defines Link's server in a form Link does not edit (an inline table or "
+                             "dotted keys); change it by hand to the snippet below")
+        block = _codex_toml_snippet(python_cmd, wiki_dir) + "\n"
+        if not text.strip():
+            updated = block
+        else:
+            separator = "" if text.endswith("\n\n") else "\n" if text.endswith("\n") else "\n\n"
+            updated = text + separator + block
     else:
-        text = text.rstrip() + ("\n\n" if text.strip() else "") + block
-    _write_config_text(path, text, bom=bom, newline=newline)
+        start = headers[table]
+        end = headers[table + 1] if table + 1 < len(headers) else len(lines)
+        header = lines[start] if lines[start].endswith("\n") else lines[start] + "\n"
+        body = "".join(lines[start + 1:end])
+        try:
+            body = _set_toml_key(body, "args", _toml_array(args))
+            body = _set_toml_key(body, "command", _toml_string(python_cmd))
+        except ValueError as exc:
+            raise ValueError(f"could not edit {path} safely ({exc}); change Link's entry by hand "
+                             "to the snippet below") from exc
+        updated = "".join(lines[:start]) + header + body + "".join(lines[end:])
+    _check_codex_with_link(path, text, updated, python_cmd, args)
+    _write_config_text(path, updated, bom=bom, newline=newline)
+
+
+def _codex_link_server(text: str) -> object:
+    """Codex's mcp_servers.link as parsed; None when absent, unparseable, or tomllib is missing (3.10)."""
+    try:
+        import tomllib
+    except ImportError:
+        return None
+    try:
+        servers = tomllib.loads(text).get("mcp_servers")
+    except tomllib.TOMLDecodeError:
+        return None
+    return servers.get("link") if isinstance(servers, dict) else None
+
+
+def _check_codex_with_link(path: Path, before: str, after: str, python_cmd: str, args: list[str]) -> None:
+    """Refuse to write unless the edit changed Link's command and args and nothing else."""
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10: the table-level edit above is the check
+        return
+    try:
+        expected = tomllib.loads(before)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{path} is not valid TOML ({exc}); fix it, or add the snippet below by hand") from exc
+    servers = expected.setdefault("mcp_servers", {})
+    link = servers.setdefault("link", {}) if isinstance(servers, dict) else None
+    if not isinstance(link, dict):
+        raise ValueError(f"{path} keeps mcp_servers in a form Link does not edit; add the snippet below by hand")
+    link.update({"command": python_cmd, "args": args})
+    try:
+        got = tomllib.loads(after)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"could not edit {path} safely ({exc}); add the snippet below by hand") from exc
+    if got != expected:
+        raise ValueError(f"could not edit {path} safely; add the snippet below by hand")
 
 
 def _write_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki_dir: Path) -> None:
@@ -556,6 +748,28 @@ def _write_config(path: Path, config: AgentMcpConfig, python_cmd: str, wiki_dir:
         _write_codex_config(path, python_cmd, wiki_dir)
         return
     _write_json_config(path, config, python_cmd, wiki_dir)
+
+
+def _codex_link_server_by_lines(text: str) -> dict[str, object] | None:
+    """Link's command and args read line by line: Python 3.10 has no tomllib, and a broken file still says them."""
+    lines = text.splitlines(keepends=True)
+    headers = _toml_headers(lines)
+    table = next((n for n, i in enumerate(headers) if _CODEX_LINK_TABLE.match(lines[i].rstrip("\r\n"))), None)
+    if table is None:
+        return None
+    end = headers[table + 1] if table + 1 < len(headers) else len(lines)
+    body = "".join(lines[headers[table] + 1:end])
+    server: dict[str, object] = {}
+    command_match = re.search(r'(?m)^[ \t]*command[ \t]*=[ \t]*"((?:[^"\\]|\\.)*)"', body)
+    args_match = re.search(r"(?m)^[ \t]*args[ \t]*=[ \t]*(\[.*\])", body)
+    if command_match:
+        server["command"] = json.loads(f'"{command_match.group(1)}"')
+    if args_match:
+        try:
+            server["args"] = json.loads(args_match.group(1))
+        except json.JSONDecodeError:
+            pass
+    return server
 
 
 def agent_alias_matches(name: str) -> bool:
@@ -586,22 +800,17 @@ def read_agent_link_server(agent: str, config_path: str | None = None) -> dict[s
     }
     if not path.exists():
         return result
-    text = _read_config(path)[0]
+    text = _read_config(path, strict=False)[0]
     command: str | None = None
     args: list[str] = []
     if config.config_format == "codex-toml":
-        block = re.search(r"(?ms)^\[mcp_servers\.link\]\r?\n(.*?)(?=^\[|\Z)", text)
-        if not block:
+        server = _codex_link_server(text)
+        if server is None:
+            server = _codex_link_server_by_lines(text)
+        if not isinstance(server, dict):
             return result
-        command_match = re.search(r'(?m)^command\s*=\s*"((?:[^"\\]|\\.)*)"', block.group(1))
-        args_match = re.search(r"(?m)^args\s*=\s*(\[.*\])", block.group(1))
-        if command_match:
-            command = json.loads(f'"{command_match.group(1)}"')
-        if args_match:
-            try:
-                args = [str(item) for item in json.loads(args_match.group(1))]
-            except json.JSONDecodeError:
-                args = []
+        command = server["command"] if isinstance(server.get("command"), str) else None
+        args = [str(item) for item in server["args"]] if isinstance(server.get("args"), list) else []
     else:
         try:
             payload = _jsonc_loads(text)
@@ -727,6 +936,7 @@ def build_disconnect_payload(
     *,
     config_path: str | None = None,
     hooks_settings: str | None = None,
+    hooks: bool = True,
     write: bool = False,
 ) -> dict[str, object]:
     """Preview (or with write, perform) removing Link from one agent.
@@ -741,13 +951,14 @@ def build_disconnect_payload(
     config = _agent_by_name(agent)
     mcp_path = _config_path(config.default_config, config_path)
     mcp = remove_link_mcp_entry(mcp_path, config, write=write)
-    hook_config = _find_hook_agent(config.name)
-    hooks: dict[str, object] = {"supported": False, "found": [], "removed": False}
+    # Session hooks are global: a project uninstall (hooks=False) leaves them.
+    hook_config = _find_hook_agent(config.name) if hooks else None
+    removed_hooks: dict[str, object] = {"supported": False, "found": [], "removed": False}
     if hook_config is not None:
-        hooks = remove_link_hooks(_settings_path(hook_config.default_settings, hooks_settings), config.name, write=write)
+        removed_hooks = remove_link_hooks(_settings_path(hook_config.default_settings, hooks_settings), config.name, write=write)
         # Antigravity and Gemini CLI share ~/.gemini and are connected as one
         # agent: take the companion's hooks out too.
-        found = list(hooks.get("found") or [])  # type: ignore[call-overload]
+        found = list(removed_hooks.get("found") or [])  # type: ignore[call-overload]
         for name in hook_config.companions:
             other = _find_hook_agent(name)
             if other is None:
@@ -755,17 +966,17 @@ def build_disconnect_payload(
             extra = remove_link_hooks(_settings_path(other.default_settings, None), other.name, write=write)
             found += list(extra.get("found") or [])  # type: ignore[call-overload]
             if extra.get("error"):
-                hooks["error"] = extra["error"]
-            hooks["removed"] = bool(hooks.get("removed")) or bool(extra.get("removed"))
-        hooks["found"] = sorted(set(found))
-    found_anything = bool(mcp.get("found")) or bool(hooks.get("found"))
+                removed_hooks["error"] = extra["error"]
+            removed_hooks["removed"] = bool(removed_hooks.get("removed")) or bool(extra.get("removed"))
+        removed_hooks["found"] = sorted(set(found))
+    found_anything = bool(mcp.get("found")) or bool(removed_hooks.get("found"))
     return {
         "agent": config.name,
         "display_name": config.display_name,
         "write": write,
         "mcp": mcp,
-        "hooks": hooks,
+        "hooks": removed_hooks,
         "found": found_anything,
-        "changed": bool(mcp.get("removed")) or bool(hooks.get("removed")),
+        "changed": bool(mcp.get("removed")) or bool(removed_hooks.get("removed")),
         "restart_hint": f"Restart {config.display_name} so it stops loading Link.",
     }

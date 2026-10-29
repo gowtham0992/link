@@ -688,6 +688,8 @@ def build_cli_parser(
     disconnect_cmd.add_argument("--config", default=None, help="override the agent config file path")
     disconnect_cmd.add_argument("--hooks-settings", default=None, dest="hooks_settings",
                                 help="override the hooks settings file")
+    disconnect_cmd.add_argument("--no-hooks", action="store_false", dest="hooks",
+                                help="leave session hooks alone (they are global; a project uninstall uses this)")
     disconnect_cmd.add_argument("--json", action="store_true", help="print the removal plan as JSON")
 
     return parser
@@ -1128,7 +1130,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "disconnect":
         return handlers["disconnect"](
             args.agent, write=args.write, config_path=args.config,
-            hooks_settings=args.hooks_settings, json_output=args.json,
+            hooks_settings=args.hooks_settings, hooks=args.hooks, json_output=args.json,
         )
     if command == "connect":
         return handlers["connect"](
