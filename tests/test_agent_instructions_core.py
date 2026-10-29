@@ -106,6 +106,20 @@ class RefreshFlowTests(unittest.TestCase):
 
 
 
+class UpsertIsIdempotentTests(unittest.TestCase):
+    """A second install changes nothing, whatever the line endings and wherever the section sits."""
+
+    def test_every_shape_settles_after_one_write(self):
+        from link_core.agent_instructions import remove_link_section, upsert_link_section
+        for text in ("# Mine\r\n\r\nkeep\r\n", "# Mine\n\nkeep\n", "", "# Mine\nno final break",
+                     "# Mine\n" + INSTRUCTIONS_TEMPLATE + "### After\nx\n",
+                     ("# Mine\n\n" + INSTRUCTIONS_TEMPLATE).replace("\n", "\r\n")):
+            once = upsert_link_section(text)
+            self.assertEqual(upsert_link_section(once), once, repr(text[:30]))
+            self.assertNotIn("\r\r", once, "no stray carriage returns")
+            self.assertIsNone(find_link_section(remove_link_section(once)))
+
+
 class CodexInstructionsMoveTests(unittest.TestCase):
     """Codex reads ~/.codex/AGENTS.md; ~/AGENTS.md was never read by it (and Claude Code read it instead)."""
 

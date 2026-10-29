@@ -35,7 +35,16 @@ Link-UpsertInstructions $after $source "test"
 $text = [System.IO.File]::ReadAllText($after)
 Assert ($text -eq "## Link — Local Agent Memory`n`nnew body`n### Mine after`nstay`n") "section replaced, ### heading kept: [$text]"
 
-# 4. A new file gets just Link's section.
+# 4. A section at the end of an LF file keeps the final line break on every run.
+$lf = Join-Path $dir "lf.md"
+[System.IO.File]::WriteAllText($lf, "# Mine`n`n## Link — Local Agent Memory`nold`n", $utf8)
+Link-UpsertInstructions $lf $source "test"
+$once = [System.IO.File]::ReadAllText($lf)
+Link-UpsertInstructions $lf $source "test"
+Assert ([System.IO.File]::ReadAllText($lf) -eq $once) "idempotent at the end of the file"
+Assert ($once -eq "# Mine`n`n## Link — Local Agent Memory`n`nnew body`n") "final line break kept: [$once]"
+
+# 5. A new file gets just Link's section.
 $fresh = Join-Path $dir "fresh\AGENTS.md"
 Link-UpsertInstructions $fresh $source "test"
 Assert ([System.IO.File]::ReadAllText($fresh) -eq "## Link — Local Agent Memory`n`nnew body`n") "new file"

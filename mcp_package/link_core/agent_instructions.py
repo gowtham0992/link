@@ -100,7 +100,7 @@ Otherwise, keep working normally after the cheap first recall; do not save durab
 # A Link section runs from its marker to the next heading of any level: a
 # person's own `# Notes` or `### Shell` after it is theirs, not Link's.
 _SECTION_PATTERN = re.compile(
-    r"(^|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\r?\n.*?(?=\r?\n#{1,6}[ \t]|\Z)",
+    r"(^|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\r?\n.*?(?=\r?\n#{1,6}[ \t]|(?:\r?\n)*\Z)",
     re.DOTALL,
 )
 
@@ -127,7 +127,7 @@ def upsert_link_section(text: str) -> str:
     template = _template(newline)
     match = _SECTION_PATTERN.search(text)
     if match:
-        prefix = newline if match.group(1) else ""
+        prefix = match.group(1)  # the line break before the section, exactly as it was
         tail = text[match.end():]
         return text[:match.start()] + prefix + template + (tail if tail.strip() else newline)
     separator = newline * 2 if text.strip() else ""

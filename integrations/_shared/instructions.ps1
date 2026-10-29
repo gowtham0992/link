@@ -29,7 +29,7 @@ function Link-UpsertInstructions {
 
     $headers = @("## Link — Local Agent Memory", "## Link — Personal Knowledge Wiki")
     $headerPattern = ($headers | ForEach-Object { [regex]::Escape($_) }) -join "|"
-    $pattern = "(?s)(^|`n)(?:$headerPattern)`r?`n.*?(?=`r?`n#{1,6}[ `t]|\z)"
+    $pattern = "(?s)(^|`n)(?:$headerPattern)`r?`n.*?(?=`r?`n#{1,6}[ `t]|(?:`r?`n)*\z)"
     $newline = if ($existing.Contains("`r`n")) { "`r`n" } else { "`n" }
     $block = ($source -replace "`r?`n", "`n") -replace "`n", $newline
 

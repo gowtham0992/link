@@ -11,7 +11,7 @@ import os, re, stat, tempfile
 from pathlib import Path
 
 HEADERS = ["## Link — Local Agent Memory", "## Link — Personal Knowledge Wiki"]
-PATTERN = re.compile(r"(^|\n)(?:" + "|".join(re.escape(h) for h in HEADERS) + r")\r?\n.*?(?=\r?\n#{1,6}[ \t]|\Z)", re.DOTALL)
+PATTERN = re.compile(r"(^|\n)(?:" + "|".join(re.escape(h) for h in HEADERS) + r")\r?\n.*?(?=\r?\n#{1,6}[ \t]|(?:\r?\n)*\Z)", re.DOTALL)
 
 
 def read(path):
