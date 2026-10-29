@@ -457,6 +457,7 @@ from link_core.handoff import (
 )
 from link_core.guard import (
     guard_reminder as _core_guard_reminder,
+    note_guarded as _core_note_guarded,
     recently_guarded as _core_recently_guarded,
     render_guard_text as _core_render_guard_text,
 )
@@ -804,6 +805,7 @@ def _guard_note_for(query: str, records: list[dict[str, object]] | None = None) 
         name = str(reminder.get("name") or "")
         if _core_recently_guarded(WIKI_DIR.parent, name):
             return ""
+        _core_note_guarded(WIKI_DIR.parent, name)
         _core_record_retrieval(WIKI_DIR.parent, "guard", [name], surface="mcp")
         return _core_render_guard_text(reminder)
     except Exception:

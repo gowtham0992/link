@@ -87,6 +87,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - The docs (getting started, security, CLI, the installers' README) describe
   per-agent rule checks and held calls, and the Antigravity installer adds
   hooks for Antigravity and Gemini CLI on a global install.
+- The reminder about a saved constraint keeps its cooldown in its own
+  small file, so it no longer repeats on every recall when usage recording
+  is off (`LINK_USAGE=off`).
+- The live-agent enforcement benchmark drives Codex too (`--agent codex`,
+  `gpt-6-luna` by default), in a throwaway `CODEX_HOME` with only the
+  benchmark's hook, and refuses an older Codex that lacks the flags it
+  relies on before spending anything.
 - When Cursor runs the hooks in `~/.claude/settings.json` (it does by
   default) and Link has installed its own Cursor hooks too, the Claude copy
   stands down, so a call is checked once and the brief arrives once.

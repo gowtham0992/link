@@ -48,15 +48,44 @@ def is_constraint_memory(record: Mapping[str, object]) -> bool:
     return bool(_CONSTRAINT_RE.search(claim))
 
 
-def recently_guarded(root, name: str, *, now: str | None = None) -> bool:
-    """Did the guard already fire for this memory within the cooldown?"""
-    from datetime import datetime, timedelta, timezone
+COOLDOWN_FILE = ".link-cache/guard-cooldown.json"
 
-    if now:
-        current = datetime.fromisoformat(now.replace("Z", "+00:00"))
-    else:
-        current = datetime.now(timezone.utc)
+
+def _now(now: str | None):
+    from datetime import datetime, timezone
+
+    return datetime.fromisoformat(now.replace("Z", "+00:00")) if now else datetime.now(timezone.utc)
+
+
+def _cooldown(root) -> dict[str, str]:
+    import json
+    from pathlib import Path
+
+    try:
+        data = json.loads((Path(root).expanduser() / COOLDOWN_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def recently_guarded(root, name: str, *, now: str | None = None) -> bool:
+    """Did the guard already fire for this memory within the cooldown?
+
+    The cooldown has its own small file, so it holds with usage recording
+    off (LINK_USAGE=off); the usage ledger is still read for reminders
+    recorded before that file existed.
+    """
+    from datetime import datetime, timedelta
+
+    current = _now(now)
     floor = current - timedelta(minutes=GUARD_COOLDOWN_MINUTES)
+    stamp = _cooldown(root).get(name)
+    if stamp:
+        try:
+            if floor <= datetime.fromisoformat(stamp.replace("Z", "+00:00")) <= current + timedelta(minutes=1):
+                return True
+        except ValueError:
+            pass
     for event in reversed(load_usage(root)):
         if str(event.get("kind")) != "guard":
             continue
@@ -71,6 +100,30 @@ def recently_guarded(root, name: str, *, now: str | None = None) -> bool:
         if isinstance(names, list) and name in [str(item) for item in names]:
             return True
     return False
+
+
+def note_guarded(root, name: str, *, now: str | None = None) -> None:
+    """Start the cooldown for this memory. Never raises: a reminder is never worth a failure."""
+    import json
+    from datetime import timedelta
+    from pathlib import Path
+
+    from .files import atomic_write_bytes
+
+    try:
+        current = _now(now)
+        floor = current - timedelta(minutes=GUARD_COOLDOWN_MINUTES)
+        kept = {}
+        for key, stamp in _cooldown(root).items():
+            try:
+                if _now(stamp) >= floor:
+                    kept[key] = stamp
+            except ValueError:
+                continue
+        kept[name] = current.isoformat().replace("+00:00", "Z")
+        atomic_write_bytes(Path(root).expanduser() / COOLDOWN_FILE, json.dumps(kept, sort_keys=True).encode())
+    except Exception:
+        return
 
 
 def guard_reminder(

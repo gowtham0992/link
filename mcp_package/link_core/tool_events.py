@@ -115,14 +115,29 @@ def _from_tool(name: str, args: Mapping[str, object]) -> list[tuple[str, str]]:
         operations = args.get("operations")
         return [("read", str(op.get("path"))) for op in operations
                 if isinstance(op, dict) and op.get("path")] if isinstance(operations, list) else []
-    path = next((args.get(key) for key in _PATH_KEYS if args.get(key)), None)
-    if not path:
+    kind = "write" if lowered in WRITE_TOOLS else "read" if lowered in READ_TOOLS else ""
+    if not kind:
         return []
-    if lowered in WRITE_TOOLS:
-        return [("write", str(path))]
-    if lowered in READ_TOOLS:
-        return [("read", str(path))]
-    return []
+    path = next((args.get(key) for key in _PATH_KEYS if args.get(key)), None)
+    if path:
+        return [(kind, str(path))]
+    return [(kind, value) for value in _named_paths(args)]
+
+
+def _named_paths(args: Mapping[str, object]) -> list[str]:
+    """Paths from arguments whose name says they hold one ("filePath", "target_path", "files").
+
+    For file tools whose argument names are not documented (Devin CLI's), so
+    a rule on a path still sees the call whatever the field is called.
+    """
+    found: list[str] = []
+    for key, value in args.items():
+        name = str(key).lower()
+        if ("path" not in name and "file" not in name) or any(w in name for w in ("text", "content", "data")):
+            continue  # "file_text" and "file_content" carry what is written, not where
+        values = value if isinstance(value, list) else [value]
+        found += [item for item in values if isinstance(item, str) and item.strip() and "\n" not in item]
+    return found
 
 
 def tool_calls(event: Mapping[str, object]) -> list[tuple[str, str]]:

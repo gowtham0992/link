@@ -275,6 +275,7 @@ from link_core.files import (
 from link_core.guard import (
     guard_reminder as _core_guard_reminder,
     render_guard_text as _core_render_guard_text,
+    note_guarded as _core_note_guarded,
     recently_guarded as _core_recently_guarded,
     render_switch_nudge as _core_render_switch_nudge,
     switch_intent as _core_switch_intent,
@@ -3503,6 +3504,7 @@ def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str
         # work - one reminder is a guard, ten is a nag.
         if _core_recently_guarded(root, str(reminder.get("name") or "")):
             return 0
+        _core_note_guarded(root, str(reminder.get("name") or ""))
         delivery_id = _core_new_delivery_id()
         _core_record_retrieval(
             root, "guard", [str(reminder.get("name") or "")],

@@ -111,6 +111,10 @@ jobs:
       - name: Release hygiene
         run: python scripts/check_release_hygiene.py
 
+      - name: PowerShell instruction-file round trip
+        shell: pwsh
+        run: ./tests/powershell/instructions_roundtrip.ps1
+
       - name: MCP verification smoke test
         shell: pwsh
         run: |

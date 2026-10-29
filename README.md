@@ -72,7 +72,7 @@ checks, receipts, sync and `lnk compile` work the same for every agent.
 Enforcement is measured end to end on Claude Code; on the others it follows
 each vendor's documented hook schema and is new in 6.0 - report what you see.
 Devin CLI does not document its file tools' arguments, so its file checks
-read the usual path fields.
+read the usual path fields and any other argument named for a path or file.
 
 ```bash
 lnk status                                   # is it wired up and being used?

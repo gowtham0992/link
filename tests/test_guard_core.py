@@ -119,36 +119,37 @@ class SwitchIntentTests(unittest.TestCase):
 class GuardCooldownTests(unittest.TestCase):
     """One reminder is a guard, ten is a nag."""
 
-    def setUp(self):
-        # The cooldown lives in the usage ledger; a developer's LINK_USAGE=off must not change these tests.
-        patcher = mock.patch.dict(os.environ)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        os.environ.pop("LINK_USAGE", None)
-
     def test_same_memory_does_not_repeat_within_cooldown(self):
         import tempfile
         from pathlib import Path as P
-        from link_core.guard import recently_guarded
-        from link_core.usage import record_retrieval
+        from link_core.guard import note_guarded, recently_guarded
         with tempfile.TemporaryDirectory() as temp:
             root = P(temp)
             self.assertFalse(recently_guarded(root, "deploy-tuesdays"))
-            record_retrieval(root, "guard", ["deploy-tuesdays"])
+            note_guarded(root, "deploy-tuesdays")
             self.assertTrue(recently_guarded(root, "deploy-tuesdays"))
             # A different constraint is still allowed to fire.
             self.assertFalse(recently_guarded(root, "no-force-push"))
 
 
+class GuardCooldownWithoutUsageTests(unittest.TestCase):
+    """LINK_USAGE=off turns off the usage ledger, not the cooldown."""
+
+    def test_cooldown_holds_with_usage_recording_off(self):
+        import tempfile
+        from pathlib import Path as P
+        from link_core.guard import note_guarded, recently_guarded
+        with mock.patch.dict(os.environ, {"LINK_USAGE": "off"}), tempfile.TemporaryDirectory() as temp:
+            root = P(temp)
+            note_guarded(root, "deploy-tuesdays", now="2026-10-28T10:00:00Z")
+            self.assertTrue(recently_guarded(root, "deploy-tuesdays", now="2026-10-28T10:05:00Z"))
+            self.assertFalse(recently_guarded(root, "deploy-tuesdays", now="2026-10-29T10:05:00Z"), "it expires")
+            (root / ".link-cache" / "guard-cooldown.json").write_text("not json", encoding="utf-8")
+            self.assertFalse(recently_guarded(root, "deploy-tuesdays"), "a broken file just means no cooldown")
+
+
 class McpGuardTests(unittest.TestCase):
     """Every agent gets the guard through recall - not just the hooked one."""
-
-    def setUp(self):
-        # The cooldown lives in the usage ledger; a developer's LINK_USAGE=off must not change these tests.
-        patcher = mock.patch.dict(os.environ)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        os.environ.pop("LINK_USAGE", None)
 
     def test_recall_packet_carries_guard_on_conflicting_query(self):
         import json

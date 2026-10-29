@@ -340,5 +340,25 @@ class ReachTests(unittest.TestCase):
             payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(self.repo)}
             self.assertIn("deny", self._hook("codex", payload).stdout, command)
 
+
+class UndocumentedFileArgumentsTests(unittest.TestCase):
+    """Devin CLI does not document its file tools' arguments: any path-named field is read."""
+
+    def test_path_named_fields_are_read(self):
+        from link_core.tool_events import tool_calls
+        cases = [
+            ({"tool_name": "edit", "tool_input": {"filePath": "migrations/1.sql", "old": "a", "new": "b"}},
+             [("write", "migrations/1.sql")]),
+            ({"tool_name": "read", "tool_input": {"target_path": ".env"}}, [("read", ".env")]),
+            ({"tool_name": "write", "tool_input": {"files": ["a.py", "b.py"], "file_content": "x"}},
+             [("write", "a.py"), ("write", "b.py")]),
+            ({"tool_name": "write", "tool_input": {"file_text": "print(1)", "body": "x"}}, []),
+            ({"tool_name": "write", "tool_input": {"file_path": "known.py", "filePath": "ignored.py"}},
+             [("write", "known.py")]),
+        ]
+        for event, expected in cases:
+            self.assertEqual(tool_calls(event), expected, event)
+
+
 if __name__ == "__main__":
     unittest.main()
