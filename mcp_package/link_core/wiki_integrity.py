@@ -17,6 +17,7 @@ findings are for a person (or an agent the person asks) to act on.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -34,6 +35,19 @@ _SOURCE_LINE_RE = re.compile(r"(?<![^\W\d_])Sources?\s*(?:\*\*|__)?\s*:\s*(?:\*\
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 _SOURCES_SECTION_RE = re.compile(r"^#{2,6}\s+Sources?\s*$(.*?)(?=^#{1,6}\s|\Z)", re.IGNORECASE | re.MULTILINE | re.DOTALL)
 _RAW_PATH_RE = re.compile(r"(?<![\w/])raw/[^\s)\]>`'\"|,;*]+\.[A-Za-z0-9]{1,8}\b")
+# A raw path may hold spaces ("raw/Meeting notes.md") when something delimits it: backticks, quotes, a
+# Markdown link target, or a whole frontmatter value. Bare in prose, it ends at the first space.
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)^---\s*$", re.DOTALL | re.MULTILINE)
+_RAW_EXT = r"\.[A-Za-z0-9]{1,8}"
+_MARKDOWN_LINK_RAW_RE = re.compile(r"\]\(\s*<?/?(raw/[^)>\n]+?" + _RAW_EXT + r")>?(?:\s+\"[^\"\n]*\")?\s*\)")
+_DELIMITED_RAW_RES = (
+    _MARKDOWN_LINK_RAW_RE,
+    re.compile(r"`\s*/?(raw/[^`\n]+?" + _RAW_EXT + r")\s*`"),
+    re.compile(r"\"/?(raw/[^\"\n]+?" + _RAW_EXT + r")\""),
+    re.compile(r"(?<![\w])'/?(raw/[^'\n]+?" + _RAW_EXT + r")'(?![\w])"),
+)
+_FRONTMATTER_VALUE_RE = re.compile(r"^\s*(?:[\w-]+:|-)\s*/?(raw/(?:(?!raw/)[^\n\"'`,#])+?" + _RAW_EXT + r")\s*$",
+                                   re.MULTILINE)
 _CODE_RE = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]*`", re.DOTALL)
 _URL_RE = re.compile(r"https?://\S+")
 _WORD_RE = re.compile(r"[^\W_]+")
@@ -56,9 +70,17 @@ class WikiPage:
     citations: list[str] = field(default_factory=list)
 
 
+def _nfc(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
+
+
 def _norm(name: str) -> str:
-    """A link target's identity: its last path segment, case-folded, any script."""
-    stem = name.strip().replace("\\", "/").rsplit("/", 1)[-1]
+    """A link target's identity: its last path segment, case-folded, any script, composed (NFC).
+
+    macOS file names often arrive decomposed (NFD) while the same name typed
+    in a link is composed; both must reach the same page.
+    """
+    stem = _nfc(name).strip().replace("\\", "/").rsplit("/", 1)[-1]
     stem = stem[:-3] if stem.lower().endswith(".md") else stem
     return re.sub(r"[\W_]+", "-", stem.casefold()).strip("-")
 
@@ -184,13 +206,33 @@ def _duplicates(pages: Iterable[WikiPage]) -> list[dict[str, object]]:
     return findings
 
 
+def _raw_paths(text: str) -> set[str]:
+    """The raw/ paths a source page names, as written (NFC), whether or not they still exist."""
+    from urllib.parse import unquote
+
+    found: set[str] = set()
+    rest = text
+    frontmatter = _FRONTMATTER_RE.match(text)
+    if frontmatter:
+        found.update(m.strip() for m in _FRONTMATTER_VALUE_RE.findall(frontmatter.group(1)))
+        rest = _FRONTMATTER_VALUE_RE.sub(" ", frontmatter.group(1)) + text[frontmatter.end():]
+    for pattern in _DELIMITED_RAW_RES:
+        for match in pattern.finditer(rest):
+            path = match.group(1).strip()
+            found.add(unquote(path) if pattern is _MARKDOWN_LINK_RAW_RE else path)
+        rest = pattern.sub(" ", rest)
+    found.update(m.rstrip(".") for m in _RAW_PATH_RE.findall(rest))
+    return {_nfc(path) for path in found}
+
+
 def _raw_backing(target: Path, wiki_dir: Path) -> tuple[dict[str, float], dict[str, list[str]]]:
     """(source page name -> newest mtime of the raw files it names, source page name -> raw files it names that are gone)."""
     from .ingest import raw_source_files, source_matches_by_raw, source_page_index
 
-    records = source_page_index(wiki_dir)
+    records = {name: {**record, "text": _nfc(str(record.get("text") or ""))}
+               for name, record in source_page_index(wiki_dir).items()}
     raw_files = raw_source_files(target / "raw")
-    raw_rels = [path.relative_to(target).as_posix() for path in raw_files]
+    raw_rels = [_nfc(path.relative_to(target).as_posix()) for path in raw_files]
     mtimes: dict[str, float] = {}
     for path, rel in zip(raw_files, raw_rels):
         try:
@@ -205,9 +247,9 @@ def _raw_backing(target: Path, wiki_dir: Path) -> tuple[dict[str, float], dict[s
     existing = set(raw_rels)
     gone: dict[str, list[str]] = {}
     for name, record in records.items():
-        named = sorted({m.rstrip(".") for m in _RAW_PATH_RE.findall(str(record.get("text") or ""))})
+        named = sorted(_raw_paths(str(record.get("text") or "")))
         missing = [rel for rel in named if rel not in existing and not (target / rel).exists()]
-        if missing and _norm(name) not in newest:
+        if missing:  # also when another raw file it names is still there
             gone[_norm(name)] = missing
     return newest, gone
 
@@ -219,7 +261,6 @@ def wiki_findings(target: Path) -> dict[str, object]:
     wiki = load_pages(wiki_dir)
     pages, targets = wiki.pages, wiki.targets
     raw_mtime, raw_gone = _raw_backing(target, wiki_dir)
-    sources = {page.name: page for page in pages.values() if page.kind == "source"}
     findings: list[dict[str, object]] = []
     for page in pages.values():
         if page.kind == "source":
@@ -230,7 +271,8 @@ def wiki_findings(target: Path) -> dict[str, object]:
             if page.name in raw_gone:
                 findings.append({"kind": "source-raw-missing", "page": page.rel,
                                  "evidence": "names " + ", ".join(raw_gone[page.name])
-                                             + ", which is no longer in raw/; its claims have nothing under them"})
+                                             + ", which is no longer in raw/; what it took from there has "
+                                               "nothing under it"})
             continue
         grounded = False
         resolved_any = False
@@ -244,17 +286,19 @@ def wiki_findings(target: Path) -> dict[str, object]:
             kinds = {wiki.kind_of(rel) for rel in reached}
             if kinds & {"source", "memory"}:
                 grounded = True
-            source = sources.get(cited)
-            if source is None:
-                continue
-            newest = raw_mtime.get(cited, 0.0)
-            if newest > page.mtime + 0.001 or newest > source.mtime + 0.001:
-                findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
-                                 "evidence": f"cites [[{cited}]], whose raw file changed after this page was "
-                                             "written; its claims may no longer match"})
-            elif cited in raw_gone:
-                findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
-                                 "evidence": f"cites [[{cited}]], whose raw file is no longer in raw/"})
+            # By file name or by alias: the raw files are the source page's, under its file name.
+            for source in (pages[rel] for rel in reached if rel in pages and pages[rel].kind == "source"):
+                newest = raw_mtime.get(source.name, 0.0)
+                if newest > page.mtime + 0.001 or newest > source.mtime + 0.001:
+                    findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
+                                     "evidence": f"cites [[{cited}]], whose raw file changed after this page was "
+                                                 "written; its claims may no longer match"})
+                    break
+                if source.name in raw_gone:
+                    findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
+                                     "evidence": f"cites [[{cited}]], whose raw file "
+                                                 + ", ".join(raw_gone[source.name]) + " is no longer in raw/"})
+                    break
         if resolved_any and not grounded:
             findings.append({"kind": "wiki-only-support", "page": page.rel,
                              "evidence": "every citation is another wiki page ("

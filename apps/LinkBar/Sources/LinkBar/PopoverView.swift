@@ -117,45 +117,57 @@ struct PopoverView: View {
     // MARK: inbox tab (the original memory view)
 
     private var inboxTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
-                if let handoff = store.handoffsWaiting.first {
-                    handoffBanner(handoff)
-                }
-                if !store.activeSessions.isEmpty {
-                    pulseRow
-                }
-                if let warning = store.runtimeWarning {
-                    runtimeBanner(warning)
-                }
-                if !store.heldCalls.isEmpty {
-                    heldCallsSection
-                }
-                recallField
-                if store.searchedQuery != nil || !store.recallResults.isEmpty {
-                    recallSection
-                }
-                if isFullyIdle {
-                    idleState
-                } else {
-                    inboxSection
-                    if let captures = store.captures, !captures.captures.isEmpty {
-                        capturesSection(captures)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
+                    if let handoff = store.handoffsWaiting.first {
+                        handoffBanner(handoff)
+                    }
+                    if !store.activeSessions.isEmpty {
+                        pulseRow
+                    }
+                    if let warning = store.runtimeWarning {
+                        runtimeBanner(warning)
+                    }
+                    if !store.heldCalls.isEmpty {
+                        heldCallsSection
+                    }
+                    recallField
+                    if store.searchedQuery != nil || !store.recallResults.isEmpty {
+                        recallSection
+                    }
+                    if isFullyIdle {
+                        idleState
+                    } else {
+                        inboxSection
+                        if let captures = store.captures, !captures.captures.isEmpty {
+                            capturesSection(captures)
+                        }
+                    }
+                    if let session = store.receipt?.last,
+                       !session.memoriesUsed.isEmpty || session.recalls > 0
+                        || session.anythingUndelivered == true || !(session.ruleChecks ?? []).isEmpty {
+                        receiptSection(session)
+                    }
+                    if !store.activity.isEmpty && !isFullyIdle {
+                        activitySection
                     }
                 }
-                if let session = store.receipt?.last,
-                   !session.memoriesUsed.isEmpty || session.recalls > 0
-                    || session.anythingUndelivered == true || !(session.ruleChecks ?? []).isEmpty {
-                    receiptSection(session)
-                }
-                if !store.activity.isEmpty && !isFullyIdle {
-                    activitySection
-                }
+                .padding(LinkBrand.pad)
             }
-            .padding(LinkBrand.pad)
+            .frame(maxHeight: Self.contentCap)
+            .onAppear {
+                recallFocused = true
+                scrollToFocusedHeldCall(proxy)
+            }
+            .onChange(of: store.focusedHeldCall) { _, _ in scrollToFocusedHeldCall(proxy) }
         }
-        .frame(maxHeight: Self.contentCap)
-        .onAppear { recallFocused = true }
+    }
+
+    /// A held call opened from its notification: bring its whole text into view.
+    private func scrollToFocusedHeldCall(_ proxy: ScrollViewProxy) {
+        guard let id = store.focusedHeldCall, store.heldCalls.contains(where: { $0.id == id }) else { return }
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("held-\(id)", anchor: .top) }
     }
 
 
@@ -682,6 +694,11 @@ struct PopoverView: View {
                             .help("Let exactly this call through once; anything different is held again")
                     }
                 }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(LinkBrand.amber, lineWidth: store.focusedHeldCall == call.id ? 1.5 : 0)
+                )
+                .id("held-\(call.id)")
             }
         }
     }

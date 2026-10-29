@@ -1438,9 +1438,39 @@ def _stale_wiki(root: Path, *, json_output: bool) -> int:
 
 def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool, json_output: bool,
                     home: Path | None = None) -> int:
-    """`lnk compile --global`: personal memory into agents' global instruction files."""
-    from link_core.global_compile import GLOBAL_TARGET_KEYS, ZED_PERMISSIONS, apply_global_plan, plan_global_compile
+    """`lnk compile --global`: personal memory into agents' global instruction files.
+
+    Always from the personal workspace, the one every later refresh follows:
+    compiling some other workspace's memories would be undone by the next
+    memory change. A workspace that was only resolved from the current
+    directory gives way to it; one named explicitly is refused.
+    """
+    from link_core.global_compile import (
+        GLOBAL_TARGET_KEYS,
+        ZED_PERMISSIONS,
+        apply_global_plan,
+        detected_global_targets,
+        personal_wiki_dir,
+        plan_global_compile,
+    )
     from link_core.zed_permissions import ZED_SETTINGS
+
+    personal = personal_wiki_dir()
+    if wiki_dir.resolve() != personal.resolve():
+        if wiki_dir.resolve() != (Path.cwd() / "wiki").resolve():
+            print(f"lnk compile --global writes your personal memory, from {personal.parent} (LINK_WORKSPACE, "
+                  f"else ~/link), not from {wiki_dir.parent}: global files follow the personal workspace only. "
+                  "Run it without a path, or set LINK_WORKSPACE to make that workspace your personal one.",
+                  file=sys.stderr)
+            return 2
+        if not personal.exists():
+            print(f"No personal workspace at {personal.parent} (LINK_WORKSPACE, else ~/link): "
+                  "`lnk compile --global` writes your personal memory from it. Create it with `lnk onboard`.",
+                  file=sys.stderr)
+            return 2
+        print(f"Global files follow your personal workspace: compiling from {personal.parent}, "
+              f"not {wiki_dir.parent}.", file=sys.stderr)
+        wiki_dir = personal
 
     chosen = [key.strip() for key in targets.split(",") if key.strip()] if targets else None
     if chosen == ["all"]:
@@ -1478,8 +1508,18 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
         for rel in plan.unchanged:
             print(f"Up to date: ~/{rel}")
         if not plan.files and not plan.unchanged:
-            print("No global instruction files to write: no Windsurf, Kiro or Zed install found "
-                  "(or nothing reviewed and personal yet). Pass --targets windsurf,kiro,zed to write anyway.")
+            if plan.conflicts or plan.dropped:
+                print("Nothing written" + (f" to {', '.join(chosen)}" if chosen else "") + ": see why below.")
+            elif chosen:  # every file asked for gets at least an empty block; only Zed's permissions wait
+                print(f"Nothing written to {', '.join(chosen)}: no reviewed rule for Zed's permissions yet. "
+                      "`--targets zed` keeps them in step from the first one.")
+            elif not detected_global_targets(home or Path.home()):
+                print("No global instruction files to write: no Windsurf, Kiro or Zed install found. "
+                      "Pass --targets windsurf,kiro,zed to write anyway.")
+            else:
+                print("No global instruction files to write yet: no reviewed personal memory. "
+                      "Pass --targets windsurf,kiro,zed to set the files up now; they fill in as memories are "
+                      "reviewed.")
         for item in plan.dropped:
             print(f"Left out of {item['target']} (size limit): {item['name']} - {item['reason']}")
         for item in plan.conflicts:
@@ -1533,6 +1573,11 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, in
     """
     from link_core.staleness import StalenessChecker, describe_findings
 
+    if wiki and instructions:
+        # Two checks of different things, each with its own report and exit code: one at a time.
+        print("lnk stale: --wiki and --instructions are separate checks; run `lnk stale --wiki` and "
+              "`lnk stale --instructions` one after the other.", file=sys.stderr)
+        return 2
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)

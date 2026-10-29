@@ -12,10 +12,13 @@ sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.compile import BLOCK_BEGIN, BLOCK_END  # noqa: E402
 from link_core.global_compile import (  # noqa: E402
+    ZED_PERMISSIONS,
     apply_global_plan,
     detected_global_targets,
+    owned_global_targets,
     plan_global_compile,
     refresh_after_memory_change,
+    refresh_global_files,
 )
 
 LINK = [sys.executable, str(ROOT / "link.py")]
@@ -69,7 +72,7 @@ class GlobalCompileTests(unittest.TestCase):
         self.assertLessEqual(len(content), 6000)
         self.assertTrue(plan.dropped, "what does not fit is reported, not cut silently")
 
-    def test_rewriting_is_idempotent_and_an_empty_set_removes_the_block(self):
+    def test_rewriting_is_idempotent_and_an_empty_set_empties_the_block(self):
         records = [_memory("short-answers", "Keep answers short.")]
         apply_global_plan(plan_global_compile(records, self.home, targets=["zed"]))
         again = plan_global_compile(records, self.home, targets=["zed"])
@@ -78,7 +81,10 @@ class GlobalCompileTests(unittest.TestCase):
         zed = self.home / ".config/zed/AGENTS.md"
         zed.write_text("# Zed notes\n\n" + zed.read_text(encoding="utf-8"), encoding="utf-8")
         apply_global_plan(plan_global_compile([], self.home, targets=["zed"]))
-        self.assertEqual(zed.read_text(encoding="utf-8").strip(), "# Zed notes")
+        text = zed.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# Zed notes\n"))
+        self.assertNotIn("Keep answers short", text)
+        self.assertIn(BLOCK_BEGIN, text, "an empty block keeps the file Link's to refresh")
 
     def test_a_broken_marker_is_left_alone(self):
         zed = self.home / ".config/zed/AGENTS.md"
@@ -136,14 +142,46 @@ class GlobalCompileTests(unittest.TestCase):
         self.assertEqual(plan.files, {}, "no room: nothing written rather than a file Windsurf truncates")
         self.assertEqual([d["name"] for d in plan.dropped], ["a"])
 
-    def test_kiros_own_file_goes_when_no_memory_is_left(self):
-        apply_global_plan(plan_global_compile([_memory("a", "Keep answers short.")], self.home, targets=["kiro"]))
+    def test_ownership_survives_the_last_memory_leaving_and_refresh_brings_it_back(self):
+        memory = _memory("a", "Keep answers short.")
+        apply_global_plan(plan_global_compile([memory], self.home, targets=["windsurf", "kiro", "zed"]))
         kiro = self.home / ".kiro/steering/link-memory.md"
         self.assertTrue(kiro.exists())
-        plan = plan_global_compile([], self.home, targets=["kiro"])
-        self.assertIsNone(plan.files[".kiro/steering/link-memory.md"])
-        apply_global_plan(plan)
-        self.assertFalse(kiro.exists())
+        refresh_global_files([], self.home)
+        self.assertTrue(kiro.exists(), "Kiro's file stays, with an empty block, so it stays Link's")
+        self.assertNotIn("Keep answers short", kiro.read_text(encoding="utf-8"))
+        self.assertEqual(sorted(owned_global_targets(self.home)), ["kiro", "windsurf", "zed"])
+        written = refresh_global_files([memory], self.home)
+        self.assertEqual(len(written), 3, "restoring the memory refreshes every file again")
+        for rel in (".codeium/windsurf/memories/global_rules.md", ".kiro/steering/link-memory.md",
+                    ".config/zed/AGENTS.md"):
+            self.assertIn("Keep answers short", (self.home / rel).read_text(encoding="utf-8"))
+        self.assertEqual(plan_global_compile([memory], self.home, targets=owned_global_targets(self.home)).files, {})
+
+    def test_an_explicit_target_with_no_memory_yet_is_set_up_and_a_detected_one_is_not(self):
+        self.assertEqual(plan_global_compile([], self.home).files, {})
+        apply_global_plan(plan_global_compile([], self.home, targets=["kiro"]))
+        self.assertEqual(owned_global_targets(self.home), ["kiro"])
+        refresh_global_files([_memory("a", "Keep answers short.")], self.home)
+        self.assertIn("Keep answers short",
+                      (self.home / ".kiro/steering/link-memory.md").read_text(encoding="utf-8"))
+
+    def test_zeds_permissions_stay_links_while_no_rule_is_left(self):
+        ruled = _memory("no-force-push", "Never force-push.", memory_type="decision",
+                        enforce=["deny command: git push --force*"])
+        settings = self.home / ".config/zed/settings.json"
+        apply_global_plan(plan_global_compile([ruled], self.home, targets=["zed", ZED_PERMISSIONS]))
+        self.assertIn("always_deny", settings.read_text(encoding="utf-8"))
+        refresh_global_files([], self.home)
+        self.assertNotIn("always_deny", settings.read_text(encoding="utf-8"))
+        self.assertIn(ZED_PERMISSIONS, owned_global_targets(self.home), "recorded in Zed's AGENTS.md block")
+        refresh_global_files([ruled], self.home)
+        self.assertIn("always_deny", settings.read_text(encoding="utf-8"), "the rule comes back on its own")
+        self.assertNotIn("no rule at the moment", (self.home / ".config/zed/AGENTS.md").read_text(encoding="utf-8"))
+        # Taking the settings block back by hand while it has rules is an opt-out a refresh respects.
+        settings.write_text("{}\n", encoding="utf-8")
+        refresh_global_files([ruled], self.home)
+        self.assertEqual(settings.read_text(encoding="utf-8"), "{}\n")
 
     def test_refresh_only_follows_the_personal_workspace_and_owned_files(self):
         personal = self.home / "link" / "wiki"
@@ -206,6 +244,28 @@ class GlobalCompileCliTests(unittest.TestCase):
         subprocess.run([*LINK, "demo", str(other), "--force"], check=True, capture_output=True, env=self.env)
         self._run("archive-memory", result["included"]["zed"][0], str(other))
         self.assertEqual(zed.read_text(encoding="utf-8"), before)
+
+    def test_global_compile_follows_the_personal_workspace_wherever_it_is_run(self):
+        other = Path(self.temp.name) / "other"
+        subprocess.run([*LINK, "init", str(other)], check=True, capture_output=True, env=self.env)
+        result = subprocess.run([*LINK, "compile", "--global", "--json"], capture_output=True, text=True,
+                                env=self.env, cwd=other)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["included"]["zed"], "the personal workspace's memories")
+        self.assertIn("personal workspace", result.stderr)
+        refused = subprocess.run([*LINK, "compile", str(other), "--global"], capture_output=True, text=True,
+                                 env=self.env)
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("personal workspace only", refused.stderr)
+        zed = self.home / ".config" / "zed" / "AGENTS.md"
+        self.assertIn("- ", zed.read_text(encoding="utf-8"), "a refused run leaves the file as it was")
+
+    def test_nothing_to_write_for_named_targets_says_why(self):
+        (self.home / ".kiro" / ".git").mkdir(parents=True)
+        result = self._run("compile", str(self.ws), "--global", "--targets", "kiro")
+        self.assertIn("Nothing written to kiro: see why below.", result.stdout)
+        self.assertNotIn("install found", result.stdout)
+        self.assertIn("git work tree", result.stdout)
 
 
 if __name__ == "__main__":

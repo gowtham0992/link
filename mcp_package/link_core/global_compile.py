@@ -20,6 +20,14 @@ the agent deciding to call a tool. `lnk compile --global` writes it there:
 - After a memory changes, only files that already carry Link's block are
   refreshed (`refresh_global_files`); nothing new appears in a home
   directory unless the person runs `lnk compile --global`.
+- When no memory is left for a file, its block stays, empty: the block is
+  how Link knows the file is its to refresh, so the next reviewed memory
+  arrives without another `lnk compile --global`. Deleting the block by
+  hand is how the person takes a file back. Zed's settings.json has no room
+  for an empty block, so while it holds no rule of Link's, a marker in
+  Zed's AGENTS.md block records that its permissions are still Link's.
+- Global files follow the personal workspace only (LINK_WORKSPACE, else
+  ~/link), whether written by `lnk compile --global` or by a refresh.
 
 Agents whose hooks deliver the brief at session start (Claude Code, Cursor,
 Codex, Gemini CLI, Antigravity, Copilot) are not written: the brief already
@@ -39,6 +47,7 @@ from .compile import (
     Unreadable,
     _fit,
     _read_strict,
+    _within,
     newline_of,
     remove_block,
     render_block,
@@ -58,7 +67,7 @@ class GlobalTarget:
     budget_chars: int | None = None  # for the whole file
     budget_note: str = ""
     signs: tuple[str, ...] = ()  # home-relative paths that show the agent is installed
-    owned_file: bool = False  # the whole file is Link's: removed when no memory is left for it
+    owned_file: bool = False  # the whole file is Link's: removed if even an empty block no longer fits
 
 
 GLOBAL_TARGETS: tuple[GlobalTarget, ...] = (
@@ -109,8 +118,29 @@ GLOBAL_INTRO = ("The user's reviewed memory, compiled by Link for every project.
                 "decisions and preferences; follow them.")
 
 
-def _render(records: list[Mapping[str, object]]) -> str:
-    return render_block(records, intro=GLOBAL_INTRO)
+GLOBAL_EMPTY = ("No reviewed personal memory right now. Link fills this block again when one is reviewed; "
+                "delete the block to stop Link writing to this file.")
+# Inside Zed's AGENTS.md block, on a line of its own: Link's block in Zed's settings.json is empty
+# for now (so gone from the file) but the permissions are still Link's to refresh.
+ZED_PERMISSIONS_KEPT = "<!-- Link keeps Zed's tool permissions in settings.json; no rule at the moment -->"
+
+
+def _render(records: list[Mapping[str, object]], zed_permissions_kept: bool = False) -> str:
+    if records:
+        block = render_block(records, intro=GLOBAL_INTRO)
+    else:
+        block = f"{BLOCK_BEGIN}\n## Link memory\n\n{GLOBAL_EMPTY}\n{BLOCK_END}\n"
+    if zed_permissions_kept:
+        block = block.replace(BLOCK_END, ZED_PERMISSIONS_KEPT + "\n" + BLOCK_END)
+    return block
+
+
+def _keeps_zed_permissions(text: str | None) -> bool:
+    """Whether Zed's AGENTS.md says Link's (now empty) permissions in settings.json are still Link's."""
+    if not text or BLOCK_BEGIN not in text or BLOCK_END not in text:
+        return False
+    block = text[text.find(BLOCK_BEGIN):text.find(BLOCK_END)]
+    return any(line.strip() == ZED_PERMISSIONS_KEPT for line in block.splitlines())
 
 
 def _refusal(home: Path, rel: str) -> str | None:
@@ -131,8 +161,15 @@ def _refusal(home: Path, rel: str) -> str | None:
         probe = probe.parent
 
 
+def _zed_agents_text(home: Path) -> str | None:
+    try:
+        return _read_strict(home / ".config/zed/AGENTS.md")
+    except Unreadable:
+        return None
+
+
 def owned_global_targets(home: Path) -> list[str]:
-    """The targets whose file already carries Link's block."""
+    """The targets whose file already carries Link's block (an empty one included)."""
     owned = []
     for target in GLOBAL_TARGETS:
         try:
@@ -144,10 +181,11 @@ def owned_global_targets(home: Path) -> list[str]:
     from .zed_permissions import ZED_SETTINGS, owns_block
 
     try:
-        if owns_block(_read_strict(home / ZED_SETTINGS)):
-            owned.append(ZED_PERMISSIONS)
+        settings_owned = owns_block(_read_strict(home / ZED_SETTINGS))
     except Unreadable:
-        pass
+        settings_owned = False
+    if settings_owned or _keeps_zed_permissions(_zed_agents_text(home)):
+        owned.append(ZED_PERMISSIONS)
     return owned
 
 
@@ -160,6 +198,10 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
     chosen, excluded = select_memories(personal, home, "", include_private=True)
     plan.excluded += excluded
     wanted = targets if targets is not None else detected_global_targets(home)
+    # Zed's settings first: whether its permissions stay Link's while empty is recorded in AGENTS.md.
+    zed_kept = _keeps_zed_permissions(_zed_agents_text(home))
+    if ZED_PERMISSIONS in wanted:
+        zed_kept = _plan_zed_permissions(plan, home, chosen, zed_kept)
     for target in GLOBAL_TARGETS:
         if target.key not in wanted:
             continue
@@ -184,17 +226,20 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
         fit_target = Target(target.key, target.agent, "block", target.path, budget_chars=target.budget_chars)
 
         def whole_file(records: list[Mapping[str, object]], existing: str | None = existing,
-                       newline: str = newline) -> str:
-            return splice_block(existing, _render(records), newline)
+                       newline: str = newline, zed: bool = target.key == "zed" and zed_kept) -> str:
+            return splice_block(existing, _render(records, zed), newline)
 
         has_block = bool(existing) and BLOCK_BEGIN in str(existing)
+        # A file already Link's keeps its block, empty if need be, so it stays Link's to refresh;
+        # one named in `targets` (asked for, or owned) gets one; one merely detected waits for a memory.
+        keep_block = has_block or targets is not None
         content: str | None = existing
         try:
             kept, dropped = _fit(fit_target, chosen, whole_file) if chosen else ([], [])
-            if kept:
+            if kept or (keep_block and _within(fit_target, whole_file([]))):
                 content = whole_file(kept)
             elif has_block:
-                content = remove_block(str(existing), newline)
+                content = remove_block(str(existing), newline)  # not even an empty block fits
                 if target.owned_file and not content.strip():
                     content = None  # Link's own file, and nothing of Link's is left in it
         except ValueError as exc:
@@ -203,19 +248,23 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
         for record in dropped:
             plan.dropped.append({"target": target.key, "name": str(record.get("name") or ""),
                                  "reason": target.budget_note or "over the file's limit"})
-        if not kept and not has_block:
+        if content == existing and not has_block:
             continue
         plan.included[target.key] = [str(record.get("name") or "") for record in kept]
         if content == existing:
             plan.unchanged.append(target.path)
         else:
             plan.files[target.path] = content
-    if ZED_PERMISSIONS in wanted:
-        _plan_zed_permissions(plan, home, chosen)
     return plan
 
 
-def _plan_zed_permissions(plan: GlobalPlan, home: Path, chosen: list[Mapping[str, object]]) -> None:
+def _plan_zed_permissions(plan: GlobalPlan, home: Path, chosen: list[Mapping[str, object]], kept: bool) -> bool:
+    """Plan Zed's settings.json; return whether Zed's AGENTS.md should record the permissions as Link's.
+
+    They stay Link's while Link has no rule to write (the settings file then
+    carries nothing of Link's), and stop being recorded once its block is back
+    in settings.json. A file Link may not edit keeps the record as it was.
+    """
     from .zed_permissions import ZED_SETTINGS, compile_permissions, owns_block, snippet, splice
 
     permissions, plan.zed_rules_skipped, names = compile_permissions(chosen)
@@ -228,20 +277,21 @@ def _plan_zed_permissions(plan: GlobalPlan, home: Path, chosen: list[Mapping[str
         if permissions:
             plan.zed_snippet = snippet(permissions)
             plan.conflicts.append({"path": ZED_SETTINGS, "reason": refusal + "; merge the rules by hand"})
-        return
+        return kept
     if not permissions and not owns_block(existing):
-        return
+        return True  # asked for, or still Link's: the first reviewed rule is written without another compile
     try:
         content = splice(existing, permissions)
     except ValueError as exc:
         plan.zed_snippet = snippet(permissions)
         plan.conflicts.append({"path": ZED_SETTINGS, "reason": str(exc)})
-        return
+        return kept
     plan.included[ZED_PERMISSIONS] = names
     if content == existing:
         plan.unchanged.append(ZED_SETTINGS)
     else:
         plan.files[ZED_SETTINGS] = content
+    return not permissions
 
 
 def apply_global_plan(plan: GlobalPlan) -> list[str]:

@@ -647,27 +647,53 @@ struct HeldCall: Identifiable, Equatable {
     let agent: String
     let at: Date
 
-    /// Requests older than a day have expired (approvals.py REQUEST_HOURS).
+    /// The pending requests `lnk approve` would accept, read the way approvals.py `_load` and `_prune`
+    /// read them, so LinkBar never offers a call the CLI would then refuse:
+    /// - a file with a second hard link reads as empty (another name for it could have written it);
+    /// - an entry needs its call `key` and a creation time in Link's own format, at most a minute ahead;
+    /// - requests older than a day have expired (REQUEST_HOURS), a request with a bad or stale `used`
+    ///   stamp is gone, and only the newest 200 are kept (MAX_REQUESTS).
     static func load(from workspace: String, now: Date = Date()) -> [HeldCall] {
         let path = (workspace as NSString).appendingPathComponent(".link-cache/approvals.json")
-        guard let data = FileManager.default.contents(atPath: path),
+        var info = stat()
+        guard stat(path, &info) == 0, info.st_nlink <= 1,
+              let data = FileManager.default.contents(atPath: path),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let requests = root["requests"] as? [String: Any] else { return [] }
-        let stamp = ISO8601DateFormatter()
-        var calls: [HeldCall] = []
+        var kept: [(stamp: String, call: HeldCall?)] = []
         // One malformed entry must not hide the rest.
         for (id, value) in requests {
             guard let entry = value as? [String: Any],
-                  let display = entry["display"] as? String, !display.isEmpty,
-                  let at = (entry["at"] as? String).flatMap(stamp.date(from:)),
-                  now.timeIntervalSince(at) < 24 * 3600 else { continue }
+                  entry["key"] is String,
+                  let stamp = entry["at"] as? String,
+                  let at = linkStamp.date(from: stamp),
+                  now.timeIntervalSince(at) <= 24 * 3600,
+                  at.timeIntervalSince(now) <= 60 else { continue }
+            if let used = entry["used"] {
+                guard let usedAt = (used as? String).flatMap(linkStamp.date(from:)),
+                      now.timeIntervalSince(usedAt) <= 5 else { continue }
+            }
+            // Counted towards the 200 like any request, but not shown: there would be nothing to approve.
+            guard let display = entry["display"] as? String, !display.isEmpty else {
+                kept.append((stamp, nil))
+                continue
+            }
             let kind = display.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
-            calls.append(HeldCall(id: id, kind: kind, display: display, title: entry["title"] as? String ?? "",
-                                  rule: entry["rule"] as? String ?? "", agent: entry["agent"] as? String ?? "",
-                                  at: at))
+            kept.append((stamp, HeldCall(id: id, kind: kind, display: display, title: entry["title"] as? String ?? "",
+                                         rule: entry["rule"] as? String ?? "", agent: entry["agent"] as? String ?? "",
+                                         at: at)))
         }
-        return calls.sorted { $0.at > $1.at }
+        return kept.sorted { $0.stamp > $1.stamp }.prefix(200).compactMap(\.call)
     }
+
+    /// approvals.py `_stamp`: "%Y-%m-%dT%H:%M:%SZ", UTC.
+    private static let linkStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        return formatter
+    }()
 
     var agentName: String {
         ["codex": "Codex", "cursor": "Cursor", "windsurf": "Windsurf", "kiro": "Kiro", "devin": "Devin"][agent] ?? agent

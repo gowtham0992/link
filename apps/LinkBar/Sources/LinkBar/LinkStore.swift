@@ -57,6 +57,8 @@ final class LinkStore: ObservableObject {
     @Published var staleUnsupported = false
     /// Set by a status-row Fix to steer the popover (e.g. to the stale filter).
     @Published var requestedTab: PopoverView.Tab?
+    /// A held call whose notification was opened: the popover scrolls to it and marks it.
+    @Published var focusedHeldCall: String?
     @Published var memoryFilterStale = false
     /// Published copy of LinkCLI.workspace so Settings and the footer update
     /// the moment the workspace changes.
@@ -674,8 +676,15 @@ final class LinkStore: ObservableObject {
     /// inbox's checkmark runs, by memory name.
     /// Let one held tool call through once; the agent repeats it within 10 minutes.
     func approveHeldCall(id: String) {
+        if focusedHeldCall == id { focusedHeldCall = nil }
         act(["approve", id, LinkCLI.workspace],
             success: "Approved once \u{2014} the agent can run exactly that call again in the next 10 minutes.")
+    }
+
+    /// Steer the popover to one held call (from its notification), where the whole call is shown.
+    func showHeldCall(id: String) {
+        focusedHeldCall = id
+        requestedTab = .inbox
     }
 
     func markReviewedByName(_ name: String) {

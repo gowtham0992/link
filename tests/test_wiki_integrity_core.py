@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -85,6 +86,43 @@ class WikiIntegrityTests(unittest.TestCase):
         flagged = self._kinds()
         self.assertIn(("source-raw-missing", "wiki/sources/local-release-notes.md"), flagged)
 
+    def test_a_deleted_raw_file_with_a_space_in_its_name_is_reported(self):
+        sources = self.ws / "wiki" / "sources"
+        (sources / "meeting-notes.md").write_text(_page("source", "Meeting", "Raw: `raw/Meeting notes.md`"),
+                                                  encoding="utf-8")
+        flagged = wiki_findings(self.ws)["findings"]
+        missing = [f for f in flagged if f["kind"] == "source-raw-missing"]
+        self.assertEqual([f["page"] for f in missing], ["wiki/sources/meeting-notes.md"])
+        self.assertIn("raw/Meeting notes.md", missing[0]["evidence"])
+        (self.ws / "raw" / "Meeting notes.md").write_text("notes\n", encoding="utf-8")
+        self.assertNotIn(("source-raw-missing", "wiki/sources/meeting-notes.md"), self._kinds(),
+                         "the whole name is checked, not its first word")
+
+    def test_a_missing_raw_file_is_reported_beside_one_still_there(self):
+        source = self.ws / "wiki" / "sources" / "agent-memory-session.md"
+        source.write_text(source.read_text(encoding="utf-8") + "\nAlso from `raw/follow-up.md`.\n",
+                          encoding="utf-8")
+        flagged = self._kinds()
+        self.assertIn(("source-raw-missing", "wiki/sources/agent-memory-session.md"), flagged)
+        self.assertIn(("cites-changed-source", "wiki/concepts/agent-memory.md"), flagged)
+
+    def test_a_citation_by_alias_sees_its_source_change(self):
+        (self.ws / "wiki" / "concepts" / "via-alias.md").write_text(
+            _page("concept", "Via alias", "A claim. *Source: [[Memory demo note]]*"), encoding="utf-8")
+        raw = self.ws / "raw" / "agent-memory-session.md"
+        later = time.time() + 5
+        os.utime(raw, (later, later))
+        self.assertIn(("cites-changed-source", "wiki/concepts/via-alias.md"), self._kinds())
+
+    def test_a_decomposed_file_name_matches_a_composed_link(self):
+        sources = self.ws / "wiki" / "sources"
+        decomposed = unicodedata.normalize("NFD", "café-notes.md")
+        (sources / decomposed).write_text(_page("source", "Café notes", "Notes from the café."), encoding="utf-8")
+        (self.ws / "wiki" / "concepts" / "coffee.md").write_text(
+            _page("concept", "Coffee", "A claim. *Source: [[" + unicodedata.normalize("NFC", "café-notes") + "]]*"),
+            encoding="utf-8")
+        self.assertEqual([k for k, p in self._kinds() if p == "wiki/concepts/coffee.md"], [])
+
     def test_citation_forms_and_targets(self):
         concepts = self.ws / "wiki" / "concepts"
         (concepts / "bold.md").write_text(_page("concept", "Bold", "A claim. **Source:** [[agent-memory-session]]"),
@@ -126,6 +164,13 @@ class WikiIntegrityTests(unittest.TestCase):
         result = subprocess.run([*LINK, "stale", str(self.ws), "--wiki"], capture_output=True, text=True,
                                 env={**os.environ, "LINK_USAGE": "off"})
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_wiki_and_instructions_together_are_refused_not_half_run(self):
+        result = subprocess.run([*LINK, "stale", str(self.ws), "--wiki", "--instructions"], capture_output=True,
+                                text=True, env={**os.environ, "LINK_USAGE": "off"})
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("separate checks", result.stderr)
+        self.assertEqual(result.stdout, "")
 
     def test_the_command_reports_and_writes_nothing(self):
         before = {p: p.read_bytes() for p in (self.ws / "wiki").rglob("*.md")}
