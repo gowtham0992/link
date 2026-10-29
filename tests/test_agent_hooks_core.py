@@ -34,14 +34,14 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertTrue(supports_agent_hooks("codex"))
         self.assertTrue(supports_agent_hooks("cursor"))
         self.assertTrue(supports_agent_hooks("gemini-cli"))
-        self.assertFalse(supports_agent_hooks("kiro"))
+        self.assertFalse(supports_agent_hooks("zed"))
         self.assertFalse(supports_agent_hooks("vscode"))
 
     def test_build_payload_rejects_unsupported_agent(self):
         with self.assertRaises(ValueError):
             build_agent_hooks_payload(
                 target=Path("/tmp/link"),
-                agent="kiro",
+                agent="zed",
                 runtime_script=Path("/tmp/link/link.py"),
                 python_cmd="python3",
             )
@@ -103,16 +103,16 @@ class AgentHooksCoreTests(unittest.TestCase):
         for name in ("antigravity", "gemini"):
             with tempfile.TemporaryDirectory() as temp:
                 home = Path(temp)
-                old_home = os.environ.get("HOME")
-                os.environ["HOME"] = str(home)
+                old_home = dict(os.environ)
+                os.environ.update(HOME=str(home), USERPROFILE=str(home))
                 try:
                     build_agent_hooks_payload(target=home / "link", agent="antigravity",
                                               runtime_script=home / "link" / "link.py", python_cmd="python3",
                                               write=True)
                     result = build_disconnect_payload(agent=name, write=True)
                 finally:
-                    if old_home is not None:
-                        os.environ["HOME"] = old_home
+                    os.environ.clear()
+                    os.environ.update(old_home)
                 self.assertTrue(result["hooks"]["removed"], name)
                 for settings in (home / ".gemini" / "settings.json", home / ".gemini" / "config" / "hooks.json"):
                     self.assertNotIn("hook pre-tool", settings.read_text(encoding="utf-8"), (name, settings))
@@ -133,21 +133,73 @@ class AgentHooksCoreTests(unittest.TestCase):
         self.assertNotIn("SessionStart", windsurf["hooks"], "Windsurf has no session-start event")
         self.assertNotIn("timeout", windsurf["hooks"]["pre_run_command"][0])
 
+    def test_kiro_gets_a_v3_hooks_file_and_an_agent_profile_and_loses_both_on_disconnect(self):
+        from link_core.mcp_connect import build_disconnect_payload  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            v3 = home / ".kiro" / "hooks" / "link.json"
+            profile = home / ".kiro" / "agents" / "link.json"
+            profile.parent.mkdir(parents=True)
+            profile.write_text(json.dumps({"name": "link", "tools": ["@builtin"], "hooks": {
+                "stop": [{"command": "say done"}]}}), encoding="utf-8")
+            old_home = dict(os.environ)
+            os.environ.update(HOME=str(home), USERPROFILE=str(home))
+            try:
+                for _ in range(2):  # a second connect replaces, never duplicates
+                    payload = build_agent_hooks_payload(target=home / "link", agent="kiro",
+                                                        runtime_script=home / "link" / "link.py",
+                                                        python_cmd="python3", write=True)
+                hooks = json.loads(v3.read_text(encoding="utf-8"))
+                agent = json.loads(profile.read_text(encoding="utf-8"))
+                result = build_disconnect_payload(agent="kiro", write=True)
+                after = json.loads(profile.read_text(encoding="utf-8"))
+            finally:
+                os.environ.clear()
+                os.environ.update(old_home)
+        self.assertTrue(payload["write"]["ok"], payload["write"])
+        self.assertEqual(hooks["version"], "v1")
+        self.assertEqual([(h["trigger"], h.get("matcher")) for h in hooks["hooks"]],
+                         [("SessionStart", None), ("PreToolUse", "shell|read|write")])
+        self.assertIn("--emit kiro", hooks["hooks"][1]["action"]["command"])
+        self.assertEqual(hooks["hooks"][1]["timeout"], 10)
+        self.assertEqual(agent["tools"], ["@builtin"], "a profile the person already has keeps its own settings")
+        self.assertEqual(agent["hooks"]["stop"], [{"command": "say done"}])
+        self.assertEqual(len(agent["hooks"]["agentSpawn"]), 1)
+        self.assertEqual(agent["hooks"]["preToolUse"][0]["timeout_ms"], 10_000)
+        self.assertNotIn("matcher", agent["hooks"]["preToolUse"][0], "every tool: Link decides what matters")
+        self.assertTrue(result["hooks"]["removed"])
+        self.assertFalse(v3.exists(), "Link's own hooks file goes when nothing else is in it")
+        self.assertEqual(after["hooks"], {"stop": [{"command": "say done"}]})
+
+    def test_a_new_kiro_profile_has_every_tool_and_the_mcp_servers(self):
+        snippet = json.loads(str(build_agent_hooks_payload(
+            target=Path("/tmp/link"), agent="kiro-agent", runtime_script=Path("/tmp/link/link.py"),
+            python_cmd="python3")["snippet"]))
+        self.assertIn("agentSpawn", snippet["hooks"])
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "link.json"
+            build_agent_hooks_payload(target=Path("/tmp/link"), agent="kiro-agent",
+                                      runtime_script=Path("/tmp/link/link.py"), python_cmd="python3",
+                                      settings_path=str(path), write=True)
+            profile = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual((profile["name"], profile["tools"], profile["includeMcpJson"]), ("link", ["*"], True))
+
     def test_antigravity_writes_its_own_file_and_gemini_clis(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
             antigravity = home / ".gemini" / "config" / "hooks.json"
             antigravity.parent.mkdir(parents=True)
             antigravity.write_text(json.dumps({"mine": {"PreToolUse": []}}), encoding="utf-8")
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
+            old_home = dict(os.environ)
+            os.environ.update(HOME=str(home), USERPROFILE=str(home))
             try:
                 payload = build_agent_hooks_payload(target=home / "link", agent="antigravity",
                                                     runtime_script=home / "link" / "link.py",
                                                     python_cmd="python3", write=True)
             finally:
-                if old_home is not None:
-                    os.environ["HOME"] = old_home
+                os.environ.clear()
+                os.environ.update(old_home)
             self.assertTrue(payload["write"]["ok"], payload["write"])
             written = json.loads(antigravity.read_text(encoding="utf-8"))
             self.assertIn("mine", written, "another hook set in the same file is kept")
@@ -434,7 +486,7 @@ class ConnectRefreshTests(unittest.TestCase):
             home = Path(temp) / "home"
             home.mkdir()
             ws = Path(temp) / "ws"
-            env = {**os.environ, "HOME": str(home), "LINK_USAGE": "off"}
+            env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "LINK_USAGE": "off"}
             subprocess.run([*link, "init", str(ws)], check=True, capture_output=True, env=env)
             (ws / "link_hook.py").unlink()  # a workspace copied by an older Link
             (ws / "link_core" / "tool_events.py").unlink()

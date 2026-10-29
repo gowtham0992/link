@@ -40,8 +40,9 @@ ASK_CAPABLE = {"text", "gemini", "copilot", "antigravity"}
 _CURSOR_ASK_EVENTS = {"beforeShellExecution", "beforeMCPExecution"}
 
 SHELL_TOOLS = {
-    "bash", "powershell", "shell", "run_shell_command", "terminal", "exec", "execute_bash", "run_command",
+    "bash", "powershell", "pwsh", "shell", "run_shell_command", "terminal", "exec", "execute_bash", "run_command",
 }
+_POWERSHELL_TOOLS = {"powershell", "pwsh"}
 # Devin CLI's tool names: it runs the hooks in ~/.claude/settings.json with these.
 _DEVIN_TOOLS = {"exec", "read", "write", "edit", "apply_patch", "notebook_read", "notebook_edit", "grep", "glob"}
 READ_TOOLS = {
@@ -98,7 +99,8 @@ def _from_tool(name: str, args: Mapping[str, object]) -> list[tuple[str, str]]:
         if not command:
             return []
         text = _command_text(command)
-        found: list[tuple[str, str]] = [("command", text)]
+        # PowerShell keeps backslashes and reads files through cmdlets: shell_parse reads it its own way.
+        found: list[tuple[str, str]] = [("powershell" if lowered in _POWERSHELL_TOOLS else "command", text)]
         # Codex can also apply a patch through the shell (`apply_patch <<'EOF'`,
         # or the older ["apply_patch", "<patch>"] form): its headers name the files it writes.
         patch = "\n".join(str(part) for part in command) if isinstance(command, list) else text

@@ -3254,10 +3254,10 @@ class AgentHookCliTests(unittest.TestCase):
 
         err = StringIO()
         with redirect_stderr(err):
-            code = link_cli.connect_mcp(target, "kiro", hooks=True)
+            code = link_cli.connect_mcp(target, "zed", hooks=True)
 
         self.assertEqual(code, 1)
-        self.assertIn("--hooks is not supported for kiro", err.getvalue())
+        self.assertIn("--hooks is not supported for zed", err.getvalue())
 
     def test_connect_hooks_preview_includes_session_hooks_payload(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-hook-test-"))

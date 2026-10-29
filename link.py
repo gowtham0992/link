@@ -1439,6 +1439,7 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
                     home: Path | None = None) -> int:
     """`lnk compile --global`: personal memory into agents' global instruction files."""
     from link_core.global_compile import GLOBAL_TARGET_KEYS, apply_global_plan, plan_global_compile
+    from link_core.zed_permissions import ZED_SETTINGS
 
     chosen = [key.strip() for key in targets.split(",") if key.strip()] if targets else None
     if chosen == ["all"]:
@@ -1454,6 +1455,7 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
         "mode": "check" if check else "dry-run" if dry_run else "write",
         "changed": sorted(plan.files), "unchanged": plan.unchanged, "written": written,
         "included": plan.included, "dropped": plan.dropped, "excluded": plan.excluded, "conflicts": plan.conflicts,
+        "zed_rules_skipped": plan.zed_rules_skipped, "zed_permissions_snippet": plan.zed_snippet,
     }
     if json_output:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
@@ -1462,6 +1464,10 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
         for rel in sorted(plan.files):
             if plan.files[rel] is None:
                 print(f"{'Would remove' if (check or dry_run) else 'Removed'}: ~/{rel} (no memory left for it)")
+            elif rel == ZED_SETTINGS:
+                count = len(plan.included.get("zed-permissions", []))
+                print(f"{verb}: ~/{rel} (Zed tool permissions from {count} "
+                      f"{'memory' if count == 1 else 'memories'} with rules)")
             else:
                 count = len(plan.included.get(_global_key(rel), []))
                 print(f"{verb}: ~/{rel} ({count} {'memory' if count == 1 else 'memories'})")
@@ -1474,6 +1480,11 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
             print(f"Left out of {item['target']} (size limit): {item['name']} - {item['reason']}")
         for item in plan.conflicts:
             print(f"Not touched: ~/{item['path']} - {item['reason']}")
+        if plan.zed_snippet:
+            print("Zed tool permissions to merge into ~/.config/zed/settings.json by hand:")
+            print("\n".join(f"  {line}" for line in plan.zed_snippet.splitlines()))
+        for item in plan.zed_rules_skipped:
+            print(f"Not in Zed's permissions: {item['rule']} ({item['name']}) - {item['reason']}")
     return 1 if check and plan.files else 0
 
 

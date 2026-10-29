@@ -230,3 +230,196 @@ def _merge(into: ShellReading, other: ShellReading) -> None:
     into.commands.extend(other.commands)
     into.reads.extend(other.reads)
     into.writes.extend(other.writes)
+
+
+# ── PowerShell ───────────────────────────────────────────────────────────
+# Read with POSIX rules, `Get-Content C:\repo\.env` loses its backslashes
+# and names no file at all, so path rules and the guard on Link's own files
+# never saw a PowerShell call. PowerShell keeps backslashes, quotes with
+# '...' (literal) and "..." (backtick escapes), and reads and writes files
+# through cmdlets and their aliases rather than through redirection alone.
+
+_PS_READ = {"get-content", "gc", "cat", "type", "import-csv", "import-clixml", "get-filehash",
+            "format-hex", "import-powershelldatafile", "select-string", "sls"}
+_PS_WRITE_FIRST = {"set-content", "sc", "add-content", "ac", "clear-content", "clc", "out-file", "new-item", "ni",
+                   "export-csv", "export-clixml", "rename-item", "ren", "rni", "tee-object", "tee"}
+_PS_WRITE_ALL = {"remove-item", "rm", "del", "erase", "ri", "rd", "rmdir"}
+_PS_MOVE = {"move-item", "mv", "move", "mi"}
+_PS_COPY = {"copy-item", "cp", "copy", "cpi"}
+_PS_CD = {"set-location", "cd", "sl", "chdir", "push-location", "pushd"}
+_PS_SHELLS = {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+_PS_PATH_PARAMS = ("path", "literalpath", "pspath", "filepath", "destination")
+# Parameters that take a value; every other -Name is a switch.
+_PS_VALUE_PARAMS = {"path", "literalpath", "pspath", "filepath", "destination", "value", "encoding", "filter",
+                    "include", "exclude", "itemtype", "name", "newname", "pattern", "delimiter", "stream",
+                    "credential", "tail", "totalcount", "head", "readcount", "width", "inputobject", "command",
+                    "c", "file", "f", "executionpolicy", "ex", "ep", "workingdirectory", "wd"}
+_PS_ENV_RE = re.compile(r"\$env:([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+
+
+def _ps_tokens(text: str) -> list[str]:
+    """Words and operators, with PowerShell's quoting; backslashes are ordinary characters."""
+    tokens: list[str] = []
+    word: list[str] = []
+    started = False
+    index = 0
+
+    def flush() -> None:
+        nonlocal word, started
+        if started:
+            tokens.append("".join(word))
+        word, started = [], False
+
+    while index < len(text):
+        ch = text[index]
+        if ch == "'":
+            end = index + 1
+            while end < len(text):
+                if text[end] == "'" and text[end + 1:end + 2] == "'":
+                    word.append("'")
+                    end += 2
+                    continue
+                if text[end] == "'":
+                    break
+                word.append(text[end])
+                end += 1
+            started, index = True, end + 1
+            continue
+        if ch == '"':
+            end = index + 1
+            while end < len(text) and text[end] != '"':
+                if text[end] == "`" and end + 1 < len(text):
+                    end += 1
+                word.append(text[end])
+                end += 1
+            started, index = True, end + 1
+            continue
+        if ch == "`" and index + 1 < len(text):
+            word.append(text[index + 1])
+            started, index = True, index + 2
+            continue
+        if ch == "#" and not started:
+            while index < len(text) and text[index] != "\n":
+                index += 1
+            continue
+        if ch.isspace() and ch != "\n":
+            flush()
+            index += 1
+            continue
+        operator = next((op for op in ("&&", "||", "*>>", "*>", "2>>", "2>", ">>", ">", "|", ";", "\n", "&")
+                         if text.startswith(op, index)), None)
+        if operator and not started or operator in {"&&", "||", "|", ";", "\n"}:
+            flush()
+            tokens.append(operator)
+            index += len(operator)
+            continue
+        word.append(ch)
+        started = True
+        index += 1
+    flush()
+    return tokens
+
+
+def _ps_expand(path: str) -> str:
+    import os
+
+    path = _PS_ENV_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), path)
+    if path.lower().startswith("$home"):
+        path = os.path.expanduser("~") + path[5:]
+    elif path.startswith("~"):
+        path = os.path.expanduser(path)
+    return path
+
+
+def _ps_absolute(path: str) -> bool:
+    return bool(re.match(r"^(?:[A-Za-z]:|\\\\|/|~|\$)", path))
+
+
+def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
+    """What a PowerShell command line runs, reads and writes."""
+    reading = ShellReading()
+    if _depth > 3 or not command.strip():
+        return reading
+    here = ""
+    statement: list[str] = []
+    pending_redirect = False
+
+    def at(target: str) -> str:
+        target = _ps_expand(target)
+        if not here or _ps_absolute(target):
+            return target
+        while target.startswith((".\\", "./")):
+            target = target[2:]
+        separator = "\\" if "\\" in here else "/"
+        return here if target in {".", ""} else here.rstrip("\\/") + separator + target
+
+    def finish() -> None:
+        nonlocal statement, here
+        words, statement = statement, []
+        if words and words[0] in {"&", "."}:
+            words = words[1:]  # the call and dot-source operators
+        if not words:
+            return
+        name = words[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+        reading.commands.append([words[0].replace("\\", "/").rsplit("/", 1)[-1], *words[1:]])
+        named: dict[str, list[str]] = {}
+        positional: list[str] = []
+        index = 1
+        while index < len(words):
+            word = words[index]
+            if word.startswith("-") and len(word) > 1 and not word[1].isdigit():
+                key, _, inline = word[1:].partition(":")
+                key = key.lower()
+                if inline:
+                    named.setdefault(key, []).append(inline)
+                elif key in _PS_VALUE_PARAMS and index + 1 < len(words):
+                    named.setdefault(key, []).append(words[index + 1])
+                    index += 1
+                index += 1
+                continue
+            positional.append(word)
+            index += 1
+        paths = [value for key in _PS_PATH_PARAMS if key != "destination" for value in named.get(key, [])]
+        for value_list in (paths, positional):
+            value_list[:] = [item for part in value_list for item in part.split(",") if item]
+        if name in _PS_SHELLS:
+            flag = next((i for i, w in enumerate(words) if w.lower() in {"-command", "-c"}), None)
+            if flag is not None and flag + 1 < len(words):
+                _merge(reading, read_powershell(" ".join(words[flag + 1:]), _depth=_depth + 1))
+            return
+        if name in _PS_CD:
+            target = (paths or positional or [""])[0]
+            if target:
+                here = at(target)
+            return
+        if name in _PS_READ:
+            sources = paths or (positional[1:] if name in {"select-string", "sls"} else positional)
+            reading.reads.extend(at(path) for path in sources)
+        elif name in _PS_WRITE_FIRST:
+            reading.writes.extend(at(path) for path in (paths or positional[:1]))
+        elif name in _PS_WRITE_ALL:
+            reading.writes.extend(at(path) for path in (paths + positional))
+        elif name in _PS_MOVE or name in _PS_COPY:
+            sources = paths or positional[:1]
+            destination = named.get("destination", []) or positional[1:2]
+            reading.writes.extend(at(path) for path in destination)
+            (reading.writes if name in _PS_MOVE else reading.reads).extend(at(path) for path in sources)
+        else:
+            # A native program (git, bash -c, cat from Git for Windows) reads its arguments as a POSIX shell would.
+            if name in _SHELLS or name.removesuffix(".exe") in _SHELLS:
+                _merge(reading, read_shell(shlex.join(words), _depth=_depth + 1))
+
+    for token in _ps_tokens(command):
+        if pending_redirect:
+            reading.writes.append(at(token))
+            pending_redirect = False
+            continue
+        if token in {">", ">>", "2>", "2>>", "*>", "*>>"}:
+            pending_redirect = True
+            continue
+        if token in {"&&", "||", "|", ";", "\n"} or (token == "&" and statement):
+            finish()
+            continue
+        statement.append(token)
+    finish()
+    return reading

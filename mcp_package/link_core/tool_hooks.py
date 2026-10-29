@@ -40,7 +40,7 @@ from .project_scope import (
     normalize_project,
     parse_applies_when,
 )
-from .shell_parse import read_shell
+from .shell_parse import read_powershell, read_shell
 from .tool_events import EMITS, HookReply, can_ask, native_emit, render_reply, tool_calls
 
 # Everything else is imported where it is used: the pre-tool hook runs before
@@ -270,7 +270,10 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None) -> bool:
         except OSError:
             continue
         mine, theirs = (resolved.lower(), root_text.lower()) if _CASE_FOLDING_FS else (resolved, root_text)
-        if mine == theirs or mine.startswith(theirs.rstrip("/") + "/") or theirs.startswith(mine.rstrip("/") + "/"):
+        # Windows paths use "\\" (and accept "/"): compare in the platform's own separator.
+        mine, theirs = mine.replace("/", os.sep), theirs.replace("/", os.sep)
+        if mine == theirs or mine.startswith(theirs.rstrip(os.sep) + os.sep) \
+                or theirs.startswith(mine.rstrip(os.sep) + os.sep):
             return True
     return False
 
@@ -299,8 +302,8 @@ def evaluate_tool_call(
     reads: list[str] = []
     writes: list[str] = []
     for kind, value in calls:
-        if kind == "command":
-            reading = read_shell(value)
+        if kind in {"command", "powershell"}:
+            reading = read_powershell(value) if kind == "powershell" else read_shell(value)
             commands += reading.commands
             reads += reading.reads
             writes += reading.writes

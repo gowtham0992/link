@@ -60,7 +60,8 @@ What each agent gets depends on what it lets Link plug into:
 | Copilot CLI and VS Code | start hook, MCP, compiled files | start | shell, file reads and writes; asks you | no |
 | Windsurf | MCP, global rules file, compiled rules | none (no such event) | shell, file reads and writes (held) | no |
 | Devin CLI | Claude Code's hooks, which it runs | start, end | shell and files (held) | no |
-| Kiro, Zed | MCP, global steering / `AGENTS.md` file | no | no | no |
+| Kiro | start hook, MCP, global steering file | start | shell, file reads and writes (held) | no |
+| Zed | MCP, global `AGENTS.md` | none (no hooks) | shell and file writes, by Zed's own permission rules; not reads | no |
 
 "Asks you": the agent shows you the call and waits. "Held": the agent can
 only allow or block, so Link blocks the call and the agent asks you in chat;
@@ -71,6 +72,11 @@ step as memories change. Recall, review, stale
 checks, receipts, sync and `lnk compile` work the same for every agent.
 Enforcement is measured end to end on Claude Code; on the others it follows
 each vendor's documented hook schema and is new in 6.0 - report what you see.
+Kiro's hooks run in Kiro CLI V3 for every workspace, and on the default
+engine through Link's `link` agent profile (`kiro-cli agent set-default
+link`). Zed has no hooks, so `lnk compile --global` writes your personal
+rules into Zed's own tool permissions; Zed decides those calls itself, so
+they are not held for `lnk approve` or counted in receipts.
 Devin CLI does not document its file tools' arguments, so its file checks
 read the usual path fields and any other argument named for a path or file.
 

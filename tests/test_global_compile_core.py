@@ -60,7 +60,7 @@ class GlobalCompileTests(unittest.TestCase):
         rules = self.home / ".codeium/windsurf/memories/global_rules.md"
         rules.parent.mkdir(parents=True)
         own = "# My rules\n\n" + "Always write tests first.\n" * 200  # ~5,000 characters
-        rules.write_text(own, encoding="utf-8")
+        rules.write_bytes(own.encode("utf-8"))
         records = [_memory(f"m{i}", f"Preference number {i} that is reasonably long to take some room.")
                    for i in range(40)]
         plan = plan_global_compile(records, self.home, targets=["windsurf"])
@@ -119,6 +119,7 @@ class GlobalCompileTests(unittest.TestCase):
         self.assertIn("git work tree", reasons[".codeium/windsurf/memories/global_rules.md"])
         self.assertEqual((elsewhere / "AGENTS.md").read_text(encoding="utf-8"), "# shared\n")
 
+    @unittest.skipIf(os.name == "nt", "Windows has no Unix permission bits")
     def test_permissions_are_kept(self):
         zed = self.home / ".config/zed/AGENTS.md"
         zed.write_text("# mine\n", encoding="utf-8")
@@ -150,8 +151,9 @@ class GlobalCompileTests(unittest.TestCase):
         other = self.home / "team" / "wiki"
         other.mkdir(parents=True)
         zed = self.home / ".config/zed/AGENTS.md"
-        saved = (os.environ.get("HOME"), os.environ.pop("LINK_WORKSPACE", None))
-        os.environ["HOME"] = str(self.home)
+        saved = dict(os.environ)
+        os.environ.pop("LINK_WORKSPACE", None)
+        os.environ.update(HOME=str(self.home), USERPROFILE=str(self.home))
         try:
             self.assertEqual(refresh_after_memory_change(personal, self.home), [], "no owned file: nothing created")
             self.assertFalse(zed.exists())
@@ -161,9 +163,8 @@ class GlobalCompileTests(unittest.TestCase):
             self.assertEqual(refresh_after_memory_change(personal, self.home), [str(zed)])
             self.assertNotIn("stale", zed.read_text(encoding="utf-8"))
         finally:
-            os.environ["HOME"] = saved[0] or ""
-            if saved[1] is not None:
-                os.environ["LINK_WORKSPACE"] = saved[1]
+            os.environ.clear()
+            os.environ.update(saved)
 
 
 class GlobalCompileCliTests(unittest.TestCase):
@@ -173,7 +174,8 @@ class GlobalCompileCliTests(unittest.TestCase):
         self.home = base / "home"
         (self.home / ".config" / "zed").mkdir(parents=True)
         self.ws = base / "ws"
-        self.env = {**os.environ, "HOME": str(self.home), "LINK_USAGE": "off", "LINK_WORKSPACE": str(self.ws)}
+        self.env = {**os.environ, "HOME": str(self.home), "USERPROFILE": str(self.home), "LINK_USAGE": "off",
+                    "LINK_WORKSPACE": str(self.ws)}
         subprocess.run([*LINK, "demo", str(self.ws), "--force"], check=True, capture_output=True, env=self.env)
 
     def tearDown(self):

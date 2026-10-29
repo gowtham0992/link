@@ -64,10 +64,13 @@ class AgentHookConfig:
     default_settings: str
     # "nested": event -> [{matcher, hooks: [entry]}] (Claude Code, Codex, Gemini CLI);
     # "flat": event -> [entry] (Cursor, Copilot, Windsurf);
-    # "named": like nested under a hook-name key, lifecycle events flat (Antigravity).
+    # "named": like nested under a hook-name key, lifecycle events flat (Antigravity);
+    # "triggers": a list of named hooks, each with its trigger (Kiro CLI V3).
     schema: str = "nested"
     root_key: str = "hooks"
-    version: int | None = None  # flat files that carry {"version": 1}
+    version: int | str | None = None  # files that carry {"version": 1} (or "v1")
+    # Keys a new file starts with (a Kiro agent profile needs a name and tools).
+    file_defaults: tuple[tuple[str, object], ...] = ()
     timeout_key: str | None = "timeout"
     timeout_scale: int = 1  # Gemini CLI counts milliseconds
     entry_extra: tuple[tuple[str, object], ...] = ()
@@ -171,6 +174,46 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         start_emit="copilot",
         pre_tool=(("preToolUse", "bash|powershell|view|create|edit"),),
         pre_tool_emit="copilot",
+    ),
+    AgentHookConfig(
+        name="kiro",
+        display_name="Kiro",
+        aliases=("kiro", "kiro-cli"),
+        default_settings="~/.kiro/hooks/link.json",
+        schema="triggers",
+        version="v1",
+        end_event=None,
+        start_matcher=None,
+        pre_tool=(("PreToolUse", "shell|read|write"),),
+        pre_tool_emit="kiro",
+        companions=("kiro-agent",),
+        restart_hint=(
+            "Kiro CLI V3 (kiro-cli chat --v3) runs ~/.kiro/hooks/link.json in every workspace; trust the "
+            "workspace when asked. The default engine runs hooks only from an agent profile: use Link's with "
+            "`kiro-cli chat --agent link`, or make it the default with `kiro-cli agent set-default link` "
+            "(it keeps your steering and MCP servers). The Kiro IDE reads hooks per workspace only."
+        ),
+    ),
+    AgentHookConfig(
+        name="kiro-agent",
+        display_name="Kiro (agent profile for the default engine)",
+        aliases=("kiro-agent",),
+        default_settings="~/.kiro/agents/link.json",
+        schema="flat",
+        timeout_key="timeout_ms",
+        timeout_scale=1000,
+        file_defaults=(
+            ("name", "link"),
+            ("description", "Kiro's default tools and steering, with Link's memory brief and rule checks"),
+            ("tools", ["*"]),
+            ("includeMcpJson", True),
+        ),
+        start_event="agentSpawn",
+        end_event=None,
+        start_matcher=None,
+        pre_tool=(("preToolUse", None),),
+        pre_tool_emit="kiro",
+        restart_hint="",  # Kiro's own hint covers both files
     ),
     AgentHookConfig(
         name="windsurf",
@@ -283,6 +326,17 @@ def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, objec
         return result
     settings = json.loads(text)
     hooks = settings.get(config.root_key) if isinstance(settings, dict) else None
+    if config.schema == "triggers" and isinstance(hooks, list):
+        kept = [entry for entry in hooks if not _is_link_trigger(entry)]
+        result["found"] = sorted({str(e.get("trigger")) for e in hooks if _is_link_trigger(e)})
+        if result["found"] and write:
+            if kept or set(settings) - {"version", config.root_key}:
+                settings[config.root_key] = kept
+                atomic_write_json(path, settings)
+            else:
+                path.unlink()  # Link's own file, with nothing else in it
+            result["removed"] = True
+        return result
     if not isinstance(hooks, dict):
         return result
     found: list[str] = []
@@ -375,8 +429,15 @@ def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, 
     def add(event_name: str, event: str, matcher: str | None, emit: str, timeout: int) -> None:
         grouped = _grouped(config, matcher)
         command = _hook_command(python_cmd, runtime_script, event, target, emit=emit)
+        if config.schema == "triggers":
+            entry: dict[str, object] = {"name": f"Link {event}", "trigger": event_name}
+            if matcher:
+                entry["matcher"] = matcher
+            entry.update({"action": {"type": "command", "command": command}, "timeout": timeout})
+        else:
+            entry = _entry(config, command, timeout, grouped=grouped, matcher=matcher)
         plan.append({"event_name": event_name, "event": event, "matcher": matcher, "grouped": grouped,
-                     "entry": _entry(config, command, timeout, grouped=grouped, matcher=matcher)})
+                     "entry": entry})
 
     if config.start_event:
         add(config.start_event, "session-start", config.start_matcher, config.start_emit, SESSION_START_TIMEOUT_SECONDS)
@@ -391,7 +452,15 @@ def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, 
     return plan
 
 
+def _is_link_trigger(entry: object) -> bool:
+    action = entry.get("action") if isinstance(entry, dict) else None
+    command = action.get("command") if isinstance(action, dict) else None
+    return any(_is_link_hook_command(command, event) for event in LINK_HOOK_EVENTS)
+
+
 def _hooks_snippet(config: AgentHookConfig, plan: list[dict[str, object]]) -> str:
+    if config.schema == "triggers":
+        return json.dumps({"version": config.version, config.root_key: [item["entry"] for item in plan]}, indent=2)
     hooks: dict[str, Any] = {}
     _merge_plan(hooks, plan)
     payload: dict[str, object] = {config.root_key: hooks}
@@ -417,8 +486,17 @@ def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, objec
         settings = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         if not isinstance(settings, dict):
             raise ValueError(f"{path} must contain a JSON object")
+    for key, value in config.file_defaults:
+        settings.setdefault(key, value)
     if config.version is not None:
         settings.setdefault("version", config.version)
+    if config.schema == "triggers":
+        existing = settings.get(config.root_key)
+        kept = [entry for entry in existing if not _is_link_trigger(entry)] if isinstance(existing, list) else []
+        settings[config.root_key] = kept + [item["entry"] for item in plan]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(path, settings)
+        return
     hooks = settings.get(config.root_key)
     if not isinstance(hooks, dict):
         hooks = {}
@@ -449,10 +527,13 @@ def build_agent_hooks_payload(
         except Exception as exc:
             write_status = {"requested": True, "ok": False, "message": str(exc)}
 
-    entry_commands = {
-        str(item["event_name"]): str(item["entry"]["command"])  # type: ignore[index]
-        for item in plan
-    }
+    entry_commands = {}
+    for item in plan:
+        entry = item["entry"]
+        assert isinstance(entry, dict)
+        action = entry.get("action")
+        entry_commands[str(item["event_name"])] = str(action.get("command") if isinstance(action, dict)
+                                                      else entry.get("command"))
     behavior: list[str] = []
     if config.start_event:
         behavior.append(f"{config.start_event}: injects a bounded Link memory brief into new agent sessions.")

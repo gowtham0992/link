@@ -87,6 +87,31 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - The docs (getting started, security, CLI, the installers' README) describe
   per-agent rule checks and held calls, and the Antigravity installer adds
   hooks for Antigravity and Gemini CLI on a global install.
+- **Kiro and Zed.** `lnk connect kiro --hooks` installs the memory brief
+  and rule checks for Kiro: a Link-owned `~/.kiro/hooks/link.json` that
+  Kiro CLI V3 runs in every workspace, and a `link` agent profile for the
+  default engine, which runs hooks only from a profile (`kiro-cli agent
+  set-default link` makes it yours; it keeps your steering and MCP
+  servers). Kiro can only allow or block, so ask rules hold the call. Zed
+  has no hooks; `lnk compile --global` writes your personal rules into
+  Zed's own `agent.tool_permissions` (deny as `always_deny`, ask as
+  `always_confirm`, commands and file writes; Zed has no rule for reads).
+  Link writes that block only where there is none, marks it with a
+  comment, keeps every other byte and comment of the settings file, and
+  leaves permissions you wrote alone, printing its block for you to merge.
+  Both are wired to the vendors' documented formats and not yet measured
+  on a live session.
+- **PowerShell calls are read as PowerShell.** Read with POSIX shell
+  rules, `Get-Content C:\repo\.env` lost its backslashes and named no file,
+  so path rules, and the guard on Link's own files, never saw a PowerShell
+  call. PowerShell tool calls now keep their backslashes and quoting, name
+  the files their cmdlets and aliases read and write (`Get-Content`, `gc`,
+  `type`, `Set-Content`, `Out-File`, `Remove-Item`, `del`, `Copy-Item`,
+  `Move-Item`, redirection and more), follow `Set-Location`, and expand
+  `$env:` variables and `~` as the shell would.
+- **Link's own files are guarded on Windows.** The check for writes to the
+  memory and approval files compared paths with `/`, which Windows paths do
+  not use, so on Windows an agent's write there was not held.
 - The reminder about a saved constraint keeps its cooldown in its own
   small file, so it no longer repeats on every recall when usage recording
   is off (`LINK_USAGE=off`).

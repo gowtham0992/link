@@ -152,8 +152,19 @@ def build_repo(base: Path) -> tuple[Path, Path]:
     git(other, "add", "-A")
     git(other, "commit", "-q", "-m", "teammate")
     git(other, "push", "-q", "origin", "main")
-    shutil.rmtree(other)
+    _remove_tree(other)
     return repo, remote
+
+
+def _remove_tree(path: Path) -> None:
+    """rmtree that also removes git's read-only object files (Windows refuses to delete those)."""
+    import stat
+
+    def clear_and_retry(function, target, _info) -> None:
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+
+    shutil.rmtree(path, onerror=clear_and_retry)  # noqa: B904 - onexc needs Python 3.12
 
 
 def claude_command(model: str, settings: Path, mcp_config: Path) -> list[str]:

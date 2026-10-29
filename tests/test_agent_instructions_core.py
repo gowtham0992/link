@@ -169,7 +169,8 @@ class CodexInstructionsMoveTests(unittest.TestCase):
         os.chmod(old, 0o644)
         migrate_codex_instructions(self.home)
         self.assertEqual(old.read_bytes(), b"# Mine\r\n\r\n# After\r\nok\r\n")
-        self.assertEqual(old.stat().st_mode & 0o777, 0o644)
+        if os.name != "nt":  # Windows has no Unix permission bits
+            self.assertEqual(old.stat().st_mode & 0o777, 0o644)
         latin1 = self.home / "AGENTS.md"
         latin1.write_bytes(b"caf\xe9\n\n" + OLD_ERA_SECTION.encode())
         result = migrate_codex_instructions(self.home)

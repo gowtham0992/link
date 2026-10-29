@@ -162,7 +162,7 @@ class HeldCallTests(unittest.TestCase):
         self.assertEqual(decision["permissionDecision"], "deny", "Codex cannot ask; the call is held")
         self.assertIn("lnk approve ", decision["permissionDecisionReason"])
         request_id = decision["permissionDecisionReason"].split("lnk approve ")[1].split()[0]
-        self.assertIn(str(self.ws), decision["permissionDecisionReason"], "names the workspace to approve in")
+        self.assertIn(str(self.ws.resolve()), decision["permissionDecisionReason"], "names the workspace to approve in")
         self.assertEqual(self._hook("codex", push).stdout, first.stdout, "a retry re-uses the same request")
 
         listing = subprocess.run([*LINK, "approve", str(self.ws), "--json"], capture_output=True, text=True, check=True)
@@ -193,12 +193,13 @@ class HeldCallTests(unittest.TestCase):
         ask = json.loads(self._hook("text", sneaky).stdout)["hookSpecificOutput"]
         self.assertEqual(ask["permissionDecision"], "ask", "Claude Code puts it in front of the person instead")
         write = {"tool_name": "apply_patch", "tool_input": {"command": "*** Begin Patch\n*** Add File: "
-                                                            f"{self.ws}/.link-cache/approvals.json\n*** End Patch\n"}}
+                                                            f"{self.ws.as_posix()}/.link-cache/approvals.json\n*** End Patch\n"}}
         self.assertEqual(json.loads(self._hook("codex", write).stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_cursor_running_claudes_hook_stands_down_when_link_has_its_own(self):
         with tempfile.TemporaryDirectory() as home:
-            env = {"HOME": home, "PATH": "/usr/bin:/bin"}
+            env = {"HOME": home, "USERPROFILE": home, "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                   **{key: os.environ[key] for key in ("SYSTEMROOT", "TEMP", "TMP") if key in os.environ}}
             payload = {"cursor_version": "2.4", "tool_name": "Bash", "tool_input": {"command": "git push --force"}}
 
             def run():
@@ -233,14 +234,15 @@ class HeldCallTests(unittest.TestCase):
         cache = self.ws / ".link-cache"
         memories = self.ws / "wiki" / "memories"
         rule_file = next(memories.glob("never-run-git-push*.md"))
-        attempts = [
+        ws, cache, memories, rule_file = (p.as_posix() for p in (self.ws, cache, memories, rule_file))
+        attempts = [  # bash, as an agent writes it on any system (Git Bash takes forward slashes too)
             f"cd {cache} && echo x > approvals.json",
-            f"cd {self.ws} && cp /etc/hosts .link-cache/approvals.json",
+            f"cd {ws} && cp /etc/hosts .link-cache/approvals.json",
             f"mv {rule_file} /tmp/gone.md",
-            f"rm -rf {self.ws / 'wiki'}",
+            f"rm -rf {ws}/wiki",
             f"find {memories} -delete",
-            f"git -C {self.ws} checkout -- wiki",
-            f"dd if=/dev/null of={cache / 'approvals.json'}",
+            f"git -C {ws} checkout -- wiki",
+            f"dd if=/dev/null of={cache}/approvals.json",
         ]
         for command in attempts:
             decision = json.loads(self._hook("codex", {"tool_name": "Bash", "tool_input": {"command": command}}).stdout)
@@ -358,6 +360,29 @@ class UndocumentedFileArgumentsTests(unittest.TestCase):
         ]
         for event, expected in cases:
             self.assertEqual(tool_calls(event), expected, event)
+
+
+
+class KiroPayloadTests(unittest.TestCase):
+    """Kiro CLI's tool calls, in the default engine's names and V3's."""
+
+    def test_kiro_calls_are_read_and_answered_with_exit_2(self):
+        from link_core.tool_events import render_reply
+        cases = [
+            ({"tool_name": "execute_bash", "tool_input": {"command": "git push --force"}},
+             [("command", "git push --force")]),
+            ({"tool_name": "fs_write", "tool_input": {"command": "str_replace", "path": "migrations/1.sql",
+                                                      "old_str": "a", "new_str": "b"}},
+             [("write", "migrations/1.sql")]),
+            ({"tool_name": "fs_read", "tool_input": {"operations": [{"mode": "Line", "path": ".env"}]}},
+             [("read", ".env")]),
+            ({"tool_name": "shell", "tool_input": {"command": "npm publish"}}, [("command", "npm publish")]),
+            ({"tool_name": "write", "tool_input": {"path": "src/a.py"}}, [("write", "src/a.py")]),
+        ]
+        for event, expected in cases:
+            self.assertEqual(tool_calls(event), expected, event)
+        reply = render_reply({"decision": "deny", "reason": "held: ask the person"}, "kiro", {})
+        self.assertEqual((reply.exit_code, reply.stderr, reply.stdout), (2, "held: ask the person", ""))
 
 
 if __name__ == "__main__":

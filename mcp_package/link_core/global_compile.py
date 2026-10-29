@@ -80,6 +80,9 @@ class GlobalPlan:
     dropped: list[dict[str, str]] = field(default_factory=list)
     excluded: list[dict[str, str]] = field(default_factory=list)
     conflicts: list[dict[str, str]] = field(default_factory=list)
+    # Zed: reviewed rules as its own tool permissions (zed_permissions.py)
+    zed_rules_skipped: list[dict[str, str]] = field(default_factory=list)
+    zed_snippet: str = ""
 
 
 def detected_global_targets(home: Path) -> list[str]:
@@ -134,6 +137,13 @@ def owned_global_targets(home: Path) -> list[str]:
             continue
         if text is not None and BLOCK_BEGIN in text:
             owned.append(target.key)
+    from .zed_permissions import ZED_SETTINGS, owns_block
+
+    try:
+        if owns_block(_read_strict(home / ZED_SETTINGS)):
+            owned.append("zed-permissions")  # Zed's settings, apart from its AGENTS.md
+    except Unreadable:
+        pass
     return owned
 
 
@@ -196,7 +206,38 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
             plan.unchanged.append(target.path)
         else:
             plan.files[target.path] = content
+    if "zed" in wanted or "zed-permissions" in wanted:
+        _plan_zed_permissions(plan, home, chosen)
     return plan
+
+
+def _plan_zed_permissions(plan: GlobalPlan, home: Path, chosen: list[Mapping[str, object]]) -> None:
+    from .zed_permissions import ZED_SETTINGS, compile_permissions, owns_block, snippet, splice
+
+    permissions, plan.zed_rules_skipped, names = compile_permissions(chosen)
+    refusal = _refusal(home, ZED_SETTINGS)
+    try:
+        existing = None if refusal else _read_strict(home / ZED_SETTINGS)
+    except Unreadable as exc:
+        refusal = str(exc)
+    if refusal:
+        if permissions:
+            plan.zed_snippet = snippet(permissions)
+            plan.conflicts.append({"path": ZED_SETTINGS, "reason": refusal + "; merge the rules by hand"})
+        return
+    if not permissions and not owns_block(existing):
+        return
+    try:
+        content = splice(existing, permissions)
+    except ValueError as exc:
+        plan.zed_snippet = snippet(permissions)
+        plan.conflicts.append({"path": ZED_SETTINGS, "reason": str(exc)})
+        return
+    plan.included["zed-permissions"] = names
+    if content == existing:
+        plan.unchanged.append(ZED_SETTINGS)
+    else:
+        plan.files[ZED_SETTINGS] = content
 
 
 def apply_global_plan(plan: GlobalPlan) -> list[str]:
