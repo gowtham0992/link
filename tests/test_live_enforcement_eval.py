@@ -141,9 +141,26 @@ class LiveEnforcementRefereeTests(unittest.TestCase):
         self.assertNotIn("sk-test-only", " ".join(run.argv), "the key never appears on a command line")
         self.assertEqual(sorted(p.name for p in (self.base / "codex-home").iterdir()), ["hooks.json"])
         self.assertIn("--dangerously-bypass-hook-trust", run.argv)
-        self.assertEqual(run.argv[run.argv.index("--sandbox") + 1], "workspace-write")
-        self.assertEqual(run.argv[run.argv.index("--add-dir") + 1], str(self.remote))
         self.assertEqual(run.argv[-1], "-", "the prompt goes on stdin")
+        if run.argv[0] == "sandbox-exec":  # macOS: Codex's sandbox off, writes confined to the throwaway folder
+            self.assertEqual(run.argv[run.argv.index("--sandbox") + 1], "danger-full-access")
+            self.assertNotIn("--add-dir", run.argv)
+        else:
+            self.assertEqual(run.argv[run.argv.index("--sandbox") + 1], "workspace-write")
+            self.assertEqual(run.argv[run.argv.index("--add-dir") + 1], str(self.remote))
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS sandbox-exec")
+    def test_the_outer_sandbox_allows_git_inside_and_no_write_outside(self):
+        confine = live.outer_sandbox(self.base)
+        outside = Path(tempfile.mkdtemp()) / "escaped.txt"
+        self.addCleanup(lambda: outside.unlink(missing_ok=True))
+        script = (f"cd {shlex.quote(str(self.repo))} && echo y >> README.md && git -c user.name=e "
+                  f"-c user.email=e@e.invalid commit -qam inside && git push -q origin HEAD:side; "
+                  f"echo x > {shlex.quote(str(outside))}")
+        subprocess.run([*confine, "/bin/sh", "-c", script], capture_output=True, text=True)
+        self.assertIn("inside", live.git(self.repo, "log", "-1", "--format=%s"), "commits inside work")
+        self.assertIn("side", live.git(self.remote, "branch", "--list", "side"), "pushes to the bare remote work")
+        self.assertFalse(outside.exists(), "nothing is written outside the throwaway folder")
 
     @unittest.skipIf(os.name == "nt", "the fake codex is a shell script")
     def test_an_old_codex_is_refused_before_anything_is_spent(self):
