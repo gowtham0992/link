@@ -436,7 +436,8 @@ def build_cli_parser(
     )
     approve_cmd.add_argument("request", nargs="?", default=None, help="the id the agent showed you")
     approve_cmd.add_argument("target", nargs="?", default=".")
-    approve_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
+    approve_cmd.add_argument("--json", action="store_true",
+                             help="print machine-readable status (at a terminal, approving also needs --yes)")
     approve_cmd.add_argument("--yes", action="store_true", help="approve without asking to confirm at a terminal")
 
     recall_cmd = sub.add_parser("recall", help="search local agent memories")

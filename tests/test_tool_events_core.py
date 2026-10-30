@@ -85,6 +85,25 @@ class ToolCallsTests(unittest.TestCase):
         for payload, expected in cases:
             self.assertEqual(tool_calls(payload), expected, payload)
 
+    def test_vs_code_copilot_and_kiro_on_windows_tool_names(self):
+        cases = [
+            ({"toolName": "run_in_terminal", "toolArgs": {"command": "git push --force", "explanation": "x"}},
+             [("command", "git push --force")]),
+            ({"tool_name": "execute_cmd", "tool_input": {"command": "git push --force"}},
+             [("command", "git push --force")]),
+            ({"toolName": "replace_string_in_file", "toolArgs": {"filePath": "/r/m/x.sql", "oldString": "a",
+                                                                 "newString": "b"}}, [("write", "/r/m/x.sql")]),
+            ({"toolName": "insert_edit_into_file", "toolArgs": {"filePath": "/r/m/x.sql", "code": "b"}},
+             [("write", "/r/m/x.sql")]),
+            ({"toolName": "multi_replace_string_in_file", "toolArgs": {"replacements": [
+                {"filePath": "/r/m/x.sql", "oldString": "a", "newString": "b"},
+                {"filePath": "/r/m/y.sql", "oldString": "c", "newString": "d"},
+                {"filePath": "/r/m/x.sql", "oldString": "e", "newString": "f"}]}},
+             [("write", "/r/m/x.sql"), ("write", "/r/m/y.sql")]),
+        ]
+        for payload, expected in cases:
+            self.assertEqual(tool_calls(payload), expected, payload)
+
     def test_a_codex_patch_names_every_file_it_touches(self):
         self.assertEqual(patch_paths(PATCH), ["migrations/0001_init.sql", "src/new.py", "src/old.py", "src/renamed.py"])
         calls = tool_calls({"tool_name": "apply_patch", "tool_input": {"command": PATCH}})
@@ -189,6 +208,72 @@ class HeldCallTests(unittest.TestCase):
         self.assertEqual(self._hook("kiro", push).returncode, 0, "the approved call, from Kiro's global hook")
         self.assertEqual(self._hook("kiro-agent", push).returncode, 0, "and the same call from Link's agent profile")
         self.assertEqual(self._hook("kiro", push).returncode, 2, "then held again")
+
+    def test_an_approval_is_for_the_agent_the_call_was_held_on(self):
+        push = {"session_id": "s", "tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}}
+        held = json.loads(self._hook("codex", push).stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        subprocess.run([*LINK, "approve", held.split("lnk approve ")[1].split()[0], str(self.ws)],
+                       check=True, capture_output=True)
+        self.assertIn("block", self._hook("devin", push).stdout, "the same call from another agent stays held")
+        self.assertEqual(self._hook("codex", push).stdout, "", "the agent it was held on runs it once")
+        self.assertIn("block", self._hook("devin", push).stdout, "and no other agent repeats it after")
+        self.assertEqual(self._hook("kiro", push).returncode, 2, "Kiro's second check is Kiro's alone")
+
+    def test_the_call_shown_cannot_redraw_the_terminal_or_leak_a_secret(self):
+        token = "ghp_" + "a" * 36
+        sneaky = {"tool_name": "Bash", "tool_input": {
+            "command": f"GITHUB_TOKEN={token} git push --force origin main # \x1b[2K\x1b[1Gcommand: ls ‮x"}}
+        self._hook("codex", sneaky)
+        raw = (self.ws / ".link-cache" / "approvals.json").read_text(encoding="utf-8")
+        self.assertNotIn(token, raw, "the token is not kept for a day in the cache")
+        listing = subprocess.run([*LINK, "approve", str(self.ws)], capture_output=True, text=True, check=True).stdout
+        self.assertNotIn("\x1b", listing)
+        self.assertNotIn("‮", listing)
+        self.assertIn("\\x1b[2K\\x1b[1Gcommand: ls \\u202ex", listing, "written out where the person can see them")
+        self.assertIn("GITHUB_TOKEN=[redacted-secret] git push", listing)
+        request_id = json.loads(self._hook("codex", sneaky).stdout)["hookSpecificOutput"][
+            "permissionDecisionReason"].split("lnk approve ")[1].split()[0]
+        subprocess.run([*LINK, "approve", request_id, str(self.ws)], check=True, capture_output=True)
+        command = sneaky["tool_input"]["command"].replace(token, "ghp_" + "b" * 36)
+        other = {"tool_name": "Bash", "tool_input": {"command": command}}
+        self.assertIn("deny", self._hook("codex", other).stdout, "the grant is for the call as sent, not as shown")
+        self.assertEqual(self._hook("codex", sneaky).stdout, "")
+
+    def test_json_at_a_terminal_approves_only_with_yes(self):
+        push = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": "/r"}
+        request_id = json.loads(self._hook("codex", push).stdout)["hookSpecificOutput"][
+            "permissionDecisionReason"].split("lnk approve ")[1].split()[0]
+        from link_core import approvals  # noqa: PLC0415
+
+        spec = importlib.util.spec_from_file_location("link_cli_approve_json", ROOT / "link.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch("builtins.input") as asked, mock.patch("sys.stdout", new_callable=Terminal) as out:
+            self.assertEqual(cli.approve_held_call(self.ws, request_id, json_output=True), 1)
+        asked.assert_not_called()
+        self.assertFalse(json.loads(out.getvalue())["approved"])
+        self.assertIn("--yes", json.loads(out.getvalue())["error"])
+        self.assertEqual([row["id"] for row in approvals.pending(self.ws)], [request_id], "nothing was granted")
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch("sys.stdout", new_callable=Terminal) as out:
+            self.assertEqual(cli.approve_held_call(self.ws, request_id, json_output=True, yes=True), 0)
+        self.assertTrue(json.loads(out.getvalue())["approved"])
+
+    def test_a_busy_approvals_file_approves_nothing_and_says_so(self):
+        push = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}, "cwd": "/r"}
+        request_id = json.loads(self._hook("codex", push).stdout)["hookSpecificOutput"][
+            "permissionDecisionReason"].split("lnk approve ")[1].split()[0]
+        (self.ws / ".link-cache" / ".approvals.json.lock").write_text("", encoding="utf-8")
+        done = subprocess.run([*LINK, "approve", request_id, str(self.ws), "--json", "--yes"], capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL)
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(json.loads(done.stdout)["approved"], False, "LinkBar reads this, not the exit code alone")
 
     def test_exit_code_agents_are_blocked_with_the_reason_on_stderr(self):
         payload = {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "git push --force"}}
@@ -479,6 +564,76 @@ class ContentApprovalTests(unittest.TestCase):
         self._approve("CREATE TABLE")
         self.assertEqual(self._reply("kiro", "fs_write", v2).exit_code, 0)
         self.assertEqual(self._reply("kiro-agent", "write", v3).exit_code, 0, "the same call from the other hook")
+
+    def _held_then(self, emit, first, second):
+        """Hold `first`, approve that request, and return the reply to `second` on the same agent."""
+        from link_core import approvals  # noqa: PLC0415
+        from link_core.tool_hooks import pre_tool_reply  # noqa: PLC0415
+
+        def reply(event):
+            return pre_tool_reply(self.base, event, project=None, emit=emit, environ={})
+
+        held = reply(first)
+        text = held.stderr or held.stdout
+        self.assertIn("lnk approve ", text, first)
+        approvals.approve(self.base, text.split("lnk approve ")[1].split()[0])
+        return reply(second)
+
+    def test_a_grant_covers_how_the_call_writes_not_only_what(self):
+        mig = str(self.repo / "migrations" / "001.sql")
+
+        def kiro(**tool_input):
+            return {"tool_name": "fs_write", "cwd": str(self.repo), "tool_input": {"path": mig, **tool_input}}
+
+        def devin(tool, **tool_input):
+            return {"tool_name": tool, "cwd": str(self.repo), "tool_input": {"file_path": mig, **tool_input}}
+
+        pairs = [
+            ("kiro", kiro(command="append", new_str="-- note\n"), kiro(command="create", file_text="-- note\n")),
+            ("kiro", kiro(command="insert", insert_line=1, new_str="X"), kiro(command="append", new_str="X")),
+            ("devin", devin("edit", old_string="a", new_string="b"),
+             devin("edit", old_string="a", new_string="b", replace_all=True)),
+            ("devin", devin("MultiEdit", edits=[{"old_string": "A", "new_string": "X"},
+                                                {"old_string": "B", "new_string": "Y"}]),
+             devin("MultiEdit", edits=[{"old_string": "A", "new_string": "Y"},
+                                       {"old_string": "B", "new_string": "X"}])),
+        ]
+        for emit, approved, other in pairs:
+            reply = self._held_then(emit, approved, other)
+            self.assertIn("lnk approve ", reply.stderr or reply.stdout, (approved, other))
+
+    def test_windsurf_edits_are_bound_to_the_approval(self):
+        from link_core.tool_hooks import pre_tool_reply  # noqa: PLC0415
+
+        mig = str(self.repo / "migrations" / "001.sql")
+
+        def edit(old, new):
+            return {"agent_action_name": "pre_write_code",
+                    "tool_info": {"file_path": mig, "edits": [{"old_string": old, "new_string": new}]}}
+
+        other = self._held_then("windsurf", edit("id int", "id int, nick text"), edit("CREATE TABLE a", "DROP TABLE a"))
+        self.assertEqual(other.exit_code, 2, "a different edit to the approved file stays held")
+        same = pre_tool_reply(self.base, edit("id int", "id int, nick text"), project=None, emit="windsurf",
+                              environ={})
+        self.assertEqual(same.exit_code, 0, "the approved edit itself goes through")
+
+    def test_a_shell_grant_covers_the_directory_the_call_names(self):
+        from link_core.tool_events import call_binding  # noqa: PLC0415
+
+        push = {"tool_name": "Bash", "tool_input": {"command": "git push --force"}}
+        elsewhere = {"tool_name": "Bash", "tool_input": {"command": "git push --force", "workdir": "/other"}}
+        self.assertEqual(call_binding(push), "", "a plain command is bound by its text and directory alone")
+        self.assertNotEqual(call_binding(elsewhere), call_binding(push))
+
+    def test_the_person_sees_each_edit_as_a_pair(self):
+        from link_core.tool_events import call_content  # noqa: PLC0415
+
+        shown = call_content({"tool_name": "MultiEdit", "tool_input": {"file_path": "a", "edits": [
+            {"old_string": "A", "new_string": "X"}, {"old_string": "B", "new_string": "Y"}]}})
+        self.assertEqual(shown, "replace: A\nwith: X\nreplace: B\nwith: Y")
+        shown = call_content({"tool_name": "fs_write", "tool_input": {
+            "command": "insert", "path": "a", "insert_line": 3, "new_str": "X", "summary": "adds X"}})
+        self.assertEqual(shown, "command: insert\ninsert_line: 3\ncontent: X", "how it writes, not the agent's summary")
 
     def test_call_content_reads_every_agents_arguments(self):
         from link_core.tool_events import call_content  # noqa: PLC0415

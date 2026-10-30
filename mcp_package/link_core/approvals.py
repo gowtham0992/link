@@ -9,10 +9,11 @@ agrees, they run `lnk approve <id>` (or approve it in LinkBar) and the agent
 repeats the exact same call, which then goes through once.
 
 A grant is for one exact call - every command, read and write the tool
-call names, from the same directory, writing the same content - is used up by the call it lets
+call names, from the same directory, writing the same content in the same
+way - on the agent it was held on, is used up by the call it lets
 through, and expires after a few minutes, so an approval never becomes a
 standing exception. Kiro can check one call twice, from its global hooks
-and from Link's agent profile: the second check, from the other hook,
+and from Link's agent profile: the second check, from Kiro's other hook,
 within a few seconds, is the same call and goes through with it. Agents cannot approve their own requests: `lnk approve`
 is a governance command the pre-tool hook holds however it is spelt, and
 this file sits under the cache directory the hook protects. A file that is
@@ -27,16 +28,20 @@ import os
 import re
 import secrets
 import shlex
+import unicodedata
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .files import atomic_write_text_unlocked, file_lock
+from .security import redact_secret_values
 
 GRANT_MINUTES = 10
 REQUEST_HOURS = 24
 # How long a used grant still covers the same call checked again by a different hook (Kiro).
 REPEAT_SECONDS = 5
+# The hooks that are one agent: Link's Kiro agent profile checks the same calls as Kiro's global hook.
+_AGENT_FAMILY = {"kiro-agent": "kiro"}
 MAX_REQUESTS = 200
 # Shorter than the hook's own 10 s timeout, so a stuck lock fails the call
 # closed (held) instead of the agent killing the hook mid-write.
@@ -58,15 +63,39 @@ CONTENT_CHARS = 800
 
 
 def call_display(calls: Iterable[tuple[str, str]], cwd: str, content: str = "") -> str:
-    """What the person approves: the whole call, line breaks kept, and the start of what it writes."""
-    lines = [f"{kind}: {value}" for kind, value in sorted(calls)]
+    """What the person approves: the whole call, line breaks kept, and the start of what it writes.
+
+    Kept, printed and posted as a notification, so it never carries a
+    secret the call names, and never a control character that could redraw
+    the terminal or reorder the text around it (see `printable`).
+    """
+    calls = sorted(calls)
+    lines = [f"{kind}: {value}" for kind, value in calls]
     if content:
         shown = content[:CONTENT_CHARS].splitlines()[:CONTENT_LINES]
         rest = len(content) - len("\n".join(shown))
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
-        lines += [f"writing (sha256 {digest}):", *(f"  {line}" for line in shown)]
+        label = "writing" if any(kind == "write" for kind, _value in calls) else "with"
+        lines += [f"{label} (sha256 {digest}):", *(f"  {line}" for line in shown)]
         lines += [f"  ... and {rest} more characters"] if rest > 0 else []
-    return "\n".join(lines + ([f"(in {cwd})"] if cwd else []))
+    return printable(redact_secret_values("\n".join(lines + ([f"(in {cwd})"] if cwd else [])))[0])
+
+
+def printable(text: str) -> str:
+    """Text safe to show at a terminal or in LinkBar: control and format characters written out.
+
+    An escape sequence in a held command can erase the line it is on and
+    print a harmless-looking call in its place, and a bidi override can
+    reverse what follows; both are shown as `\\x1b` or `\\u202e` instead.
+    Line breaks and tabs stay.
+    """
+    def visible(char: str) -> str:
+        code = ord(char)
+        if char in "\n\t" or unicodedata.category(char) not in {"Cc", "Cf", "Zl", "Zp"}:
+            return char
+        return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}" if code < 0x10000 else f"\\U{code:08x}"
+
+    return "".join(visible(char) for char in text)
 
 
 def approvals_path(link_root: Path) -> Path:
@@ -175,8 +204,9 @@ def approve(link_root: Path, request_id: str, now: datetime | None = None) -> di
 def take_grant(link_root: Path, key: str, now: datetime | None = None, *, hook: str = "") -> bool:
     """Use up the grant for this exact call, if the person gave one in the last few minutes.
 
-    `hook` names the hook checking the call; one check of the same call from
-    a different hook, right after, is let through with it (see above).
+    `hook` names the hook checking the call. The grant is for the agent the
+    call was held on: the same call from another agent stays held. One check
+    from Kiro's other hook, right after, is let through with it (see above).
     """
     path = approvals_path(link_root)
     if not path.exists():
@@ -186,19 +216,24 @@ def take_grant(link_root: Path, key: str, now: datetime | None = None, *, hook: 
         data = _load(path)
         _prune(data, moment)
         entry = data["grants"].get(key)
-        if entry is None:
+        if entry is None or _family(str(entry.get("agent") or "")) != _family(hook):
             granted = False
         elif "used" not in entry:
             entry.update(used=_stamp(moment), used_by=hook)
             granted = True
         else:
-            granted = bool(hook) and entry.get("used_by") not in {hook, None} and not entry.get("repeated")
+            granted = _family(hook) == "kiro" and entry.get("used_by") not in {hook, None} \
+                and not entry.get("repeated")
             if granted:
                 entry["repeated"] = True
             else:
                 del data["grants"][key]
         _save(path, data)
     return granted
+
+
+def _family(hook: str) -> str:
+    return _AGENT_FAMILY.get(hook, hook)
 
 
 def pending(link_root: Path, now: datetime | None = None) -> list[dict[str, object]]:

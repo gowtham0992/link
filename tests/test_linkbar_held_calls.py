@@ -40,6 +40,14 @@ class LinkBarHeldCallSourceTests(unittest.TestCase):
         self.assertNotIn("Approve once", notifications)
         self.assertIn("showHeldCall(id:", notifications)
 
+    def test_approving_succeeds_only_when_lnk_says_it_approved(self):
+        """lnk approve prints the call before it grants anything: output alone is not a grant."""
+        store = (SOURCES / "LinkStore.swift").read_text(encoding="utf-8")
+        body = store.split("func approveHeldCall(id: String)")[1].split("\n    }\n")[0]
+        self.assertIn('["approve", id, LinkCLI.workspace, "--json", "--yes"]', body)
+        self.assertIn('reply?["approved"] as? Bool == true', body)
+        self.assertNotIn("act(", body, "act() flashes success on any output")
+
 
 @unittest.skipUnless(sys.platform == "darwin" and shutil.which("swiftc"), "LinkBar builds on macOS")
 class LinkBarHeldCallParityTests(unittest.TestCase):

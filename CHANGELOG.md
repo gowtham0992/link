@@ -241,6 +241,28 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   showed text macOS cuts short, written by the agent, beside an Approve
   button; it now opens the popover on the whole call. LinkBar lists exactly
   the held calls `lnk approve` would accept.
+- **An approval covers how a call writes, on the agent it was held on.**
+  A Windsurf edit was approved by file alone, so any edit to that file went
+  through; Kiro's append and overwrite, an insert at one line and another,
+  an edit and the same edit with `replace_all`, and two edits with their
+  replacements swapped each counted as one call. Each now needs its own OK,
+  and `lnk approve` shows every edit as what it replaces and with what. An
+  approval no longer lets the same call through from a second agent; only
+  Kiro's two hooks share one.
+- **The call you approve is the call you see.** A held command could carry
+  terminal escapes that erased its own line and printed a harmless one in
+  its place, or a bidi character that reordered it; `lnk approve` and
+  LinkBar now write those out (`\x1b`, `\u202e`). Secret-looking values in
+  a held call are blanked before it is kept for a day in `.link-cache/` or
+  shown in a notification; the approval still binds the call as sent.
+- **`lnk approve <id> --json` at a terminal approves only with `--yes`.**
+  It granted the call without showing it or asking. LinkBar, which runs it
+  without a terminal and shows the call itself, said "Approved once" even
+  when nothing was granted (the request had expired, or the approvals file
+  was busy); it now passes `--yes` and trusts only `"approved": true`.
+- **Rules see more tool names:** VS Code's Copilot agent's
+  `run_in_terminal`, `replace_string_in_file`, `insert_edit_into_file` and
+  `multi_replace_string_in_file`, and Kiro's `execute_cmd` on Windows.
 - **Cursor got Link's reasons in keys it does not read.** Link answered
   Cursor with `userMessage`/`agentMessage`; Cursor reads `user_message` and
   `agent_message`, and blocks a permission hook whose output does not match

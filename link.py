@@ -1660,9 +1660,12 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
 
     The call is shown before anything is granted; at a terminal the person
     confirms it (`--yes` skips that). LinkBar runs this without a terminal
-    and shows the call itself.
+    and shows the call itself. `--json` shows nothing to confirm, so at a
+    terminal it approves only with `--yes`.
     """
     from link_core import approvals
+
+    printable = approvals.printable  # requests filed before Link wrote out control characters
 
     root = _resolve_link_root(target)
     if not request_id:
@@ -1675,9 +1678,10 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
             return 0
         print("Tool calls waiting for your OK (each approval lets the exact call through once):")
         for row in waiting:
-            print(f"\n  {row['id']}  held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')})")
+            held_on = f"held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')})"
+            print(printable(f"\n  {row['id']}  {held_on}"))
             for line in str(row.get("display") or "").splitlines():
-                print(f"      {line}")
+                print(f"      {printable(line)}")
         print(f"Approve one: {_display_command(['lnk', 'approve', '<id>', str(target)])}")
         return 0
     missing = f"No held call {request_id!r} is waiting (requests expire after a day, approvals after 10 minutes)."
@@ -1686,13 +1690,19 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
         print(json.dumps({"approved": False, "error": missing}) if json_output else missing,
               file=sys.stdout if json_output else sys.stderr)
         return 1
+    # Both ends at a terminal: on Windows the NUL device reports itself as one, and a
+    # caller that captures the output (LinkBar, a script) shows the call itself.
+    interactive = not yes and sys.stdin.isatty() and sys.stdout.isatty()
+    if json_output and interactive:
+        plain = _display_command(["lnk", "approve", request_id, str(target)])
+        print(json.dumps({"approved": False, "error": f"At a terminal, --json approves only with --yes: run {plain} "
+                          "to see the call first, or add --yes."}))
+        return 1
     if not json_output:
-        print(f"Held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')}):")
+        print(printable(f"Held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')}):"))
         for line in str(row.get("display") or "").splitlines():
-            print(f"  {line}")
-        # Both ends at a terminal: on Windows the NUL device reports itself as one, and a
-        # caller that captures the output (LinkBar, a script) shows the call itself.
-        if not yes and sys.stdin.isatty() and sys.stdout.isatty():
+            print(f"  {printable(line)}")
+        if interactive:
             try:
                 answer = input("Approve once? [y/N] ")
             except EOFError:
@@ -1700,7 +1710,13 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
             if answer.strip().lower() not in {"y", "yes"}:
                 print("Not approved; the call stays held.")
                 return 1
-    entry = approvals.approve(root, request_id)
+    try:
+        entry = approvals.approve(root, request_id)
+    except TimeoutError:
+        busy = "Link's approvals file is busy; nothing was approved. Try again in a moment."
+        print(json.dumps({"approved": False, "error": busy}) if json_output else busy,
+              file=sys.stdout if json_output else sys.stderr)
+        return 1
     if entry is None:
         print(json.dumps({"approved": False, "error": missing}) if json_output else missing,
               file=sys.stdout if json_output else sys.stderr)
