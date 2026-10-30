@@ -185,8 +185,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   the top shows, for each agent, how memory arrives, which session hooks
   it has, which tool calls rules are checked on and whether it can ask you
   or only hold the call, and says what enforcement is measured on: one
-  live Codex session, recorded tool calls replayed through the installed
-  hook command, and elsewhere the vendors' documented hook schemas. Claims that outran their evidence are corrected:
+  live Codex session, 86 hand-written Claude Code-shaped calls decided in
+  process by the same matcher, and elsewhere the vendors' documented hook schemas. Claims that outran their evidence are corrected:
   `lnk setup` wires every agent *it finds*, not every agent you have; the
   LoCoMo 84.8% says it was measured on Link 3.x and not yet re-run; the
   hygiene and poisoning zeros are labelled as CI regression floors on
