@@ -375,6 +375,11 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   its files is still yours alone. `lnk approve` with no id, which only lists
   what is waiting, and `lnk enforce <memory> --suggest` are no longer held;
   `echo <id> | xargs lnk approve` still is.
+- **LinkBar's popover opened empty and came loose from the menu bar.** On
+  macOS 27 the inbox's scroll view gave the window no height, so the first
+  open showed only the tabs, and switching tabs resized the window from its
+  bottom edge, which pulled it away from the menu bar. Every tab now has
+  the same height and scrolls within it.
 - LinkBar builds without warnings: the two hook-state switches spelt the
   "still checking" case as `.none`, which Swift read as the Optional's nil
   (the intended meaning) while warning it could mean `HookState.none`.

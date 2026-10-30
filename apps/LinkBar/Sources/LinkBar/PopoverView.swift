@@ -41,12 +41,15 @@ struct PopoverView: View {
                 switch tab {
                 case .inbox: inboxTab
                 case .memory: memoryTab
-                case .status: statusTab
+                case .status: ScrollView { statusTab }
                 case .settings:
-                    SettingsPane(done: { tab = .inbox })
-                        .environmentObject(store)
+                    ScrollView {
+                        SettingsPane(done: { tab = .inbox })
+                            .environmentObject(store)
+                    }
                 }
             }
+            .frame(height: Self.contentHeight, alignment: .top)
             .animation(.easeOut(duration: 0.18), value: store.pendingCount)
 
             footer
@@ -67,11 +70,15 @@ struct PopoverView: View {
         }
     }
 
-    /// The popover has to stay on screen on a 13" laptop. Anything longer
-    /// than this scrolls; anything shorter sizes to its content.
-    private static var contentCap: CGFloat {
+    /// Every tab gets the same height, and scrolls within it. A menu bar
+    /// window that sizes to its content broke both ways on macOS 27: a
+    /// ScrollView proposes no height of its own, so the inbox opened empty,
+    /// and a window that changed height on a tab switch was resized from its
+    /// bottom edge, which pulled its top away from the menu bar. Short
+    /// enough to stay on screen on a 13" laptop.
+    private static var contentHeight: CGFloat {
         let visible = NSScreen.main?.visibleFrame.height ?? 800
-        return min(640, max(360, visible - 200))
+        return min(540, max(340, visible - 220))
     }
 
     // MARK: tab bar
@@ -155,7 +162,7 @@ struct PopoverView: View {
                 }
                 .padding(LinkBrand.pad)
             }
-            .frame(maxHeight: Self.contentCap)
+            .frame(maxHeight: .infinity)
             .onAppear {
                 recallFocused = true
                 scrollToFocusedHeldCall(proxy)
@@ -319,7 +326,7 @@ struct PopoverView: View {
                     }
                 }
             }
-            .frame(maxHeight: 320)
+            .frame(maxHeight: .infinity)
         }
         .padding(LinkBrand.pad)
     }
