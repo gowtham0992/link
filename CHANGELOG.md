@@ -248,6 +248,45 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - LinkBar builds without warnings: the two hook-state switches spelt the
   "still checking" case as `.none`, which Swift read as the Optional's nil
   (the intended meaning) while warning it could mean `HookState.none`.
+- **An installer rewrote what `lnk connect` had refused to touch.** The
+  installers' own registration ran whenever `lnk connect` failed, including
+  when it had deliberately left a file alone (a Codex server Link does not
+  edit, a settings file with comments, bytes that are not UTF-8), so Codex
+  got a second `[mcp_servers.link]`, your keys and comments went, and a
+  `café` became `caf�`. It now runs only when no Link CLI is reachable at
+  all; otherwise the installer says what to fix and exits non-zero.
+- **Codex and Copilot moved homes; Link did not follow.** With `CODEX_HOME`
+  set, connect, disconnect, doctor and setup still edited
+  `~/.codex/config.toml` and `hooks.json`; with `COPILOT_HOME` set,
+  Copilot's hooks went to `~/.copilot`. Both are honoured now, in the
+  PowerShell installer too.
+- **The Kiro and Copilot installers did not add hooks.** A global install
+  now adds Kiro's hooks, and Copilot's (`lnk connect copilot --hooks-only`:
+  its hooks are global, its MCP entry stays per project).
+- **A config Link could not read stopped `lnk disconnect` halfway.** A
+  broken or unreadable MCP config left Link's hooks in place - hooks that
+  block every tool call once the workspace is gone - and a folder where the
+  file should be printed a traceback. The MCP entry and the hooks are now
+  taken out independently, each problem is reported, and the exit is
+  non-zero when anything was left.
+- **`lnk setup` brought back agents you had disconnected.** `lnk
+  disconnect` now remembers the agent (in the workspace's private
+  `.link-cache`), and setup skips it and says so until `lnk connect` brings
+  it back.
+- **`lnk connect --hooks` could stop halfway.** Every hooks file is checked
+  before anything is written, so a Gemini CLI `settings.json` with comments
+  no longer leaves the MCP entry and Antigravity's hooks written and Gemini's
+  not.
+- **Install and uninstall left traces in the person's files.** A BOM before
+  Link's heading hid the section, so a reinstall added a second one; removing
+  a section that was a symlinked file's only content deleted the symlink;
+  each JSON MCP config round trip left a blank indented line; Link's hook
+  joining a group you wrote changed that group's matcher, so your script
+  ran on other tools; and Link's old section in `~/AGENTS.md` survived
+  uninstalling both Claude Code and Codex. Each is fixed: install then
+  uninstall now gives back the same bytes. The PowerShell installers no
+  longer add a BOM to the Codex config, the Cursor rule and
+  `.link-mcp-python`.
 
 ## [5.0.0] - 2026-10-25
 

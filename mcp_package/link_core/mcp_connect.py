@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .agent_instructions import agent_home_path
 from .files import atomic_write_text, write_config_bytes
 from .mcp_verify import (
     display_command,
@@ -125,7 +126,7 @@ def detect_installed_agents(home: Path | None = None) -> list[str]:
         default = str(config.default_config)
         if not default.startswith("~/"):
             continue
-        path = base / default[2:]
+        path = agent_home_path(default, base)
         probes = [path]
         if path.parent != base:
             probes.append(path.parent)
@@ -146,7 +147,7 @@ HOOK_ONLY_AGENT_HOMES: tuple[tuple[str, str], ...] = (("copilot", ".copilot"),)
 def detect_hook_only_agents(home: Path | None = None) -> list[str]:
     """Agents `lnk setup` wires session hooks for, but not MCP (see HOOK_ONLY_AGENT_HOMES)."""
     base = (home or Path.home()).expanduser()
-    return [name for name, folder in HOOK_ONLY_AGENT_HOMES if (base / folder).is_dir()]
+    return [name for name, folder in HOOK_ONLY_AGENT_HOMES if agent_home_path("~/" + folder, base).is_dir()]
 
 
 def _agent_by_name(agent: str) -> AgentMcpConfig:
@@ -159,7 +160,7 @@ def _agent_by_name(agent: str) -> AgentMcpConfig:
 
 
 def _config_path(default_config: str, override: str | None) -> Path:
-    path = Path(override or default_config).expanduser()
+    path = Path(override).expanduser() if override else agent_home_path(default_config)
     if not path.is_absolute():
         path = (Path.cwd() / path).resolve()
     return path
@@ -407,6 +408,10 @@ def _remove_link_entry(text: str, top_key: str) -> tuple[str, bool]:
             fwd += 1
         if fwd < len(masked) and masked[fwd] == ",":
             end = fwd + 1  # first member: drop the comma after us instead
+        # and the line break and indent connect put before it, so an install
+        # and uninstall leave the file byte for byte (a comment there stays).
+        while start > top_span[0] + 1 and text[start - 1].isspace():
+            start -= 1
     return text[:start] + text[end:], True
 
 
@@ -946,30 +951,44 @@ def build_disconnect_payload(
     "wiki missing" into the model's context. This removes only Link's
     entries - other servers, other hooks and the file's comments stay.
     """
-    from .agent_hooks import _find_hook_agent, _settings_path, remove_link_hooks
+    from .agent_hooks import _find_hook_agent, _settings_path
 
     config = _agent_by_name(agent)
     mcp_path = _config_path(config.default_config, config_path)
-    mcp = remove_link_mcp_entry(mcp_path, config, write=write)
+    # The MCP entry and the hooks are taken out independently: a config Link
+    # cannot edit must not leave Link's hooks behind, which block every tool
+    # call once the workspace is gone. Each failure is reported on its own.
+    mcp: dict[str, object] = {"path": str(mcp_path), "found": False, "removed": False}
+    try:
+        mcp = remove_link_mcp_entry(mcp_path, config, write=write)
+    except ValueError as exc:
+        mcp["error"] = str(exc)
+    except OSError as exc:
+        mcp["error"] = f"{exc}; remove the link entry by hand"
     # Session hooks are global: a project uninstall (hooks=False) leaves them.
     hook_config = _find_hook_agent(config.name) if hooks else None
     removed_hooks: dict[str, object] = {"supported": False, "found": [], "removed": False}
     if hook_config is not None:
-        removed_hooks = remove_link_hooks(_settings_path(hook_config.default_settings, hooks_settings), config.name, write=write)
+        removed_hooks = _remove_hooks_reporting(_settings_path(hook_config.default_settings, hooks_settings),
+                                                config.name, write=write)
         # Antigravity and Gemini CLI share ~/.gemini and are connected as one
         # agent: take the companion's hooks out too.
         found = list(removed_hooks.get("found") or [])  # type: ignore[call-overload]
+        errors = [str(removed_hooks["error"])] if removed_hooks.get("error") else []
         for name in hook_config.companions:
             other = _find_hook_agent(name)
             if other is None:
                 continue
-            extra = remove_link_hooks(_settings_path(other.default_settings, None), other.name, write=write)
+            extra = _remove_hooks_reporting(_settings_path(other.default_settings, None), other.name, write=write)
             found += list(extra.get("found") or [])  # type: ignore[call-overload]
             if extra.get("error"):
-                removed_hooks["error"] = extra["error"]
+                errors.append(str(extra["error"]))
             removed_hooks["removed"] = bool(removed_hooks.get("removed")) or bool(extra.get("removed"))
         removed_hooks["found"] = sorted(set(found))
+        if errors:
+            removed_hooks["error"] = "; ".join(errors)
     found_anything = bool(mcp.get("found")) or bool(removed_hooks.get("found"))
+    errors_all = [str(part["error"]) for part in (mcp, removed_hooks) if part.get("error")]
     return {
         "agent": config.name,
         "display_name": config.display_name,
@@ -978,5 +997,53 @@ def build_disconnect_payload(
         "hooks": removed_hooks,
         "found": found_anything,
         "changed": bool(mcp.get("removed")) or bool(removed_hooks.get("removed")),
+        "ok": not errors_all,
+        "errors": errors_all,
         "restart_hint": f"Restart {config.display_name} so it stops loading Link.",
     }
+
+
+def _remove_hooks_reporting(path: Path, agent: str, *, write: bool) -> dict[str, object]:
+    """remove_link_hooks, with any error it did not catch itself reported instead of raised."""
+    from .agent_hooks import remove_link_hooks
+
+    try:
+        return remove_link_hooks(path, agent, write=write)
+    except (OSError, ValueError) as exc:
+        return {"path": str(path), "supported": True, "found": [], "removed": False,
+                "error": f"{exc}; remove Link's hooks by hand"}
+
+
+# `lnk disconnect` remembers the agents the person took Link out of, so
+# `lnk setup` (run after every upgrade) does not wire them back in. A later
+# `lnk connect` clears the mark. The file sits in the workspace's private
+# .link-cache (never synced): it is about this machine's agents.
+DISCONNECTED_FILE = Path(".link-cache") / "disconnected-agents.json"
+
+
+def disconnected_agents(link_root: Path) -> list[str]:
+    """Agents the person disconnected on purpose (canonical names)."""
+    try:
+        data = json.loads((link_root / DISCONNECTED_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    names = data.get("agents") if isinstance(data, dict) else None
+    return sorted({str(name) for name in names}) if isinstance(names, list) else []
+
+
+def mark_disconnected(link_root: Path, agent: str, disconnected: bool) -> None:
+    """Record (or clear) that this agent was disconnected; only in a workspace that exists."""
+    name = _agent_by_name(agent).name
+    current = disconnected_agents(link_root)
+    wanted = sorted(set(current) | {name}) if disconnected else [n for n in current if n != name]
+    if wanted == current or not link_root.is_dir():
+        return
+    path = link_root / DISCONNECTED_FILE
+    try:
+        if wanted:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(path, json.dumps({"agents": wanted}, indent=2) + "\n")
+        else:
+            path.unlink()
+    except OSError:
+        pass

@@ -47,8 +47,8 @@ if [ -f "$MCP_MARKER" ]; then
     MCP_PYTHON="$(cat "$MCP_MARKER")"
 fi
 
-# Auto-register MCP in ~/.codex/config.toml
-CODEX_CONFIG="$HOME/.codex/config.toml"
+# Auto-register MCP in Codex's config.toml ($CODEX_HOME, default ~/.codex)
+CODEX_CONFIG="${CODEX_HOME:-$HOME/.codex}/config.toml"
 if [ -f "$CODEX_CONFIG" ]; then
     LINK_CODEX_CONFIG="$CODEX_CONFIG" LINK_MCP_PYTHON="$MCP_PYTHON" LINK_WIKI_PATH="$WIKI_PATH" python3 - << 'PYEOF'
 import json, os, re
@@ -72,9 +72,9 @@ else:
     text = text.rstrip() + "\n\n" + block
 path.write_text(text, encoding="utf-8")
 PYEOF
-    echo "  ✓ Link MCP registered in ~/.codex/config.toml"
+    echo "  ✓ Link MCP registered in $CODEX_CONFIG"
 elif [ ! -f "$CODEX_CONFIG" ]; then
-    echo "  MCP config: add to ~/.codex/config.toml:"
+    echo "  MCP config: add to $CODEX_CONFIG:"
     echo "  [mcp_servers.link]"
     echo "  command = \"$MCP_PYTHON\""
     echo "  args = [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"]"

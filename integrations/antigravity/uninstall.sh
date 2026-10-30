@@ -12,7 +12,7 @@ MODE="${1:---global}"
 # sessions kept trying to start a workspace that was gone. Both are the
 # agent's global config, so a --project uninstall leaves them alone.
 if [ "$MODE" = "--global" ]; then
-    link_cli disconnect antigravity --write || echo "  · Could not run lnk disconnect; remove the \"link\" MCP entry by hand"
+    link_cli disconnect antigravity --write || echo "  · lnk disconnect did not finish; remove the \"link\" MCP entry and Link's hooks it names by hand"
 fi
 
 if [ "$MODE" = "--global" ]; then

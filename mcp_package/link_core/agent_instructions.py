@@ -105,10 +105,11 @@ BLOCK_BEGIN_PREFIX = "<!-- BEGIN LINK MEMORY"
 # "Otherwise, "), the line before `lnk compile`'s block, the next heading
 # (ATX of any level, or setext), the end of the file. Whatever the person
 # writes after it - a plain line, their own `### Shell`, the compiled
-# block - is theirs, not Link's. integrations/_shared/instructions.sh and
-# instructions.ps1 use this same pattern.
+# block - is theirs, not Link's. A UTF-8 BOM before a heading on the first
+# line is the file's, kept as it was. integrations/_shared/instructions.sh
+# and instructions.ps1 use this same pattern.
 _SECTION_PATTERN = re.compile(
-    r"(^|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\r?\n.*?"
+    r"(^\ufeff?|\n)(?:" + "|".join(re.escape(m) for m in INSTRUCTION_MARKERS) + r")\r?\n.*?"
     r"(?:(?<=\n)Otherwise, [^\r\n]*"
     r"|(?=(?:\r?\n)+(?:" + re.escape(BLOCK_BEGIN_PREFIX) + r"|#{1,6}[ \t]|[^\r\n]+\r?\n(?:=+|-+)[ \t]*(?:\r?\n|\Z)))"
     r"|(?=(?:\r?\n)*\Z))",
@@ -121,7 +122,7 @@ def find_link_section(text: str) -> str | None:
     match = _SECTION_PATTERN.search(text)
     if match is None:
         return None
-    return match.group(0).lstrip("\r\n")
+    return match.group(0).lstrip("\ufeff\r\n")
 
 
 def _newline(text: str) -> str:
@@ -151,9 +152,11 @@ def remove_link_section(text: str) -> str:
     if match is None:
         return text
     newline = _newline(text)
+    bom = match.group(1).rstrip("\n")
     head, tail = text[:match.start()], text[match.end():]
     if not head.strip():
-        return tail.lstrip("\r\n")
+        rest = tail.lstrip("\r\n")
+        return bom + rest if rest.strip() else rest
     if not tail.strip():
         return head.rstrip("\r\n") + newline
     return head.rstrip("\r\n") + newline * 2 + tail.lstrip("\r\n")
@@ -180,6 +183,32 @@ def codex_home(home: Path) -> Path:
     """Where Codex keeps its global files: $CODEX_HOME, else ~/.codex."""
     configured = os.environ.get("CODEX_HOME")
     return Path(configured).expanduser() if configured else home / ".codex"
+
+
+def copilot_home(home: Path) -> Path:
+    """Where Copilot CLI keeps its user hooks folder: $COPILOT_HOME, else ~/.copilot."""
+    configured = os.environ.get("COPILOT_HOME")
+    return Path(configured).expanduser() if configured else home / ".copilot"
+
+
+# Agents whose home folder moves with an environment variable.
+_MOVABLE_HOMES = (("~/.codex", codex_home), ("~/.copilot", copilot_home))
+
+
+def agent_home_path(spec: str, home: Path | None = None) -> Path:
+    """An agent's home-relative file ("~/.cursor/mcp.json") as a path.
+
+    Codex keeps its config.toml and hooks.json in $CODEX_HOME as well as its
+    AGENTS.md, and Copilot CLI its hooks in $COPILOT_HOME/hooks; connect,
+    disconnect, doctor and setup all resolve those folders here so none of
+    them edits ~/.codex or ~/.copilot while the agent reads another folder.
+    """
+    for prefix, resolve in _MOVABLE_HOMES:
+        if spec == prefix or spec.startswith(prefix + "/"):
+            return resolve((home or Path.home()).expanduser()) / spec[len(prefix) + 1:]
+    if home is not None and spec.startswith("~/"):
+        return home.expanduser() / spec[2:]
+    return Path(spec).expanduser()
 
 
 def _instruction_path(agent: str, base: Path) -> Path | None:
@@ -228,7 +257,7 @@ def migrate_codex_instructions(home: Path | None = None, *, write: bool = True) 
         _write_exact(new, upsert_link_section(new_text or ""))
         if not keep_old:
             rest = remove_link_section(old_text)
-            if rest.strip():
+            if rest.strip() or old.is_symlink():  # a symlink stays the person's link to their file
                 _write_exact(old, rest)
             else:
                 old.unlink()

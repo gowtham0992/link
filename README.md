@@ -446,8 +446,9 @@ bash integrations/antigravity/install.sh
 
 Installers create or update `~/link`, install or upgrade `link-mcp`, write
 lightweight agent instructions, and preserve existing wiki data on reinstall.
-A global install also adds the agent's hooks; use `--project` when a repo
-needs separate project memory (it leaves your global hooks alone).
+A global install also adds the agent's hooks (Copilot's: hooks only, since
+its MCP entry is per project); use `--project` when a repo needs separate
+project memory (it leaves your global hooks alone).
 
 On Windows, use the matching PowerShell installer. It registers the MCP
 server and writes the instructions; add hooks afterwards with
