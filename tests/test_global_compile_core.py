@@ -141,6 +141,53 @@ class GlobalCompileTests(unittest.TestCase):
         plan = plan_global_compile([_memory("a", "Keep answers short.")], self.home, targets=["windsurf"])
         self.assertEqual(plan.files, {}, "no room: nothing written rather than a file Windsurf truncates")
         self.assertEqual([d["name"] for d in plan.dropped], ["a"])
+        self.assertEqual([item["path"] for item in plan.no_room], [".codeium/windsurf/memories/global_rules.md"])
+
+    def test_no_room_never_takes_links_block_away_and_the_block_fills_again(self):
+        memory = _memory("a", "Keep answers short.")
+        rules = self.home / ".codeium/windsurf/memories/global_rules.md"
+        apply_global_plan(plan_global_compile([memory], self.home, targets=["windsurf"]))
+        block = rules.read_text(encoding="utf-8")
+        rules.write_text("x" * 5990 + "\n\n" + block, encoding="utf-8")  # the person's own text fills the limit
+        warnings = []
+        refresh_global_files([memory], self.home, warnings)
+        text = rules.read_text(encoding="utf-8")
+        self.assertIn(BLOCK_BEGIN, text, "a refresh never deletes Link's block for lack of room")
+        self.assertNotIn("Keep answers short", text)
+        self.assertTrue(text.startswith("x" * 5990), "the person's text is kept")
+        self.assertEqual(owned_global_targets(self.home), ["windsurf"])
+        self.assertEqual([w["path"] for w in warnings], [".codeium/windsurf/memories/global_rules.md"])
+        self.assertIn("shorten", warnings[0]["reason"])
+        rules.write_text(text[5990:].lstrip(), encoding="utf-8")  # the person makes room
+        refresh_global_files([memory], self.home)
+        self.assertIn("Keep answers short", rules.read_text(encoding="utf-8"), "the next refresh fills it again")
+
+    def test_kiro_gets_no_steering_copy_once_links_hooks_hand_it_the_brief(self):
+        memory = _memory("a", "Keep answers short.")
+        steering = self.home / ".kiro/steering/link-memory.md"
+        apply_global_plan(plan_global_compile([memory], self.home, targets=["kiro"]))
+        self.assertTrue(steering.exists())
+        hooks = self.home / ".kiro/hooks/link.json"
+        hooks.parent.mkdir(parents=True)
+        pre_tool = {"name": "Link pre-tool", "trigger": "PreToolUse",
+                    "action": {"type": "command", "command": "python3 /opt/link/link_hook.py hook pre-tool /ws"}}
+        hooks.write_text(json.dumps({"version": "v1", "hooks": [pre_tool]}), encoding="utf-8")
+        self.assertIn("kiro", detected_global_targets(self.home), "rule checks alone do not hand Kiro the brief")
+        start = {"name": "Link session-start", "trigger": "SessionStart",
+                 "action": {"type": "command", "command": "python3 /opt/link/link.py hook session-start /ws"}}
+        hooks.write_text(json.dumps({"version": "v1", "hooks": [start, pre_tool]}), encoding="utf-8")
+        self.assertNotIn("kiro", detected_global_targets(self.home))
+        refresh_global_files([memory], self.home)
+        self.assertFalse(steering.exists(), "the copy Link wrote before the hooks goes: one brief, not two")
+        plan = plan_global_compile([memory], self.home, targets=["kiro"])
+        self.assertEqual(plan.files, {})
+        self.assertIn("session start", plan.skipped[0]["reason"])
+        hooks.unlink()
+        profile = self.home / ".kiro/agents/link.json"  # the agent profile for Kiro's default engine
+        profile.parent.mkdir(parents=True)
+        profile.write_text(json.dumps({"name": "link", "hooks": {"agentSpawn": [
+            {"command": "python3 /opt/link/link.py hook session-start /ws --emit text"}]}}), encoding="utf-8")
+        self.assertNotIn("kiro", detected_global_targets(self.home))
 
     def test_ownership_survives_the_last_memory_leaving_and_refresh_brings_it_back(self):
         memory = _memory("a", "Keep answers short.")
@@ -266,6 +313,18 @@ class GlobalCompileCliTests(unittest.TestCase):
         self.assertIn("Nothing written to kiro: see why below.", result.stdout)
         self.assertNotIn("install found", result.stdout)
         self.assertIn("git work tree", result.stdout)
+
+    def test_a_file_with_no_room_says_so_when_compiled_and_when_a_memory_changes(self):
+        self._run("compile", str(self.ws), "--global", "--targets", "windsurf")
+        rules = self.home / ".codeium/windsurf/memories/global_rules.md"
+        rules.write_text("x" * 5990 + "\n\n" + rules.read_text(encoding="utf-8"), encoding="utf-8")
+        name = json.loads(self._run("compile", str(self.ws), "--global", "--dry-run", "--json").stdout)[
+            "included"]["zed"][0]
+        archived = self._run("archive-memory", name, str(self.ws))
+        self.assertIn("No room for your memory in ~/.codeium/windsurf/memories/global_rules.md", archived.stderr)
+        self.assertIn(BLOCK_BEGIN, rules.read_text(encoding="utf-8"))
+        compiled = self._run("compile", str(self.ws), "--global", "--targets", "windsurf")
+        self.assertIn("No room: ~/.codeium/windsurf/memories/global_rules.md", compiled.stdout)
 
 
 if __name__ == "__main__":
