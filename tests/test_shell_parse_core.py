@@ -1,7 +1,9 @@
 """The bash reader: what a command line runs and writes, however it is spelt (the 6.0 review's bypasses)."""
 import os
+import shlex
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -130,6 +132,125 @@ class ReadShellTests(unittest.TestCase):
             self.assertIn(plain, forms, command)
         self.assertEqual(command_forms(["git", "push"]), [["git", "push"]])
 
+    def test_options_in_any_order_or_bundled_meet_the_rule(self):
+        cases = {
+            "git push -u --force origin feat": "git push --force -u origin feat",
+            "git push --no-verify --force": "git push --force --no-verify",
+            "git push -uf origin feature": "git push -f -u origin feature",
+            "git push -u origin main": "git push origin main -u",
+            "git push --set-upstream origin main": "git push origin main --set-upstream",
+            "git push -o ci.skip origin main": "git push origin main -o ci.skip",
+            "rm -fr build": "rm -rf build",
+            "rm -r -f build": "rm -rf build",
+            "rm -Rf build": "rm -rf build",
+            "rm --recursive --force build": "rm -rf build",
+            "rm -v -r -f build": "rm -rfv build",
+            "git.exe push -f": "git push -f",
+            "npm.cmd publish": "npm publish",
+            "GIT.EXE push -f": "git push -f",
+        }
+        for command, plain in cases.items():
+            forms = [" ".join(form) for form in command_forms(command.split())]
+            self.assertIn(plain, forms, command)
+        # A value stays with its option, and --force-with-lease is not --force.
+        forms = [" ".join(form) for form in command_forms("git push -o main origin feat".split())]
+        self.assertNotIn("git push origin main", " ".join(forms))
+        forms = [" ".join(form) for form in command_forms("git push -u --force-with-lease origin x".split())]
+        self.assertFalse(any(form.startswith("git push --force ") for form in forms), forms)
+
+    def test_programs_named_with_a_windows_extension(self):
+        self.assertIn("git push -f", _commands("git.exe push -f"))
+        self.assertIn("/w", read_shell("git.exe -C /w clean -fdx").trees)
+
+    def test_a_function_body_is_read(self):
+        self.assertIn("git push -f", _commands("function gp { git push -f; }; gp"))
+        self.assertIn("git push -f", _commands("function gp() { git push -f; }; gp"))
+
+    def test_too_deep_to_read_is_opaque_not_empty(self):
+        command = "git push -f"
+        for _ in range(4):
+            command = f"bash -c {shlex.quote(command)}"
+        self.assertFalse(read_shell(command).opaque, "four deep is read")
+        self.assertIn("git push -f", _commands(command))
+        self.assertTrue(read_shell(f"bash -c {shlex.quote(command)}").opaque, "five deep is not, and says so")
+        self.assertTrue(read_shell("$($($($($(git push -f)))))").opaque)
+        self.assertTrue(read_shell("find a b -exec find a b -exec find a b -exec rm {} \\; \\; \\;").opaque)
+        self.assertFalse(read_shell("find . -name x -exec grep -l y {} \\;").opaque)
+
+    def test_lines_built_to_be_slow_are_read_quickly(self):
+        cases = [
+            "git push -f; echo $env:X " + "$(" * 95 + "true" + ")" * 95,
+            "git push -f; find . " + "-exec find . " * 40 + "\\;",
+            "rm " + "{a,b}/" * 5000,
+            "rm " + " ".join(f"a{i}" for i in range(12000)),
+            "echo " + "a" * 99_000,
+            "rm " + "a " * 100_000,
+        ]
+        for command in cases:
+            started = time.perf_counter()
+            reading = read_shell(command)
+            self.assertLess(time.perf_counter() - started, 3.0, command[:40])
+            if len(command) > 100_000 or "{a,b}" in command:
+                self.assertTrue(reading.opaque, command[:40])
+        self.assertTrue(read_shell("rm a", deadline=time.monotonic() - 1).opaque, "out of time is unreadable")
+
+    def test_in_place_editors_write_their_files(self):
+        cases = {
+            "sed -Ei 's/a/b/' /w/m/a.md": ["/w/m/a.md"],
+            "sed -E -i 's/a/b/' /w/m/a.md": ["/w/m/a.md"],
+            "sed --in-place 's/a/b/' /w/m/a.md": ["/w/m/a.md"],
+            "sed --in-place=.bak --expression=s/a/b/ /w/m/a.md": ["/w/m/a.md"],
+            "perl -0pi -e 's/a/b/' /w/m/a.md": ["/w/m/a.md"],
+            "perl -0777pi -e 's/a/b/' /w/m/a.md": ["/w/m/a.md"],
+            "gawk -i inplace '{print}' /w/m/a.md": ["/w/m/a.md"],
+            "awk --include=inplace '{print}' /w/m/a.md": ["/w/m/a.md"],
+            "patch /w/m/a.md < fix.diff": ["/w/m/a.md"],
+            "patch -p1 -o /w/m/a.md < fix.diff": ["/w/m/a.md"],
+            "sort -o /w/m/a.md x": ["/w/m/a.md"],
+        }
+        for command, writes in cases.items():
+            self.assertEqual([w for w in read_shell(command).writes if w in writes], writes, command)
+        self.assertEqual(read_shell("patch -p1 < fix.diff").trees, ["."], "whatever the diff names, from here")
+        for command in ("sed -n 's/a/b/p' /w/m/a.md", "sed -E 's/i/x/' /w/m/a.md", "perl -Mlib=x -e 'p' /w/m/a.md",
+                        "perl -e 'print 1' /w/m/a.md", "awk '{print}' /w/m/a.md", "sort /w/m/a.md"):
+            self.assertEqual(read_shell(command).writes, [], command)
+
+    def test_what_an_archive_or_a_copy_of_contents_lands_on_is_a_tree(self):
+        cases = {
+            "tar xzf b.tgz -C /w": ["/w"],
+            "cd /w && tar xzf /tmp/b.tgz": ["/w/."],
+            "bsdtar -xf b.tar -C /w": ["/w"],
+            "unzip -o b.zip -d /w": ["/w"],
+            "unzip b.zip": ["."],
+            "ditto /tmp/wiki /w/wiki": ["/w/wiki"],
+            "cpio -idm -D /w": ["/w"],
+            "cpio -pdm /w": ["/w"],
+            "pax -r -f a.pax": ["."],
+            "rsync -a /tmp/backup/ /w/": ["/w/"],
+            "cp -r /tmp/backup/wiki/ /w/wiki": ["/w/wiki"],
+            "cp -R /tmp/backup/. /w/": ["/w/"],
+        }
+        for command, trees in cases.items():
+            self.assertEqual([t for t in read_shell(command).trees if t in trees], trees, command)
+        for command in ("unzip -l b.zip", "tar tzf b.tgz", "tar czf b.tgz src", "cp -r dist /w/x", "rsync a b"):
+            self.assertNotIn("/w", read_shell(command).trees, command)
+            self.assertNotIn(".", read_shell(command).trees, command)
+
+    def test_git_commands_that_rewrite_the_work_tree(self):
+        for command in ("git -C /w stash", "git -C /w stash pop", "git -C /w reset --hard HEAD~1", "git -C /w pull",
+                        "git -C /w merge x", "git -C /w rebase main", "git -C /w checkout .", "git -C /w checkout main",
+                        "git -C /w switch main", "git -C /w restore .", "git -C /w cherry-pick abc",
+                        "git -C /w apply fix.diff"):
+            self.assertTrue(any(tree in {"/w", "/w/."} for tree in read_shell(command).trees), command)
+        for command in ("git -C /w stash list", "git -C /w status", "git -C /w reset HEAD x", "git -C /w log",
+                        "git -C /w checkout -b new", "git -C /w switch -c new", "git -C /w apply --check fix.diff",
+                        "git -C /w commit -m x", "git -C /w add -A", "git -C /w fetch"):
+            self.assertEqual(read_shell(command).trees, [], command)
+
+    def test_xargs_gives_a_command_arguments_it_cannot_see(self):
+        self.assertIn(["lnk", "approve", SUBSTITUTED], read_shell("echo abc | xargs lnk approve").commands)
+        self.assertIn(["lnk", "approve", SUBSTITUTED], read_shell("xargs lnk approve < ids").commands)
+
 
 class LinkFilesGuardTests(unittest.TestCase):
     """Writes to Link's own files are held however they are spelt; writes beside them are not."""
@@ -182,7 +303,7 @@ class LinkFilesGuardTests(unittest.TestCase):
 
     def test_writes_beside_links_files_are_not_held(self):
         for command in ("cp notes.txt ~", "mv build.log ~/", "cp -r dist ~/", "chmod 700 ~", "mkdir ~/proj2",
-                        "tar -xf x.tar -C ~", "rm -rf ~/tmp", "rm -rf dist", "find . -name '*.pyc' -delete",
+                        "tar -xf x.tar -C ~/proj", "rm -rf ~/tmp", "rm -rf dist", "find . -name '*.pyc' -delete",
                         "echo $HOME", "python3 -c 'print(1)'", "bash -c 'for f in *; do echo $f; done'",
                         "git rm -r --cached build", "curl -sSLo out.tgz https://example.com",
                         "cat files.txt | xargs rm", "cp -r dist ~/link"):
@@ -200,6 +321,51 @@ class LinkFilesGuardTests(unittest.TestCase):
         for command in (f"rm -rf {self.ws.as_posix()}/wiki/memories", 'eval "$X"; rm -rf ~/link/.link-cache'):
             decision = decide(command)
             self.assertEqual((decision["approvable"], decision["governance"]), (False, True), command)
+
+    def test_archives_copies_and_git_above_links_files_are_held(self):
+        memory = "~/link/wiki/memories/a.md"
+        held = [
+            "tar xzf b.tgz -C ~", "tar xzf b.tgz -C ~/link", "cd ~/link && tar xzf /tmp/b.tgz",
+            "unzip -o b.zip -d ~/link", "ditto /tmp/wiki ~/link/wiki", "cpio -idm -D ~/link",
+            "rsync -a /tmp/backup/ ~/link/", "cp -r /tmp/backup/wiki/ ~/link/wiki", "cd ~/link && git checkout .",
+            "git -C ~/link reset --hard HEAD~1", "git -C ~/link stash", "git -C ~/link pull",
+            f"sed -Ei 's/deny/ask/' {memory}", f"sed --in-place 's/deny/ask/' {memory}",
+            f"perl -0pi -e 's/deny/ask/' {memory}", f"gawk -i inplace '{{print}}' {memory}",
+            f"patch {memory} < fix.diff", f"sort -o {memory} x", "function f { rm -rf ~/link; }; f",
+            # A path the reader cannot expand never lets the rest of the line through.
+            "cat ~x/y; rm -rf ~/link", "cp a ~-/; rm -rf ~/link", "echo hi > ~+/x; rm -rf ~/link",
+        ]
+        for command in held:
+            self.assertTrue(self._held(command), command)
+
+    def test_everyday_git_archives_and_edits_in_a_project_are_not_held(self):
+        for command in ("git stash", "git stash pop", "git pull", "git reset --hard", "git checkout main",
+                        "git merge feature", "git rebase main", "tar xzf release.tgz", "unzip x.zip",
+                        "patch -p1 < x.diff", "sed -i 's/a/b/' src/app.py", "cp -r assets/ public/",
+                        "rsync -a src/ build/", "cd ~/link && git status", "git -C ~/link log",
+                        "cd ~/link && git add -A && git commit -m wip", "cat ~nobody/x", "ls ~+/x"):
+            self.assertFalse(self._held(command), command)
+
+    def test_what_may_be_links_files_can_be_let_through_once_and_what_is_cannot(self):
+        def decide(command):
+            return evaluate_tool_call(self.index, {"tool_name": "Bash", "tool_input": {"command": command}},
+                                      context_path=str(self.home / "proj"),
+                                      protected=[self.ws / "wiki" / "memories", self.ws / ".link-cache"])
+        # Code that names Link's files, or a path through a variable Link cannot know, may be nothing.
+        for command in ("python3 -c \"import json; print(json.load(open('/x/link/.link-cache/hook-index.json')))\"",
+                        "node -e \"console.log(require('fs').readdirSync(process.env.HOME + '/link/wiki/memories'))\"",
+                        'cp notes.md "$PROJ/wiki/memories/"', "rm -r $BUILD/wiki"):
+            decision = decide(command)
+            self.assertEqual((decision["decision"], decision["approvable"], decision["governance"]),
+                             ("ask", True, False), command)
+        for command in ("rm -r ~/link/wiki", "git -C ~/link stash", f"sed -Ei s/a/b/ {self.ws}/wiki/memories/a.md",
+                        "rm -r $BUILD/wiki; rm -r ~/link/.link-cache", "lnk approve abc123",
+                        "echo abc123 | xargs lnk approve", "lnk enforce x --rule 'ask command: y'"):
+            decision = decide(command)
+            self.assertEqual((decision["approvable"], decision["governance"]), (False, True), command)
+        # Listing what waits, or showing rules, changes nothing.
+        for command in ("lnk approve", "lnk approve --json", "lnk enforce x --suggest", "python3 link.py approve"):
+            self.assertIsNone(decide(command), command)
 
 
 if __name__ == "__main__":

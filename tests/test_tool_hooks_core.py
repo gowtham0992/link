@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
@@ -25,6 +26,7 @@ from link_core.tool_hooks import (  # noqa: E402
     _fence_matches,
     evaluate_tool_call,
     load_hook_index,
+    pre_tool_reply,
     verify_deliveries,
     wrap_for_delivery,
 )
@@ -156,6 +158,72 @@ class RuleTests(_Store):
         moved.write_text(moved.read_text(encoding="utf-8").replace("status: active", "status: archived"),
                          encoding="utf-8")
         self.assertIsNone(self._decide("Bash", command="git push --force"))
+
+    def test_options_in_any_order_meet_the_rule(self):
+        self._memory("Never force-push.", ["deny command: git push --force*", "deny command: git push -f*",
+                                           "deny command: git push origin main*", "ask command: rm -rf",
+                                           "ask command: rm -rf *"])
+        for command in ("git push -u --force origin feat", "git push --no-verify --force", "git push -v --force",
+                        "git push --all --force", "git push -uf origin feature", "git push -u origin main",
+                        "git push --set-upstream origin main", "git push -q origin main", "rm -fr build",
+                        "rm -r -f build", "rm -Rf build", "rm --recursive --force build", "sudo rm -fr /",
+                        "git.exe push -f", "function gp { git push -f; }; gp"):
+            with self.subTest(command=command):
+                self.assertIsNotNone(self._decide("Bash", command=command))
+        for command in ("git push -u origin feature", "git push origin feature", "git push -o main origin feat",
+                        "rm -r build", "rm -f x.log", "git push upstream feature"):
+            with self.subTest(command=command):
+                self.assertIsNone(self._decide("Bash", command=command))
+
+    def test_a_folder_rule_covers_removing_the_folder_itself(self):
+        self._memory("Secrets are never changed by an agent.", ["deny write: secrets/**", "deny write: config/keys/**"])
+        for command in ("rm -r secrets", "rm -r ./secrets", "rm -r secrets/", "mv secrets /tmp/old",
+                        "find secrets -delete", "git rm -r secrets", "cp -r newsecrets/ secrets", "rm -r app/secrets",
+                        "rm -r config", "mv config /tmp", "sed -Ei 's/a/b/' secrets/x", "patch secrets/x < p.diff",
+                        "sort -o secrets/x secrets/x"):
+            with self.subTest(command=command):
+                self.assertEqual(self._decide("Bash", command=command)["decision"], "deny")
+        for command in ("Remove-Item -Recurse -Force secrets", "Remove-Item -r secrets/key.pem", "rd -r secrets"):
+            with self.subTest(command=command):
+                self.assertEqual(self._decide("PowerShell", command=command)["decision"], "deny")
+        # The working folder is above every rule's folder: what acts there selects, and is everyday.
+        for command in ("rm -r .", "find . -name '*.pyc' -delete", "git clean -fdx", "tar xzf release.tgz",
+                        "git stash", "git pull", "rm -r secrets-old", "rm -r build", "mv secrets.md notes.md",
+                        "cp a secrets.txt", "rm -r config-old", "cat secrets/x"):
+            with self.subTest(command=command):
+                self.assertIsNone(self._decide("Bash", command=command))
+
+    def test_a_path_the_reader_cannot_expand_never_lets_the_call_through(self):
+        self._memory("Never force-push.", ["deny command: git push -f*", "ask write: secrets/**"])
+        for command in ("cat ~x/y; git push -f", "git push -f > ~nobody/log", "cp a ~-/; git push -f",
+                        "echo hi > ~+/x; git push -f"):
+            with self.subTest(command=command):
+                self.assertEqual(self._decide("Bash", command=command)["decision"], "deny")
+        self.assertEqual(self._decide("PowerShell", command="Remove-Item ~\\x; git push -f")["decision"], "deny")
+        self.assertIsNone(self._decide("Read", file_path="~nobody/notes.md"))
+
+    def test_a_call_link_fails_to_read_waits_for_the_person(self):
+        self._memory("Never force-push.", ["ask command: git push --force*"])
+        event = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": str(self.base)}
+        with mock.patch("link_core.tool_hooks.evaluate_tool_call", side_effect=RuntimeError("boom")):
+            asked = json.loads(pre_tool_reply(self.base, event, project=None, emit="text").stdout)
+            self.assertEqual(asked["hookSpecificOutput"]["permissionDecision"], "ask")
+            self.assertIn("could not read", asked["hookSpecificOutput"]["permissionDecisionReason"])
+            # An agent that cannot ask holds it, for the person to approve once.
+            held = json.loads(pre_tool_reply(self.base, event, project=None, emit="codex").stdout)
+            self.assertEqual(held["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("lnk approve", held["hookSpecificOutput"]["permissionDecisionReason"])
+            with mock.patch("link_core.tool_hooks.tool_calls", side_effect=RuntimeError("worse")):
+                blocked = json.loads(pre_tool_reply(self.base, event, project=None, emit="text").stdout)
+                self.assertEqual(blocked["hookSpecificOutput"]["permissionDecision"], "deny")
+        with mock.patch("link_core.approvals.call_key", side_effect=UnicodeEncodeError("utf-8", "", 0, 1, "x")):
+            held = json.loads(pre_tool_reply(self.base, {**event, "tool_input": {"command": "git push --force"}},
+                                             project=None, emit="codex").stdout)
+            self.assertEqual(held["hookSpecificOutput"]["permissionDecision"], "deny")
+        # With no rule in force a failure costs nothing.
+        (self.wiki / "memories" / "never-force-push.md").unlink()
+        with mock.patch("link_core.tool_hooks.evaluate_tool_call", side_effect=RuntimeError("boom")):
+            self.assertEqual(pre_tool_reply(self.base, event, project=None, emit="text").stdout, "")
 
     def test_unrelated_calls_pass(self):
         self._memory("Never force-push to main.", ["ask command: git push --force*"])

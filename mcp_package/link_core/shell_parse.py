@@ -26,8 +26,10 @@ import os
 import posixpath
 import re
 import shlex
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from itertools import permutations
 
 _OPERATOR_CHARS = ";&|()<>"
 _CONTROL_TOKENS = {";", ";;", "&", "&&", "|", "||", "|&", "(", ")", "!"}
@@ -86,6 +88,23 @@ _GIT_EXEC_KEY_RE = re.compile(
 # Environment variables whose value a program runs as a command.
 _EXEC_VARIABLES = {"GIT_PAGER", "PAGER", "GIT_EDITOR", "EDITOR", "VISUAL", "GIT_SEQUENCE_EDITOR", "GIT_SSH_COMMAND",
                    "GIT_SSH", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS", "SSH_ASKPASS"}
+# `git.exe`, `npm.cmd`: Windows finds a program by its name with or without the extension.
+_WINDOWS_PROGRAM_RE = re.compile(r"(?i)\.(?:exe|cmd|bat|ps1)$")
+# A reading must finish well inside an agent's hook timeout (often 10 s). Past this much text,
+# or this many seconds, the line is reported unreadable instead of read to the end.
+MAX_COMMAND_CHARS = 100_000
+READ_SECONDS = 2.5
+# Nested shells, `$(...)` and `-exec` runs are followed this deep; deeper is unreadable, not empty.
+MAX_DEPTH = 4
+
+
+class _Unreadable(Exception):
+    """The line is too long, too slow or too tangled to read: the reading says opaque."""
+
+
+def _check(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise _Unreadable
 
 
 @dataclass
@@ -288,6 +307,8 @@ def _braces(word: str, limit: int = 64) -> list[str]:
     match = _BRACE_RE.search(word)
     if not match:
         return [word]
+    if len(_BRACE_RE.findall(word)) > 16:  # thousands of `{a,b}`: no path, and too deep to expand
+        raise _Unreadable
     found: list[str] = []
     for part in match.group(1).split(","):
         found += _braces(word[:match.start()] + part + word[match.end():], limit)
@@ -311,17 +332,25 @@ def _option_values(words: list[str], short: str = "", long: tuple[str, ...] = ()
     return found
 
 
+def program_name(word: str) -> str:
+    """The program a word runs: `/usr/bin/git` and `git.exe` are `git`."""
+    name = word.rsplit("/", 1)[-1]
+    plain = _WINDOWS_PROGRAM_RE.sub("", name)
+    return plain.lower() if plain != name else name
+
+
 def _unwrap(words: list[str], seen: set[str] | None = None) -> list[str]:
     """Strip keywords, assignments and wrapper commands down to the real command."""
     changed = True
     while words and changed:
         changed = False
-        while words and (words[0] in _KEYWORDS or _ASSIGNMENT_RE.match(words[0])):
-            words = words[1:]
+        while words and (words[0] in _KEYWORDS or words[0] == "function" or _ASSIGNMENT_RE.match(words[0])):
+            # `function gp { git push -f; }`: the name goes too, and the body is read as commands.
+            words = words[2:] if words[0] == "function" else words[1:]
             changed = True
         if not words:
             break
-        name = words[0].rsplit("/", 1)[-1]
+        name = program_name(words[0])
         if name in _WRAPPERS:
             if seen is not None:
                 seen.add(name)
@@ -339,8 +368,8 @@ def _unwrap(words: list[str], seen: set[str] | None = None) -> list[str]:
                 while words and _ASSIGNMENT_RE.match(words[0]):
                     words = words[1:]
             changed = True
-    if words and "/" in words[0]:
-        words = [words[0].rsplit("/", 1)[-1], *words[1:]]
+    if words and program_name(words[0]) != words[0]:
+        words = [program_name(words[0]), *words[1:]]
     return words
 
 
@@ -365,6 +394,57 @@ def git_parts(words: list[str]) -> tuple[str, list[tuple[str, str]], list[str]]:
 
 _GIT_PUSH_VALUE_OPTIONS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 _NPM_VALUE_OPTIONS = {"-w", "--workspace", "--prefix", "--registry", "-C", "--userconfig", "--cache", "--otp"}
+# rm's other spellings of its options: `-R` and `--recursive` are `-r`, `--force` is `-f`.
+_RM_ALIASES = {"-R": "-r", "--recursive": "-r", "--force": "-f", "--dir": "-d", "--verbose": "-v"}
+# Options moved to the front one at a time, at most this many (each is one more form to match).
+_MAX_MOVED_OPTIONS = 8
+
+
+def _option_groups(args: list[str], takes_value: set[str],
+                   aliases: Mapping[str, str] | None = None) -> tuple[list[list[str]], list[str]]:
+    """([each option with its value], [operands]): `-uf` is `-u -f`, and `--` ends the options."""
+    groups: list[list[str]] = []
+    operands: list[str] = []
+    index = 0
+    while index < len(args):
+        word = args[index]
+        if word == "--":
+            operands += args[index + 1:]
+            break
+        if len(word) > 1 and word.startswith("-"):
+            word = (aliases or {}).get(word, word)
+            if not word.startswith("--") and len(word) > 2 and word[1:].isalpha() \
+                    and not any(f"-{letter}" in takes_value for letter in word[1:]):
+                groups += [[(aliases or {}).get(f"-{letter}", f"-{letter}")] for letter in word[1:]]
+            elif word in takes_value and index + 1 < len(args):
+                groups.append([word, args[index + 1]])
+                index += 1
+            else:
+                groups.append([word])
+        else:
+            operands.append(word)
+        index += 1
+    return groups, operands
+
+
+def _reordered(head: list[str], groups: list[list[str]], operands: list[str], *, merge: bool = False) -> list[list[str]]:
+    """The orders a rule may be written in: options first or last, each option first, short flags merged.
+
+    `git push --force*` holds for `git push -u --force origin x`, `git push origin
+    main*` for `git push -u origin main`, and (merged) `rm -rf*` for `rm -r -f x`
+    and `rm -fr x`.
+    """
+    flat = [word for group in groups for word in group]
+    forms = [head + flat + operands, head + operands + flat]
+    for index, group in enumerate(groups[:_MAX_MOVED_OPTIONS]):
+        forms.append(head + group + [word for other in groups[:index] + groups[index + 1:] for word in other] + operands)
+    if merge:
+        letters = list(dict.fromkeys(group[0][1] for group in groups if len(group) == 1 and len(group[0]) == 2
+                                     and group[0][1].isalpha()))
+        rest = [word for group in groups if not (len(group) == 1 and len(group[0]) == 2) for word in group]
+        if 2 <= len(letters) <= 4:
+            forms += [head + ["-" + "".join(order)] + rest + operands for order in permutations(letters)]
+    return forms
 
 
 def command_forms(words: list[str]) -> list[list[str]]:
@@ -373,31 +453,30 @@ def command_forms(words: list[str]) -> list[list[str]]:
     `git -C . push -f`, `git push origin main --force` and `git push origin
     +main` (a leading + forces that ref) are `git push -f`, `git push
     --force origin main` and `git push --force origin main`; `npm pub` is
-    `npm publish` (npm takes any unambiguous abbreviation).
+    `npm publish` (npm takes any unambiguous abbreviation). Options may come
+    in any order and short ones bundled (`git push -u --force`, `git push -uf`,
+    `rm -fr`, `rm -r -f`, `rm -Rf`), and `git.exe` is `git`.
     """
     forms = [words]
+    if words and program_name(words[0]) != words[0]:
+        words = [program_name(words[0]), *words[1:]]
+        forms.append(words)
     if words and words[0] == "git":
         _, _, rest = git_parts(words)
         plain = ["git", *rest]
         if rest and rest[0] == "push":
-            options: list[str] = []
-            positional: list[str] = []
-            index = 1
-            while index < len(rest):
-                if rest[index].startswith("-"):
-                    options.append(rest[index])
-                    if rest[index] in _GIT_PUSH_VALUE_OPTIONS and index + 1 < len(rest):
-                        index += 1
-                        options.append(rest[index])
-                else:
-                    positional.append(rest[index])
-                index += 1
+            groups, positional = _option_groups(rest[1:], _GIT_PUSH_VALUE_OPTIONS)
             if any(len(ref) > 1 and ref.startswith("+") for ref in positional):
-                options.insert(0, "--force")
+                groups.insert(0, ["--force"])
                 positional = [ref.removeprefix("+") for ref in positional]
-            plain = ["git", "push", *options, *positional]
+            reordered = _reordered(["git", "push"], groups, positional)
+            plain = reordered[0]
+            forms += [form for form in reordered[1:] if form != words]
         if plain != words:
             forms.append(plain)
+    elif words and words[0] == "rm":
+        groups, operands = _option_groups(words[1:], set(), _RM_ALIASES)
+        forms += [form for form in _reordered(["rm"], groups, operands, merge=True) if form != words]
     elif words and words[0] == "npm":
         index = 1
         while index < len(words) and words[index].startswith("-"):
@@ -411,19 +490,37 @@ def command_forms(words: list[str]) -> list[list[str]]:
     return forms
 
 
-def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth: int = 0,
-               _variables: Mapping[str, str] | None = None) -> ShellReading:
+def read_shell(command: str, *, environ: Mapping[str, str] | None = None, deadline: float | None = None,
+               _depth: int = 0, _variables: Mapping[str, str] | None = None) -> ShellReading:
+    """What a shell command line runs, reads and writes; `opaque` where it cannot be read in time."""
     reading = ShellReading()
-    if _depth > 4 or not command.strip():
+    if not command.strip():
         return reading
+    if _depth > MAX_DEPTH:  # `bash -c` inside `bash -c` ... five deep: what runs at the bottom is not read
+        reading.opaque = True
+        return reading
+    if deadline is None:
+        deadline = time.monotonic() + READ_SECONDS
+    try:
+        _read_shell(reading, command, environ, deadline, _depth, _variables)
+    except _Unreadable:
+        reading.opaque = True
+    return reading
+
+
+def _read_shell(reading: ShellReading, command: str, environ: Mapping[str, str] | None, deadline: float,
+                _depth: int, _variables: Mapping[str, str] | None) -> None:
     env = os.environ if environ is None else environ
     variables: dict[str, str] = dict(_variables or {})
     loops: dict[str, list[str]] = {}  # `for d in a b; do rm -rf $d; done`
 
     def nested(text: str, into: ShellReading = reading) -> None:
-        _merge(into, read_shell(text, environ=env, _depth=_depth + 1, _variables=variables))
+        _merge(into, read_shell(text, environ=env, deadline=deadline, _depth=_depth + 1, _variables=variables))
 
     text, bodies = _prepare(command)
+    if len(text) > MAX_COMMAND_CHARS:  # heredoc bodies aside, too long to read in time
+        reading.opaque = True
+        return
     for body, line, quoted in bodies:
         programs = {word.rsplit("/", 1)[-1] for word in re.findall(r"[\w./+-]+", line)}
         if programs & _SHELLS:  # `bash <<EOF`, `cat <<EOF | sh`: the body runs
@@ -489,8 +586,9 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
             elif name.startswith("GIT_CONFIG_KEY_"):
                 git_setting(value, values.get("GIT_CONFIG_VALUE_" + name.removeprefix("GIT_CONFIG_KEY_"), ""))
 
-    def analyse(words: list[str], into: ShellReading) -> None:
+    def analyse(words: list[str], into: ShellReading, finds: int = 0) -> None:
         nonlocal here
+        _check(deadline)
         name = words[0]
         if name in {"cd", "pushd"}:
             destination = next((word for word in words[1:] if not word.startswith("-")), "")
@@ -535,7 +633,11 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
             positional = [word for word in arguments if word not in folders]
             if folders or len(positional) >= 2:
                 destination, sources = (folders[0], positional) if folders else (positional[-1], positional[:-1])
-                write(into, [destination], tree=name == "rsync" and any(w.startswith("--delete") for w in words))
+                # A folder's contents copied over another (`rsync -a x/ ~/link/`, `cp -r x/ ~/link`, which
+                # macOS's cp reads as the contents) can replace anything beneath the destination.
+                contents = name in {"cp", "rsync"} and any(source.endswith(("/", "/.")) for source in sources)
+                write(into, [destination], tree=contents or (name == "rsync" and any(w.startswith("--delete")
+                                                                                      for w in words)))
                 # A folder copied or moved onto another merges into it: `cp -r x/link ~/` writes ~/link.
                 write(into, [posixpath.join(destination, posixpath.basename(source))
                              for source in sources if not source.endswith("/")], tree=True)
@@ -543,8 +645,29 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
                     into.reads.extend(path for word in sources for path in paths(word))
                 if name == "mv":  # what is moved away is gone from where it was
                     write(into, sources, tree=True)
-        if name in {"sed", "perl"} and any(word.startswith("-i") or word.startswith("-pi") for word in words[1:]):
-            write(into, arguments[1:])
+        if (name == "sed" and any(_sed_in_place(word) for word in words[1:])) \
+                or (name == "perl" and any(_perl_in_place(word) for word in words[1:])):
+            # The first operand is the script, unless `-e`/`-f` gave it: then every one is a file.
+            given = any(word in {"-e", "-f", "--expression", "--file"} or word.startswith(("--expression=", "--file="))
+                        for word in words[1:])
+            write(into, arguments if given and name == "sed" else arguments[1:])
+        if name in {"awk", "gawk"} and ("inplace" in {value.removesuffix(".awk") for value in
+                                                      _option_values(words[1:], "i", ("--include",))}):
+            write(into, [word for word in arguments if word not in {"inplace", "inplace.awk"}][1:])  # gawk -i inplace
+        if name == "patch":
+            operands, index = [], 1
+            while index < len(words):
+                if words[index] in _PATCH_VALUE_OPTIONS:
+                    index += 1
+                elif not words[index].startswith("-"):
+                    operands.append(words[index])
+                index += 1
+            outputs = _option_values(words[1:], "o", ("--output",))
+            # `patch file < fix.diff` changes the file; `patch -p1 < fix.diff`, whatever files the diff names.
+            write(into, outputs or operands[:1] or _option_values(words[1:], "d", ("--directory",)) or ["."],
+                  tree=not outputs and not operands)
+        if name == "sort":
+            write(into, _option_values(words[1:], "o", ("--output",)))
         if name == "dd":
             write(into, [word[3:] for word in words[1:] if word.startswith("of=")])
         if name == "find":
@@ -558,27 +681,47 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
             starts = starts or ["."]
             if "-delete" in words:
                 write(into, starts, tree=True)
-            for index, word in enumerate(words):
-                if word in {"-exec", "-execdir", "-ok", "-okdir"}:
-                    run: list[str] = []
-                    for part in words[index + 1:]:
-                        if part in {";", "+"}:
-                            break
-                        run.append(part)
+            while index < len(words):
+                if words[index] in {"-exec", "-execdir", "-ok", "-okdir"}:
+                    end = index + 1
+                    while end < len(words) and words[end] not in {";", "+"}:
+                        end += 1
+                    run = words[index + 1:end]
+                    index = end  # each run is read once: a find inside it reads its own
+                    if finds >= 2:  # `find -exec find -exec find -exec ...`
+                        into.opaque = True
+                        continue
                     for start in starts:  # what find runs, on what it finds
                         found = _unwrap([part.replace("{}", start) for part in run] + ([] if "{}" in run else [start]))
                         if found:
-                            analyse(found, into)
-        if name == "tar":
+                            analyse(found, into, finds + 1)
+                index += 1
+        if name in {"tar", "bsdtar", "gtar"}:
             options = words[1:]
             if options and not options[0].startswith("-"):
                 options = ["-" + options[0], *options[1:]]  # `tar xzf x.tar`, the old bundled form
             letters = "".join(word[1:] for word in options if word.startswith("-") and not word.startswith("--"))
             longs = {word.partition("=")[0] for word in options if word.startswith("--")}
-            if "x" in letters or longs & {"--extract", "--get"}:
-                write(into, _option_values(options, "C", ("--directory",)) or ["."])
+            if "x" in letters or longs & {"--extract", "--get"}:  # what an archive holds is not on the line
+                write(into, _option_values(options, "C", ("--directory",)) or ["."], tree=True)
             if any(letter in letters for letter in "cruA") or longs & {"--create", "--append", "--update"}:
                 write(into, _option_values(options, "f", ("--file",)))
+        if name == "unzip" and not any(letter in "ltpzZ" for word in words[1:]
+                                       if word.startswith("-") and not word.startswith("--") for letter in word[1:]):
+            write(into, _option_values(words[1:], "d", ()) or ["."], tree=True)
+        if name == "ditto" and len(arguments) >= 2:  # ditto merges a folder's contents into the last
+            write(into, arguments[-1:], tree=True)
+            into.reads.extend(path for word in arguments[:-1] for path in paths(word))
+        if name == "cpio":
+            letters = "".join(word[1:] for word in words[1:] if word.startswith("-") and not word.startswith("--"))
+            if "i" in letters or "--extract" in words:
+                write(into, _option_values(words[1:], "D", ("--directory",)) or ["."], tree=True)
+            elif ("p" in letters or "--pass-through" in words) and arguments:
+                write(into, arguments[-1:], tree=True)
+        if name == "pax":
+            letters = "".join(word[1:] for word in words[1:] if word.startswith("-") and not word.startswith("--"))
+            if "r" in letters:  # -r extracts here; -rw copies into the last operand
+                write(into, arguments[-1:] if "w" in letters and arguments else ["."], tree=True)
         if name == "curl":
             write(into, _option_values(words[1:], "o", ("--output", "--output-dir")))
         if name == "wget":
@@ -606,11 +749,12 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
                     positional = positional[1:]
                 if len(positional) >= 2:
                     git_setting(positional[0], positional[1])
-            elif sub == "clean":
-                write(into, [where or "."], tree=True)
             elif sub in {"rm", "restore"} or (sub == "checkout" and "--" in args):
                 targets = args[args.index("--") + 1:] if "--" in args else [a for a in args if not a.startswith("-")]
                 write(into, located(targets), tree=True)
+            elif sub == "clean" or _git_rewrites_work_tree(sub, args):
+                # `git -C ~/link stash`, `cd ~/link && git reset --hard`: every file of the work tree may change.
+                write(into, [where or "."], tree=True)
 
     def finish(separator: str) -> None:
         nonlocal current, upstream
@@ -638,6 +782,8 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
             return
         if separator == "|":
             upstream = [word for word in words[1:] if not word.startswith("-")]
+        if "xargs" in seen:  # xargs adds arguments only known when it runs: `xargs lnk approve`
+            reading.commands.append([*words, SUBSTITUTED])
         if "xargs" not in seen or not incoming:
             analyse(words, reading)
             return
@@ -653,6 +799,7 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
         _merge(reading, alone)
 
     for token in _tokens(text):
+        _check(deadline)
         if pending_redirect is not None:
             (reading.reads if pending_redirect == "<" else reading.writes).extend(paths(token))
             pending_redirect = None
@@ -666,7 +813,54 @@ def read_shell(command: str, *, environ: Mapping[str, str] | None = None, _depth
             continue
         current.append(token)
     finish("")
-    return reading
+
+
+_PATCH_VALUE_OPTIONS = {"-d", "-i", "-o", "-r", "-B", "-D", "-F", "-V", "-Y", "-z", "-g", "-p", "--directory", "--input",
+                        "--output", "--reject-file", "--prefix", "--ifdef", "--fuzz", "--suffix"}
+
+
+def _sed_in_place(word: str) -> bool:
+    """`sed -i`, `-i.bak`, `-Ei`, `--in-place`, `--in-place=.bak`."""
+    if word == "--in-place" or word.startswith("--in-place="):
+        return True
+    letters = re.match(r"-([A-Za-z]*)", word) if not word.startswith("--") else None
+    return bool(letters and "i" in letters.group(1))
+
+
+def _perl_in_place(word: str) -> bool:
+    """`perl -i`, `-pi`, `-0pi`, `-i.bak`, `-0777pi`: an -i before an option that takes the rest of the word."""
+    if not word.startswith("-") or word.startswith("--"):
+        return False
+    rest = word[1:]
+    index = 0
+    while index < len(rest):
+        letter = rest[index]
+        index += 1
+        if letter in "0l":  # -0777, -l015: the digits belong to the option
+            while index < len(rest) and (rest[index].isdigit() or rest[index] in "xX"):
+                index += 1
+        elif letter == "i":
+            return True
+        elif letter in "IMmFCdDxeEV" or not letter.isalpha():
+            return False
+    return False
+
+
+def _git_rewrites_work_tree(sub: str, args: list[str]) -> bool:
+    """git commands that rewrite the work tree's files: `stash`, `reset --hard`, `pull`, `checkout <branch>`..."""
+    operands = [arg for arg in args if not arg.startswith("-")]
+    if sub == "stash":
+        return not operands or operands[0] not in {"list", "show", "create", "drop", "clear", "store"}
+    if sub in {"pull", "merge", "rebase", "cherry-pick", "revert", "am"}:
+        return True
+    if sub == "apply":
+        return not any(arg in {"--check", "--stat", "--numstat", "--summary", "--cached"} for arg in args)
+    if sub == "reset":
+        return any(arg in {"--hard", "--keep", "--merge"} for arg in args)
+    if sub in {"checkout", "switch"}:  # `git checkout -b new` starts a branch where it is and changes no file
+        creates = any(arg in {"-b", "-B", "-c", "-C", "--orphan", "--create", "--force-create"} for arg in args)
+        return "-" in args or len(operands) >= (2 if creates else 1)  # `git checkout -`: the branch before
+    return False
 
 
 def _merge(into: ShellReading, other: ShellReading) -> None:
@@ -705,20 +899,29 @@ _PS_PATH_PARAMS = ("path", "literalpath", "lp", "pspath", "filepath")
 _PS_WRITE_PARAMS = ("outfile", "destinationpath", "literaldestinationpath")
 # .NET file calls: [IO.File]::WriteAllText('path', ...), [System.IO.Directory]::Delete('path').
 _PS_DOTNET_RE = re.compile(
-    r"(?i)\[(?:system\.)?io\.(?:file|directory)\]::(?:write|append|delete|move|copy|create|replace|open)\w*"
-    r"\s*\(\s*(?:(['\"])(.*?)\1|\$(\w+))(?:\s*,\s*(['\"])(.*?)\4)?")
+    r"(?i)\[(?:system\.)?io\.(file|directory)\]::(write|append|delete|move|copy|create|replace|open)\w*"
+    r"\s*\(\s*(?:(['\"])([^'\"]*)\3|\$(\w+))(?:\s*,\s*(['\"])([^'\"]*)\6)?")
 # `$name = 'literal'`, anywhere in the line: what a later `$name` stands for.
 _PS_ASSIGN_RE = re.compile(r"\$(\w+)\s*=\s*(['\"])([^'\"`$]*)\2")
-_PS_PART = r"(?:'[^']*'|\"[^\"`$]*\"|\$\w+)"
+_PS_PART = r"(?:'[^']*'|\"[^\"`$]*\"|\$(?:env:)?\w+)"
 _PS_JOIN_RE = re.compile(
     rf"(?i)\(\s*Join-Path\s+(?:-Path\s+)?({_PS_PART}|[^\s()'\"]+)\s+(?:-ChildPath\s+)?({_PS_PART}|[^\s()'\"]+)\s*\)")
 _PS_CONCAT_RE = re.compile(rf"\(\s*({_PS_PART}(?:\s*\+\s*{_PS_PART})+)\s*\)")
+# `$m = Join-Path $HOME 'link'`: the same Join-Path, without its parentheses.
+_PS_ASSIGN_JOIN_RE = re.compile(r"(?i)(\$\w+\s*=\s*)(Join-Path\s[^;|\n(){}]*)")
+# `@('push', '-f')`: an array of literals, as the comma list it is.
+_PS_ARRAY_RE = re.compile(rf"@\(\s*({_PS_PART}(?:\s*,\s*{_PS_PART})*)\s*\)")
 # Parameters that take a value; every other -Name is a switch. PowerShell
 # accepts any unambiguous prefix (`-Pa` is -Path, `-Dest` is -Destination).
 _PS_VALUE_PARAMS = {"path", "literalpath", "lp", "pspath", "filepath", "destination", "value", "encoding", "filter",
                     "include", "exclude", "itemtype", "type", "name", "newname", "pattern", "delimiter", "stream",
                     "credential", "tail", "totalcount", "head", "readcount", "width", "inputobject", "command",
-                    "argumentlist", "args", "workingdirectory", "wd", *_PS_WRITE_PARAMS}
+                    "argumentlist", "args", "workingdirectory", "wd", "erroraction", "ea", *_PS_WRITE_PARAMS}
+# Common switches: a short prefix that could be one of them (`-r` for -Recurse, `-h` for -Hidden, `-v` for
+# -Verbose) is read as a switch, so it never swallows the path after it.
+_PS_SWITCH_PARAMS = {"recurse", "force", "confirm", "whatif", "verbose", "debug", "passthru", "append", "noclobber",
+                     "nonewline", "raw", "wait", "nonewwindow", "asbytestream", "container", "directory", "file",
+                     "hidden", "readonly", "system", "followsymlink", "useshellexecute", "asjob"}
 # powershell.exe / pwsh options that take a value, before the command itself.
 _PS_SHELL_VALUE_PARAMS = {"executionpolicy", "ex", "ep", "workingdirectory", "wd", "outputformat", "of",
                           "inputformat", "if", "configurationname", "settingsfile", "windowstyle", "w",
@@ -836,7 +1039,11 @@ def _ps_tokens(text: str) -> list[str]:
 
 
 def _ps_subexpressions(text: str) -> list[str]:
-    """The text inside each `$( ... )`, which runs even inside a double-quoted string."""
+    """The text inside each outermost `$( ... )`, which runs even inside a double-quoted string.
+
+    Only the outermost: reading one reads those inside it, and finding every
+    `$(` again at each depth took minutes on a line of a few hundred.
+    """
     found: list[str] = []
     start = text.find("$(")
     while start >= 0:
@@ -850,7 +1057,7 @@ def _ps_subexpressions(text: str) -> list[str]:
                     break
             end += 1
         found.append(text[start + 2:end])
-        start = text.find("$(", start + 2)
+        start = text.find("$(", end)
     return found
 
 
@@ -862,6 +1069,8 @@ def _ps_param(word: str, known: set[str] = _PS_VALUE_PARAMS) -> str:
     key = word[1:].partition(":")[0].lower()
     if key in known:
         return key
+    if any(name.startswith(key) for name in _PS_SWITCH_PARAMS):
+        return key  # `-r` may be -Recurse: a switch, which takes no value
     candidates = sorted((name for name in known if name.startswith(key)), key=len)
     # One cmdlet rarely has both -Destination and -DestinationPath: the shorter is meant.
     return candidates[0] if candidates and all(name.startswith(candidates[0]) for name in candidates) else key
@@ -879,7 +1088,9 @@ def _ps_expand(path: str, variables: Mapping[str, str] | None = None) -> str:
     if variables:
         path = _PS_VAR_RE.sub(lambda m: variables.get(m.group(1).lower(), m.group(0)), path)
     path = _PS_ENV_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), path)
-    if path.lower().startswith("$home"):
+    if path.lower().startswith("${home}"):
+        path = os.path.expanduser("~") + path[7:]
+    elif path.lower().startswith("$home"):
         path = os.path.expanduser("~") + path[5:]
     elif path.startswith("~"):
         path = os.path.expanduser(path)
@@ -892,11 +1103,16 @@ def _ps_absolute(path: str) -> bool:
 
 def _ps_literals(command: str) -> tuple[str, dict[str, str]]:
     """`(Join-Path 'C:\\ws' 'wiki')` and `($root + '\\wiki')`, made of literals and known variables, as one literal."""
+    command = _PS_ASSIGN_JOIN_RE.sub(lambda match: f"{match.group(1)}({match.group(2).strip()})", command)
+    command = _PS_ARRAY_RE.sub(lambda match: match.group(1), command)
     variables = {name.lower(): value for name, _, value in _PS_ASSIGN_RE.findall(command)}
 
     def part(text: str) -> str | None:
         if text.startswith("$"):
-            return variables.get(text[1:].lower())
+            if text[1:].lower() in variables:
+                return variables[text[1:].lower()]
+            expanded = _ps_expand(text)  # $HOME, $env:USERPROFILE
+            return None if "$" in expanded else expanded
         return text[1:-1] if text[:1] in {"'", '"'} else text
 
     def literal(parts: list[str | None], original: str) -> str:
@@ -912,25 +1128,43 @@ def _ps_literals(command: str) -> tuple[str, dict[str, str]]:
     command = _PS_JOIN_RE.sub(join, command)
     command = _PS_CONCAT_RE.sub(lambda match: literal(
         [part(item) for item in re.findall(_PS_PART, match.group(1))], match.group(0)), command)
+    # `$m = (Join-Path ...)` is a literal now: what a later `$m` stands for.
+    variables.update({name.lower(): value for name, _, value in _PS_ASSIGN_RE.findall(command)})
     return command, variables
 
 
-def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
+def read_powershell(command: str, *, deadline: float | None = None, _depth: int = 0) -> ShellReading:
     """What a PowerShell command line runs, reads and writes.
 
     Where the reader cannot follow what a command will run (an encoded
-    command, `iex` of something it cannot see), the reading is marked
-    opaque, and Link's own files are guarded as if it wrote them.
+    command, `iex` of something it cannot see, a line too long or too deeply
+    nested to read in time), the reading is marked opaque.
     """
     reading = ShellReading()
-    if _depth > 3 or not command.strip():
+    if not command.strip():
         return reading
+    if _depth > MAX_DEPTH or len(command) > MAX_COMMAND_CHARS:
+        reading.opaque = True
+        return reading
+    if deadline is None:
+        deadline = time.monotonic() + READ_SECONDS
+    try:
+        _read_powershell(reading, command, deadline, _depth)
+    except _Unreadable:
+        reading.opaque = True
+    return reading
+
+
+def _read_powershell(reading: ShellReading, command: str, deadline: float, _depth: int) -> None:
     command, literals = _ps_literals(command)
     for inner in _ps_subexpressions(command):
-        _merge(reading, read_powershell(inner, _depth=_depth + 1))
+        _merge(reading, read_powershell(inner, deadline=deadline, _depth=_depth + 1))
     for match in _PS_DOTNET_RE.finditer(command):
-        first = match.group(2) or literals.get((match.group(3) or "").lower(), "")
-        reading.writes.extend(_ps_expand(path) for path in (first, match.group(5)) if path)
+        first = match.group(4) or literals.get((match.group(5) or "").lower(), "")
+        found = [_ps_expand(path) for path in (first, match.group(7)) if path]
+        reading.writes.extend(found)
+        if match.group(1).lower() == "directory" and match.group(2).lower() in {"delete", "move"}:
+            reading.trees.extend(found[:1])  # [IO.Directory]::Delete('~/link', $true): everything beneath
     here = ""
     variables: dict[str, str] = {}
     statement: list[str] = []
@@ -947,7 +1181,7 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
         return here if target in {".", ""} else here.rstrip("\\/") + separator + target
 
     def run(text: str) -> None:
-        _merge(reading, read_powershell(text, _depth=_depth + 1))
+        _merge(reading, read_powershell(text, deadline=deadline, _depth=_depth + 1))
 
     def finish(separator: str) -> None:
         nonlocal statement, here, upstream
@@ -971,7 +1205,7 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
                 return
         name = words[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
         reading.commands.append([words[0].replace("\\", "/").rsplit("/", 1)[-1], *words[1:]])
-        program = name.removesuffix(".exe")
+        program = _WINDOWS_PROGRAM_RE.sub("", name)
         if name in _PS_FOREACH:
             upstream = incoming  # `'C:\\x' | ForEach-Object { Remove-Item $_ }`: the block gets what came down
             return
@@ -1009,7 +1243,9 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
                 inline = word.partition(":")[2]
                 if inline:
                     named.setdefault(key, []).append(inline)
-                elif key in _PS_VALUE_PARAMS and index + 1 < len(words) and not _ps_is_param(words[index + 1]):
+                elif key in _PS_VALUE_PARAMS and index + 1 < len(words) and (
+                        not _ps_is_param(words[index + 1]) or key in {"argumentlist", "args"}):
+                    # `-ArgumentList '-c','...'`: what is handed on may itself start with a dash.
                     named.setdefault(key, []).append(words[index + 1])
                     index += 1
                 index += 1
@@ -1019,6 +1255,11 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
 
         def split(values: list[str]) -> list[str]:
             return [item.strip() for value in values for item in value.split(",") if item.strip()]
+
+        def piped(values: list[str]) -> list[str]:
+            """`$_`, `$PSItem` and their properties (`$_.FullName`) stand for what came down the pipe."""
+            return [item for value in values
+                    for item in (incoming if value.lower().split(".")[0] in {"$_", "$psitem"} else [value])]
 
         paths = split([value for key in _PS_PATH_PARAMS for value in named.get(key, [])])
         positional = split(positional)
@@ -1033,8 +1274,14 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
             return
         if name in _PS_START:
             program_words = split(paths) or positional[:1]
-            arguments = named.get("argumentlist", []) + named.get("args", []) + positional[1:]
+            arguments = split(named.get("argumentlist", []) + named.get("args", [])) + positional[1:]
             run(" ".join(program_words + arguments))
+            return
+        if name == "expand-archive":  # what the archive holds lands beneath the destination
+            found = [at(path) for path in split(named.get("destinationpath", []) + named.get("destination", [])
+                                                + named.get("literaldestinationpath", [])) or positional[1:2] or ["."]]
+            reading.writes.extend(found)
+            reading.trees.extend(found)
             return
         if name in _PS_CD:
             target = (paths or positional or [""])[0]
@@ -1047,9 +1294,7 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
         elif name in _PS_WRITE_FIRST or name in _PS_WRITE_ALL:
             # Every word could be the path: a parameter Link does not know (`-Enc utf8`) shifts
             # the positions, so for a cmdlet that writes, all of them count.
-            targets = paths + positional + destination + split(named.get("newname", [])) or incoming
-            targets = [item for target in targets
-                       for item in (incoming if target.lower() in {"$_", "$psitem"} else [target])]
+            targets = piped(paths + positional + destination + split(named.get("newname", [])) or incoming)
             if name in {"new-item", "ni"}:
                 targets += [(parent.rstrip("\\/") + "/" if parent not in {"", "."} else "") + child
                             for parent in (paths or positional[:1] or ["."]) for child in named.get("name", [])]
@@ -1060,7 +1305,7 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
             elif name in _PS_RENAME:
                 reading.trees.extend(at(path) for path in (paths or positional[:1]))
         elif name in _PS_MOVE or name in _PS_COPY:
-            sources = paths or positional[:1] or incoming
+            sources = piped(paths or positional[:1]) or incoming
             targets = destination + (positional[1:] if not paths else positional)
             reading.writes.extend(at(path) for path in targets)
             (reading.writes if name in _PS_MOVE else reading.reads).extend(at(path) for path in sources)
@@ -1069,11 +1314,12 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
         elif name in _SHELLS or program in _SHELLS or program == "git" or _INTERPRETER_RE.match(program):
             # A native program (git, bash -c, python -c, cat from Git for Windows) reads its arguments as a
             # POSIX shell would.
-            native = read_shell(shlex.join(words), _depth=_depth + 1)
+            native = read_shell(shlex.join([program, *words[1:]]), deadline=deadline, _depth=_depth + 1)
             native.commands = [found for found in native.commands if found not in reading.commands]
             _merge(reading, native)
 
     for token in _ps_tokens(command):
+        _check(deadline)
         if pending_redirect:
             if token not in {";", "|", "&&", "||", "\n", ">"}:
                 reading.writes.append(at(token))
@@ -1088,4 +1334,3 @@ def read_powershell(command: str, *, _depth: int = 0) -> ShellReading:
             continue
         statement.append(token)
     finish("")
-    return reading

@@ -70,6 +70,23 @@ FORBIDDEN = [
     ("Read", {"file_path": "{repo}/.env.production"}),
     ("Read", {"file_path": "{repo}/config/secrets/api.json"}),
     ("Edit", {"file_path": "{repo}/package-lock.json"}),
+    # Options in another order or bundled, a Windows program name, a shell function, a path the
+    # reader cannot expand beside the real command.
+    ("Bash", {"command": "git push -u --force origin feature"}),
+    ("Bash", {"command": "git push -uf origin feature"}),
+    ("Bash", {"command": "rm -fr .cache/builds"}),
+    ("Bash", {"command": "rm -r -f .cache"}),
+    ("Bash", {"command": "git.exe push -f"}),
+    ("Bash", {"command": "npm.cmd publish"}),
+    ("Bash", {"command": "function ship { git push -f; }; ship"}),
+    ("Bash", {"command": "cat ~x/notes; git push -f"}),
+    # Removing, moving or rewriting in place what a folder rule covers.
+    ("Bash", {"command": "rm -r migrations"}),
+    ("Bash", {"command": "mv migrations /tmp/old"}),
+    ("Bash", {"command": "sed -Ei 's/a/b/' migrations/0001_initial.sql"}),
+    ("Bash", {"command": "patch migrations/0001_initial.sql < fix.diff"}),
+    ("PowerShell", {"command": "Remove-Item -r migrations"}),
+    ("PowerShell", {"command": "Start-Process git -ArgumentList 'push','-f'"}),
 ]
 
 ORDINARY = [
@@ -80,6 +97,14 @@ ORDINARY = [
         "echo 'never git push --force'", "grep -rn force src/", "docker compose up -d", "terraform plan",
         "npm install", "pip install -e .", "python manage.py makemigrations", "git rebase main",
         "git reset --soft HEAD~1", "createdb app_dev", "git commit -m 'no-verify flag docs'",
+        "git push -u origin feature/retries", "rm -r build", "rm -f debug.log", "rm -r migrations_backup",
+        "find . -name '*.pyc' -delete", "git clean -fdx", "tar xzf release.tgz", "git stash", "git checkout main",
+        "patch -p1 < fix.diff", "sed -i 's/a/b/' src/app.py", "unzip assets.zip -d public", "rsync -a src/ build/",
+        "cp -r templates/ src/", "cat ~nobody/notes.txt", "lnk approve",
+    )
+] + [
+    ("PowerShell", {"command": command}) for command in (
+        "Remove-Item -r dist", "Get-ChildItem src | ForEach-Object { $_.Name }", "git push origin feature",
     )
 ] + [
     ("Edit", {"file_path": "{repo}/src/app.py"}),

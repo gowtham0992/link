@@ -65,6 +65,56 @@ class ReadPowerShellTests(unittest.TestCase):
         self.assertEqual(nested.writes, [r"C:\ws\wiki"])
         self.assertEqual(read_powershell("bash -c 'cat .env'").reads, [".env"], "a POSIX shell inside reads as one")
 
+    def test_a_short_switch_never_swallows_the_path(self):
+        for command in ("Remove-Item -r C:\\ws\\wiki", "rm -r C:\\ws\\wiki", "rd -r C:\\ws\\wiki",
+                        "Remove-Item -re -fo C:\\ws\\wiki", "ri -h C:\\ws\\wiki", "Remove-Item -v C:\\ws\\wiki"):
+            reading = read_powershell(command)
+            self.assertIn("C:\\ws\\wiki", reading.writes, command)
+            self.assertIn("C:\\ws\\wiki", reading.trees, command)
+        self.assertEqual(read_powershell("Get-Content -h 5 .env").reads, ["5", ".env"])
+        self.assertEqual(read_powershell("Copy-Item a.txt -Dest C:\\x").writes, ["C:\\x"])
+
+    def test_pipeline_items_joined_paths_and_dotnet_folders(self):
+        home = os.path.expanduser("~")
+        os.environ["LINK_PS_HOME"] = "C:\\Users\\me"
+        try:
+            cases = {
+                "Get-ChildItem C:\\ws\\m | ForEach-Object { Remove-Item $_.FullName }": "C:\\ws\\m",
+                "gci C:\\ws\\m -r | % { ri $PSItem.FullName }": "C:\\ws\\m",
+                "Remove-Item (Join-Path $HOME 'link') -Recurse": f"{home}/link",
+                "Remove-Item (Join-Path $env:LINK_PS_HOME 'link') -Recurse": "C:\\Users\\me\\link",
+                "$m = Join-Path $HOME 'link/wiki'; Remove-Item $m -Recurse": f"{home}/link/wiki",
+                "[IO.Directory]::Delete('C:\\ws\\wiki', $true)": "C:\\ws\\wiki",
+                "Expand-Archive x.zip C:\\ws -Force": "C:\\ws",
+                "Expand-Archive -Path x.zip -DestinationPath C:\\ws": "C:\\ws",
+            }
+            for command, tree in cases.items():
+                self.assertIn(tree, read_powershell(command).trees, command)
+        finally:
+            del os.environ["LINK_PS_HOME"]
+        self.assertIn("C:\\ws\\m", read_powershell("Get-ChildItem C:\\ws\\m | % { Set-Content $_.FullName '' }").writes)
+        self.assertEqual(read_powershell("[IO.File]::Delete('C:\\ws\\a.md')").trees, [])
+        self.assertEqual(read_powershell("Remove-Item (Join-Path $unknown 'dist')").writes, [])
+
+    def test_programs_started_indirectly_are_seen(self):
+        for command in ("Start-Process git -ArgumentList 'push','-f'", "Start-Process git -ArgumentList @('push','-f')",
+                        "Start-Process git 'push -f'", "& 'C:\\Program Files\\Git\\bin\\git.exe' push -f"):
+            commands = [" ".join(words) for words in read_powershell(command).commands]
+            self.assertTrue(any(c.startswith(("git push -f", "git.exe push -f")) for c in commands), (command, commands))
+        reading = read_powershell("Start-Process pwsh -ArgumentList '-c','Remove-Item C:\\ws\\wiki -Recurse'")
+        self.assertEqual(reading.trees, ["C:\\ws\\wiki"])
+
+    def test_deep_subexpressions_are_read_quickly_and_too_deep_is_opaque(self):
+        import time
+
+        started = time.perf_counter()
+        reading = read_powershell("git push -f; echo " + "$(" * 300 + "true" + ")" * 300)
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertTrue(reading.opaque)
+        self.assertIn(["git", "push", "-f"], reading.commands)
+        self.assertFalse(read_powershell('echo "$(Get-Date)" "$(whoami)"').opaque)
+        self.assertTrue(read_powershell("Remove-Item " + "a," * 60_000).opaque, "too long to read in time")
+
     def test_the_powershell_tool_is_read_as_powershell(self):
         self.assertEqual(tool_calls({"tool_name": "PowerShell", "tool_input": {"command": "gc .env"}}),
                          [("powershell", "gc .env")])
