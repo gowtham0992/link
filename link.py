@@ -5177,7 +5177,7 @@ def main(argv: list[str] | None = None) -> int:
             "",
             "  lnk proof     see cross-agent memory work (~1 second, throwaway)",
             "  lnk try       build a full demo wiki you can explore",
-            "  lnk setup     make it yours: wire every agent you have, one command",
+            "  lnk setup     make it yours: wire every agent it finds, one command",
             "  lnk status    is my workspace healthy?",
             "  lnk --help    everything else, grouped by task",
             "",

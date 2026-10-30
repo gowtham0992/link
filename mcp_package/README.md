@@ -173,10 +173,13 @@ In the local web proposal picker, unreadable raw files are surfaced as
 
 ## Automatic Session Hooks
 
-Agents with session-hook support (Claude Code, Codex, Cursor) can run the
-memory loop automatically: `lnk connect <agent> --hooks --write` (from a Link
-checkout or installer) installs hooks that inject a bounded memory brief into
-every new session and store proposal-only session notes at session end.
+Agents with session-hook support (Claude Code, Cursor, Codex, Gemini CLI,
+Antigravity, Copilot, Windsurf and Kiro) can run the memory loop
+automatically: `lnk connect <agent> --hooks --write` (from a Link checkout or
+installer) installs hooks that inject a bounded memory brief into every new
+session where the agent has a start event, and on Claude Code and Cursor
+store proposal-only session notes at session end. The same hooks check
+reviewed memories' enforced rules before tool calls.
 Sessions with nothing memory-worthy are skipped, duplicate end events are
 deduplicated, and durable memory still requires explicit review. If hooks are
 installed, agents should skip the manual startup brief call.
@@ -204,7 +207,7 @@ Plain files with no LLM in the memory layer, measured against the systems
 that have one everywhere:
 
 - **LoCoMo end-to-end QA** (all 1,540 questions, under mem0's own open
-  harness): **84.8%** vs mem0's cloud platform at 83.2% under the same
+  harness; measured on Link 3.x, not yet re-run): **84.8%** vs mem0's cloud platform at 83.2% under the same
   judge — confirmed by a second, independent judge (Tencent Hunyuan 3):
   85.5% vs 83.6%.
 - **LongMemEval evidence retrieval**: the memory layer put the gold
@@ -212,7 +215,7 @@ that have one everywhere:
   LLM judge).
 - **Memory hygiene**: **0%** junk stored over a simulated multi-month
   session stream (CI-enforced); the same pipeline with governance off
-  stores 23.9%.
+  stores 35.7%.
 
 Every number is published with its config, judge models, caveats, and the
 experiments that lost:

@@ -57,7 +57,7 @@ What each agent gets depends on what it lets Link plug into:
 | Codex | start hook, MCP, `~/.codex/AGENTS.md` | start | shell commands and patches (held) | no |
 | Gemini CLI | start hook, MCP, `GEMINI.md` | start | shell, file reads and writes; asks you | no |
 | Antigravity | start hook, MCP | start | shell, file reads and writes; asks you | no |
-| Copilot CLI and VS Code | start hook, MCP, compiled files | start | shell, file reads and writes; asks you | no |
+| Copilot CLI and VS Code | start hook, MCP (VS Code, per project), compiled files | start | shell, file reads and writes; asks you (a block in autopilot; the cloud agent never sees Link's hooks) | no |
 | Windsurf | MCP, global rules file, compiled rules | none (no such event) | shell, file reads and writes (held) | no |
 | Devin CLI | Claude Code's hooks, which it runs | start, end | shell and files (held) | no |
 | Kiro | start hook, MCP, global steering file | start | shell, file reads and writes (held) | no |
@@ -72,8 +72,9 @@ step as memories change. Recall, review, stale
 checks, receipts, sync and `lnk compile` work the same for every agent.
 On a live Codex session the hook stopped every tempting call the model
 tried while all ordinary work went through (one run per task, in
-RESULTS.md). On Claude Code, recorded tool calls are replayed through the
-installed hook command; a live Claude Code session has not been
+RESULTS.md; those rows are being re-confirmed under the tightened harness).
+The offline benchmark decides 51 hand-written Claude Code-shaped calls with
+the same matcher, in process; a live Claude Code session has not been
 benchmarked yet. On the other agents it follows each vendor's documented
 hook schema and is new in 6.0 - report what you see.
 Kiro's hooks run in Kiro CLI V3 for every workspace, and on the default
@@ -231,7 +232,7 @@ The quick start above is the whole install. This is what each step does.
 ```bash
 brew install gowtham0992/link/link
 lnk proof     # see the promise (~1 second, no setup)
-lnk setup     # wire every agent you have — workspace, MCP, session hooks, one command
+lnk setup     # wire every agent it finds — workspace, MCP, session hooks, one command
 ```
 
 Already have memory scattered across tools? Bring it home as reviewable
@@ -502,9 +503,10 @@ lnk verify-mcp ~/link
 For agents with hook support — Claude Code, Cursor, Codex, Gemini CLI,
 Antigravity, Copilot, Windsurf and Kiro — add `--hooks` (works with `lnk onboard`
 too) to make the memory loop automatic:
-the brief is injected at session start and proposal-only notes are captured at
-session end, so memory no longer depends on the agent remembering to call
-Link. Empty sessions and duplicate end events are skipped, and when the
+the brief is injected at session start where the agent has a start event
+(every one listed except Windsurf), and on Claude Code, Cursor and Devin
+proposal-only notes are captured at session end, so memory no longer depends
+on the agent remembering to call Link. Empty sessions and duplicate end events are skipped, and when the
 backlog builds up the brief nudges the agent to offer a read-only
 `lnk consolidate` pass. On Claude Code the hooks also run before shell and
 file tool calls: a reviewed memory's enforced rules are checked there, and
