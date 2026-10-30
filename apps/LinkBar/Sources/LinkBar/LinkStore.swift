@@ -675,10 +675,35 @@ final class LinkStore: ObservableObject {
     /// Approve a waiting rule from its notification: the same review the
     /// inbox's checkmark runs, by memory name.
     /// Let one held tool call through once; the agent repeats it within 10 minutes.
+    /// Success only on `"approved": true`: `lnk approve` prints the call before it grants anything, so
+    /// output alone does not mean the grant was written (an expired request, a busy approvals file).
     func approveHeldCall(id: String) {
         if focusedHeldCall == id { focusedHeldCall = nil }
-        act(["approve", id, LinkCLI.workspace],
-            success: "Approved once \u{2014} the agent can run exactly that call again in the next 10 minutes.")
+        // LinkBar shows the call itself and the person clicked to approve it: no terminal prompt, a JSON answer.
+        let args = ["approve", id, LinkCLI.workspace, "--json", "--yes"]
+        busy = true
+        Task.detached(priority: .userInitiated) {
+            let failure: String? = {
+                do {
+                    let data = try LinkCLI.run(args)
+                    let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    if reply?["approved"] as? Bool == true { return nil }
+                    return reply?["error"] as? String ?? "lnk approve did not approve the call."
+                } catch {
+                    return String(describing: error)
+                }
+            }()
+            await MainActor.run {
+                if let failure {
+                    self.lastError = failure
+                    self.busy = false
+                } else {
+                    self.showFlash("Approved once \u{2014} the agent can run exactly that call again in the next 10 minutes.",
+                                   tone: .success)
+                    self.refresh()
+                }
+            }
+        }
     }
 
     /// Steer the popover to one held call (from its notification), where the whole call is shown.

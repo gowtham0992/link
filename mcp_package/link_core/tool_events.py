@@ -42,6 +42,7 @@ _CURSOR_ASK_EVENTS = {"beforeShellExecution", "beforeMCPExecution"}
 
 SHELL_TOOLS = {
     "bash", "powershell", "pwsh", "shell", "run_shell_command", "terminal", "exec", "execute_bash", "run_command",
+    "execute_cmd", "run_in_terminal",  # Kiro on Windows; VS Code's Copilot agent
 }
 _POWERSHELL_TOOLS = {"powershell", "pwsh"}
 # Devin CLI's tool names: it runs the hooks in ~/.claude/settings.json with these.
@@ -53,6 +54,8 @@ WRITE_TOOLS = {
     "write", "edit", "multiedit", "notebookedit", "notebook_edit", "str_replace_based_edit_tool", "create_file",
     "create", "write_file", "replace", "fs_write", "write_to_file", "replace_file_content",
     "multi_replace_file_content", "apply_patch", "delete",
+    # VS Code's Copilot agent
+    "replace_string_in_file", "insert_edit_into_file", "multi_replace_string_in_file",
 }
 _PATH_KEYS = ("file_path", "notebook_path", "path", "AbsolutePath", "TargetFile", "absolute_path", "target_file")
 _COMMAND_KEYS = ("command", "command_line", "CommandLine", "cmd")
@@ -114,6 +117,11 @@ def _from_tool(name: str, args: Mapping[str, object]) -> list[tuple[str, str]]:
     if lowered == "read_many_files":
         includes = args.get("include")
         return [("read", str(item)) for item in includes] if isinstance(includes, list) else []
+    if lowered == "multi_replace_string_in_file":  # one call, edits to several files
+        edits = args.get("replacements")
+        files = [str(edit.get("filePath")) for edit in edits
+                 if isinstance(edit, dict) and edit.get("filePath")] if isinstance(edits, list) else []
+        return [("write", path) for path in dict.fromkeys(files)]
     if lowered == "fs_read":
         operations = args.get("operations")
         return [("read", str(op.get("path"))) for op in operations
@@ -177,43 +185,100 @@ def tool_calls(event: Mapping[str, object]) -> list[tuple[str, str]]:
 
 
 # Arguments that carry what a file tool writes, and (the first set) what an edit replaces.
-_OLD_CONTENT_KEYS = {"old_str", "old_string", "oldtext", "old", "targetcontent"}
-_NEW_CONTENT_KEYS = {"content", "contents", "file_text", "text", "new_str", "new_string", "newtext", "new",
-                     "codecontent", "replacementcontent", "new_source", "insert_text", "patch", "input"}
+_OLD_CONTENT_KEYS = {"old_str", "old_string", "oldstring", "oldtext", "old", "targetcontent"}
+_NEW_CONTENT_KEYS = {"content", "contents", "file_text", "text", "new_str", "new_string", "newstring", "newtext",
+                     "new", "codecontent", "replacementcontent", "new_source", "insert_text", "patch", "input"}
+
+
+# Arguments that only tell the person about a call and never change what it does (Kiro's fs_write `summary`).
+_NARRATIVE_KEYS = {"summary", "description", "explanation", "justification"}
+# Where a shell tool runs its command, when the call says (Codex's `workdir`).
+_DIRECTORY_KEYS = {"workdir", "cwd", "working_directory", "directory", "dir"}
+
+
+def call_arguments(event: Mapping[str, object]) -> dict[str, object]:
+    """Everything a call does beyond the commands and files it names, read one way for every agent.
+
+    What an edit replaces is "old" and what it writes is "new", whatever the
+    agent calls them, so Kiro's two hooks, which name them differently, see
+    one call. Every other argument - Kiro's `command: append` or
+    `insert_line`, an edit's `replace_all` - is kept under its own name, and
+    a list of edits keeps its order and its pairs. For a shell command, only
+    the directory it runs in, if the call names one: its text is the call
+    itself. Empty for a read.
+    """
+    action = str(event.get("agent_action_name") or "")
+    if action in _WINDSURF_EVENTS:  # Windsurf's edits are in tool_info
+        name, args = ("write", _as_dict(event.get("tool_info"))) if _WINDSURF_EVENTS[action] == "write" else ("", {})
+    else:
+        name, args = _tool(event) or ("", {})
+    lowered = name.strip().lower()
+    if lowered in SHELL_TOOLS:
+        return {f"={key}": value for key, value in args.items()
+                if str(key).lower() in _DIRECTORY_KEYS and isinstance(value, str) and value}
+    if lowered == "apply_patch":
+        patch = next((args.get(key) for key in ("command", "patch", "input") if args.get(key)), None)
+        return {"new": str(patch)} if patch else {}
+    if lowered not in WRITE_TOOLS:
+        return {}
+    named = {value for _kind, value in tool_calls(event)}  # already bound as the files the call names
+    top = {key: value for key, value in args.items() if not (
+        (isinstance(value, str) and value in named)
+        or (isinstance(value, list) and value and all(isinstance(item, str) and item in named for item in value))
+        # Kiro's fs_write `create` is a whole-file write, which its V3 `write` sends with no command.
+        or (str(key).lower() == "command" and value == "create"))}
+    return _normalized_args(top)
+
+
+def _normalized_args(args: Mapping[str, object]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, item in sorted(args.items(), key=lambda pair: str(pair[0])):
+        lowered = str(key).lower()
+        if lowered in _NARRATIVE_KEYS:
+            continue
+        role = "old" if lowered in _OLD_CONTENT_KEYS else "new" if lowered in _NEW_CONTENT_KEYS else f"={key}"
+        if role in out:  # two names for one role in one call: keep both
+            earlier = out[role]
+            out[role] = [*(earlier if isinstance(earlier, list) else [earlier]), _normalized(item)]
+        else:
+            out[role] = _normalized(item)
+    return out
+
+
+def _normalized(value: object) -> object:
+    if isinstance(value, list):
+        return [_normalized(item) for item in value]
+    return _normalized_args(value) if isinstance(value, dict) else value
+
+
+def call_binding(event: Mapping[str, object]) -> str:
+    """call_arguments as one exact text, for the approval key. Empty when there is nothing beyond the call's names."""
+    arguments = call_arguments(event)
+    return json.dumps(arguments, sort_keys=True, ensure_ascii=False, default=str) if arguments else ""
 
 
 def call_content(event: Mapping[str, object]) -> str:
-    """What a file tool call writes, as one text: a patch, a file's content, what an edit replaces and with what.
+    """call_arguments for the person to read: a file's content, each edit as what it replaces and with what."""
+    arguments = call_arguments(event)
+    if set(arguments) == {"new"} and isinstance(arguments["new"], str):
+        return arguments["new"]  # a plain write: just what it writes
+    lines: list[str] = []
 
-    The same whatever the agent calls its arguments, so Kiro's two hooks,
-    which name them differently, see one call. Empty for a shell command,
-    whose text is the call itself.
-    """
-    named = _tool(event)
-    if not named or named[0].strip().lower() in SHELL_TOOLS:
-        return ""
-    name, args = named
-    old: list[str] = []
-    new: list[str] = []
-    if name.strip().lower() == "apply_patch":
-        new += [str(args.get(key)) for key in ("command", "patch", "input") if args.get(key)][:1]
-
-    def walk(value: object, role: list[str] | None) -> None:
+    def show(value: object, label: str = "") -> None:
         if isinstance(value, dict):
-            for key, item in value.items():
-                lowered = str(key).lower()
-                walk(item, old if lowered in _OLD_CONTENT_KEYS else new if lowered in _NEW_CONTENT_KEYS else role)
+            for key in sorted(key for key in value if key.startswith("=")):
+                show(value[key], key[1:])
+            for role in ("old", "new"):
+                if role in value:
+                    show(value[role], "replace" if role == "old" else "with" if "old" in value else "content")
         elif isinstance(value, list):
             for item in value:
-                walk(item, role)
-        elif role is not None and isinstance(value, str) and value:
-            role.append(value)
+                show(item, label)
+        elif label:
+            lines.append(f"{label}: {value if isinstance(value, str) else json.dumps(value)}")
 
-    if not new:
-        walk(args, None)
-    if not old:
-        return "\n".join(sorted(new))
-    return "\n".join([f"replace: {text}" for text in sorted(old)] + [f"with: {text}" for text in sorted(new)])
+    show(arguments)
+    return "\n".join(lines)
 
 
 def native_emit(emit: str, event: Mapping[str, object], environ: Mapping[str, str]) -> str:

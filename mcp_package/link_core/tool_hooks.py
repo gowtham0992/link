@@ -44,7 +44,7 @@ from .project_scope import (
     parse_applies_when,
 )
 from .shell_parse import command_forms, looks_like_powershell, read_powershell, read_shell
-from .tool_events import EMITS, HookReply, call_content, can_ask, native_emit, render_reply, tool_calls
+from .tool_events import EMITS, HookReply, call_binding, call_content, can_ask, native_emit, render_reply, tool_calls
 
 # Everything else is imported where it is used: the pre-tool hook runs before
 # every shell command and file access, and deciding against the compiled
@@ -554,7 +554,8 @@ def evaluate_tool_call(
         reason += " Do not work around it; tell the person, who can edit the memory if it no longer holds."
     return {
         "decision": decision, "reason": reason, "memories": names, "kind": rule_kind,
-        "calls": sorted(calls), "content": call_content(event), "title": str(first.get("title") or ""),
+        "calls": sorted(calls), "content": call_content(event), "binding": call_binding(event),
+        "title": str(first.get("title") or ""),
         "rule": f"{first.get('action')} {rule_kind}: {first.get('pattern')}",
         # Only a user's ask rule can be let through once; a governance or
         # Link-file guard is for the person to do themselves.
@@ -904,7 +905,7 @@ def _hold(decision: Mapping[str, object], root: Path, cwd: str, emit: str,
     calls = [(str(call[0]), str(call[1])) for call in raw_calls if isinstance(call, (list, tuple)) and len(call) == 2] \
         if isinstance(raw_calls, list) else []
     content = str(decision.get("content") or "")
-    key = approvals.call_key(calls, cwd, content)
+    key = approvals.call_key(calls, cwd, str(decision.get("binding") or ""))
     try:
         if approvals.take_grant(root, key, hook=emit):
             return held, "approved"
