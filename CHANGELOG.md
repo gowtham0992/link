@@ -245,6 +245,67 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   Cursor with `userMessage`/`agentMessage`; Cursor reads `user_message` and
   `agent_message`, and blocks a permission hook whose output does not match
   its schema. The reason now reaches both you and the agent.
+- **A call Link fails to read no longer runs unchecked.** A path such as
+  `~x/y`, `~+/x` or PowerShell's `~\link` made the reader fail, and the
+  hook's "never break the agent" fallback then let the whole line through:
+  `cat ~x/y; git push -f` ran past a deny rule. Such paths are now read as
+  they are, and if reading a call ever fails while rules are in force, the
+  call waits for your OK (on agents that cannot ask, it is held for
+  `lnk approve`) instead of running; a call Link cannot even name is
+  blocked.
+- **A folder rule covers removing the folder.** `deny write: secrets/**`
+  stopped writes inside `secrets/` but not `rm -r secrets`,
+  `mv secrets /tmp/old`, `find secrets -delete`, `git rm -r secrets`,
+  `cp -r new/ secrets` or `Remove-Item -Recurse secrets`. Deleting, moving
+  away or copying over the folder itself, or a named folder above it, now
+  counts. The working folder does not: `find . -delete`, `git clean` and
+  `tar x` there act on what they select, every day.
+- **Options in another order meet the rule.** `git push --force*` missed
+  `git push -u --force`, `git push --all --force` and `git push -uf`;
+  `git push origin main*` missed `git push -u origin main`; `rm -rf*` missed
+  `rm -fr`, `rm -Rf`, `rm -r -f` and `rm --recursive --force`. Options now
+  meet a rule in any order, bundled or apart, and `--force-with-lease` is
+  still not `--force`. `git.exe`, `npm.cmd` and the like are the program
+  they name, and the body of `function gp { ... }` is read.
+- **PowerShell's `-r` is `-Recurse`, not a value.** `Remove-Item -r <path>`
+  (and `rm -r`, `rd -r`) read `-r` as the start of `-ReadCount` and took the
+  path as its value, so the delete named no file. A short parameter that
+  could be a switch never takes the path after it now. Also read:
+  `ForEach-Object { Remove-Item $_.FullName }`, `Join-Path` on `$HOME` or an
+  `$env:` variable (in parentheses or assigned first),
+  `[IO.Directory]::Delete(...)` as removing the whole folder,
+  `Start-Process git -ArgumentList 'push','-f'` (or `@(...)`), and
+  `Expand-Archive`.
+- **Extracting, syncing or resetting over Link's files is seen.**
+  `tar x -C ~/link` (or `-C ~`, or after `cd ~/link`), `unzip -d`, `ditto`,
+  `cpio`, `pax`, `bsdtar`, `rsync -a backup/ ~/link/`, macOS's
+  `cp -r backup/wiki/ ~/link/wiki`, and the git commands that rewrite a work
+  tree (`stash`, `reset --hard`, `pull`, `merge`, `rebase`, `checkout` of a
+  branch or `.`, `switch`, `cherry-pick`, `apply`) run in the workspace that
+  `lnk sync` made a repository could replace the memory files unseen. They
+  now count as writing everything beneath where they land; the same
+  commands in your own projects are not held.
+- **In-place edits are writes.** `sed -Ei`, `sed --in-place`, `perl -0pi`,
+  `gawk -i inplace`, `patch <file>` and `sort -o <file>` now count as
+  writing their files, for path rules and for Link's own files.
+- **A line built to be slow to read is reported, not waited out.** `$(`
+  nested a few hundred deep, `find -exec find -exec ...` and lines naming
+  tens of thousands of paths took from seconds to hours to read, past the
+  agent's hook timeout, after which the call runs. Each `$(...)` and `-exec`
+  is now read once; a line over 100,000 characters (here-document bodies
+  aside), nested more than four shells deep, or not read within 2.5 seconds
+  is unreadable and waits for your OK. Five `bash -c` deep used to read as
+  nothing at all.
+- **What only might touch Link's files can be let through once.**
+  Interpreter code that merely names Link's files
+  (`python3 -c "print(open('/x/link/.link-cache/hook-index.json').read())"`)
+  or a path through a variable Link cannot know
+  (`cp notes.md "$PROJ/wiki/memories/"`, `rm -r $BUILD/wiki`) was blocked
+  outright on Codex, Windsurf and Cursor, with no way through. It now waits
+  for your OK like a command Link cannot read; a write Link can see lands in
+  its files is still yours alone. `lnk approve` with no id, which only lists
+  what is waiting, and `lnk enforce <memory> --suggest` are no longer held;
+  `echo <id> | xargs lnk approve` still is.
 - LinkBar builds without warnings: the two hook-state switches spelt the
   "still checking" case as `.none`, which Swift read as the Optional's nil
   (the intended meaning) while warning it could mean `HookState.none`.

@@ -19,7 +19,7 @@ where they changed.
 | 9. Staleness | does `lnk stale` cry wolf? | 0 false flags in 345 references |
 | 10. Contradiction flags | what does the optional NLI tier add? | 0 false alarms, +1 revision caught |
 | 11. Instruction files | does `lnk stale --instructions` cry wolf on real repositories? | 0 false flags in 604 references; 8 of 8 findings true |
-| 12. Enforced rules | do reviewed rules stop the calls they name, and only those? | 17 of 17 caught, 0 of 34 ordinary calls stopped |
+| 12. Enforced rules | do reviewed rules stop the calls they name, and only those? | 31 of 31 caught, 0 of 53 ordinary calls stopped |
 
 Tracks 1-3, 5-12 need no LLM and no network and run in CI or from one
 command each (see Reproduce).
@@ -750,14 +750,15 @@ references. Track 9 is unchanged by them: 0 false flags, 7 of 7 removals.
 
 Measured 2026-09-28 on the 5.0.0 branch with `scripts/eval_enforcement.py`
 (pinned by `tests/test_enforcement_eval.py`); hook timing re-measured
-2026-10-26 after the tool hooks moved to `link_hook.py` (median of three runs on an Apple-silicon Mac). A store of 50 memories, 10 of
+2026-10-26 after the tool hooks moved to `link_hook.py`; the forbidden and ordinary calls grew
+on 2026-10-29 with the 6.0 review's bypasses (options reordered, folders removed whole, PowerShell) (median of three runs on an Apple-silicon Mac). A store of 50 memories, 10 of
 them reviewed memories carrying 15 enforced rules, checked against the tool
 calls a coding agent makes:
 
 | | result |
 |---|---|
-| forbidden calls caught (inside `cd ... &&` chains, behind `sudo` and `env` prefixes, with extra flags, by absolute path) | 17 of 17 |
-| ordinary calls stopped (`rm -rf dist`, `git push origin feature/x`, `terraform plan`, reading `.envrc.example`, writing under `src/`) | 0 of 34 |
+| forbidden calls caught (inside `cd ... &&` chains, behind `sudo` and `env` prefixes, with extra flags, options reordered or bundled, by absolute path, through PowerShell) | 31 of 31 |
+| ordinary calls stopped (`rm -rf dist`, `git push origin feature/x`, `terraform plan`, `git stash`, `find . -delete`, reading `.envrc.example`, writing under `src/`) | 0 of 53 |
 | decision time, p95, in process | 0.12 ms |
 | hook command, median, end to end (`link_hook.py`, what installed hooks run) | 33 ms (5.0: 99 ms) |
 | older hooks that still call `link.py hook`, which takes a fast path inside the CLI | 57 ms |

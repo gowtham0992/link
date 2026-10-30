@@ -26,11 +26,13 @@ changes, instead of parsing the store each time.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import hashlib
 import json
 import os
 import re
 import sys
+import time
 from datetime import date
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -41,7 +43,7 @@ from .project_scope import (
     normalize_project,
     parse_applies_when,
 )
-from .shell_parse import command_forms, looks_like_powershell, read_powershell, read_shell
+from .shell_parse import READ_SECONDS, command_forms, looks_like_powershell, read_powershell, read_shell
 from .tool_events import EMITS, HookReply, call_content, can_ask, native_emit, render_reply, tool_calls
 
 # Everything else is imported where it is used: the pre-tool hook runs before
@@ -182,19 +184,38 @@ def _fence_matches(applies_when: str, project: str | None, context_path: str | N
     return False
 
 
-def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Path | None = None) -> bool:
+@functools.lru_cache(maxsize=4096)
+def _repo_relative(raw: str, repo_root: Path, base: Path | None) -> str | None:
+    """The path as the repository names it, resolved once however many rules ask."""
+    path = Path(os.path.expanduser(raw))  # never raises, unlike Path.expanduser on `~x/y`
+    if not path.is_absolute() and base is not None:
+        path = base / path
+    try:
+        return path.resolve().relative_to(_resolved(repo_root)).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
+@functools.lru_cache(maxsize=64)
+def _resolved(path: Path) -> Path:
+    return path.resolve()
+
+
+def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Path | None = None, *,
+                  tree: bool = False) -> bool:
+    """Does a path rule cover this file? With `tree` (a delete, a move away, a folder copied over), the folder
+    a `dir/**` rule names counts too, and so does a named folder above it: `rm -r secrets`, `mv config x`.
+
+    The working folder itself does not: `find . -delete`, `git clean`, `tar x` there act on what they
+    select, every day, and a rule on one folder must not stop them all.
+    """
     raw = str(file_path or "").strip()
     if not raw:
         return False
     candidates = {raw.replace("\\", "/")}
-    path = Path(raw).expanduser()
-    if not path.is_absolute() and base is not None:
-        path = base / path
-    if repo_root is not None:
-        try:
-            candidates.add(path.resolve().relative_to(repo_root.resolve()).as_posix())
-        except (OSError, ValueError):
-            pass
+    relative = _repo_relative(raw, repo_root, base) if repo_root is not None else None
+    if relative is not None:
+        candidates.add(relative)
     # Case-insensitive: `.ENV` is `.env` on the default macOS and Windows disks.
     wanted = pattern.replace("\\", "/").lower()
     for candidate in (item.lower() for item in candidates):
@@ -204,6 +225,11 @@ def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Pa
             return True
         # "migrations/**" also covers the directory's files at any depth.
         if wanted.endswith("/**") and (f"/{wanted[:-3]}/" in f"/{candidate}"):
+            return True
+        folder, candidate = wanted[:-3], candidate.rstrip("/")
+        if tree and wanted.endswith("/**") and candidate not in {"", "."} and (
+                fnmatch.fnmatchcase(candidate, folder) or fnmatch.fnmatchcase(candidate, f"*/{folder}")
+                or folder.startswith(f"{candidate}/")):
             return True
     return False
 
@@ -248,6 +274,8 @@ def is_link_governance(words: list[str]) -> bool:
                 return True
             if not word.startswith("-"):
                 break  # the subcommand, as typed
+        if _only_reads_governance(words[link_at + 1:]):
+            return False
     if not any(word in GOVERNANCE_COMMANDS for word in words) and not any(
         module in word for word in words[1:] for module in _LINK_MODULES
     ):
@@ -261,6 +289,23 @@ def is_link_governance(words: list[str]) -> bool:
             return True
         if index == 0 and ("$" in word or "`" in word):
             return True  # the program is decided at run time
+    return False
+
+
+def _only_reads_governance(arguments: list[str]) -> bool:
+    """`lnk approve` with no id lists the held calls; `lnk enforce x --suggest` only shows rules."""
+    options = [word for word in arguments if word.startswith("-")]
+    operands = [word for word in arguments if not word.startswith("-")]
+    if "--" in arguments:
+        operands += arguments[arguments.index("--") + 1:]
+    if operands[:1] == ["approve"]:
+        return len(operands) == 1
+    if operands[:1] == ["enforce"]:
+        named = [option.partition("=")[0] for option in options]
+        suggest = any(len(option) > 3 and "--suggest".startswith(option) for option in named)
+        changes = any(len(option) > 2 and ("--rule".startswith(option) or "--clear".startswith(option))
+                      for option in named)
+        return suggest and not changes
     return False
 
 
@@ -323,7 +368,7 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None, *, tree: bo
     """
     if "$" in str(path_text) or "`" in str(path_text):
         return _names_root(str(path_text), roots, tree=tree)
-    path = Path(str(path_text or "")).expanduser()
+    path = Path(os.path.expanduser(str(path_text or "")))
     if not path.is_absolute() and base is not None:
         path = base / path
     try:
@@ -372,6 +417,11 @@ def evaluate_tool_call(
     calls = tool_calls(event)
     if not calls:
         return None
+    _repo_relative.cache_clear()  # resolved once per call, never carried over to the next
+    _resolved.cache_clear()
+    # A line built to be slow to read (thousands of paths, `$(` nested hundreds deep) is cut off and
+    # reported unreadable well inside the agent's hook timeout, never read past it.
+    deadline = time.monotonic() + READ_SECONDS
     commands: list[list[str]] = []
     reads: list[str] = []
     writes: list[str] = []
@@ -380,10 +430,11 @@ def evaluate_tool_call(
     opaque = False
     for kind, value in calls:
         if kind in {"command", "powershell"}:
-            reading = read_powershell(value) if kind == "powershell" else read_shell(value)
+            reading = read_powershell(value, deadline=deadline) if kind == "powershell" \
+                else read_shell(value, deadline=deadline)
             if kind == "command" and looks_like_powershell(value):
                 # A shell tool on Windows may run PowerShell: read it that way too.
-                other = read_powershell(value)
+                other = read_powershell(value, deadline=deadline)
                 reading.commands += [words for words in other.commands if words not in reading.commands]
                 reading.reads += other.reads
                 reading.writes += other.writes
@@ -403,6 +454,17 @@ def evaluate_tool_call(
     base = Path(context_path) if context_path else None
     rule_values = index.get("rules")
     rules = [rule for rule in (rule_values if isinstance(rule_values, list) else []) if isinstance(rule, dict)]
+    # Each command's forms and each path once, however many rules there are or times a line repeats them.
+    forms = list(dict.fromkeys(" ".join(form) for words in commands for form in command_forms(words)))
+    reads, writes = list(dict.fromkeys(reads)), list(dict.fromkeys(writes))
+
+    def in_time() -> bool:
+        nonlocal opaque
+        if time.monotonic() <= deadline:
+            return True
+        opaque = True  # not finished in time: what was left unchecked waits for the person
+        return False
+
     matches: list[Mapping[str, object]] = []
     for rule in rules:
         if not _rule_applies(rule, project, context_path):
@@ -412,10 +474,11 @@ def evaluate_tool_call(
         hit = False
         if rule_kind == "command":
             wanted = " ".join(pattern.split())
-            hit = any(fnmatch.fnmatchcase(" ".join(form), wanted) for words in commands for form in command_forms(words))
+            hit = any(fnmatch.fnmatchcase(form, wanted) for form in forms)
         elif rule_kind in {"write", "read"}:
             targets = writes if rule_kind == "write" else reads
-            hit = any(_path_matches(pattern, target, repo_root, base) for target in targets)
+            hit = any(in_time() and _path_matches(pattern, target, repo_root, base, tree=target in trees)
+                      for target in targets)
         if hit:
             matches.append(rule)
     # Changing Link's own rules or files is checked whatever else the call
@@ -428,8 +491,13 @@ def evaluate_tool_call(
             "name": "link-governance", "title": "Only the person approves, clears or retires rules",
             "action": "ask", "kind": "command", "pattern": "lnk review-memory|enforce|archive-memory|approve|...",
         })
-    if rules and roots and (any(_under(target, roots, base, tree=target in trees) for target in writes)
-                            or any(_code_names_link(text, roots) for text in code)):
+    # A path Link resolved, under its files, is a definite write; a path through a variable it cannot
+    # know that names them (`cp x "$PROJ/wiki/memories/"`), or code that names them (`python3 -c "...
+    # open('~/link/.link-cache/hook-index.json')"`), may be nothing of the kind, so the person can let
+    # that through once.
+    resolved = [target for target in writes if "$" not in target and "`" not in target]
+    unresolved = [target for target in writes if "$" in target or "`" in target]
+    if rules and roots and any(in_time() and _under(target, roots, base, tree=target in trees) for target in resolved):
         guards.append({
             "name": "link-memory-files", "title": "Link memory and approval files change only through Link",
             "action": "ask", "kind": "write", "pattern": "<Link memories and .link-cache>/**",
@@ -439,7 +507,14 @@ def evaluate_tool_call(
     # shell too (`eval "$(ssh-agent -s)"`), so the person can let it through
     # once, having seen exactly what it is.
     unreadable: list[Mapping[str, object]] = []
-    if rules and roots and opaque and not guards:
+    if rules and roots and not guards and (
+            any(_under(target, roots, base, tree=target in trees) for target in unresolved)
+            or any(_code_names_link(text, roots) for text in code)):
+        unreadable.append({
+            "name": "link-unclear-write", "title": "A call that may change Link's files waits for the person",
+            "action": "ask", "kind": "write", "pattern": "<a variable or code naming Link's files>",
+        })
+    if rules and roots and opaque and not guards and not unreadable:
         unreadable.append({
             "name": "link-unreadable-command", "title": "A command Link cannot read waits for the person",
             "action": "ask", "kind": "command", "pattern": "<eval or an encoded command>",
@@ -448,7 +523,9 @@ def evaluate_tool_call(
         return None
     every = [*guards, *unreadable, *matches]
     decision = "deny" if any(rule.get("action") == "deny" for rule in every) else "ask"
-    first = (guards or unreadable or [next((rule for rule in matches if rule.get("action") == decision), matches[0])])[0]
+    # The reason cites what decided: a guard, else a user's deny rule over an unreadable call's ask.
+    cited = unreadable if decision == "ask" or not matches else []
+    first = (guards or cited or [next((rule for rule in matches if rule.get("action") == decision), matches[0])])[0]
     names = sorted({str(rule.get("name") or "") for rule in matches})
     rule_kind = str(first.get("kind") or calls[0][0])
     verb = "blocked" if decision == "deny" else "needs the person's OK"
@@ -721,8 +798,8 @@ def hook_project(event: Mapping[str, object], project: str | None) -> str:
 def _target_dir(event: Mapping[str, object]) -> str:
     """With no directory in the payload, the folder of the first absolute file the call names."""
     for kind, value in tool_calls(event):
-        if kind in {"read", "write"} and Path(value).expanduser().is_absolute():
-            return str(Path(value).expanduser().parent)
+        if kind in {"read", "write"} and Path(os.path.expanduser(value)).is_absolute():
+            return str(Path(os.path.expanduser(value)).parent)
     return ""
 
 
@@ -771,27 +848,61 @@ def pre_tool_reply(target: Path, event: Mapping[str, object], *, project: str | 
     index = load_hook_index(wiki_dir, root)
     if not index.get("rules"):
         return render_reply(None, emit, event)
-    project_dir = hook_project_dir(event) or _target_dir(event)
-    repo_root = find_repo_root(Path(project_dir)) if project_dir else None
-    project_name = project or (default_project_for_target(repo_root) if repo_root else "")
-    decision = evaluate_tool_call(
-        index, event, project=project_name, repo_root=repo_root, context_path=project_dir or None,
-        protected=[wiki_dir / "memories", root / ".link-cache"],
-    )
+    project_dir, project_name = hook_project_dir(event), project or ""
+    try:
+        project_dir = project_dir or _target_dir(event)
+        repo_root = find_repo_root(Path(project_dir)) if project_dir else None
+        project_name = project or (default_project_for_target(repo_root) if repo_root else "")
+        decision = evaluate_tool_call(
+            index, event, project=project_name, repo_root=repo_root, context_path=project_dir or None,
+            protected=[wiki_dir / "memories", root / ".link-cache"],
+        )
+    except Exception as exc:  # with rules in force, a call Link failed to read is not let through unseen
+        print(f"Link pre-tool hook could not read this call: {exc}", file=sys.stderr)
+        decision = _unreadable_call(event)
     if decision is None:
         return render_reply(None, emit, event)
-    from .usage import record_retrieval
-
     session = _event_session(event)
     verdict = str(decision["decision"])
     memories = decision.get("memories")
     if verdict == "ask" and not can_ask(emit, event):
         decision, verdict = _hold(decision, root, project_dir, emit, session)
-    record_retrieval(
-        root, "enforce", [str(name) for name in memories] if isinstance(memories, list) else [],
-        project=project_name, surface="hook", session=session, decision=verdict,
-    )
+    try:
+        from .usage import record_retrieval
+
+        record_retrieval(
+            root, "enforce", [str(name) for name in memories] if isinstance(memories, list) else [],
+            project=project_name, surface="hook", session=session, decision=verdict,
+        )
+    except Exception as exc:  # a receipt that cannot be written must not undo the decision
+        print(f"Link could not record this decision: {exc}", file=sys.stderr)
     return render_reply(None if verdict == "approved" else decision, emit, event)
+
+
+def _unreadable_call(event: Mapping[str, object]) -> dict[str, object]:
+    """The decision for a call whose reading failed while rules are in force.
+
+    It waits for the person, who can let it through once having seen it; if
+    Link cannot even say what the call is, it is blocked.
+    """
+    title = "Link could not read this call"
+    try:
+        calls = sorted(tool_calls(event))
+        content = call_content(event)
+    except Exception:
+        calls, content = [], ""
+    reason = f"Link: this call needs the person's OK - \"{title}\" (link-unreadable-call), so no rule was checked."
+    if not calls:
+        return {
+            "decision": "deny", "memories": [], "kind": "command", "calls": [], "content": "", "title": title,
+            "reason": reason.replace("needs the person's OK", "is blocked") + " Tell the person what you meant to run.",
+            "rule": "deny command: <a call Link could not read>", "approvable": False, "governance": False,
+        }
+    return {
+        "decision": "ask", "reason": reason + " If the person approves, go ahead; otherwise do not run it.",
+        "memories": [], "kind": calls[0][0], "calls": calls, "content": content, "title": title,
+        "rule": "ask command: <a call Link could not read>", "approvable": True, "governance": False,
+    }
 
 
 def _hold(decision: Mapping[str, object], root: Path, cwd: str, emit: str,
@@ -812,8 +923,8 @@ def _hold(decision: Mapping[str, object], root: Path, cwd: str, emit: str,
     calls = [(str(call[0]), str(call[1])) for call in raw_calls if isinstance(call, (list, tuple)) and len(call) == 2] \
         if isinstance(raw_calls, list) else []
     content = str(decision.get("content") or "")
-    key = approvals.call_key(calls, cwd, content)
     try:
+        key = approvals.call_key(calls, cwd, content)
         if approvals.take_grant(root, key, hook=emit):
             return held, "approved"
         request_id = approvals.request(
@@ -881,8 +992,10 @@ def fast_tool_hook(argv: list[str]) -> int | None:
     """Run `hook pre-tool|post-tool [target] [--emit E] [--project P]` without the CLI.
 
     Returns None, before reading stdin, for anything it does not recognise,
-    so the full CLI handles it. Like every hook, it never fails the agent's
-    tool call: an error is reported on stderr and the call goes ahead.
+    so the full CLI handles it. Like every hook, it never breaks the agent's
+    tool call: an error is reported on stderr and the call goes ahead -
+    except that a call Link fails to read while rules are in force waits for
+    the person (pre_tool_reply).
     """
     if not argv or argv[0] not in TOOL_HOOK_EVENTS:
         return None
