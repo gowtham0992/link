@@ -48,6 +48,28 @@ class WikiIntegrityTests(unittest.TestCase):
         self.assertIn("wiki/concepts/agent-memory.md", cited_by)
         self.assertNotIn("wiki/concepts/transformers.md", cited_by, "pages not built on it stay quiet")
 
+    def test_a_changed_source_names_the_raw_file_and_claims_only_its_modified_time(self):
+        raw = self.ws / "raw" / "agent-memory-session.md"
+        later = time.time() + 5
+        os.utime(raw, (later, later))  # a touch or a copy: only the time moved, so no more is claimed
+        findings = {f["kind"]: f for f in wiki_findings(self.ws)["findings"]}
+        for kind in ("source-changed", "cites-changed-source"):
+            evidence = str(findings[kind]["evidence"])
+            self.assertEqual(findings[kind]["raw"], "raw/agent-memory-session.md")
+            self.assertIn("raw/agent-memory-session.md", evidence)
+            self.assertIn("newer modified time", evidence)
+            self.assertNotIn("changed after", evidence)
+
+    def test_pages_in_hidden_folders_are_not_checked(self):
+        concepts = self.ws / "wiki" / "concepts"
+        for hidden in (self.ws / "wiki" / ".trash", concepts / ".obsidian"):
+            hidden.mkdir()
+            (hidden / "agent-memory.md").write_text((concepts / "agent-memory.md").read_text(encoding="utf-8"),
+                                                    encoding="utf-8")
+            (hidden / "ghost.md").write_text(_page("concept", "Ghost", "A claim. *Source: [[never-ingested]]*"),
+                                             encoding="utf-8")
+        self.assertEqual(self._kinds(), [], "an Obsidian vault's trash holds no live pages")
+
     def test_citations_to_nothing_and_to_the_wiki_alone(self):
         concepts = self.ws / "wiki" / "concepts"
         (concepts / "ghost.md").write_text(_page("concept", "Ghost", "A claim. *Source: [[never-ingested]]*"),

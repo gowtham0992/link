@@ -14,7 +14,13 @@ translates the person's reviewed rules into that shape:
 
 - `deny` becomes `always_deny` and `ask` becomes `always_confirm`;
 - a command glob matches the command after `sudo`, `env VAR=1` and similar
-  prefixes and by any path to the program, as Link's own matcher does;
+  prefixes, by any path to the program, and after `&&`, `;`, `|` or `$(`
+  (in case Zed hands it the whole chain), as Link's own matcher does;
+- a `git push` glob also matches with git's own options before `push` and
+  with the remote and branch before the options (`git push origin main
+  --force`), the forms Link's hook reads as `git push --force origin main`.
+  Other rewrites Link's hook makes (`+main` as a force-push, `npm pub` as
+  `npm publish`) are not compiled: Zed matches those commands as written;
 - a path glob matches at any depth of the path (`migrations/**`, `.env`);
 - read rules are reported, not compiled: Zed has no rule for reading files.
 
@@ -44,8 +50,17 @@ WRITE_TOOLS = ("copy_path", "create_directory", "delete_path", "edit_file", "mov
 _META = set(".+*?()|[]{}^$\\")
 # What Link's shell reader looks past before the program: privilege and environment wrappers.
 # A wrapper's options may take a value (`sudo -u deploy`, `nice -n 5`, `env -u FOO`).
-_PREFIX = (r"^\s*(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+"
+# The command starts the line or follows a chain operator, a pipe, `(` or `$(`.
+_START = r"(?:^|[;&|(`])\s*"
+_PREFIX = (_START + r"(?:(?:sudo|doas|env|command|exec|nohup|nice|time|xargs)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+"
            r"|\w+=\S*\s+)*(?:\S*/)?\\?")
+# ...and ends the line or comes before the next chain operator, pipe or `)`.
+_END = r"\s*(?:$|[;&|)`])"
+# git's own options before the subcommand (`git -C . push`), and words that are not options;
+# neither ever spans a chain operator, so `git push origin && echo --force` is no force-push.
+_WORD = r"[^-\s;&|()`][^\s;&|()`]*"
+_GIT_OPTIONS = r"(?:\s+-[^\s;&|()`]+(?:\s+" + _WORD + r")?)*"
+_POSITIONALS = r"(?:\s+" + _WORD + r")*?"
 
 
 def _escape(text: str) -> str:
@@ -68,7 +83,14 @@ def _glob(pattern: str) -> str:
 
 def command_regex(pattern: str) -> str:
     """A Link command glob as a regex over one command of a chain."""
-    return _PREFIX + _glob(" ".join(pattern.split())) + r"\s*$"
+    words = pattern.split()
+    if words[:2] == ["git", "push"]:
+        rest = words[2:]
+        # Options may follow the remote and branch: `git push origin main --force` is `git push --force ...`.
+        between = _POSITIONALS if rest and rest[0].startswith("-") else ""
+        tail = (between + r"\s+" + _glob(" ".join(rest))) if rest else ""
+        return _PREFIX + r"git" + _GIT_OPTIONS + r"\s+push" + tail + _END
+    return _PREFIX + _glob(" ".join(words)) + _END
 
 
 def path_regex(pattern: str) -> str:

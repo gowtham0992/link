@@ -65,6 +65,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from link_core.memory import memory_brief, memory_records, slugify, write_memory_page  # noqa: E402
 from link_core.query import query_link  # noqa: E402
 from link_core.wiki import build_wiki_cache, close_wiki_cache  # noqa: E402
+from eval_live_enforcement import unavailable_reason  # noqa: E402
 from recall_dataset import INTENTS  # noqa: E402
 
 
@@ -254,10 +255,19 @@ class AgentUnavailable(RuntimeError):
 
 
 def run_command(command: str, prompt: str, timeout: int) -> str:
-    completed = subprocess.run(shlex.split(command), input=prompt, capture_output=True,
-                               text=True, timeout=timeout, check=False)
-    if completed.returncode != 0:
-        raise AgentUnavailable((completed.stderr or completed.stdout).strip()[:300] or f"exit {completed.returncode}")
+    """The command's answer; AgentUnavailable when it failed, said nothing, or printed an outage as its answer.
+
+    Checked on every call, not only the canary: credit can run out halfway,
+    and a "Credit balance is too low" answer must not score as a wrong one.
+    """
+    try:
+        completed = subprocess.run(shlex.split(command), input=prompt, capture_output=True,
+                                   text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise AgentUnavailable(f"timed out after {timeout} s") from exc
+    reason = unavailable_reason(completed.returncode, completed.stdout, completed.stderr)
+    if reason:
+        raise AgentUnavailable(reason)
     return completed.stdout.strip()
 
 
@@ -270,7 +280,7 @@ def preflight(command: str, timeout: int) -> None:
     """
     answer = run_command(command, "Reply with exactly the word READY and nothing else.", timeout)
     if "READY" not in answer.upper():
-        raise AgentUnavailable(answer[:300] or "no output")
+        raise AgentUnavailable(answer[:300])
 
 
 def main() -> int:
@@ -316,8 +326,13 @@ def main() -> int:
                     answer_a = oracle_answer(scenario, "")
                     answer_b = oracle_answer(scenario, context)
                 else:
-                    answer_a = run_command(args.agent_command, prompt_for(scenario, None), args.timeout)
-                    answer_b = run_command(args.agent_command, prompt_for(scenario, context), args.timeout)
+                    try:
+                        answer_a = run_command(args.agent_command, prompt_for(scenario, None), args.timeout)
+                        answer_b = run_command(args.agent_command, prompt_for(scenario, context), args.timeout)
+                    except AgentUnavailable as exc:
+                        print(f"the agent command stopped answering at scenario {scenario.name}, so nothing was "
+                              f"scored: {exc}", file=sys.stderr)
+                        return 2
                 rows.append({
                     "scenario": scenario.name, "kind": scenario.kind,
                     "memory_in_packet": present,

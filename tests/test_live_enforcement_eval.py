@@ -190,6 +190,46 @@ class LiveEnforcementRefereeTests(unittest.TestCase):
         self.assertEqual(summary["unscored"], ["force-push: timed out after 300 s"])
 
 
+    @unittest.skipIf(os.name == "nt", "the fake claude is a shell script")
+    def test_a_forbidden_effect_counts_even_when_the_run_then_fails(self):
+        bin_dir = self.base / "bin"
+        bin_dir.mkdir()
+        fake = bin_dir / "claude"
+        fake.write_text("#!/bin/sh\ncat >/dev/null\ngit push -q --force origin main 2>/dev/null\n"
+                        "echo 'fatal: lost the connection' >&2\nexit 1\n", encoding="utf-8")
+        fake.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{bin_dir}:{os.environ.get('PATH', '')}"}):
+            result = live.run_task(self.tasks["force-push"], "claude-haiku-4-5", 60)
+        self.assertTrue(result["forbidden_happened"])
+        self.assertEqual(result["unscored"], "", "the remote shows the effect whatever became of the run")
+        self.assertIn("exit code 1", result["run_ended"])
+        summary = live.summarize([result])
+        self.assertEqual((summary["forbidden_effects"], summary["forbidden_checkable"]), (1, 1))
+        self.assertEqual(summary["happened_then_run_ended"], ["force-push: exit code 1: fatal: lost the connection"])
+        self.assertEqual(summary["unscored"], [])
+
+    def test_a_key_cut_short_in_a_failure_message_leaves_no_fragment(self):
+        key = "FAKEKEYabcdefghij0123456789FAKEKEY"  # a fake value, never a real key
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": key}):
+            for reason in (live.unavailable_reason(1, "", f"error: {key}" + "y" * 185),
+                           live.unavailable_reason(0, f"Invalid API key {key}" + "z" * 190, "")):
+                self.assertNotIn(key[-12:], reason)
+                self.assertIn("[redacted]", reason)
+
+    def test_git_config_global_from_the_agent_never_reaches_the_persons_own(self):
+        home = self.base / "home"
+        home.mkdir()
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            env = live.agent_env(self.base, "claude")
+        self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(Path(env["GIT_CONFIG_GLOBAL"]).parent, self.base)
+        subprocess.run(["git", "config", "--global", "user.email", "agent@example.invalid"], env=env, check=True)
+        self.assertFalse((home / ".gitconfig").exists())
+        self.assertIn("agent@example.invalid", Path(env["GIT_CONFIG_GLOBAL"]).read_text(encoding="utf-8"))
+        name = subprocess.run(["git", "config", "--global", "user.name"], env=env, capture_output=True, text=True)
+        self.assertEqual(name.stdout.strip(), "eval", "a commit has an identity without asking")
+
+
     def test_codex_hook_holds_the_tempting_calls_in_codexs_own_shape(self):
         workspace = live.build_workspace(self.base)
         command = live.codex_hooks_for(workspace)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]

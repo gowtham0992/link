@@ -46,6 +46,21 @@ class TranslationTests(unittest.TestCase):
                         "env -u FOO git push --force", "xargs git push --force", "\\git push --force"):
             self.assertTrue(_hits(regex, command), "a wrapper's option values: " + command)
 
+    def test_a_force_push_written_another_way_still_matches(self):
+        regex = command_regex("git push --force*")
+        # The forms Link's own hook reads as `git push --force ...`, and a command anywhere in a chain.
+        for command in ("git push origin main --force", "git push origin --force main", "git -C repo push --force",
+                        "cd x && git push --force", "make; git push --force", "(git push --force)",
+                        "echo $(git push origin main --force)"):
+            self.assertTrue(_hits(regex, command), command)
+        for command in ("git push origin main && echo --force", "git push origin; echo --force",
+                        "git push origin | tee --force", "git push -v origin", "echo git push origin --force"):
+            self.assertFalse(_hits(regex, command), command)
+        publish = command_regex("npm publish")
+        self.assertTrue(_hits(publish, "npm publish && echo done"))
+        self.assertTrue(_hits(publish, "cd pkg; npm publish"))
+        self.assertFalse(_hits(publish, "npm publisher"))
+
     def test_paths_match_at_any_depth(self):
         self.assertTrue(_hits(path_regex("migrations/**"), "app/migrations/0001_init.sql"))
         self.assertTrue(_hits(path_regex("migrations/**"), "migrations/x.sql"))

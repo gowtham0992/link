@@ -11,8 +11,11 @@ names.
 
 Every check is deterministic, reads only files, and reports evidence. Like
 the memory checks it holds to a precision rule: a finding names a concrete
-fact that can be verified by opening two files. Nothing is rewritten;
-findings are for a person (or an agent the person asks) to act on.
+fact that can be verified by opening two files. A changed source is the one
+check with only file times to go on (source pages record no checksum of
+their raw files), so it names the raw file whose modified time is newer and
+says no more: a copy or a `touch` moves that time too. Nothing is
+rewritten; findings are for a person (or an agent the person asks) to act on.
 """
 from __future__ import annotations
 
@@ -130,7 +133,8 @@ def load_pages(wiki_dir: Path) -> Wiki:
         return Wiki(pages, targets, other_kinds)
     for path in sorted(wiki_dir.rglob("*.md")):
         rel = path.relative_to(wiki_dir)
-        if path.name.startswith("."):
+        # Hidden files and folders (an Obsidian vault's .trash/, .obsidian/) hold no live pages.
+        if any(part.startswith(".") for part in rel.parts):
             continue
         rel_text = f"wiki/{rel.as_posix()}"
         checked = not (rel.parts[0] in _SKIP_DIRS or (len(rel.parts) == 1 and rel.name in _SKIP_FILES))
@@ -225,8 +229,9 @@ def _raw_paths(text: str) -> set[str]:
     return {_nfc(path) for path in found}
 
 
-def _raw_backing(target: Path, wiki_dir: Path) -> tuple[dict[str, float], dict[str, list[str]]]:
-    """(source page name -> newest mtime of the raw files it names, source page name -> raw files it names that are gone)."""
+def _raw_backing(target: Path, wiki_dir: Path) -> tuple[dict[str, tuple[float, str]], dict[str, list[str]]]:
+    """(source page name -> (newest mtime, raw file) of the raw files it names,
+    source page name -> raw files it names that are gone)."""
     from .ingest import raw_source_files, source_matches_by_raw, source_page_index
 
     records = {name: {**record, "text": _nfc(str(record.get("text") or ""))}
@@ -239,11 +244,11 @@ def _raw_backing(target: Path, wiki_dir: Path) -> tuple[dict[str, float], dict[s
             mtimes[rel] = path.stat().st_mtime
         except OSError:
             continue
-    newest: dict[str, float] = {}
+    newest: dict[str, tuple[float, str]] = {}
     for rel, names in source_matches_by_raw(records, raw_rels).items():
         for name in names:
             key = _norm(name)
-            newest[key] = max(newest.get(key, 0.0), mtimes.get(rel, 0.0))
+            newest[key] = max(newest.get(key, (0.0, "")), (mtimes.get(rel, 0.0), rel))
     existing = set(raw_rels)
     gone: dict[str, list[str]] = {}
     for name, record in records.items():
@@ -264,10 +269,11 @@ def wiki_findings(target: Path) -> dict[str, object]:
     findings: list[dict[str, object]] = []
     for page in pages.values():
         if page.kind == "source":
-            newest = raw_mtime.get(page.name, 0.0)
+            newest, raw = raw_mtime.get(page.name, (0.0, ""))
             if newest > page.mtime + 0.001:
-                findings.append({"kind": "source-changed", "page": page.rel,
-                                 "evidence": "a raw file it names changed after this source page was written"})
+                findings.append({"kind": "source-changed", "page": page.rel, "raw": raw,
+                                 "evidence": f"{raw}, which it names, has a newer modified time than this page; "
+                                             "if its content changed, the page may no longer match it"})
             if page.name in raw_gone:
                 findings.append({"kind": "source-raw-missing", "page": page.rel,
                                  "evidence": "names " + ", ".join(raw_gone[page.name])
@@ -288,11 +294,12 @@ def wiki_findings(target: Path) -> dict[str, object]:
                 grounded = True
             # By file name or by alias: the raw files are the source page's, under its file name.
             for source in (pages[rel] for rel in reached if rel in pages and pages[rel].kind == "source"):
-                newest = raw_mtime.get(source.name, 0.0)
+                newest, raw = raw_mtime.get(source.name, (0.0, ""))
                 if newest > page.mtime + 0.001 or newest > source.mtime + 0.001:
-                    findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,
-                                     "evidence": f"cites [[{cited}]], whose raw file changed after this page was "
-                                                 "written; its claims may no longer match"})
+                    findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited, "raw": raw,
+                                     "evidence": f"cites [[{cited}]], whose raw file {raw} has a newer modified time "
+                                                 "than this page or the source page; if its content changed, "
+                                                 "these claims may no longer match"})
                     break
                 if source.name in raw_gone:
                     findings.append({"kind": "cites-changed-source", "page": page.rel, "source": cited,

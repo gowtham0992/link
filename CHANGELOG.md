@@ -226,8 +226,22 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - **Files `lnk compile --global` wrote stay Link's when empty.** When the
   last personal memory left, Link's block was removed and auto-refresh
   stopped for good; the block now stays, empty, and the next memory arrives
-  on its own. `--global` always compiles your personal workspace, wherever
-  it is run.
+  on its own. A full file no longer takes it either: when your own text in
+  Windsurf's `global_rules.md` left no room under its 6,000-character
+  limit, an ordinary memory change deleted Link's block for good. Link now
+  keeps its markers, says there is no room (after the memory change, in
+  `lnk setup` and in `lnk compile --global`), and fills the block again
+  once you make room. `--global` always compiles your personal workspace,
+  wherever it is run.
+- **Kiro got your memory twice.** With Link's Kiro hooks installed, the
+  brief reaches Kiro at session start, yet `lnk compile --global` also
+  wrote it into Kiro's steering and `lnk setup` said Kiro could not load
+  your memory at session start. While the hooks hand Kiro the brief, the
+  steering copy is left out and one Link wrote before is removed.
+- **Zed's compiled rules missed a force-push written another way.** A
+  `git push --force` rule now also matches `git push origin main --force`,
+  `git -C repo push --force` and the command after `&&`, `;` or a pipe, as
+  Link's own hook does.
 - **`lnk stale --wiki` finds what it missed:** raw files with spaces in
   their names, a missing raw file beside one still there, citations by
   alias, and names macOS stores decomposed. `--wiki` with `--instructions`
@@ -237,6 +251,19 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   well-known credential files and the other agent's login; key-shaped
   strings are blanked wherever they appear; the planted secret is never
   committed, and reading it counts even when the answer leaves it out.
+- **The benchmarks count what happened, not how the run ended.** A live
+  run that failed or timed out after the forbidden effect happened was set
+  aside as unscored; the effect now counts, and the report says the run
+  ended without an answer. A key cut short in a failure message is blanked
+  before it is cut, so no fragment of it reaches the report. The agent's
+  `git config --global` lands in a throwaway file, never your
+  `~/.gitconfig`. The behavioral A/B's live mode stops, scoring nothing,
+  when the agent command reports an outage partway through, instead of
+  counting it as wrong answers.
+- **`lnk stale --wiki` says only what it can show.** Pages in hidden
+  folders (an Obsidian vault's `.trash/`) are no longer read as live pages.
+  A changed source names the raw file and says its modified time is newer,
+  which a copy or `touch` also does, rather than that its content changed.
 - **LinkBar approves only in the popover.** A held call's notification
   showed text macOS cuts short, written by the agent, beside an Approve
   button; it now opens the popover on the whole call. LinkBar lists exactly

@@ -1490,6 +1490,7 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
         "changed": sorted(plan.files), "unchanged": plan.unchanged, "written": written,
         "included": plan.included, "dropped": plan.dropped, "excluded": plan.excluded, "conflicts": plan.conflicts,
         "zed_rules_skipped": plan.zed_rules_skipped, "zed_permissions_snippet": plan.zed_snippet,
+        "no_room": plan.no_room, "skipped": plan.skipped,
     }
     if json_output:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
@@ -1497,7 +1498,8 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
         verb = "Would update" if (check or dry_run) else "Updated"
         for rel in sorted(plan.files):
             if plan.files[rel] is None:
-                print(f"{'Would remove' if (check or dry_run) else 'Removed'}: ~/{rel} (no memory left for it)")
+                print(f"{'Would remove' if (check or dry_run) else 'Removed'}: ~/{rel} (Link wrote it; "
+                      "it is no longer needed)")
             elif rel == ZED_SETTINGS:
                 count = len(plan.included.get(ZED_PERMISSIONS, []))
                 print(f"{verb}: ~/{rel} (Zed tool permissions from {count} "
@@ -1508,7 +1510,7 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
         for rel in plan.unchanged:
             print(f"Up to date: ~/{rel}")
         if not plan.files and not plan.unchanged:
-            if plan.conflicts or plan.dropped:
+            if plan.conflicts or plan.dropped or plan.no_room or plan.skipped:
                 print("Nothing written" + (f" to {', '.join(chosen)}" if chosen else "") + ": see why below.")
             elif chosen:  # every file asked for gets at least an empty block; only Zed's permissions wait
                 print(f"Nothing written to {', '.join(chosen)}: no reviewed rule for Zed's permissions yet. "
@@ -1522,6 +1524,10 @@ def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool,
                       "reviewed.")
         for item in plan.dropped:
             print(f"Left out of {item['target']} (size limit): {item['name']} - {item['reason']}")
+        for item in plan.no_room:
+            print(f"No room: ~/{item['path']} - {item['reason']}")
+        for item in plan.skipped:
+            print(f"Not written: ~/{item['path']} - {item['reason']}")
         for item in plan.conflicts:
             print(f"Not touched: ~/{item['path']} - {item['reason']}")
         if plan.zed_snippet:
@@ -1552,7 +1558,10 @@ def _refresh_global_files(target: Path, home: Path | None = None) -> None:
     try:
         from link_core.global_compile import refresh_after_memory_change
 
-        refresh_after_memory_change(_resolve_wiki_dir(target), home)
+        warnings: list[dict[str, str]] = []
+        refresh_after_memory_change(_resolve_wiki_dir(target), home, warnings)
+        for item in warnings:
+            print(f"No room for your memory in ~/{item['path']}: {item['reason']}", file=sys.stderr)
     except Exception as exc:  # the memory change itself already succeeded
         print(f"Could not refresh compiled global instruction files: {exc}", file=sys.stderr)
 
@@ -4424,17 +4433,21 @@ def setup(
         for path in refreshed_instructions:
             _print_text(f"Refreshed Link instructions: {path}")
     if code == 0 and not preview:
-        # Windsurf, Kiro and Zed have no session-start hook: their global
-        # instruction file is how personal memory reaches them unasked.
-        # Setup only refreshes files the person already chose with
-        # `lnk compile --global`; it never creates one in their home.
+        # Windsurf and Zed have no session-start hook, nor Kiro without
+        # Link's Kiro hooks: their global instruction file is how personal
+        # memory reaches them unasked. Setup only refreshes files the person
+        # already chose with `lnk compile --global`; it never creates one.
         from link_core.global_compile import detected_global_targets, owned_global_targets, refresh_global_files
 
         personal_wiki = _resolve_wiki_dir(_default_workspace())
         if personal_wiki.exists():
-            for written in refresh_global_files(_core_memory_records(personal_wiki)):
+            no_room: list[dict[str, str]] = []
+            for written in refresh_global_files(_core_memory_records(personal_wiki), warnings=no_room):
                 if not json_output:
                     _print_text(f"Refreshed reviewed personal memory in {written}")
+            for item in no_room:
+                if not json_output:
+                    _print_text(f"No room for your memory in ~/{item['path']}: {item['reason']}")
         from link_core.global_compile import GLOBAL_TARGETS
 
         owned = owned_global_targets(Path.home())

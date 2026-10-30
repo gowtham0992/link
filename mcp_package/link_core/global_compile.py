@@ -4,8 +4,9 @@
 Some agents also read one instruction file of their own in the home
 directory at the start of every session, whatever the project. For agents
 that have no session-start hook to hand them the Link brief - Windsurf,
-Kiro, Zed - that file is the only way personal memory reaches them without
-the agent deciding to call a tool. `lnk compile --global` writes it there:
+Zed, and Kiro until Link's Kiro hooks are installed - that file is the only
+way personal memory reaches them without the agent deciding to call a tool.
+`lnk compile --global` writes it there:
 
 - Only reviewed, active memories scoped to the person (user or global
   scope), never a project's memory and never one fenced to a project,
@@ -16,14 +17,17 @@ the agent deciding to call a tool. `lnk compile --global` writes it there:
   repository would publish it) are left alone and reported.
 - Within the vendor's limit for the whole file (Windsurf: 6,000
   characters), counting what the person already wrote there; memories that
-  do not fit are left out and reported, lowest priority first.
+  do not fit are left out and reported, lowest priority first. When the
+  person's own text leaves no room even for an empty block, a block already
+  there shrinks to Link's two markers (never deleted) and that is reported.
 - After a memory changes, only files that already carry Link's block are
   refreshed (`refresh_global_files`); nothing new appears in a home
   directory unless the person runs `lnk compile --global`.
 - When no memory is left for a file, its block stays, empty: the block is
   how Link knows the file is its to refresh, so the next reviewed memory
   arrives without another `lnk compile --global`. Deleting the block by
-  hand is how the person takes a file back. Zed's settings.json has no room
+  hand is how the person takes a file back (and so the only way a block
+  leaves a file; Kiro's below aside). Zed's settings.json has no room
   for an empty block, so while it holds no rule of Link's, a marker in
   Zed's AGENTS.md block records that its permissions are still Link's.
 - Global files follow the personal workspace only (LINK_WORKSPACE, else
@@ -32,6 +36,10 @@ the agent deciding to call a tool. `lnk compile --global` writes it there:
 Agents whose hooks deliver the brief at session start (Claude Code, Cursor,
 Codex, Gemini CLI, Antigravity, Copilot) are not written: the brief already
 reaches them, ranked for the task, and a second copy would only cost tokens.
+Kiro joins them once Link's Kiro hooks carry a session-start entry
+(~/.kiro/hooks/link.json for Kiro CLI V3, ~/.kiro/agents/link.json for the
+agent profile): its steering file is then not written, and one Link wrote
+before is removed.
 """
 from __future__ import annotations
 
@@ -67,7 +75,7 @@ class GlobalTarget:
     budget_chars: int | None = None  # for the whole file
     budget_note: str = ""
     signs: tuple[str, ...] = ()  # home-relative paths that show the agent is installed
-    owned_file: bool = False  # the whole file is Link's: removed if even an empty block no longer fits
+    owned_file: bool = False  # the whole file is Link's: removed when Link stops writing it
 
 
 GLOBAL_TARGETS: tuple[GlobalTarget, ...] = (
@@ -95,10 +103,32 @@ class GlobalPlan:
     # Zed: reviewed rules as its own tool permissions (zed_permissions.py)
     zed_rules_skipped: list[dict[str, str]] = field(default_factory=list)
     zed_snippet: str = ""
+    # Files whose limit the person's own text fills: no room even for an empty block.
+    no_room: list[dict[str, str]] = field(default_factory=list)
+    # Targets left out on purpose (Kiro, when Link's hooks already hand it the brief).
+    skipped: list[dict[str, str]] = field(default_factory=list)
+
+
+# Kiro's hook files and the event in each that hands it the brief at session start (agent_hooks.py).
+_KIRO_START_HOOKS = (("kiro", ".kiro/hooks/link.json", "SessionStart"),
+                     ("kiro-agent", ".kiro/agents/link.json", "agentSpawn"))
+
+
+def kiro_start_hook(home: Path) -> str:
+    """The home-relative Kiro hook file through which Link's brief reaches Kiro at session start, or ''."""
+    from .agent_hooks import remove_link_hooks
+
+    for agent, rel, event in _KIRO_START_HOOKS:
+        found = remove_link_hooks(home / rel, agent, write=False).get("found")
+        if isinstance(found, list) and event in found:
+            return rel
+    return ""
 
 
 def detected_global_targets(home: Path) -> list[str]:
-    found = [target.key for target in GLOBAL_TARGETS if any((home / sign).exists() for sign in target.signs)]
+    """Installed agents that need a global file: Kiro not while Link's hooks give it the brief."""
+    found = [target.key for target in GLOBAL_TARGETS if any((home / sign).exists() for sign in target.signs)
+             and not (target.key == "kiro" and kiro_start_hook(home))]
     return found + [ZED_PERMISSIONS] if "zed" in found else found
 
 
@@ -120,6 +150,8 @@ GLOBAL_INTRO = ("The user's reviewed memory, compiled by Link for every project.
 
 GLOBAL_EMPTY = ("No reviewed personal memory right now. Link fills this block again when one is reviewed; "
                 "delete the block to stop Link writing to this file.")
+# What is left of Link's block when the person's own text fills the file's limit: the file stays Link's.
+MARKERS_ONLY = f"{BLOCK_BEGIN}\n{BLOCK_END}\n"
 # Inside Zed's AGENTS.md block, on a line of its own: Link's block in Zed's settings.json is empty
 # for now (so gone from the file) but the permissions are still Link's to refresh.
 ZED_PERMISSIONS_KEPT = "<!-- Link keeps Zed's tool permissions in settings.json; no rule at the moment -->"
@@ -230,6 +262,14 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
             return splice_block(existing, _render(records, zed), newline)
 
         has_block = bool(existing) and BLOCK_BEGIN in str(existing)
+        hooked = kiro_start_hook(home) if target.key == "kiro" else ""
+        if hooked:
+            plan.skipped.append({"path": target.path, "reason": f"Link's hooks in ~/{hooked} give Kiro your memory "
+                                 "at session start; a second copy would only cost tokens"})
+            if has_block:  # written before the hooks were installed: Link takes its block back out
+                left = remove_block(str(existing), newline)
+                plan.files[target.path] = None if target.owned_file and not left.strip() else left
+            continue
         # A file already Link's keeps its block, empty if need be, so it stays Link's to refresh;
         # one named in `targets` (asked for, or owned) gets one; one merely detected waits for a memory.
         keep_block = has_block or targets is not None
@@ -238,10 +278,15 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
             kept, dropped = _fit(fit_target, chosen, whole_file) if chosen else ([], [])
             if kept or (keep_block and _within(fit_target, whole_file([]))):
                 content = whole_file(kept)
-            elif has_block:
-                content = remove_block(str(existing), newline)  # not even an empty block fits
-                if target.owned_file and not content.strip():
-                    content = None  # Link's own file, and nothing of Link's is left in it
+            elif keep_block:
+                # The person's own text fills the limit. A block already there shrinks to its markers,
+                # never smaller than that, so the file stays Link's and fills again once there is room.
+                if has_block:
+                    content = splice_block(existing, MARKERS_ONLY, newline)
+                plan.no_room.append({"path": target.path, "reason": (
+                    f"your own text leaves no room for Link's block ({target.budget_note or 'the file limit'}); "
+                    + ("Link keeps only its markers there and fills the block again once you shorten the file"
+                       if has_block else "shorten the file and run `lnk compile --global` again"))})
         except ValueError as exc:
             plan.conflicts.append({"path": target.path, "reason": str(exc)})
             continue
@@ -316,18 +361,23 @@ def apply_global_plan(plan: GlobalPlan) -> list[str]:
     return written
 
 
-def refresh_global_files(records: Iterable[Mapping[str, object]], home: Path | None = None) -> list[str]:
+def refresh_global_files(records: Iterable[Mapping[str, object]], home: Path | None = None,
+                         warnings: list[dict[str, str]] | None = None) -> list[str]:
     """Rewrite the global files that already carry Link's block from the current memories.
 
     Called after a memory joins, changes or leaves the reviewed set, from the
     CLI, the MCP server and the viewer alike, so a forgotten memory leaves
-    those files at once rather than at the next `lnk setup`.
+    those files at once rather than at the next `lnk setup`. Files with no
+    room for Link's block are added to `warnings`, when given.
     """
     base = (home or Path.home()).expanduser()
     owned = owned_global_targets(base)
     if not owned:
         return []
-    return apply_global_plan(plan_global_compile(records, base, targets=owned))
+    plan = plan_global_compile(records, base, targets=owned)
+    if warnings is not None:
+        warnings += plan.no_room
+    return apply_global_plan(plan)
 
 
 def personal_wiki_dir() -> Path:
@@ -335,7 +385,8 @@ def personal_wiki_dir() -> Path:
     return Path(os.environ.get("LINK_WORKSPACE") or (Path.home() / "link")).expanduser() / "wiki"
 
 
-def refresh_after_memory_change(wiki_dir: Path, home: Path | None = None) -> list[str]:
+def refresh_after_memory_change(wiki_dir: Path, home: Path | None = None,
+                                warnings: list[dict[str, str]] | None = None) -> list[str]:
     """`refresh_global_files` for a memory change in `wiki_dir`, when it is the personal workspace's.
 
     A change in any other workspace (a team's, a scratch one) never touches
@@ -350,4 +401,4 @@ def refresh_after_memory_change(wiki_dir: Path, home: Path | None = None) -> lis
         return []
     if not owned_global_targets((home or Path.home()).expanduser()):
         return []
-    return refresh_global_files(memory_records(wiki_dir), home)
+    return refresh_global_files(memory_records(wiki_dir), home, warnings)
