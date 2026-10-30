@@ -264,7 +264,8 @@ class LinkFilesGuardTests(unittest.TestCase):
         (self.home / "proj").mkdir()
         self.index = {"rules": [{"name": "r", "title": "t", "action": "ask", "kind": "command",
                                  "pattern": "never-matches"}]}
-        patcher = mock.patch.dict(os.environ, {"HOME": str(self.home), "LINK_TEST_ROOT": str(self.ws)})
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.home), "USERPROFILE": str(self.home),  # ~ on Windows
+                                                  "LINK_TEST_ROOT": str(self.ws)})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -358,7 +359,7 @@ class LinkFilesGuardTests(unittest.TestCase):
             decision = decide(command)
             self.assertEqual((decision["decision"], decision["approvable"], decision["governance"]),
                              ("ask", True, False), command)
-        for command in ("rm -r ~/link/wiki", "git -C ~/link stash", f"sed -Ei s/a/b/ {self.ws}/wiki/memories/a.md",
+        for command in ("rm -r ~/link/wiki", "git -C ~/link stash", f"sed -Ei s/a/b/ {self.ws.as_posix()}/wiki/memories/a.md",
                         "rm -r $BUILD/wiki; rm -r ~/link/.link-cache", "lnk approve abc123",
                         "echo abc123 | xargs lnk approve", "lnk enforce x --rule 'ask command: y'"):
             decision = decide(command)

@@ -76,15 +76,16 @@ class ReadPowerShellTests(unittest.TestCase):
 
     def test_pipeline_items_joined_paths_and_dotnet_folders(self):
         home = os.path.expanduser("~")
+        sep = "\\" if "\\" in home else "/"  # Join-Path keeps the parent's separator
         os.environ["LINK_PS_HOME"] = "C:\\Users\\me"
         try:
             cases = {
                 "Get-ChildItem C:\\ws\\m | ForEach-Object { Remove-Item $_.FullName }": "C:\\ws\\m",
                 "gci C:\\ws\\m -r | % { ri $PSItem.FullName }": "C:\\ws\\m",
-                "Remove-Item (Join-Path $HOME 'link') -Recurse": f"{home}/link",
+                "Remove-Item (Join-Path $HOME 'link') -Recurse": f"{home}{sep}link",
                 "Remove-Item -Recurse -Force ${HOME}/link": f"{home}/link",
                 "Remove-Item (Join-Path $env:LINK_PS_HOME 'link') -Recurse": "C:\\Users\\me\\link",
-                "$m = Join-Path $HOME 'link/wiki'; Remove-Item $m -Recurse": f"{home}/link/wiki",
+                "$m = Join-Path $HOME 'link/wiki'; Remove-Item $m -Recurse": f"{home}{sep}link/wiki",
                 "[IO.Directory]::Delete('C:\\ws\\wiki', $true)": "C:\\ws\\wiki",
                 "Expand-Archive x.zip C:\\ws -Force": "C:\\ws",
                 "Expand-Archive -Path x.zip -DestinationPath C:\\ws": "C:\\ws",
