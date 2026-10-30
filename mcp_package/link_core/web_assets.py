@@ -857,21 +857,12 @@ INBOX_JS = """
     if (!items().length) { list.insertAdjacentHTML('afterend', '<p>Inbox is clear.</p>'); }
     syncBulk();
   }
-  // The rules a row displays, exactly as rendered; the server activates a
-  // rule-bearing memory only when the request acknowledges those rules.
-  function rulesShown(item) {
-    return Array.prototype.map.call(item.querySelectorAll('[data-inbox-rules] [data-rule]'), function (li) {
-      return li.getAttribute('data-rule');
-    });
-  }
+  // A memory that carries rules is refused by the server: the person turns a
+  // rule on or off with lnk or LinkBar, and the refusal says so.
   async function act(item, action) {
     if (!item) return;
     var payload = {memory: item.getAttribute('data-memory')};
     if (action === 'archive') payload.reason = 'archived from the inbox';
-    if (action === 'review') {
-      var rules = rulesShown(item);
-      if (rules.length) payload.acknowledge_rules = rules;
-    }
     say(action === 'review' ? 'Marking reviewed...' : 'Archiving...');
     try {
       await post(endpoints[action], payload);

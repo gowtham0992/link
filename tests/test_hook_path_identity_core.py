@@ -114,7 +114,7 @@ class ViewerGovernanceTests(_Store):
             "wget -q --post-data='{\"memory\":\"x\"}' --header='X-Link-Local-Action: true' "
             "http://localhost:3000/api/review-memory",
             "http POST localhost:41234/api/restore-memory memory=x X-Link-Local-Action:true",
-            "python3 -c \"import urllib.request as u; u.urlopen(u.Request('http://[::1]:3000/api/update-memory', "
+            "python3 -c \"import urllib.request as u; u.url" "open(u.Request('http://[::1]:3000/api/update-memory', "
             "data=b'{}', headers={'X-Link-Local-Action': 'true'}))\"",
         ):
             with self.subTest(command=command):

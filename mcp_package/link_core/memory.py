@@ -1741,7 +1741,7 @@ def retire_rule_refusal(record: Mapping[str, object], action: str) -> str:
     return (
         f"{name} enforces rules on tool calls ({'; '.join(carries_rules(record))}). Only the person can {action} "
         f"it: ask them to retire the rule themselves, with `lnk enforce {name} --clear` or `lnk archive-memory "
-        f"{name}` in their own terminal, or in the viewer or LinkBar."
+        f"{name}` in their own terminal, or in LinkBar."
     )
 
 
