@@ -15,6 +15,7 @@ from link_core.global_compile import (  # noqa: E402
     ZED_PERMISSIONS,
     apply_global_plan,
     detected_global_targets,
+    kiro_start_hook,
     owned_global_targets,
     plan_global_compile,
     refresh_after_memory_change,
@@ -162,32 +163,25 @@ class GlobalCompileTests(unittest.TestCase):
         refresh_global_files([memory], self.home)
         self.assertIn("Keep answers short", rules.read_text(encoding="utf-8"), "the next refresh fills it again")
 
-    def test_kiro_gets_no_steering_copy_once_links_hooks_hand_it_the_brief(self):
+    def test_kiro_keeps_its_steering_copy_with_links_hooks_for_the_ide(self):
         memory = _memory("a", "Keep answers short.")
         steering = self.home / ".kiro/steering/link-memory.md"
         apply_global_plan(plan_global_compile([memory], self.home, targets=["kiro"]))
         self.assertTrue(steering.exists())
+        self.assertEqual(kiro_start_hook(self.home), "")
         hooks = self.home / ".kiro/hooks/link.json"
         hooks.parent.mkdir(parents=True)
         pre_tool = {"name": "Link pre-tool", "trigger": "PreToolUse",
                     "action": {"type": "command", "command": "python3 /opt/link/link_hook.py hook pre-tool /ws"}}
         hooks.write_text(json.dumps({"version": "v1", "hooks": [pre_tool]}), encoding="utf-8")
-        self.assertIn("kiro", detected_global_targets(self.home), "rule checks alone do not hand Kiro the brief")
+        self.assertEqual(kiro_start_hook(self.home), "", "rule checks alone do not hand Kiro the brief")
         start = {"name": "Link session-start", "trigger": "SessionStart",
                  "action": {"type": "command", "command": "python3 /opt/link/link.py hook session-start /ws"}}
         hooks.write_text(json.dumps({"version": "v1", "hooks": [start, pre_tool]}), encoding="utf-8")
-        self.assertNotIn("kiro", detected_global_targets(self.home))
+        self.assertEqual(kiro_start_hook(self.home), ".kiro/hooks/link.json")
+        self.assertIn("kiro", detected_global_targets(self.home), "the Kiro IDE reads hooks per workspace only")
         refresh_global_files([memory], self.home)
-        self.assertFalse(steering.exists(), "the copy Link wrote before the hooks goes: one brief, not two")
-        plan = plan_global_compile([memory], self.home, targets=["kiro"])
-        self.assertEqual(plan.files, {})
-        self.assertIn("session start", plan.skipped[0]["reason"])
-        hooks.unlink()
-        profile = self.home / ".kiro/agents/link.json"  # the agent profile for Kiro's default engine
-        profile.parent.mkdir(parents=True)
-        profile.write_text(json.dumps({"name": "link", "hooks": {"agentSpawn": [
-            {"command": "python3 /opt/link/link.py hook session-start /ws --emit text"}]}}), encoding="utf-8")
-        self.assertNotIn("kiro", detected_global_targets(self.home))
+        self.assertIn("Keep answers short", steering.read_text(encoding="utf-8"))
 
     def test_ownership_survives_the_last_memory_leaving_and_refresh_brings_it_back(self):
         memory = _memory("a", "Keep answers short.")

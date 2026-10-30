@@ -233,11 +233,11 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   `lnk setup` and in `lnk compile --global`), and fills the block again
   once you make room. `--global` always compiles your personal workspace,
   wherever it is run.
-- **Kiro got your memory twice.** With Link's Kiro hooks installed, the
-  brief reaches Kiro at session start, yet `lnk compile --global` also
-  wrote it into Kiro's steering and `lnk setup` said Kiro could not load
-  your memory at session start. While the hooks hand Kiro the brief, the
-  steering copy is left out and one Link wrote before is removed.
+- **`lnk setup` said Kiro could not load your memory at session start**
+  even with Link's Kiro hooks installed. It now says Kiro CLI gets the
+  brief from the hooks and the Kiro IDE, which reads hooks per workspace
+  only, does not. Kiro's steering copy stays for the IDE's sake, so Kiro CLI
+  sees the brief twice.
 - **Zed's compiled rules missed a force-push written another way.** A
   `git push --force` rule now also matches `git push origin main --force`,
   `git -C repo push --force` and the command after `&&`, `;` or a pipe, as

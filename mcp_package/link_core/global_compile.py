@@ -4,7 +4,7 @@
 Some agents also read one instruction file of their own in the home
 directory at the start of every session, whatever the project. For agents
 that have no session-start hook to hand them the Link brief - Windsurf,
-Zed, and Kiro until Link's Kiro hooks are installed - that file is the only
+Zed, and the Kiro IDE (it reads hooks per workspace only) - that file is the only
 way personal memory reaches them without the agent deciding to call a tool.
 `lnk compile --global` writes it there:
 
@@ -27,7 +27,7 @@ way personal memory reaches them without the agent deciding to call a tool.
   how Link knows the file is its to refresh, so the next reviewed memory
   arrives without another `lnk compile --global`. Deleting the block by
   hand is how the person takes a file back (and so the only way a block
-  leaves a file; Kiro's below aside). Zed's settings.json has no room
+  leaves a file). Zed's settings.json has no room
   for an empty block, so while it holds no rule of Link's, a marker in
   Zed's AGENTS.md block records that its permissions are still Link's.
 - Global files follow the personal workspace only (LINK_WORKSPACE, else
@@ -36,10 +36,9 @@ way personal memory reaches them without the agent deciding to call a tool.
 Agents whose hooks deliver the brief at session start (Claude Code, Cursor,
 Codex, Gemini CLI, Antigravity, Copilot) are not written: the brief already
 reaches them, ranked for the task, and a second copy would only cost tokens.
-Kiro joins them once Link's Kiro hooks carry a session-start entry
-(~/.kiro/hooks/link.json for Kiro CLI V3, ~/.kiro/agents/link.json for the
-agent profile): its steering file is then not written, and one Link wrote
-before is removed.
+Kiro keeps its steering file even with Link's Kiro hooks: Kiro CLI then
+gets the brief twice, which costs tokens, but the Kiro IDE would otherwise
+get none. `lnk setup` says which of the two the hooks reach.
 """
 from __future__ import annotations
 
@@ -57,7 +56,6 @@ from .compile import (
     _read_strict,
     _within,
     newline_of,
-    remove_block,
     render_block,
     select_memories,
     splice_block,
@@ -105,7 +103,7 @@ class GlobalPlan:
     zed_snippet: str = ""
     # Files whose limit the person's own text fills: no room even for an empty block.
     no_room: list[dict[str, str]] = field(default_factory=list)
-    # Targets left out on purpose (Kiro, when Link's hooks already hand it the brief).
+    # Targets left out on purpose.
     skipped: list[dict[str, str]] = field(default_factory=list)
 
 
@@ -126,9 +124,13 @@ def kiro_start_hook(home: Path) -> str:
 
 
 def detected_global_targets(home: Path) -> list[str]:
-    """Installed agents that need a global file: Kiro not while Link's hooks give it the brief."""
-    found = [target.key for target in GLOBAL_TARGETS if any((home / sign).exists() for sign in target.signs)
-             and not (target.key == "kiro" and kiro_start_hook(home))]
+    """Installed agents that can take a global file.
+
+    Kiro keeps its steering copy even with Link's Kiro hooks: Kiro CLI runs
+    global hooks, but the Kiro IDE reads hooks per workspace only, so the
+    steering file is the one channel that reaches both.
+    """
+    found = [target.key for target in GLOBAL_TARGETS if any((home / sign).exists() for sign in target.signs)]
     return found + [ZED_PERMISSIONS] if "zed" in found else found
 
 
@@ -262,14 +264,6 @@ def plan_global_compile(records: Iterable[Mapping[str, object]], home: Path,
             return splice_block(existing, _render(records, zed), newline)
 
         has_block = bool(existing) and BLOCK_BEGIN in str(existing)
-        hooked = kiro_start_hook(home) if target.key == "kiro" else ""
-        if hooked:
-            plan.skipped.append({"path": target.path, "reason": f"Link's hooks in ~/{hooked} give Kiro your memory "
-                                 "at session start; a second copy would only cost tokens"})
-            if has_block:  # written before the hooks were installed: Link takes its block back out
-                left = remove_block(str(existing), newline)
-                plan.files[target.path] = None if target.owned_file and not left.strip() else left
-            continue
         # A file already Link's keeps its block, empty if need be, so it stays Link's to refresh;
         # one named in `targets` (asked for, or owned) gets one; one merely detected waits for a memory.
         keep_block = has_block or targets is not None

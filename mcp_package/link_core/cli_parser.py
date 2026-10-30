@@ -645,7 +645,7 @@ def build_cli_parser(
     compile_cmd.add_argument(
         "--global", action="store_true", dest="global_files",
         help="write your reviewed personal memory into the global instruction file of agents with no "
-             "session-start hook (Windsurf, Zed, and Kiro until Link's Kiro hooks are installed); "
+             "session-start hook (Windsurf, Zed, and the Kiro IDE, which reads hooks per workspace only); "
              "--targets then picks among windsurf, kiro, zed",
     )
     compile_cmd.add_argument("--json", action="store_true", help="machine-readable plan and result")

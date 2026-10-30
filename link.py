@@ -4497,11 +4497,16 @@ def setup(
         for path in refreshed_instructions:
             _print_text(f"Refreshed Link instructions: {path}")
     if code == 0 and not preview:
-        # Windsurf and Zed have no session-start hook, nor Kiro without
-        # Link's Kiro hooks: their global instruction file is how personal
-        # memory reaches them unasked. Setup only refreshes files the person
+        # Windsurf and Zed have no session-start hook, and the Kiro IDE reads
+        # hooks per workspace only: their global instruction file is how
+        # personal memory reaches them unasked. Setup only refreshes files the person
         # already chose with `lnk compile --global`; it never creates one.
-        from link_core.global_compile import detected_global_targets, owned_global_targets, refresh_global_files
+        from link_core.global_compile import (
+            detected_global_targets,
+            kiro_start_hook,
+            owned_global_targets,
+            refresh_global_files,
+        )
 
         personal_wiki = _resolve_wiki_dir(_default_workspace())
         if personal_wiki.exists():
@@ -4517,10 +4522,12 @@ def setup(
         owned = owned_global_targets(Path.home())
         unwritten = [t.agent for t in GLOBAL_TARGETS
                      if t.key in detected_global_targets(Path.home()) and t.key not in owned]
+        kiro_hooked = bool(kiro_start_hook(Path.home()))
         if unwritten and not json_output:
             names = " and ".join(unwritten) if len(unwritten) < 3 else ", ".join(unwritten[:-1]) + " and " + unwritten[-1]
-            _print_text(f"{names} cannot load your memory at session start. `lnk compile --global` writes your "
-                        "reviewed personal memory into their global rules (preview it with --dry-run).")
+            where = " (Kiro CLI gets it from Link's hooks; the Kiro IDE does not)" if kiro_hooked and "Kiro" in unwritten else ""
+            _print_text(f"{names} cannot load your memory at every session start{where}. `lnk compile --global` "
+                        "writes your reviewed personal memory into their global rules (preview it with --dry-run).")
     if code == 0 and not preview and not no_semantic:
         # Meaning-based recall by default: the measured gap between the
         # lexical default (hit@1 0.589) and the fast tier (0.703) is the
