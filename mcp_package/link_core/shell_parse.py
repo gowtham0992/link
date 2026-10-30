@@ -1012,6 +1012,10 @@ def _ps_tokens(text: str) -> list[str]:
             flush()
             index += 1
             continue
+        if text.startswith("${", index) and (close := text.find("}", index + 2)) > 0:
+            word.append(text[index:close + 1])  # `${HOME}` is a variable, not a block
+            started, index = True, close + 1
+            continue
         if ch in "{}()":
             flush()
             tokens.append(";")

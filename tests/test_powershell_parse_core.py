@@ -82,6 +82,7 @@ class ReadPowerShellTests(unittest.TestCase):
                 "Get-ChildItem C:\\ws\\m | ForEach-Object { Remove-Item $_.FullName }": "C:\\ws\\m",
                 "gci C:\\ws\\m -r | % { ri $PSItem.FullName }": "C:\\ws\\m",
                 "Remove-Item (Join-Path $HOME 'link') -Recurse": f"{home}/link",
+                "Remove-Item -Recurse -Force ${HOME}/link": f"{home}/link",
                 "Remove-Item (Join-Path $env:LINK_PS_HOME 'link') -Recurse": "C:\\Users\\me\\link",
                 "$m = Join-Path $HOME 'link/wiki'; Remove-Item $m -Recurse": f"{home}/link/wiki",
                 "[IO.Directory]::Delete('C:\\ws\\wiki', $true)": "C:\\ws\\wiki",

@@ -70,6 +70,9 @@ FORBIDDEN = [
     ("Read", {"file_path": "{repo}/.env.production"}),
     ("Read", {"file_path": "{repo}/config/secrets/api.json"}),
     ("Edit", {"file_path": "{repo}/package-lock.json"}),
+    # Wrapped in another shell, or spelt with quotes the shell removes.
+    ("Bash", {"command": "bash -c 'git push --force origin main'"}),
+    ("Bash", {"command": "git push --f\"orce\" origin main"}),
     # Options in another order or bundled, a Windows program name, a shell function, a path the
     # reader cannot expand beside the real command.
     ("Bash", {"command": "git push -u --force origin feature"}),
