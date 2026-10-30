@@ -191,13 +191,13 @@ class BashHelperTests(_TempDir):
             path.write_bytes(start.encode("utf-8"))
             self.assertEqual(self._run("link_upsert_instructions", str(path), str(self.source), "x").returncode, 0)
             newline = "\r\n" if "\r\n" in start else "\n"
-            with_mine = path.read_text(encoding="utf-8", newline="") + newline + PNPM.replace("\n", newline)
+            with_mine = path.read_bytes().decode("utf-8") + newline + PNPM.replace("\n", newline)
             path.write_bytes(with_mine.encode("utf-8"))
             self._run("link_upsert_instructions", str(path), str(self.source), "x")
-            self.assertEqual(path.read_text(encoding="utf-8", newline=""), with_mine, "installing twice")
+            self.assertEqual(path.read_bytes().decode("utf-8"), with_mine, "installing twice")
             self.assertEqual(upsert_link_section(with_mine), with_mine, "the same answer as link_core")
             self._run("link_remove_instructions", str(path))
-            left = path.read_text(encoding="utf-8", newline="")
+            left = path.read_bytes().decode("utf-8")
             self.assertIsNone(find_link_section(left))
             self.assertTrue(left.endswith(PNPM.replace("\n", newline)), repr(left))
             self.assertTrue(left.startswith(start.rstrip("\r\n")), repr(left))
@@ -312,6 +312,10 @@ CODEX = (
 )
 
 
+# Link writes the wiki path as the platform spells it, escaped for a TOML string.
+WIKI = str(Path("/x/wiki"))
+
+
 class CodexConfigTests(_TempDir):
     def setUp(self):
         super().setUp()
@@ -324,7 +328,7 @@ class CodexConfigTests(_TempDir):
         self.path.write_text(CODEX, encoding="utf-8")
         self._connect()
         self.assertEqual(self.path.read_text(encoding="utf-8"), CODEX.replace(
-            'command = "/usr/bin/python3"', 'command = "/opt/py"').replace("/old/wiki", "/x/wiki"))
+            'command = "/usr/bin/python3"', 'command = "/opt/py"').replace("/old/wiki", json.dumps(WIKI)[1:-1]))
         once = self.path.read_bytes()
         self._connect()
         self.assertEqual(self.path.read_bytes(), once)
@@ -343,6 +347,7 @@ class CodexConfigTests(_TempDir):
             remove_link_mcp_entry(self.path, _agent_by_name("codex"), write=True)
             self.assertEqual(self.path.read_text(encoding="utf-8").rstrip(), original.rstrip(), repr(original))
 
+    @unittest.skipIf(sys.version_info < (3, 11), "tomllib arrived in Python 3.11")
     def test_quoted_and_indented_headers_are_updated_in_place(self):
         import tomllib
         for header in ('[mcp_servers."link"]', "  [mcp_servers.link]", "[ mcp_servers . link ]  # Link"):
@@ -352,8 +357,9 @@ class CodexConfigTests(_TempDir):
             self.assertEqual(parsed["mcp_servers"]["link"]["command"], "/opt/py", header)
             self.assertIn(header, self.path.read_text(encoding="utf-8"))
             server = read_agent_link_server("codex", str(self.path))
-            self.assertEqual((server["python"], server["wiki"]), ("/opt/py", "/x/wiki"), header)
+            self.assertEqual((server["python"], server["wiki"]), ("/opt/py", WIKI), header)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "without tomllib (3.10) only the table-level check runs")
     def test_forms_link_cannot_edit_and_broken_files_are_refused_unchanged(self):
         for original in ('[mcp_servers]\nlink = { command = "a" }\n', 'mcp_servers.link.command = "a"\n',
                          "[mcp_servers.link\ncommand = \n"):

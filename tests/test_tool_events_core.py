@@ -322,15 +322,19 @@ class HeldCallTests(unittest.TestCase):
         self.assertEqual(self._hook("codex", push).stdout, "", "the approved call goes through once")
         held = json.loads(self._hook("codex", push).stdout)["hookSpecificOutput"]["permissionDecisionReason"]
         request_id = held.split("lnk approve ")[1].split()[0]
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
         with mock.patch.object(sys.stdin, "isatty", return_value=True), \
                 mock.patch("builtins.input", return_value="n") as asked, \
-                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                mock.patch("sys.stdout", new_callable=Terminal) as out:
             self.assertEqual(cli.approve_held_call(self.ws, request_id), 1)
         asked.assert_called_once()
         self.assertIn("git push --force origin main", out.getvalue())
         self.assertEqual([row["id"] for row in approvals.pending(self.ws)], [request_id], "a no grants nothing")
         with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("builtins.input") as asked, mock.patch("sys.stdout", new_callable=io.StringIO):
+                mock.patch("builtins.input") as asked, mock.patch("sys.stdout", new_callable=Terminal):
             self.assertEqual(cli.approve_held_call(self.ws, request_id, yes=True), 0)
         asked.assert_not_called()
         self.assertEqual(self._hook("codex", push).stdout, "", "--yes approved it")
@@ -338,7 +342,7 @@ class HeldCallTests(unittest.TestCase):
     def test_the_approval_command_is_quoted_for_the_persons_shell(self):
         from link_core.approvals import quote_argument  # noqa: PLC0415
 
-        self.assertEqual(quote_argument("/Users/me/my link"), "'/Users/me/my link'")
+        self.assertEqual(quote_argument("/Users/me/my link", windows=False), "'/Users/me/my link'")
         self.assertEqual(quote_argument(r"C:\Users\me\link", windows=True), r"C:\Users\me\link")
         self.assertEqual(quote_argument(r"C:\Users\Jo Smith\link", windows=True), r'"C:\Users\Jo Smith\link"')
 

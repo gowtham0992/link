@@ -1690,7 +1690,9 @@ def approve_held_call(target: Path, request_id: str | None, *, json_output: bool
         print(f"Held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')}):")
         for line in str(row.get("display") or "").splitlines():
             print(f"  {line}")
-        if not yes and sys.stdin.isatty():
+        # Both ends at a terminal: on Windows the NUL device reports itself as one, and a
+        # caller that captures the output (LinkBar, a script) shows the call itself.
+        if not yes and sys.stdin.isatty() and sys.stdout.isatty():
             try:
                 answer = input("Approve once? [y/N] ")
             except EOFError:
