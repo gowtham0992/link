@@ -58,14 +58,15 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   held calls and calls let through after approval.
   LinkBar shows held calls at the top of its inbox ("Waiting for your OK",
   with the agent, the call and the memory that held it) with an Approve once
-  button, and posts a notification with the same button the moment an
-  agent is stopped; it reads the requests straight from the workspace, so
+  button, and posts a notification the moment an agent is stopped, whose
+  Show the call button opens that inbox; it reads the requests straight from the workspace, so
   no extra `lnk` process runs per refresh.
 - **Personal memory reaches the agents that have no session-start hook.**
   Windsurf, Kiro and Zed read one instruction file of their own at the
   start of every session (`~/.codeium/windsurf/memories/global_rules.md`,
   `~/.kiro/steering/`, `~/.config/zed/AGENTS.md`), and Link had no way to
-  hand them the brief. `lnk compile --global` writes your reviewed
+  hand Windsurf, Zed or the Kiro IDE (which reads hooks per workspace only)
+  the brief. `lnk compile --global` writes your reviewed
   personal memories there, in one Link-owned block that keeps the rest of
   the file byte for byte, with its permissions, and fits the vendor's limit
   for the whole file (Windsurf: 6,000 characters, counting what you wrote).
