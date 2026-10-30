@@ -94,8 +94,46 @@ def default_project_for_target(target: Path) -> str:
     if resolved.name == "wiki" and (resolved / "index.md").exists():
         resolved = resolved.parent
     if (resolved / ".git").exists():
-        return normalize_project(resolved.name)
+        return normalize_project(_main_checkout_name(resolved))
     return ""
+
+def _main_checkout_name(checkout: Path) -> str:
+    """The project a git worktree belongs to: the main checkout's folder name, not the worktree's.
+
+    A linked worktree (`git worktree add ../app-hotfix`, Claude Code's
+    `.claude/worktrees/<name>`) has a `.git` file pointing at
+    `<main>/.git/worktrees/<id>`; named by its own folder, the project's
+    rules and memories would stop applying in it. A submodule's `.git` file
+    points at `.git/modules/...` and keeps its own name. Read from the files:
+    no git process.
+    """
+    marker = checkout / ".git"
+    if not marker.is_file():
+        return checkout.name
+    try:
+        line = marker.read_text(encoding="utf-8", errors="replace").strip().splitlines()[0]
+    except (OSError, IndexError):
+        return checkout.name
+    if not line.startswith("gitdir:"):
+        return checkout.name
+    gitdir = Path(line[len("gitdir:"):].strip())
+    if not gitdir.is_absolute():
+        gitdir = checkout / gitdir
+    try:
+        common = gitdir / (gitdir / "commondir").read_text(encoding="utf-8").strip()
+    except OSError:
+        # Linked worktrees always live in <common dir>/worktrees/<id>.
+        if gitdir.parent.name != "worktrees":
+            return checkout.name
+        common = gitdir.parent.parent
+    try:
+        common = common.resolve()
+    except (OSError, ValueError):
+        return checkout.name
+    if common.name == ".git":
+        return common.parent.name
+    # A bare repository (`app.git`) with its worktrees beside it.
+    return common.name[:-4] if common.name.endswith(".git") and len(common.name) > 4 else common.name
 
 def memory_visible_for_project(record: Mapping[str, object], project: str | None = None) -> bool:
     project_name = normalize_project(project)

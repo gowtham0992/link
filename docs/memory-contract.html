@@ -166,7 +166,7 @@ recall(query="formatting", memory_type="preference")</code></pre>
           <li>If a write returns <code>conflict_candidates</code>, explain the conflict and ask the user before overriding.</li>
           <li>If a write returns <code>possible_contradictions</code>, tell the user which stored memories the new one may contradict and offer to supersede or archive the old one. The memory is already saved; the flag asks for review, it does not block.</li>
           <li>Use <code>review_after</code> for memories that should be re-checked, and <code>expires_at</code> for temporary context.</li>
-          <li>Never review, clear, archive or update a memory that carries enforced rules. Only the user does that, in the viewer or the CLI, after seeing the rules; the MCP surface refuses, and the hook asks before an agent runs those commands itself.</li>
+          <li>Never review, clear, archive or update a memory that carries enforced rules. Only the user does that, with <code>lnk</code> in their own terminal or in LinkBar, after seeing the rules; the MCP surface and the viewer refuse (the viewer cannot tell a click from an agent's request), and the hook asks before an agent runs those commands itself or sends them to the viewer.</li>
         </ul>
         <p><strong>Contradiction flags (optional).</strong> Word rules catch contradictions that share structure, such as &ldquo;uses X&rdquo; against &ldquo;no longer uses X&rdquo;, or two different version numbers. After <code>lnk semantic &lt;dir&gt; --setup --nli</code>, a small local natural-language-inference model also reads meaning.</p>
         <ul>

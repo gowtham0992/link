@@ -92,6 +92,17 @@ class SlimRecallContractTests(unittest.TestCase):
             self.assertRegex(str(refused.get("error")), r"Only the person|the person's call")
         self.assertFalse(superseded["created"])
 
+    def test_agent_cannot_restore_a_rule_the_person_retired(self):
+        with mcp_server(self.root) as server:
+            saved = json.loads(server.remember(text="Never run `git push --force` on main.",
+                                               enforce="ask command: git push --force*"))
+        _cli("archive-memory", saved["name"], str(self.root))  # the person retires it
+        with mcp_server(self.root) as server:
+            restored = json.loads(server.review(action="restore", identifier=saved["name"]))
+        self.assertRegex(str(restored.get("error")), r"Only the person can restore")
+        page = self.root / "wiki" / "memories" / f"{saved['name']}.md"
+        self.assertIn("status: archived", page.read_text(encoding="utf-8"))
+
     def test_first_response_reports_the_real_review_queue(self):
         with mcp_server(self.root) as server:
             brief = json.loads(server.recall(query="", mode="brief"))["brief"]

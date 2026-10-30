@@ -1119,8 +1119,9 @@ def _refuse_rule_change(identifier: str, action: str) -> None:
 
     Over MCP an agent could otherwise mark its own rule reviewed, or clear,
     archive, forget or update (which resets review on) a rule that just
-    stopped it. Those changes stay with the person: the CLI, the viewer and
-    LinkBar make them.
+    stopped it, or restore one the person retired. Those changes stay with
+    the person: the CLI in their own terminal and LinkBar make them (the
+    viewer refuses them too: it cannot tell a click from an agent's curl).
     """
     from link_core.memory import carries_rules
     from link_core.memory import resolve_memory_page as _resolve
@@ -1132,13 +1133,13 @@ def _refuse_rule_change(identifier: str, action: str) -> None:
         raise ValueError(
             f"{name} enforces rules on tool calls ({'; '.join(rules)}). "
             f"Only the person can {action} it: ask them to run `lnk review-memory {name}`, "
-            f"`lnk enforce {name} --clear` or use the viewer or LinkBar."
+            f"`lnk enforce {name} --clear` in their own terminal, or use LinkBar."
         )
 
 
 def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[str, object]:
-    if status != "active":
-        _refuse_rule_change(identifier, status.rstrip("d") if status.endswith("d") else status)
+    # Restoring a retired rule turns it back on: as much the person's call as retiring it.
+    _refuse_rule_change(identifier, "restore" if status == "active" else status.removesuffix("d"))
     result = _core_set_memory_status(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),

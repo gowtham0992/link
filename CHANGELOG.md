@@ -245,6 +245,25 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   Cursor with `userMessage`/`agentMessage`; Cursor reads `user_message` and
   `agent_message`, and blocks a permission hook whose output does not match
   its schema. The reason now reaches both you and the agent.
+- **The viewer no longer turns rules on or off.** Any program on your
+  machine can send the viewer's requests, so an agent's `curl` to
+  `localhost` could archive the rule that just stopped it, restore one you
+  retired, or review its own rule into force. The viewer cannot tell your
+  click from that request, so it now refuses to review, archive, restore or
+  update a memory that carries rules and names the `lnk` command to run in
+  your own terminal (LinkBar does the same). The hook also asks before a
+  shell command calls those viewer endpoints, and MCP's `review` refuses to
+  restore a retired rule, as it already refused to archive one.
+- **Link's files are protected however a path names them.** On macOS
+  `/System/Volumes/Data/Users/...` is the same file as `/Users/...`, and a
+  name with an accent can be spelt two ways; either spelling, or a hard
+  link to a memory file, walked past the hook's guard on memory and
+  approval files. Paths are now compared by the file they name as well as
+  by their text, for that guard and for `write:` rules.
+- **Project rules hold in a git worktree.** A worktree (`git worktree add
+  ../app-hotfix`, or Claude Code's `.claude/worktrees/<name>`) was named
+  after its own folder, so the project's rules and memories stopped
+  applying in it. It now belongs to the main checkout's project.
 - LinkBar builds without warnings: the two hook-state switches spelt the
   "still checking" case as `.none`, which Swift read as the Optional's nil
   (the intended meaning) while warning it could mean `HookState.none`.

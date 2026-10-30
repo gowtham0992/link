@@ -31,9 +31,11 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from datetime import date
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from stat import S_ISREG
 
 from .project_scope import (
     default_project_for_target,
@@ -190,14 +192,26 @@ def _path_matches(pattern: str, file_path: str, repo_root: Path | None, base: Pa
     path = Path(raw).expanduser()
     if not path.is_absolute() and base is not None:
         path = base / path
-    if repo_root is not None:
+    try:
+        resolved: Path | None = path.resolve()
+        candidates.add(_spelled(str(resolved)).replace("\\", "/"))
+    except (OSError, ValueError):
+        resolved = None
+    if repo_root is not None and resolved is not None:
         try:
-            candidates.add(path.resolve().relative_to(repo_root.resolve()).as_posix())
+            candidates.add(resolved.relative_to(repo_root.resolve()).as_posix())
         except (OSError, ValueError):
             pass
+        # The same checkout under another spelling (the macOS firmlink, a decomposed é): by identity.
+        try:
+            inside = _relative_to(resolved, repo_root.resolve())
+        except (OSError, ValueError):
+            inside = None
+        if inside:
+            candidates.add(inside)
     # Case-insensitive: `.ENV` is `.env` on the default macOS and Windows disks.
-    wanted = pattern.replace("\\", "/").lower()
-    for candidate in (item.lower() for item in candidates):
+    wanted = unicodedata.normalize("NFC", pattern.replace("\\", "/")).lower()
+    for candidate in (unicodedata.normalize("NFC", item).lower() for item in candidates):
         if candidate.startswith("./"):
             candidate = candidate[2:]
         if fnmatch.fnmatchcase(candidate, wanted) or fnmatch.fnmatchcase(candidate, f"*/{wanted}"):
@@ -218,6 +232,10 @@ GOVERNANCE_COMMANDS = {
 # workspace copy), the pip module, the package name pipx and uv know.
 _LINK_PROGRAMS = {"lnk", "lnk.exe", "link", "link.py", "link_cli", "link_cli.py", "link_hook.py", "link-mcp"}
 _LINK_MODULES = {"link_cli", "link_mcp", "link_core"}
+# The viewer's endpoints for the same changes: `curl localhost:3000/api/archive-memory`
+# is the governance command by another road. (The viewer refuses them for a
+# memory that carries rules; this asks before the request is even sent.)
+_VIEWER_GOVERNANCE = re.compile(r"/api/(?:review|archive|restore|update|forget)-memory(?![\w-])", re.IGNORECASE)
 
 
 def _link_program_at(words: list[str]) -> int | None:
@@ -239,8 +257,12 @@ def is_link_governance(words: list[str]) -> bool:
     So does Link's CLI given a subcommand only known at run time (`lnk $A`,
     `lnk $(echo approve)`): it could be any of them.
     Code passed to an interpreter (`python -c`) is only caught when it names
-    Link's modules; anything subtler is out of a pre-tool hook's sight.
+    Link's modules or the viewer's endpoints; anything subtler is out of a
+    pre-tool hook's sight. Any word naming one of the viewer's governance
+    endpoints counts, whatever sends it (curl, wget, httpie, `python -c`).
     """
+    if any(_VIEWER_GOVERNANCE.search(word) for word in words):
+        return True
     link_at = _link_program_at(words)
     if link_at is not None:
         for word in words[link_at + 1:]:
@@ -311,6 +333,67 @@ def _code_names_link(code: str, roots: Sequence[Path]) -> bool:
     return False
 
 
+# macOS shows the data volume at / and again at /System/Volumes/Data: a
+# firmlink, not a symlink, so resolve() keeps whichever spelling it is given.
+_DATA_VOLUME = "/System/Volumes/Data"
+
+
+def _spelled(path_text: str) -> str:
+    """A resolved path in one spelling: Unicode NFC (APFS accepts NFD too), without the macOS firmlink."""
+    text = unicodedata.normalize("NFC", path_text)
+    if sys.platform == "darwin" and (text == _DATA_VOLUME or text.startswith(_DATA_VOLUME + "/")):
+        text = text[len(_DATA_VOLUME):] or "/"
+    return text
+
+
+def _identity(path: Path) -> tuple[int, int] | None:
+    """What a file is, whatever path names it: (device, inode). None if it does not exist or has no inode."""
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return (info.st_dev, info.st_ino) if info.st_ino else None
+
+
+def _relative_to(path: Path, root: Path) -> str | None:
+    """Where a resolved path lies inside root, judged by file identity: "" for root itself, None if outside.
+
+    Strings miss the same folder named another way (the firmlink, NFD, a
+    case the disk ignores). Walking up from the path, or the part of it that
+    exists, and comparing each folder's device and inode with root's does not.
+    """
+    wanted = _identity(root)
+    if wanted is None:
+        return None
+    parts: list[str] = []
+    current = path
+    while True:
+        if _identity(current) == wanted:
+            return "/".join(reversed(parts))
+        if current.parent == current:
+            return None
+        parts.append(current.name)
+        current = current.parent
+
+
+def _hard_link_into(path: Path, roots: Iterable[Path]) -> bool:
+    """Is an existing file a hard link to one of the protected files? (Writing it writes theirs.)"""
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return False
+    if info.st_nlink < 2 or not info.st_ino or not S_ISREG(info.st_mode):
+        return False
+    for root in roots:
+        try:
+            for child in root.rglob("*"):
+                if _identity(child) == (info.st_dev, info.st_ino):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def _under(path_text: str, roots: Iterable[Path], base: Path | None, *, tree: bool = False) -> bool:
     """Is the path inside one of the roots, or (for `tree`) a folder that contains one?
 
@@ -319,7 +402,10 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None, *, tree: bo
     file into `~` or a plain `chmod 700 ~` does not touch Link's files. A path
     Link cannot resolve (a variable it does not know) counts when it names a
     protected folder. macOS and Windows file systems ignore case, so
-    `.LINK-CACHE` is `.link-cache` there.
+    `.LINK-CACHE` is `.link-cache` there. Paths are compared as text and by
+    file identity, so another spelling of the same folder (the macOS
+    /System/Volumes/Data firmlink, a decomposed é) or a hard link to a
+    protected file is inside too.
     """
     if "$" in str(path_text) or "`" in str(path_text):
         return _names_root(str(path_text), roots, tree=tree)
@@ -327,14 +413,20 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None, *, tree: bo
     if not path.is_absolute() and base is not None:
         path = base / path
     try:
-        resolved = str(path.resolve())
+        resolved_path = path.resolve()
+        resolved = _spelled(str(resolved_path))
     except (OSError, ValueError):  # a NUL in the path, an unreadable link
         return False
+    roots = list(roots)
     for root in roots:
         try:
-            root_text = str(root.resolve())
+            root_path = root.resolve()
+            root_text = _spelled(str(root_path))
         except (OSError, ValueError):
             continue
+        if _relative_to(resolved_path, root_path) is not None \
+                or (tree and _relative_to(root_path, resolved_path) is not None):
+            return True
         mine, theirs = (resolved.lower(), root_text.lower()) if _CASE_FOLDING_FS else (resolved, root_text)
         # Windows paths use "\\" (and accept "/"): compare in the platform's own separator.
         mine, theirs = mine.replace("/", os.sep), theirs.replace("/", os.sep)
@@ -349,7 +441,7 @@ def _under(path_text: str, roots: Iterable[Path], base: Path | None, *, tree: bo
             if any(fnmatch.fnmatchcase(candidate, mine) for candidate in ancestors) \
                     or literal == theirs or literal.startswith(theirs.rstrip(os.sep) + os.sep):
                 return True
-    return False
+    return _hard_link_into(resolved_path, roots)
 
 
 def evaluate_tool_call(

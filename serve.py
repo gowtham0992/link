@@ -564,14 +564,33 @@ def _memory_profile(limit: int = 10, project: str | None = None) -> dict[str, ob
     return _core_memory_profile(_memory_records(), limit=limit, review_command="review-memory", project=project)
 
 
-def _enforced_rules_for(identifier: str) -> list[str]:
-    """The enforce rules of the memory an identifier names (by name, title or path)."""
-    wanted = _clean_text_input(identifier, max_len=300)
-    for record in _memory_records():
-        if wanted in {str(record.get("name") or ""), str(record.get("title") or ""), str(record.get("path") or "")}:
-            raw = record.get("enforce")
-            return [str(rule) for rule in raw if str(rule).strip()] if isinstance(raw, list) else []
-    return []
+def _rule_change_refusal(identifier: str, action: str) -> dict[str, object] | None:
+    """Why the viewer will not review, archive, restore or update a memory that carries rules.
+
+    The viewer cannot tell a person's click from an agent's request: any
+    process on this machine can send the same POST, headers included. So a
+    change that turns a rule on or off is refused here, as it is over MCP,
+    and the person makes it in their own terminal or in LinkBar.
+    """
+    from link_core.memory import carries_rules, resolve_memory_page
+
+    _path, record, _error = resolve_memory_page(
+        WIKI_DIR, _clean_text_input(identifier, max_len=300), records=_memory_records(),
+    )
+    rules = carries_rules(record) if record else []
+    if not record or not rules:
+        return None
+    name = str(record.get("name") or identifier)
+    command = {"archive": "archive-memory", "restore": "restore-memory", "update": "update-memory"}.get(
+        action, "review-memory")
+    return {
+        "updated": False,
+        "saved": False,
+        "error": f"{name} enforces rules on the agent's tool calls, so only you can {action} it, and the viewer "
+                 f"cannot tell your click from an agent's request. Run `lnk {command} {name}` in your own "
+                 "terminal, or use LinkBar.",
+        "rules": rules,
+    }
 
 
 def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
@@ -1606,6 +1625,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             payload = self._read_json_or_reply({"saved": False})
             if payload is None:
                 return
+            if path == "/api/update-memory":
+                # An update sends a reviewed memory back to review: a rule's call too.
+                refusal = _rule_change_refusal(
+                    _clean_text_input(payload.get("memory") or payload.get("identifier"), max_len=300), "update")
+                if refusal:
+                    self._json(refusal, status=403)
+                    return
             try:
                 if path == "/api/remember-memory":
                     result = _remember_memory_from_web(payload)
@@ -1649,24 +1675,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not identifier:
                 self._json({"updated": False, "error": "memory required"}, status=400)
                 return
+            # Reviewing a memory turns its rules on; archiving and restoring
+            # turn them off and on. That is the person's call, made outside
+            # the viewer (_rule_change_refusal says why).
+            refusal = _rule_change_refusal(identifier, {
+                "/api/review-memory": "review", "/api/archive-memory": "archive",
+            }.get(path, "restore"))
+            if refusal:
+                self._json(refusal, status=403)
+                return
             try:
                 if path == "/api/review-memory":
-                    # Reviewing a memory with enforced rules turns them on for
-                    # the agent's tool calls. The viewer is the one place a
-                    # person does that, and only after seeing the rules: the
-                    # request must repeat the exact rules it displayed. Bulk
-                    # review never sends them, so it can never activate rules.
-                    rules = _enforced_rules_for(identifier)
-                    raw_ack = payload.get("acknowledge_rules")
-                    acknowledged = {str(r) for r in raw_ack} if isinstance(raw_ack, list) else set()
-                    if rules and acknowledged != set(rules):
-                        self._json({
-                            "updated": False,
-                            "error": "this memory carries enforced rules; review it on its own, with its rules "
-                                     "in view, so they are acknowledged before they act on the agent's tool calls",
-                            "rules": rules,
-                        }, status=409)
-                        return
                     result = _mark_memory_reviewed(
                         identifier,
                         note=_clean_text_input(payload.get("note"), max_len=500),
