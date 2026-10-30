@@ -231,6 +231,26 @@ class BashHelperTests(_TempDir):
             self.assertIn("read-only", run.stdout + run.stderr)
             self.assertEqual(locked.read_text(encoding="utf-8"), "# Mine\n")
 
+    def test_a_bom_before_links_heading_is_replaced_in_place_and_kept(self):
+        path = self.dir / "GEMINI.md"
+        path.write_bytes(("﻿" + STALE_SECTION + "\n" + PNPM).encode("utf-8"))
+        for _ in range(2):
+            self.assertEqual(self._run("link_upsert_instructions", str(path), str(self.source), "x").returncode, 0)
+        text = path.read_bytes().decode("utf-8")
+        self.assertTrue(text.startswith("﻿## Link — Local Agent Memory"))
+        self.assertEqual(text.count("## Link — "), 1)
+        self._run("link_remove_instructions", str(path))
+        self.assertEqual(path.read_bytes().decode("utf-8"), "﻿" + PNPM)
+
+    def test_removing_the_only_section_through_a_symlink_keeps_the_link(self):
+        real = self.dir / "dotfiles.md"
+        real.write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+        link = self.dir / "CLAUDE.md"
+        link.symlink_to(real)
+        self.assertEqual(self._run("link_remove_instructions", str(link)).returncode, 0)
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(real.read_text(encoding="utf-8"), "")
+
 
 # ── 3: a project uninstall leaves the global config alone ───────────────
 
@@ -496,6 +516,252 @@ class CopilotDetectionTests(_TempDir):
         setup = source[source.index("def setup("):source.index("def onboard(")]
         self.assertIn("_core_detect_hook_only_agents()", setup)
         self.assertIn("_core_build_agent_hooks_payload(", setup)
+
+
+
+# ── Review round 2 ───────────────────────────────────────────────────────
+
+def _fake_home_env(home: Path, bin_dir: Path) -> dict[str, str]:
+    """An environment with nothing of the real home: HOME, Codex and XDG all inside `home`."""
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("CODEX_HOME", "COPILOT_HOME", "LINK_WORKSPACE", "XDG_CONFIG_HOME", "PYTHONPATH")}
+    env.update({"HOME": str(home), "USERPROFILE": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
+                "LINK_WORKSPACE": str(home / "link"), "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin"})
+    return env
+
+
+@unittest.skipUnless(POSIX and shutil.which("bash"), "bash installers")
+class InstallerConnectTests(_TempDir):
+    """The installers, run from a copy with no link.py beside it and the scaffold stubbed out."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = self.dir / "home"
+        self.home.mkdir()
+        self.bin = self.dir / "bin"
+        self.bin.mkdir()
+        (self.bin / "python3").symlink_to(sys.executable)
+        self.repo = self.dir / "repo"
+        shutil.copytree(ROOT / "integrations", self.repo / "integrations")
+        (self.repo / "integrations" / "_shared" / "scaffold.sh").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        self.env = _fake_home_env(self.home, self.bin)
+        self.env["CODEX_HOME"] = str(self.home / "cx")
+
+    def _fake_lnk(self, code: int) -> Path:
+        log = self.dir / "lnk.log"
+        lnk = self.bin / "lnk"
+        lnk.write_text(f'#!/bin/bash\necho "$@" >> "{log}"\necho "lnk: refused" >&2\nexit {code}\n', encoding="utf-8")
+        lnk.chmod(0o755)
+        return log
+
+    def _run(self, agent: str, script: str = "install.sh", *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(self.repo / "integrations" / agent / script), *args], cwd=self.dir,
+                              env=self.env, capture_output=True, text=True, check=False)
+
+    def test_a_connect_that_refused_is_not_overridden_by_the_fallback(self):
+        config = self.home / "cx" / "config.toml"
+        config.parent.mkdir()
+        original = '[mcp_servers]\nlink = { command = "mine" }\n'
+        config.write_text(original, encoding="utf-8")
+        self._fake_lnk(1)
+        run = self._run("codex")
+        self.assertNotEqual(run.returncode, 0, run.stdout)
+        self.assertIn("did not finish", run.stdout)
+        self.assertNotIn("Done.", run.stdout)
+        self.assertEqual(config.read_text(encoding="utf-8"), original)
+
+    def test_with_no_link_cli_the_fallback_registers_codex_in_codex_home(self):
+        config = self.home / "cx" / "config.toml"
+        config.parent.mkdir()
+        config.write_text('model = "o3"\n', encoding="utf-8")
+        run = self._run("codex")
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("No Link CLI found", run.stdout)
+        self.assertIn("[mcp_servers.link]", config.read_text(encoding="utf-8"))
+        self.assertFalse((self.home / ".codex" / "config.toml").exists())
+
+    def test_global_kiro_and_copilot_installs_add_their_hooks(self):
+        log = self._fake_lnk(0)
+        self.assertEqual(self._run("kiro").returncode, 0)
+        self.assertEqual(self._run("copilot").returncode, 0)
+        calls = log.read_text(encoding="utf-8").splitlines()
+        self.assertIn("--hooks", calls[0].split())
+        self.assertIn("connect kiro", calls[0])
+        self.assertIn("--hooks-only", calls[1].split())
+        self.assertIn("connect copilot", calls[1])
+
+    def test_after_both_uninstalls_no_link_section_is_left_in_home_agents_md(self):
+        mine = "# Home\n\nmine\n"
+        for order in (("claude-code", "codex"), ("codex", "claude-code")):
+            (self.home / "AGENTS.md").write_text(mine + "\n" + INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+            (self.home / ".claude").mkdir(exist_ok=True)
+            (self.home / ".claude" / "CLAUDE.md").write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+            for agent in order:
+                self.assertEqual(self._run(agent, "uninstall.sh").returncode, 0, agent)
+            self.assertEqual((self.home / "AGENTS.md").read_text(encoding="utf-8"), mine, order)
+
+
+class CodexHomeTests(_TempDir):
+    def test_connect_hooks_disconnect_and_detection_follow_codex_home(self):
+        from link_core.agent_hooks import _hook_agent_by_name, _settings_path
+        from link_core.mcp_connect import _config_path
+
+        saved = os.environ.get("CODEX_HOME")
+        os.environ["CODEX_HOME"] = str(self.dir / "cx")
+        try:
+            config = _agent_by_name("codex")
+            self.assertEqual(_config_path(config.default_config, None), self.dir / "cx" / "config.toml")
+            self.assertEqual(_settings_path(_hook_agent_by_name("codex").default_settings, None),
+                             self.dir / "cx" / "hooks.json")
+            self.assertNotIn("codex", detect_installed_agents(self.dir / "home"))
+            (self.dir / "cx").mkdir()
+            self.assertIn("codex", detect_installed_agents(self.dir / "home"))
+            _write_codex_config(self.dir / "cx" / "config.toml", "/opt/py", Path("/x/wiki"))
+            payload = build_disconnect_payload("codex", write=True)
+            self.assertTrue(payload["mcp"]["removed"])
+        finally:
+            if saved is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = saved
+
+
+class CopilotHomeTests(_TempDir):
+    def test_hooks_detection_and_disconnect_follow_copilot_home(self):
+        from link_core.agent_hooks import _hook_agent_by_name, _settings_path
+
+        saved = os.environ.get("COPILOT_HOME")
+        os.environ["COPILOT_HOME"] = str(self.dir / "cp")
+        try:
+            path = _settings_path(_hook_agent_by_name("copilot").default_settings, None)
+            self.assertEqual(path, self.dir / "cp" / "hooks" / "link.json")
+            (self.dir / "home" / ".copilot").mkdir(parents=True)
+            self.assertEqual(detect_hook_only_agents(self.dir / "home"), [], "~/.copilot is not where Copilot looks")
+            (self.dir / "cp").mkdir()
+            self.assertEqual(detect_hook_only_agents(self.dir / "home"), ["copilot"])
+            build_agent_hooks_payload(target=Path("/home/x/link"), agent="copilot",
+                                      runtime_script=Path("/opt/link/link.py"), python_cmd="python3", write=True)
+            self.assertTrue(path.exists())
+            payload = build_disconnect_payload("copilot", config_path=str(self.dir / "mcp.json"), write=True)
+            self.assertTrue(payload["hooks"]["removed"])
+            self.assertFalse(path.exists())
+        finally:
+            if saved is None:
+                os.environ.pop("COPILOT_HOME", None)
+            else:
+                os.environ["COPILOT_HOME"] = saved
+
+
+class DisconnectCliTests(_TempDir):
+    def _lnk(self, *args: str) -> subprocess.CompletedProcess:
+        home = self.dir / "home"
+        home.mkdir(exist_ok=True)
+        (home / "link").mkdir(exist_ok=True)
+        return subprocess.run([sys.executable, str(ROOT / "link.py"), *args], env=_fake_home_env(home, self.dir),
+                              cwd=self.dir, capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL)
+
+    def test_a_config_link_cannot_read_is_reported_and_the_exit_is_non_zero(self):
+        folder = self.dir / "mcp.json"
+        folder.mkdir()
+        run = self._lnk("disconnect", "cursor", "--write", "--config", str(folder))
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertIn("Not touched", run.stdout)
+
+    def test_setup_leaves_a_disconnected_agent_alone_until_it_is_connected_again(self):
+        home = self.dir / "home"
+        (home / ".cursor").mkdir(parents=True)
+        (home / ".cursor" / "mcp.json").write_text("{}\n", encoding="utf-8")
+        self.assertEqual(self._lnk("disconnect", "cursor", "--write").returncode, 0)
+        setup = self._lnk("setup", "--preview", "--no-semantic")
+        self.assertIn("Skipped cursor: you disconnected it", setup.stdout)
+        self.assertNotIn("Detected agents: cursor", setup.stdout)
+        connect = self._lnk("connect", "cursor", str(home / "link"), "--hooks-only", "--write")
+        self.assertEqual(connect.returncode, 0, connect.stdout + connect.stderr)
+        self.assertNotIn("Skipped cursor", self._lnk("setup", "--preview", "--no-semantic").stdout)
+
+    def test_hooks_only_writes_copilots_hooks_and_no_project_mcp_config(self):
+        home = self.dir / "home"
+        run = self._lnk("connect", "copilot", str(home / "link"), "--hooks-only", "--write")
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertTrue((home / ".copilot" / "hooks" / "link.json").exists())
+        self.assertFalse((self.dir / ".vscode").exists())
+
+    def test_a_hooks_file_link_would_refuse_stops_connect_before_anything_is_written(self):
+        home = self.dir / "home"
+        gemini = home / ".gemini"
+        gemini.mkdir(parents=True)
+        settings = '{\n  // mine\n  "theme": "Dracula"\n}\n'
+        (gemini / "settings.json").write_text(settings, encoding="utf-8")
+        run = self._lnk("connect", "antigravity", str(home / "link"), "--hooks", "--write")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("Nothing written", run.stderr)
+        self.assertEqual((gemini / "settings.json").read_text(encoding="utf-8"), settings)
+        self.assertFalse((gemini / "config" / "hooks.json").exists())
+
+
+class BomAndSymlinkTests(_TempDir):
+    def test_a_bom_before_links_heading_is_found_and_kept(self):
+        text = "﻿" + STALE_SECTION + "\n" + PNPM
+        updated = upsert_link_section(text)
+        self.assertTrue(updated.startswith("﻿## Link — Local Agent Memory"))
+        self.assertEqual(updated.count("## Link — "), 1)
+        self.assertEqual(remove_link_section(updated), "﻿" + PNPM)
+        self.assertEqual(remove_link_section("﻿" + INSTRUCTIONS_TEMPLATE), "")
+        self.assertEqual(find_link_section(updated), INSTRUCTIONS_TEMPLATE.rstrip())
+
+    @unittest.skipUnless(POSIX, "symlinks")
+    def test_moving_codex_instructions_keeps_a_symlinked_home_agents_md(self):
+        real = self.dir / "dotfiles" / "AGENTS.md"
+        real.parent.mkdir()
+        real.write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+        (self.dir / "AGENTS.md").symlink_to(real)
+        (self.dir / ".claude").mkdir()
+        (self.dir / ".claude" / "CLAUDE.md").write_text(INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+        saved = os.environ.pop("CODEX_HOME", None)
+        try:
+            self.assertTrue(migrate_codex_instructions(self.dir)["moved"])
+        finally:
+            if saved is not None:
+                os.environ["CODEX_HOME"] = saved
+        self.assertTrue((self.dir / "AGENTS.md").is_symlink())
+        self.assertEqual(real.read_text(encoding="utf-8"), "")
+
+
+class JsonRoundTripTests(_TempDir):
+    def test_install_then_uninstall_gives_back_the_same_bytes(self):
+        cases = [
+            ("claude-code", '{\n  "numStartups": 12,\n  "mcpServers": {\n    "github": {"command": "npx"}\n  }\n}\n'),
+            ("cursor", '{\n  // my servers\n  "mcpServers": {\n    "github": { "command": "npx" }, // inline\n  },\n}\n'),
+            ("kiro", '{\n  "mcpServers": {\n    "fetch": {"command": "uvx", "disabled": false}\n  }\n}\n'),
+            ("zed", '// Zed\n{\n  "context_servers": {\n    "other": {"source": "custom", "command": "x"},\n  },\n}\n'),
+            ("antigravity", '﻿{\r\n  "mcpServers": {\r\n    "github": {"command": "npx"}\r\n  }\r\n}\r\n'),
+            ("cursor", '{"mcpServers": {}}'),
+        ]
+        path = self.dir / "config.json"
+        for agent, original in cases:
+            path.write_bytes(original.encode("utf-8"))
+            for _ in range(2):  # install twice, uninstall once
+                _write_json_config(path, _agent_by_name(agent), "/opt/py", Path("/x/wiki"))
+            remove_link_mcp_entry(path, _agent_by_name(agent), write=True)
+            self.assertEqual(path.read_bytes(), original.encode("utf-8"), agent)
+
+
+class HookGroupTests(_TempDir):
+    def test_links_handler_leaves_a_group_the_person_shares_with_it(self):
+        path = self.dir / "settings.json"
+        theirs = {"type": "command", "command": "~/bin/audit.sh"}
+        link = {"type": "command", "command": "python3 /opt/link/link.py hook pre-tool /home/x/link"}
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [theirs, link]}]}}),
+                        encoding="utf-8")
+        self.assertTrue(_install("claude-code", path)["ok"])
+        groups = json.loads(path.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+        self.assertEqual(groups[0], {"matcher": "Bash", "hooks": [theirs]})
+        self.assertEqual(len(groups), 2)
+        self.assertNotEqual(groups[1]["matcher"], "Bash")
+        self.assertIn(" hook pre-tool ", groups[1]["hooks"][0]["command"])
+        self.assertEqual(_install("claude-code", path)["ok"], True)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["hooks"]["PreToolUse"], groups)
 
 
 if __name__ == "__main__":

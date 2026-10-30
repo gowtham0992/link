@@ -51,13 +51,18 @@ query Link for what you know about this project
 4. Writes `.link-mcp-python` so clients can use the Python that actually has `link-mcp`.
 5. Adds a short `lnk` command wrapper for global installs, so checks are short: `lnk health`.
 6. Calls `lnk connect <agent> --write` to register the MCP server, and for
-   Claude Code, Codex, Cursor and Antigravity (with Gemini CLI) adds
+   Claude Code, Codex, Cursor, Kiro and Antigravity (with Gemini CLI) adds
    `--hooks`: the session-start brief, session-end capture where the agent
    has the event, and the pre-tool hooks that check enforced rules; on
    Claude Code also the post-tool hook that surfaces memories anchored to
-   the file in hand. Copilot and Windsurf hooks come from `lnk setup` or
-   `lnk connect <agent> --hooks --write`. (`--project` installs leave global
-   hooks and MCP settings alone.)
+   the file in hand. Copilot's MCP entry belongs to each project, so its
+   global install adds only its hooks (`lnk connect copilot --hooks-only
+   --write`). Windsurf hooks come from `lnk setup` or `lnk connect windsurf
+   --hooks --write`. (`--project` installs leave global hooks and MCP
+   settings alone.) If `lnk connect` refuses a config it cannot edit
+   safely, the installer leaves that file alone, says what to fix, and
+   exits non-zero; its own fallback registration runs only when no Link
+   CLI is reachable at all.
 7. Prints next prompts and verification commands for your install mode.
 
 The PowerShell installers (`install.ps1`) do steps 1-5 only: they do not call

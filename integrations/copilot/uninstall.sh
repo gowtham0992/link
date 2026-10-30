@@ -12,7 +12,7 @@ MODE="${1:---global}"
 # ~/.copilot, which every project shares.
 HOOKS_FLAG=""
 if [ "$MODE" != "--global" ]; then HOOKS_FLAG="--no-hooks"; fi
-link_cli disconnect copilot --write $HOOKS_FLAG || echo "  · Could not run lnk disconnect; remove the \"link\" MCP entry by hand"
+link_cli disconnect copilot --write $HOOKS_FLAG || echo "  · lnk disconnect did not finish; remove the \"link\" MCP entry and Link's hooks it names by hand"
 
 TARGET=".github/copilot-instructions.md"
 link_remove_instructions "$TARGET"

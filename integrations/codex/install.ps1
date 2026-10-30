@@ -23,7 +23,7 @@ if ($Project) {
 }
 
 $mcpPython = Link-ReadMcpPython $wikiPath
-$codexConfig = Join-Path $HOME ".codex\config.toml"
+$codexConfig = Join-Path $codexHome "config.toml"
 if (Test-Path $codexConfig) {
     $command = $mcpPython | ConvertTo-Json -Compress
     $wiki = $wikiPath | ConvertTo-Json -Compress
@@ -38,7 +38,8 @@ if (Test-Path $codexConfig) {
     } else {
         $text = $text.TrimEnd() + "`n`n" + $block
     }
-    Set-Content -Encoding UTF8 -NoNewline -Path $codexConfig -Value $text
+    # Set-Content -Encoding UTF8 writes a BOM on Windows PowerShell 5.1.
+    Link-WriteTextFile -Path $codexConfig -Text $text
     Write-Host "  ✓ Link MCP registered in $codexConfig"
 } else {
     Write-Host "  MCP config: add to ${codexConfig}:"

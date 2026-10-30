@@ -23,12 +23,14 @@ function Link-FullPath {
 function Link-WriteTextFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+        [switch]$Bom
     )
 
-    # UTF-8 without a BOM. A symlinked file is written through to its target
-    # so the link stays a link; a read-only file is refused, never replaced.
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    # UTF-8 without a BOM unless -Bom (a file that had one keeps it). A
+    # symlinked file is written through to its target so the link stays a
+    # link; a read-only file is refused, never replaced.
+    $utf8 = New-Object System.Text.UTF8Encoding([bool]$Bom)
     if (Test-Path -LiteralPath $Path) {
         $item = Get-Item -LiteralPath $Path -Force
         if ($item.IsReadOnly) {
@@ -59,7 +61,11 @@ function Link-UpsertInstructions {
     # Everything else in the file keeps its bytes and line endings.
     $source = (Get-Content -Raw -Encoding UTF8 (Link-FullPath $SourceFile)).TrimEnd("`r", "`n")
     $existing = ""
+    $hadBom = $false
     if (Test-Path -LiteralPath $full) {
+        # ReadAllText drops a leading BOM; note it so the write puts it back.
+        $bytes = [System.IO.File]::ReadAllBytes($full)
+        $hadBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
         $existing = [System.IO.File]::ReadAllText($full, (New-Object System.Text.UTF8Encoding($false, $true)))
     }
 
@@ -86,7 +92,7 @@ function Link-UpsertInstructions {
     }
 
     if ($updated -ne $existing) {
-        Link-WriteTextFile -Path $full -Text $updated
+        Link-WriteTextFile -Path $full -Text $updated -Bom:$hadBom
     }
     Write-Host "$Label -> $Target"
 }

@@ -23,7 +23,8 @@ each answers in its own shape (tool_events.render_reply):
   and deletes.
 - Gemini CLI: BeforeTool in `~/.gemini/settings.json` (timeouts in ms).
 - Antigravity: PreToolUse in `~/.gemini/config/hooks.json`, under a named key.
-- Copilot CLI and VS Code's Copilot harness: `~/.copilot/hooks/link.json`.
+- Copilot CLI and VS Code's Copilot harness: `~/.copilot/hooks/link.json`
+  (`$COPILOT_HOME/hooks/link.json` when that is set).
 - Windsurf (Cascade): pre_run_command, pre_read_code, pre_write_code;
   blocking is by exit code, and there is no session-start event.
 """
@@ -36,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .agent_instructions import agent_home_path
 from .files import write_config_bytes
 from .mcp_verify import display_command
 
@@ -270,7 +272,7 @@ def _hook_agent_by_name(agent: str) -> AgentHookConfig:
 
 
 def _settings_path(default_settings: str, override: str | None) -> Path:
-    path = Path(override or default_settings).expanduser()
+    path = Path(override).expanduser() if override else agent_home_path(default_settings)
     if not path.is_absolute():
         path = (Path.cwd() / path).resolve()
     return path
@@ -466,18 +468,29 @@ def _merge_grouped_event(
     if not isinstance(groups, list):
         groups = []
     replaced = False
-    for group in groups:
+    for group in list(groups):
         if not isinstance(group, dict):
             continue
         group_hooks = group.get("hooks")
         if not isinstance(group_hooks, list):
             continue
-        for index, existing in enumerate(group_hooks):
-            if isinstance(existing, dict) and _is_link_hook_command(existing.get("command"), event):
-                group_hooks[index] = dict(entry)
-                if matcher:
-                    group["matcher"] = matcher
-                replaced = True
+        links = [i for i, h in enumerate(group_hooks)
+                 if isinstance(h, dict) and _is_link_hook_command(h.get("command"), event)]
+        if not links:
+            continue
+        theirs = any(not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
+                                                      for e in LINK_HOOK_EVENTS)) for h in group_hooks)
+        if theirs and group.get("matcher") != matcher:
+            # The person's handlers share this group: changing its matcher
+            # would run their script on other tools. Link's handler moves to
+            # a group of its own; theirs keep the group as they wrote it.
+            group["hooks"] = [h for i, h in enumerate(group_hooks) if i not in links]
+            continue
+        for index in links:
+            group_hooks[index] = dict(entry)
+        if matcher:
+            group["matcher"] = matcher
+        replaced = True
     if not replaced:
         group: dict[str, object] = {"hooks": [dict(entry)]}
         if matcher:
@@ -588,6 +601,39 @@ def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, objec
             settings[config.root_key] = hooks
         _merge_plan(hooks, plan)
     _write_json_file(path, settings, current)
+
+
+def hooks_write_problems(agent: str, settings_path: str | None = None) -> list[str]:
+    """Why Link could not write this agent's hook files (and its companions'), before anything is written.
+
+    `lnk connect --hooks` checks them first, so a file Link would refuse
+    (comments in Gemini CLI's settings.json, bytes that are not UTF-8,
+    hooks in a form Link does not edit) stops the connect before the MCP
+    entry or another hooks file is half-written.
+    """
+    config = _hook_agent_by_name(agent)
+    targets = [(config, _settings_path(config.default_settings, settings_path))]
+    targets += [(other, _settings_path(other.default_settings, None))
+                for other in (_find_hook_agent(name) for name in config.companions) if other is not None]
+    problems: list[str] = []
+    for each, path in targets:
+        try:
+            current = _read_json_file(path)
+        except json.JSONDecodeError as exc:
+            problems.append(f"{path} is not plain JSON ({exc.msg} at line {exc.lineno}); Link writes hooks only "
+                            "into plain JSON, so add them by hand from the snippet")
+            continue
+        except (OSError, ValueError) as exc:
+            problems.append(str(exc))
+            continue
+        settings = current.settings if current is not None else {}
+        hooks = settings.get(each.root_key) if isinstance(settings, dict) else None
+        wanted = list if each.schema == "triggers" else dict
+        if not isinstance(settings, dict):
+            problems.append(f"{path} must contain a JSON object")
+        elif hooks is not None and not isinstance(hooks, wanted):
+            problems.append(f"{path} keeps \"{each.root_key}\" in a form Link does not edit")
+    return problems
 
 
 def build_agent_hooks_payload(

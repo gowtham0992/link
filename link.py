@@ -353,6 +353,8 @@ from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
     detect_hook_only_agents as _core_detect_hook_only_agents,
     detect_installed_agents as _core_detect_installed_agents,
+    disconnected_agents as _core_disconnected_agents,
+    mark_disconnected as _core_mark_disconnected,
     read_agent_link_server as _core_read_agent_link_server,
     supported_agents as _core_supported_agents,
 )
@@ -360,6 +362,7 @@ from link_core.agent_hooks import (
     build_agent_hooks_payload as _core_build_agent_hooks_payload,
     extract_transcript_text as _core_extract_transcript_text,
     hook_supported_agents as _core_hook_supported_agents,
+    hooks_write_problems as _core_hooks_write_problems,
     supports_agent_hooks as _core_supports_agent_hooks,
     transcript_untrusted_inputs as _core_transcript_untrusted_inputs,
 )
@@ -3896,17 +3899,23 @@ def disconnect_agent(
     try:
         payload = build_disconnect_payload(agent, config_path=config_path, hooks_settings=hooks_settings,
                                            hooks=hooks, write=write)
-    except (ValueError, json.JSONDecodeError) as exc:
+    except (ValueError, OSError) as exc:
         print(f"Disconnect failed: {exc}", file=sys.stderr)
         return 1
+    if write and hooks and not config_path:
+        # `lnk setup` leaves this agent alone until `lnk connect` brings it back.
+        _core_mark_disconnected(_resolve_link_root(_default_workspace()), str(payload["agent"]), True)
+    code = 0 if payload.get("ok", True) else 1
     if json_output:
         print(json.dumps(payload, indent=2))
-        return 0
+        return code
     mcp = payload["mcp"] if isinstance(payload["mcp"], dict) else {}
     hooks = payload["hooks"] if isinstance(payload["hooks"], dict) else {}
     verb = "Removed" if write else "Would remove"
     lines = [f"Link in {payload['display_name']}:"]
-    if mcp.get("found"):
+    if mcp.get("error"):
+        lines.append(f"  Not touched: {mcp['error']}")
+    elif mcp.get("found"):
         lines.append(f"  {verb} the MCP server entry from {mcp.get('path')}")
     else:
         lines.append(f"  No Link MCP entry in {mcp.get('path')}")
@@ -3918,14 +3927,14 @@ def disconnect_agent(
     if hooks.get("error"):
         lines.append(f"  Not touched: {hooks['error']}")
     if not payload["found"]:
-        lines.append("Nothing to remove.")
+        lines.append("Nothing to remove." if code == 0 else "Nothing removed.")
     elif write:
         lines.append(str(payload["restart_hint"]))
         lines.append("Other servers, other hooks and comments in those files were left as they were.")
     else:
         lines.append("Preview only. Run again with --write to remove.")
     _print_text("\n".join(lines))
-    return 0
+    return code
 
 
 def connect_mcp(
@@ -3936,84 +3945,58 @@ def connect_mcp(
     config_path: str | None = None,
     python_cmd: str | None = None,
     hooks: bool = False,
+    hooks_only: bool = False,
     hooks_settings: str | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
+    hooks = hooks or hooks_only
     if hooks and not _core_supports_agent_hooks(agent):
         supported = ", ".join(_core_hook_supported_agents())
         print(f"--hooks is not supported for {agent}. Session hooks are available for: {supported}", file=sys.stderr)
         return 1
-    payload = _core_build_mcp_connect_payload(
-        target=target,
-        wiki_dir=wiki_dir,
-        agent=agent,
-        expected_version=LINK_VERSION,
-        init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
-        python_cmd=python_cmd,
-        default_python=sys.executable,
-        config_path=config_path,
-        write=write,
-    )
-    hooks_payload: dict[str, object] | None = None
-    if hooks:
-        runtime_script = target / "link.py"
-        runtime_note = ""
-        if runtime_script.exists():
-            # A workspace runtime copied before session hooks existed would
-            # make every installed hook fail with an argparse error, and an
-            # older runtime silently runs old capture behavior after upgrades.
-            stale_version = _core_workspace_runtime_is_older(target, LINK_VERSION)
-            # A runtime missing the hook entry point or the agent adapters
-            # would make every installed tool hook exit 2 (argparse or "can't
-            # open file"), which Codex, Copilot, Windsurf and Gemini treat as
-            # a block on every call.
-            missing_hook_files = not all(
-                (target / name).exists()
-                for name in ("link_hook.py", "link_core/agent_hooks.py", "link_core/tool_events.py")
-            )
-            if missing_hook_files:
-                if write:
-                    _copy_runtime_files(target)
-                    runtime_note = f"Refreshed the Link runtime at {target}: it predated session hooks."
-                else:
-                    runtime_note = (
-                        f"The Link runtime at {target} predates session hooks; "
-                        "--write will refresh it automatically (or run "
-                        f"{_display_command(['lnk', 'init', str(target)])} first)."
-                    )
-            elif stale_version:
-                if write:
-                    _copy_runtime_files(target)
-                    runtime_note = (
-                        f"Refreshed the Link runtime at {target}: "
-                        f"{stale_version} → {LINK_VERSION} (hooks run the workspace copy)."
-                    )
-                else:
-                    runtime_note = (
-                        f"The Link runtime at {target} is {stale_version} but installed Link is "
-                        f"{LINK_VERSION}; --write will refresh it (or run "
-                        f"{_display_command(['lnk', 'init', str(target)])})."
-                    )
-        else:
-            runtime_script = ROOT / "link.py"
-        hooks_payload = _core_build_agent_hooks_payload(
+    if write and hooks:
+        # Every hooks file is checked before anything is written: a refusal
+        # leaves the MCP config and the other hook files as they were.
+        problems = _core_hooks_write_problems(agent, hooks_settings)
+        if problems:
+            print("Nothing written; Link cannot add its hooks:", file=sys.stderr)
+            for problem in problems:
+                print(f"  {problem}", file=sys.stderr)
+            return 1
+    if write and not config_path:
+        try:  # connecting again undoes `lnk disconnect` for `lnk setup` too
+            _core_mark_disconnected(_resolve_link_root(_default_workspace()), agent, False)
+        except ValueError:
+            pass
+    payload: dict[str, object] = {}
+    if not hooks_only:
+        payload = _core_build_mcp_connect_payload(
             target=target,
+            wiki_dir=wiki_dir,
             agent=agent,
-            runtime_script=runtime_script,
-            python_cmd=sys.executable,
-            settings_path=hooks_settings,
+            expected_version=LINK_VERSION,
+            init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
+            python_cmd=python_cmd,
+            default_python=sys.executable,
+            config_path=config_path,
             write=write,
         )
-        if runtime_note:
-            hooks_payload["runtime_note"] = runtime_note
-        payload["session_hooks"] = hooks_payload
+    hooks_payload: dict[str, object] | None = None
+    if hooks:
+        hooks_payload = _connect_hooks(target, agent, write=write, hooks_settings=hooks_settings)
+        if hooks_only:
+            payload = hooks_payload
+        else:
+            payload["session_hooks"] = hooks_payload
 
     if json_output:
         print(json.dumps(payload, indent=2))
-        write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
-        ok = not write or bool(write_status.get("ok"))
+        ok = True
+        if write and not hooks_only:
+            write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
+            ok = bool(write_status.get("ok"))
         if write and hooks_payload is not None:
             companions = hooks_payload.get("companions")
             for part in [hooks_payload, *(companions if isinstance(companions, list) else [])]:
@@ -4021,14 +4004,72 @@ def connect_mcp(
                 ok = ok and bool(hooks_write.get("ok"))
         return 0 if ok else 1
 
-    code, text = _core_render_mcp_connect_text(payload)
-    _print_text(text)
+    code = 0
+    if not hooks_only:
+        code, text = _core_render_mcp_connect_text(payload)
+        _print_text(text)
     if hooks_payload is not None:
         hooks_code, hooks_text = _core_render_agent_hooks_text(hooks_payload)
-        print()
+        if not hooks_only:
+            print()
         _print_text(hooks_text)
         code = code or hooks_code
     return code
+
+
+def _connect_hooks(target: Path, agent: str, *, write: bool, hooks_settings: str | None) -> dict[str, object]:
+    """Install (or preview) one agent's session hooks, refreshing a workspace runtime that predates them."""
+    runtime_script = target / "link.py"
+    runtime_note = ""
+    if runtime_script.exists():
+        # A workspace runtime copied before session hooks existed would
+        # make every installed hook fail with an argparse error, and an
+        # older runtime silently runs old capture behavior after upgrades.
+        stale_version = _core_workspace_runtime_is_older(target, LINK_VERSION)
+        # A runtime missing the hook entry point or the agent adapters
+        # would make every installed tool hook exit 2 (argparse or "can't
+        # open file"), which Codex, Copilot, Windsurf and Gemini treat as
+        # a block on every call.
+        missing_hook_files = not all(
+            (target / name).exists()
+            for name in ("link_hook.py", "link_core/agent_hooks.py", "link_core/tool_events.py")
+        )
+        if missing_hook_files:
+            if write:
+                _copy_runtime_files(target)
+                runtime_note = f"Refreshed the Link runtime at {target}: it predated session hooks."
+            else:
+                runtime_note = (
+                    f"The Link runtime at {target} predates session hooks; "
+                    "--write will refresh it automatically (or run "
+                    f"{_display_command(['lnk', 'init', str(target)])} first)."
+                )
+        elif stale_version:
+            if write:
+                _copy_runtime_files(target)
+                runtime_note = (
+                    f"Refreshed the Link runtime at {target}: "
+                    f"{stale_version} → {LINK_VERSION} (hooks run the workspace copy)."
+                )
+            else:
+                runtime_note = (
+                    f"The Link runtime at {target} is {stale_version} but installed Link is "
+                    f"{LINK_VERSION}; --write will refresh it (or run "
+                    f"{_display_command(['lnk', 'init', str(target)])})."
+                )
+    else:
+        runtime_script = ROOT / "link.py"
+    hooks_payload = _core_build_agent_hooks_payload(
+        target=target,
+        agent=agent,
+        runtime_script=runtime_script,
+        python_cmd=sys.executable,
+        settings_path=hooks_settings,
+        write=write,
+    )
+    if runtime_note:
+        hooks_payload["runtime_note"] = runtime_note
+    return hooks_payload
 
 
 def _copy_runtime_files(target: Path) -> None:
@@ -4355,17 +4396,24 @@ def setup(
     runtime refresh, MCP provisioning, session hooks. Idempotent — after
     `brew upgrade`, re-running it refreshes everything in one step.
     """
-    detected = _core_detect_installed_agents()
+    # An agent the person took Link out of with `lnk disconnect` stays out
+    # until they run `lnk connect` for it again.
+    disconnected = set(_core_disconnected_agents(_resolve_link_root(_default_workspace())))
+    found = _core_detect_installed_agents()
+    skipped = [name for name in found + _core_detect_hook_only_agents() if name in disconnected]
+    detected = [name for name in found if name not in disconnected]
     hookable = [name for name in detected if _core_supports_agent_hooks(name)]
     # Copilot: global hooks, per-project MCP config - setup wires the hooks only.
-    hooks_only = [name for name in _core_detect_hook_only_agents() if name not in detected]
+    hooks_only = [name for name in _core_detect_hook_only_agents() if name not in found and name not in disconnected]
     if not json_output:
+        for name in dict.fromkeys(skipped):
+            _print_text(f"Skipped {name}: you disconnected it (lnk connect {name} --write brings it back).")
         if detected or hooks_only:
             display = ", ".join(detected + [f"{name} (session hooks)" for name in hooks_only])
             _print_text(f"Detected agents: {display}")
             if not preview and detected:
                 _print_text("Wiring MCP" + (" + session hooks" if hookable else "") + " for all of them.\n")
-        else:
+        elif not skipped:
             _print_text(
                 "No agent configs detected (looked for Claude Code, Codex, Cursor, "
                 "Windsurf, Zed, Kiro, Gemini CLI). Setting up the workspace; connect "

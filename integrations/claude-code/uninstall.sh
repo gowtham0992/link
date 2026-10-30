@@ -12,7 +12,7 @@ MODE="${1:---global}"
 # sessions kept trying to start a workspace that was gone. Both are the
 # agent's global config, so a --project uninstall leaves them alone.
 if [ "$MODE" = "--global" ]; then
-    link_cli disconnect claude-code --write || echo "  · Could not run lnk disconnect; remove the \"link\" MCP entry by hand"
+    link_cli disconnect claude-code --write || echo "  · lnk disconnect did not finish; remove the \"link\" MCP entry and Link's hooks it names by hand"
 fi
 
 if [ "$MODE" = "--global" ]; then
@@ -22,3 +22,9 @@ else
 fi
 
 link_remove_instructions "$TARGET"
+
+# Older Link put Codex's section in ~/AGENTS.md, which only Claude Code
+# reads (Codex never does): with Claude Code uninstalled nothing needs it.
+if [ "$MODE" = "--global" ] && [ -f "$HOME/AGENTS.md" ] && grep -q "^## Link — " "$HOME/AGENTS.md"; then
+    link_remove_instructions "$HOME/AGENTS.md"
+fi

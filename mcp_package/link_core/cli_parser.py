@@ -674,6 +674,13 @@ def build_cli_parser(
              "Windsurf, Kiro), and on Claude Code memories surfaced when the agent opens anchored code",
     )
     connect_cmd.add_argument(
+        "--hooks-only",
+        action="store_true",
+        dest="hooks_only",
+        help="install the agent's hooks and leave its MCP config alone (Copilot's MCP entry is per project, "
+             "its hooks are global)",
+    )
+    connect_cmd.add_argument(
         "--hooks-settings",
         default=None,
         dest="hooks_settings",
@@ -1142,6 +1149,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             config_path=args.config,
             python_cmd=args.python,
             hooks=args.hooks,
+            hooks_only=args.hooks_only,
             hooks_settings=args.hooks_settings,
             json_output=args.json,
         )

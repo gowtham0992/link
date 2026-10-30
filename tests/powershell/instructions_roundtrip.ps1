@@ -127,5 +127,14 @@ $jsonc = Join-Path $dir "jsonc.json"
 Link-UpsertMcpJson -Path $jsonc -Command "py" -WikiPath "C:\wiki"
 Assert ([System.IO.File]::ReadAllText($jsonc) -eq "// mine`n{`"a`": 1}`n") "unparseable file unchanged"
 
+# 13. A BOM before Link's heading: the section is found and replaced (not added twice), and the BOM stays.
+$bomFile = Join-Path $dir "bom.md"
+[System.IO.File]::WriteAllText($bomFile, "## Link — Local Agent Memory`nold`n", (New-Object System.Text.UTF8Encoding($true)))
+Link-UpsertInstructions $bomFile $source "test"
+$bytes = [System.IO.File]::ReadAllBytes($bomFile)
+Assert ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) "BOM kept"
+$text = [System.IO.File]::ReadAllText($bomFile)
+Assert ($text -eq "## Link — Local Agent Memory`n`nnew body`n") "one section, replaced: [$text]"
+
 Remove-Item -Recurse -Force $dir
 Write-Host "instructions.ps1 round trip: ok"
