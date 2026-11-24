@@ -2,12 +2,17 @@ import sys
 import re
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
+
+# These fixtures were captured in May 2026; read them on a day inside their six-month trust window.
+ON_FIXTURE_DAY = patch("link_core.memory._today",
+                       lambda today=None: date.fromisoformat(str(today or "2026-05-25")[:10]))
 
 from link_core.memory import (  # noqa: E402
     memory_rank_score,
@@ -53,6 +58,7 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(default_project_for_target(wiki), "link-product")
         self.assertEqual(default_project_for_target(Path(tempfile.mkdtemp(prefix="link-no-project-"))), "")
 
+    @ON_FIXTURE_DAY
     def test_memory_records_profile_and_recall(self):
         root = Path(tempfile.mkdtemp(prefix="link-memory-core-"))
         wiki = root / "wiki"
@@ -1014,6 +1020,7 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(unsafe["state"], "unsafe")
         self.assertEqual(disabled["state"], "disabled")
 
+    @ON_FIXTURE_DAY
     def test_memory_explanation_reports_audit_payload_and_graph(self):
         root = Path(tempfile.mkdtemp(prefix="link-memory-explain-"))
         wiki = root / "wiki"
@@ -1067,6 +1074,7 @@ class MemoryCoreTests(unittest.TestCase):
         self.assertEqual(len(explanation["log_entries"]), 1)
         self.assertEqual(extract_wikilinks("[[one]] [[one]] [[two|Two]]"), ["one", "two"])
 
+    @ON_FIXTURE_DAY
     def test_memory_lifecycle_mutations_update_files_and_callbacks(self):
         root = Path(tempfile.mkdtemp(prefix="link-memory-lifecycle-"))
         wiki = root / "wiki"

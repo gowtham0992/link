@@ -132,6 +132,15 @@ class QuarantinedImportsStayOutOfWikiSearchTests(unittest.TestCase):
         out = self._cli("query", "force push production", str(self.root), "--budget", "micro", "--json")
         self.assertNotIn("team-force-push", out)
 
+    def test_query_and_brief_do_not_name_it_even_as_needing_review(self):
+        # The demo's own pending memory came first in the review list, which hid this one.
+        for path in (self.root / "wiki" / "memories").glob("*.md"):
+            if path.stem != "team-force-push":
+                path.unlink()
+        for args in (("query", "force push production"), ("brief", "session start"), ("brief", "force push")):
+            out = self._cli(*args, str(self.root))
+            self.assertNotIn("team-force-push", out, args)
+
     def test_index_does_not_list_it(self):
         self._cli("rebuild-index", str(self.root))
         self.assertNotIn("team-force-push", (self.root / "wiki" / "index.md").read_text(encoding="utf-8"))

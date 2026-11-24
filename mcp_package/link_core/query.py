@@ -12,6 +12,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .memory import (
     memory_inbox,
+    memory_quarantined,
     memory_visible_for_project,
     normalize_project,
     recall_memories,
@@ -550,9 +551,11 @@ def query_link(
                       cache_path=wiki_dir.parent / ".link-cache" / "staleness-v1.json")
     # Only the review queue is needed here. Building a whole brief with the
     # query scored the corpus a second time (half of query_link's time on a
-    # large store) to throw the ranking away.
+    # large store) to throw the ranking away. A teammate's memory nobody here
+    # has reviewed stays out of it: even its title is theirs, not the person's.
     inbox = memory_inbox(
-        [record for record in record_list if memory_visible_for_project(record, project_name)],
+        [record for record in record_list
+         if memory_visible_for_project(record, project_name) and not memory_quarantined(record)],
         limit=limits["memories"],
         review_command=review_command,
     )

@@ -2,11 +2,17 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
+
+# These fixtures were captured in May 2026; read them on a day inside their six-month trust window.
+ON_FIXTURE_DAY = patch("link_core.memory._today",
+                       lambda today=None: date.fromisoformat(str(today or "2026-05-25")[:10]))
 
 from link_core.memory import memory_records  # noqa: E402
 from link_core.query import normalize_budget, query_link  # noqa: E402
@@ -29,6 +35,7 @@ class QueryCoreTests(unittest.TestCase):
         self.assertEqual(normalize_budget(123), "medium")
         self.assertEqual(normalize_budget(None), "medium")
 
+    @ON_FIXTURE_DAY
     def test_query_link_returns_budgeted_memory_and_graph_context(self):
         root = Path(tempfile.mkdtemp(prefix="link-query-core-"))
         wiki = root / "wiki"

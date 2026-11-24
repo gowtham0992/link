@@ -2865,8 +2865,10 @@ def memory_brief(
         if memory_visible_for_project(record, project_name)
     ]
     profile = memory_profile(record_list, limit=limit, review_command=review_command, project=project_name)
+    # The brief goes to agents: a teammate's memory nobody here has reviewed
+    # stays out of its review list, title included (memory-inbox shows it).
     inbox = memory_inbox(
-        record_list,
+        [record for record in record_list if not memory_quarantined(record)],
         limit=limit,
         review_command=review_command,
         command_target=command_target,

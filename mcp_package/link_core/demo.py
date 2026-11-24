@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import shutil
+from datetime import date, timedelta
 from pathlib import Path
 
 from .files import atomic_write_json, atomic_write_text
@@ -98,7 +99,7 @@ def create_demo_workspace(target: Path, *, source_root: Path, force: bool = Fals
     for rel, content in DEMO_FILES.items():
         path = target / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(path, content.strip() + "\n")
+        atomic_write_text(path, _dated(content).strip() + "\n")
 
     wiki_dir = target / "wiki"
     backlinks = build_backlinks(wiki_dir, body_only=False)
@@ -111,6 +112,17 @@ def create_demo_workspace(target: Path, *, source_root: Path, force: bool = Fals
         "migration": migration,
     }
 
+
+def _dated(content: str, today: date | None = None) -> str:
+    """Move the demo's seed dates to the last few days, so its memories never age out of trust."""
+    today = today or date.today()
+    return (content.replace(SEED_CAPTURE, str(today))
+            .replace(SEED_DATE, str(today - timedelta(days=2))))
+
+
+# Seed dates written below; `_dated` moves them to the days before the demo is made.
+SEED_DATE = "2026-05-02"
+SEED_CAPTURE = "2026-05-04"
 
 DEMO_FILES: dict[str, str] = {
     "START_HERE.md": """# Link Demo: Start Here

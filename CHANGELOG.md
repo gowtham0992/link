@@ -382,6 +382,13 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   open showed only the tabs, and switching tabs resized the window from its
   bottom edge, which pulled it away from the menu bar. Every tab now has
   the same height and scrolls within it.
+- **`lnk demo` aged out of trust.** The demo's memories were dated May 2026,
+  so from November every new demo opened with them overdue for review. The
+  demo is now dated to the days before it is made.
+- **A teammate's unreviewed memory could be named in an agent's recall.**
+  Quarantined imports were kept out of recall and wiki search, but the
+  "needs review" list in a recall packet or a session brief could still show
+  one's title. Only you see them now, in `lnk memory-inbox` and LinkBar.
 - LinkBar builds without warnings: the two hook-state switches spelt the
   "still checking" case as `.none`, which Swift read as the Optional's nil
   (the intended meaning) while warning it could mean `HookState.none`.
