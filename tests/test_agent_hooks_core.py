@@ -198,10 +198,11 @@ class AgentHooksCoreTests(unittest.TestCase):
             self.assertEqual({k: v for k, v in hooks[1].items() if k != "action"},
                              {"name": "preToolUse-0", "trigger": "preToolUse", "timeout": 10},
                              "Link's entry is updated where it stands, as Kiro shaped it")
-            self.assertIn("/tmp/link/link.py hook pre-tool /tmp/link --emit kiro-agent", hooks[1]["action"]["command"])
+            script, target = Path("/tmp/link/link.py"), Path("/tmp/link")  # the platform's separators
+            self.assertIn(f"{script} hook pre-tool {target} --emit kiro-agent", hooks[1]["action"]["command"])
             self.assertEqual(hooks[2], {"name": "agentSpawn-link", "trigger": "agentSpawn", "timeout": 30,
                                         "action": {"type": "command",
-                                                   "command": "python3 /tmp/link/link.py hook session-start /tmp/link"}})
+                                                   "command": f"python3 {script} hook session-start {target}"}})
             self.assertEqual(build_agent_hooks_payload(**kwargs, write=True)["write"]["ok"], True)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["hooks"], hooks, "a second install changes nothing")
             self.assertEqual(remove_link_hooks(path, "kiro-agent", write=True)["found"], ["agentSpawn", "preToolUse"])
