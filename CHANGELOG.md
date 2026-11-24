@@ -6,6 +6,8 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-11-23
+
 ### Added
 
 - **Rules hold on every agent with a pre-tool hook, not just Claude Code.**
