@@ -296,6 +296,33 @@ class CliRuntimeCoreTests(unittest.TestCase):
         self.assertIn("is Link ready?", text)
         self.assertIn("lnk serve /tmp/link --port 3000", text)
 
+    def test_onboard_on_a_store_with_memories_and_a_hook_file_it_could_not_write(self):
+        # `lnk setup` on an existing store said "First memory - none yet" with 22
+        # memories, and "hooks updated" when Kiro's agent profile was refused.
+        def render(memory_count: int) -> str:
+            return render_onboard_text({
+                "target": "/tmp/link",
+                "status": {"ready": True, "content_page_count": 3, "memory_count": memory_count},
+                "connections": [{
+                    "display_name": "Kiro",
+                    "config_path": "/tmp/mcp.json",
+                    "write": {"requested": True, "ok": True},
+                    "session_hooks": {
+                        "write": {"requested": True, "ok": True},
+                        "companions": [{"display_name": "Kiro (agent profile)",
+                                        "write": {"requested": True, "ok": False,
+                                                  "message": "profile.json is not UTF-8"}}],
+                    },
+                }],
+                "commands": {},
+            })[1]
+
+        text = render(22)
+        self.assertNotIn("First memory", text)
+        self.assertIn("Kiro: updated · hooks updated · Kiro (agent profile) hooks not written: "
+                      "profile.json is not UTF-8", text)
+        self.assertIn("First memory\n- none yet", render(0))
+
     def test_render_onboard_write_without_agent_is_actionable_error(self):
         code, text = render_onboard_text({
             "target": "/tmp/link",

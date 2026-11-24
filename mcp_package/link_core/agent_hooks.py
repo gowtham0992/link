@@ -98,6 +98,9 @@ class AgentHookConfig:
     # A file that holds hooks only (not the agent's whole settings): removing
     # Link's hooks deletes it when nothing but Link's own skeleton is left.
     hooks_only_file: bool = True
+    # The vendor may rewrite this file's hooks into its own list form (Kiro
+    # migrates agent profiles): Link then updates its entries where they stand.
+    migrates_to_triggers: bool = False
     restart_hint: str = "Restart the agent; new sessions will start with the Link memory brief."
 
 
@@ -223,6 +226,7 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         start_matcher=None,
         pre_tool=(("preToolUse", None),),
         pre_tool_emit="kiro-agent",
+        migrates_to_triggers=True,
         restart_hint="",  # Kiro's own hint covers both files
     ),
     AgentHookConfig(
@@ -548,11 +552,43 @@ def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, 
     return plan
 
 
-def _is_link_trigger(entry: object) -> bool:
+def _trigger_command(entry: object) -> object:
     action = entry.get("action") if isinstance(entry, dict) else None
-    command = action.get("command") if isinstance(action, dict) else (
+    return action.get("command") if isinstance(action, dict) else (
         entry.get("command") if isinstance(entry, dict) else None)
-    return any(_is_link_hook_command(command, event) for event in LINK_HOOK_EVENTS)
+
+
+def _merge_migrated_triggers(hooks: list[object], plan: list[dict[str, object]],
+                             config: AgentHookConfig) -> list[object]:
+    """A file the vendor rewrote into its list form: Link's entries get the new command where they stand,
+    keeping the name, trigger and timeout the vendor gave them; a missing one is added in the same shape.
+    Every other entry is the person's and stays as it is."""
+    merged = list(hooks)
+    for item in plan:
+        entry = item["entry"]
+        assert isinstance(entry, dict)
+        event, trigger, command = str(item["event"]), str(item["event_name"]), str(entry["command"])
+        ours = [index for index, existing in enumerate(merged)
+                if isinstance(existing, dict) and _is_link_hook_command(_trigger_command(existing), event)]
+        for index in ours:
+            existing = dict(merged[index])  # type: ignore[call-overload]
+            action = existing.get("action")
+            if isinstance(action, dict):
+                existing["action"] = {**action, "command": command}
+            else:
+                existing["command"] = command
+            merged[index] = existing
+        if not ours:
+            added: dict[str, object] = {"name": f"{trigger}-link", "trigger": trigger,
+                                        "action": {"type": "command", "command": command}}
+            if config.timeout_key and config.timeout_key in entry:
+                added["timeout"] = int(entry[config.timeout_key]) // config.timeout_scale  # type: ignore[call-overload]
+            merged.append(added)
+    return merged
+
+
+def _is_link_trigger(entry: object) -> bool:
+    return any(_is_link_hook_command(_trigger_command(entry), event) for event in LINK_HOOK_EVENTS)
 
 
 def _hooks_snippet(config: AgentHookConfig, plan: list[dict[str, object]]) -> str:
@@ -587,6 +623,10 @@ def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, objec
     if config.version is not None:
         settings.setdefault("version", config.version)
     hooks = settings.get(config.root_key)
+    if config.migrates_to_triggers and isinstance(hooks, list):
+        settings[config.root_key] = _merge_migrated_triggers(hooks, plan, config)
+        _write_json_file(path, settings, current)
+        return
     wanted = list if config.schema == "triggers" else dict
     if hooks is not None and not isinstance(hooks, wanted):
         # Never replace hooks Link cannot read as its own kind: they are the person's.
@@ -631,6 +671,8 @@ def hooks_write_problems(agent: str, settings_path: str | None = None) -> list[s
         wanted = list if each.schema == "triggers" else dict
         if not isinstance(settings, dict):
             problems.append(f"{path} must contain a JSON object")
+        elif each.migrates_to_triggers and isinstance(hooks, list):
+            continue
         elif hooks is not None and not isinstance(hooks, wanted):
             problems.append(f"{path} keeps \"{each.root_key}\" in a form Link does not edit")
     return problems

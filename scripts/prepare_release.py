@@ -329,14 +329,19 @@ def release_commands(version: str) -> list[str]:
 
 
 def tap_commands(version: str, linkbar_version: str | None) -> list[str]:
-    """The Homebrew tap bump: two formula lines, three cask lines."""
+    """The Homebrew tap bump: the formula rendered from the repo's template, three cask lines.
+
+    The formula is the template, not a two-line edit of the tap's copy: an
+    edit kept the tap installing an older file list, so 6.0.0 under
+    Homebrew had no link_hook.py and its tool hooks never took the fast path.
+    """
     version = normalize_version(version)
     tap = "/opt/homebrew/Library/Taps/gowtham0992/homebrew-link"
     tarball = f"https://github.com/gowtham0992/link/archive/refs/tags/v{version}.tar.gz"
     lines = [
         f"SHA=$(curl -sL {tarball} | shasum -a 256 | cut -d' ' -f1)",
-        f"sed -i '' -E 's#refs/tags/v[0-9.]+\\.tar\\.gz#refs/tags/v{version}.tar.gz#; "
-        f"s#sha256 \"[0-9a-f]+\"#sha256 \"'$SHA'\"#' {tap}/Formula/link.rb",  # one url, one sha256 line; BSD sed
+        f"sed -E '/^class Link/,$!d; s#refs/tags/vX\\.Y\\.Z\\.tar\\.gz#refs/tags/v{version}.tar.gz#; "
+        f"s#REPLACE_WITH_RELEASE_TARBALL_SHA256#'$SHA'#' packaging/homebrew/Formula/link.rb > {tap}/Formula/link.rb",
     ]
     if linkbar_version:
         lines += [

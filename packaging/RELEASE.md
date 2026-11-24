@@ -83,12 +83,16 @@ Check the downloaded asset's sha256 matches what `bundle.sh` printed.
 
 In `gowtham0992/homebrew-link`:
 
-- `Formula/link.rb`: two lines - the tag in the `url`, and the `sha256` of
-  `https://github.com/gowtham0992/link/archive/refs/tags/vX.Y.Z.tar.gz`.
+- `Formula/link.rb`: rendered from `packaging/homebrew/Formula/link.rb` with
+  the tag in the `url` and the `sha256` of
+  `https://github.com/gowtham0992/link/archive/refs/tags/vX.Y.Z.tar.gz` (the
+  command `prepare_release.py` prints). Never hand-edit only those two lines
+  in the tap: the template's file list moves on (6.0.0 shipped through
+  Homebrew without `link_hook.py` that way).
 - `Casks/linkbar.rb` (only when LinkBar changed): three lines - `version`,
   `sha256` of the zip, and `download/vX.Y.Z/` in the `url`.
 
-`git diff` before pushing: two lines, or five. The tap's own CI runs
+`git diff` before pushing: the url and sha256, plus whatever the template changed since the last release, and three cask lines when LinkBar changed. The tap's own CI runs
 `brew test-bot`; Homebrew deprecations land there first (3.0 hit the
 `postflight` → `postflight_steps` change), so check it after pushing.
 

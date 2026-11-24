@@ -6,6 +6,39 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Homebrew installs never got the fast tool hook.** The tap's formula
+  was bumped by editing its `url` and `sha256` lines, so it kept installing
+  an older file list without `link_hook.py`: under Homebrew, `lnk setup`
+  could not switch tool hooks to it, they kept running through `link.py`
+  (about 57 ms a call instead of 33), and every setup said it had refreshed
+  the workspace runtime. The release now renders the tap's formula from the
+  template in this repository, and a test requires the template to install
+  every file a workspace runtime copies. pip installs were not affected.
+- **Link could not update a Kiro agent profile once Kiro had migrated
+  it.** Kiro rewrites an agent profile's `hooks` into its own list form;
+  Link then refused the file, so `lnk setup` left stale hook commands in
+  `~/.kiro/agents/link.json` for good (and could not remove them on
+  disconnect from a profile it had not seen in that form). Link now
+  updates its own entries where they stand - the command only, keeping the
+  name, trigger and timeout Kiro gave them - and adds a missing one in the
+  same shape. Entries that are not Link's are never touched.
+- **`lnk setup` said "hooks updated" when one of an agent's hook files was
+  not written.** Kiro's agent profile and Gemini CLI's settings are written
+  alongside Kiro's and Antigravity's own hooks; a refusal there was not
+  shown. The agent's line now names the file that was not written and why.
+- **`lnk setup` misreported two things.** It said Link's Codex instructions
+  were "moved from ~/AGENTS.md" when they were copied and kept there for
+  Claude Code, and it said "First memory - none yet" on a store that
+  already had memories.
+- **The test suite could write into the developer's real home folder.**
+  Installing Kiro's or Antigravity's hooks also writes a second agent file
+  at its default place under the home folder, so a test that pointed the
+  first file at a temporary path still wrote a fixture command into
+  `~/.kiro/agents/link.json`. Every test run now gets a home folder of its
+  own, and a test fails if any test can see the real one.
+
 ## [6.0.0] - 2026-11-23
 
 ### Added

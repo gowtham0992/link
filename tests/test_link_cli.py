@@ -218,6 +218,14 @@ class LinkCliTests(unittest.TestCase):
         self.assertTrue((target / "raw/project-seeds/client-app/project-context.md").exists())
         self.assertTrue((target / "wiki/sources/project-seed-client-app.md").exists())
 
+    def test_setup_says_whether_codex_instructions_were_moved_or_copied(self):
+        moved = {"from": "/h/AGENTS.md", "to": "/h/.codex/AGENTS.md", "moved": True}
+        self.assertEqual(link_cli._codex_instructions_note(moved),
+                         "/h/.codex/AGENTS.md (moved from /h/AGENTS.md, which Codex never reads)")
+        self.assertEqual(link_cli._codex_instructions_note({**moved, "kept_for_claude_code": True}),
+                         "/h/.codex/AGENTS.md (copied from /h/AGENTS.md, which Codex never reads; "
+                         "kept there for Claude Code)")
+
     def test_onboard_text_suggests_project_seed_when_not_run(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-onboard-test-"))
         target = tmp / "my-link"

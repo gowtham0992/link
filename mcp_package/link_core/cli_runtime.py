@@ -326,6 +326,16 @@ def _connection_state(connection: Mapping[str, object]) -> str:
         hooks_write = session_hooks.get("write") if isinstance(session_hooks.get("write"), Mapping) else {}
         if hooks_write.get("requested"):
             state += " · hooks " + ("updated" if hooks_write.get("ok") else "failed")
+            # The other files one agent's install writes (Kiro's agent profile,
+            # Gemini CLI's settings) are named when they could not be written.
+            companions = session_hooks.get("companions")
+            for companion in companions if isinstance(companions, Sequence) else []:
+                if not isinstance(companion, Mapping):
+                    continue
+                written = companion.get("write")
+                if isinstance(written, Mapping) and written.get("requested") and not written.get("ok"):
+                    state += (f" · {companion.get('display_name') or companion.get('agent')} hooks not written: "
+                              f"{written.get('message')}")
         elif hooks_write.get("message"):
             state += f" · hooks: {hooks_write.get('message')}"
         else:
@@ -370,14 +380,14 @@ def render_onboard_text(payload: Mapping[str, object]) -> tuple[int, str]:
             lines.append("- safe repairs:")
             lines.extend(f"  - {item}" for item in fixes)
 
-    lines.extend(["", "First memory"])
     if memory:
+        lines.extend(["", "First memory"])
         if memory.get("created"):
             lines.append(f"- saved for review: {memory.get('path')}")
         else:
             lines.append(f"- not written: {memory.get('message') or memory.get('reason') or 'needs review'}")
-    else:
-        lines.append("- none yet. Add one when the agent learns a durable preference or decision.")
+    elif not (status.get("memory_count") if isinstance(status, Mapping) else 0):  # past its first one
+        lines.extend(["", "First memory", "- none yet. Add one when the agent learns a durable preference or decision."])
 
     lines.extend(["", "Project seed"])
     if project_seed:

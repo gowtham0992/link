@@ -4407,6 +4407,13 @@ def _rebuild_backlinks_quiet(wiki_dir: Path) -> None:
         pass
 
 
+def _codex_instructions_note(moved: Mapping[str, object]) -> str:
+    """How setup reports giving Codex Link's section: moved, or copied when ~/AGENTS.md keeps it for Claude Code."""
+    if moved.get("kept_for_claude_code"):
+        return f"{moved['to']} (copied from {moved['from']}, which Codex never reads; kept there for Claude Code)"
+    return f"{moved['to']} (moved from {moved['from']}, which Codex never reads)"
+
+
 def setup(
     target: Path,
     *,
@@ -4475,7 +4482,7 @@ def setup(
     if code == 0 and "codex" in detected:
         moved = _core_migrate_codex_instructions(write=not preview)
         if moved.get("moved"):
-            refreshed_instructions.append(f"{moved['to']} (moved from {moved['from']}, which Codex never reads)")
+            refreshed_instructions.append(_codex_instructions_note(moved))
         elif moved.get("needed"):
             stale_instructions.append(f"{moved['from']} -> {moved['to']} (Codex never reads ~/AGENTS.md)")
     if code == 0:
