@@ -17,6 +17,11 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
     private let captureCategory = "LINK_CAPTURE"
     private let approveRuleAction = "LINK_APPROVE_RULE"
     private let ruleCategory = "LINK_RULE"
+    private let showHeldAction = "LINK_SHOW_HELD"
+    private let heldCategory = "LINK_HELD"
+    /// Held tool calls already announced (by request id).
+    private var announcedHeld: Set<String> = []
+    private var heldPrimed = false
     /// Rule memories already announced (by name), primed like captures.
     private var announcedRules: Set<String> = []
     private var rulesPrimed = false
@@ -46,7 +51,15 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
                                                      actions: [approveRule, review],
                                                      intentIdentifiers: [],
                                                      options: [])
-        center.setNotificationCategories([category, ruleCategoryDef])
+        // No approving from the banner: macOS cuts its text short, and the agent wrote that text. The
+        // popover shows the whole call; approving is done there, after reading it.
+        let showHeld = UNNotificationAction(identifier: showHeldAction, title: "Show the call…",
+                                            options: [.foreground])
+        let heldCategoryDef = UNNotificationCategory(identifier: heldCategory,
+                                                     actions: [showHeld],
+                                                     intentIdentifiers: [],
+                                                     options: [])
+        center.setNotificationCategories([category, ruleCategoryDef, heldCategoryDef])
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             Task { @MainActor in self.authorized = granted }
         }
@@ -86,7 +99,34 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
         }
     }
 
+    /// An agent that cannot ask was stopped by a rule: the person's OK is the
+    /// only way through. The banner leads to the call in the popover, where
+    /// it is shown whole before it can be approved.
+    func announceHeldCalls(_ calls: [HeldCall]) {
+        guard authorized else { return }
+        guard heldPrimed else {
+            announcedHeld.formUnion(calls.map(\.id))
+            heldPrimed = true
+            return
+        }
+        for call in calls where !announcedHeld.contains(call.id) {
+            announcedHeld.insert(call.id)
+            let content = UNMutableNotificationContent()
+            content.title = "\(call.agentName) is waiting for your OK"
+            content.subtitle = call.title
+            content.body = call.display
+            content.categoryIdentifier = heldCategory
+            content.userInfo = ["held": call.id]
+            content.sound = .default
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "held-\(call.id)", content: content, trigger: nil)
+            )
+        }
+    }
+
     func reprime() {
+        heldPrimed = false
+        announcedHeld = []
         rulesPrimed = false
         announcedRules = []
         primed = false
@@ -156,6 +196,15 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let path = response.notification.request.content.userInfo["path"] as? String
+        let held = response.notification.request.content.userInfo["held"] as? String
+        if let held, [showHeldAction, UNNotificationDefaultActionIdentifier].contains(response.actionIdentifier) {
+            Task { @MainActor in
+                self.store?.showHeldCall(id: held)
+                Self.openPopover()
+            }
+            completionHandler()
+            return
+        }
         switch response.actionIdentifier {
         case acceptAction:
             if let path { Task { @MainActor in self.store?.acceptCaptureByPath(path) } }
@@ -170,6 +219,30 @@ final class NotificationManager: NSObject, @preconcurrency UNUserNotificationCen
             break
         }
         completionHandler()
+    }
+
+    /// Open the menu-bar popover, as a click on LinkBar's icon would. MenuBarExtra has no API for it,
+    /// so this clicks the status item's button; nothing happens if it is already open or not found.
+    private static func openPopover() {
+        NSApp.activate(ignoringOtherApps: true)
+        PaletteController.shared.hide()
+        let windows = NSApp.windows
+        if windows.contains(where: { $0.className.contains("MenuBarExtraWindow") && $0.isVisible }) { return }
+        for window in windows where window.className == "NSStatusBarWindow" {
+            if let button = statusButton(in: window.contentView) {
+                button.performClick(nil)
+                return
+            }
+        }
+    }
+
+    private static func statusButton(in view: NSView?) -> NSStatusBarButton? {
+        guard let view else { return nil }
+        if let button = view as? NSStatusBarButton { return button }
+        for subview in view.subviews {
+            if let button = statusButton(in: subview) { return button }
+        }
+        return nil
     }
 
     // Show banners even while LinkBar is frontmost (it's a menu-bar agent).

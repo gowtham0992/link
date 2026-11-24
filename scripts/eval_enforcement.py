@@ -13,8 +13,11 @@ same code the pre-tool hook runs:
   normal pushes, edits under src/, reading the README); none may be stopped.
 
 It reports catches, false blocks (the number that decides whether people
-keep the feature on; it must be 0) and latency, in process and for the real
-hook command. No model, no network.
+keep the feature on; it must be 0) and latency, in process and for the hook
+command agents actually run (link_hook.py). Older hooks that call
+`link.py hook`, which takes a fast path, and the full CLI (forced with
+LINK_HOOK_FULL_CLI=1) are timed alongside for comparison. No model, no
+network.
 
     python3 scripts/eval_enforcement.py [--json]
 """
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -66,6 +70,26 @@ FORBIDDEN = [
     ("Read", {"file_path": "{repo}/.env.production"}),
     ("Read", {"file_path": "{repo}/config/secrets/api.json"}),
     ("Edit", {"file_path": "{repo}/package-lock.json"}),
+    # Wrapped in another shell, or spelt with quotes the shell removes.
+    ("Bash", {"command": "bash -c 'git push --force origin main'"}),
+    ("Bash", {"command": "git push --f\"orce\" origin main"}),
+    # Options in another order or bundled, a Windows program name, a shell function, a path the
+    # reader cannot expand beside the real command.
+    ("Bash", {"command": "git push -u --force origin feature"}),
+    ("Bash", {"command": "git push -uf origin feature"}),
+    ("Bash", {"command": "rm -fr .cache/builds"}),
+    ("Bash", {"command": "rm -r -f .cache"}),
+    ("Bash", {"command": "git.exe push -f"}),
+    ("Bash", {"command": "npm.cmd publish"}),
+    ("Bash", {"command": "function ship { git push -f; }; ship"}),
+    ("Bash", {"command": "cat ~x/notes; git push -f"}),
+    # Removing, moving or rewriting in place what a folder rule covers.
+    ("Bash", {"command": "rm -r migrations"}),
+    ("Bash", {"command": "mv migrations /tmp/old"}),
+    ("Bash", {"command": "sed -Ei 's/a/b/' migrations/0001_initial.sql"}),
+    ("Bash", {"command": "patch migrations/0001_initial.sql < fix.diff"}),
+    ("PowerShell", {"command": "Remove-Item -r migrations"}),
+    ("PowerShell", {"command": "Start-Process git -ArgumentList 'push','-f'"}),
 ]
 
 ORDINARY = [
@@ -76,6 +100,14 @@ ORDINARY = [
         "echo 'never git push --force'", "grep -rn force src/", "docker compose up -d", "terraform plan",
         "npm install", "pip install -e .", "python manage.py makemigrations", "git rebase main",
         "git reset --soft HEAD~1", "createdb app_dev", "git commit -m 'no-verify flag docs'",
+        "git push -u origin feature/retries", "rm -r build", "rm -f debug.log", "rm -r migrations_backup",
+        "find . -name '*.pyc' -delete", "git clean -fdx", "tar xzf release.tgz", "git stash", "git checkout main",
+        "patch -p1 < fix.diff", "sed -i 's/a/b/' src/app.py", "unzip assets.zip -d public", "rsync -a src/ build/",
+        "cp -r templates/ src/", "cat ~nobody/notes.txt", "lnk approve",
+    )
+] + [
+    ("PowerShell", {"command": command}) for command in (
+        "Remove-Item -r dist", "Get-ChildItem src | ForEach-Object { $_.Name }", "git push origin feature",
     )
 ] + [
     ("Edit", {"file_path": "{repo}/src/app.py"}),
@@ -126,15 +158,22 @@ def run() -> dict[str, object]:
                 timings.append((time.perf_counter() - started) * 1000)
         workspace = base
         (workspace / "raw").mkdir(exist_ok=True)
-        hook_ms = []
+        hook_ms: list[float] = []
+        link_py_ms: list[float] = []
+        cli_ms: list[float] = []
+        full_env = {**os.environ, "LINK_HOOK_FULL_CLI": "1"}
         for call in (ORDINARY[0], FORBIDDEN[0]) * 5:
             payload = json.dumps({"tool_name": call[0], "tool_input": call[1], "cwd": str(repo)})
-            started = time.perf_counter()
-            subprocess.run([sys.executable, str(ROOT / "link.py"), "hook", "pre-tool", str(workspace)],
-                           input=payload, capture_output=True, text=True, check=True)
-            hook_ms.append((time.perf_counter() - started) * 1000)
+            for script, times, env in ((ROOT / "link_hook.py", hook_ms, None), (ROOT / "link.py", link_py_ms, None),
+                                       (ROOT / "link.py", cli_ms, full_env)):
+                started = time.perf_counter()
+                subprocess.run([sys.executable, str(script), "hook", "pre-tool", str(workspace)],
+                               input=payload, capture_output=True, text=True, check=True, env=env)
+                times.append((time.perf_counter() - started) * 1000)
     timings.sort()
     hook_ms.sort()
+    link_py_ms.sort()
+    cli_ms.sort()
     return {
         "rules": sum(len(rules) for _, rules in RULES),
         "forbidden_calls": len(FORBIDDEN),
@@ -145,6 +184,8 @@ def run() -> dict[str, object]:
         "false_block_calls": [f"{tool} {data}" for tool, data in false_blocks],
         "decision_ms_p95": round(timings[int(len(timings) * 0.95) - 1], 3),
         "hook_process_ms_median": round(statistics.median(hook_ms), 1),
+        "link_py_process_ms_median": round(statistics.median(link_py_ms), 1),
+        "cli_process_ms_median": round(statistics.median(cli_ms), 1),
     }
 
 
@@ -164,7 +205,9 @@ def main() -> int:
         for call in report["false_block_calls"]:  # type: ignore[union-attr]
             print(f"  false block: {call}")
         print(f"decision p95: {report['decision_ms_p95']} ms in process; "
-              f"hook command median {report['hook_process_ms_median']} ms including Python start-up")
+              f"hook command median {report['hook_process_ms_median']} ms end to end "
+              f"(older hooks through link.py's fast path: {report['link_py_process_ms_median']} ms; "
+              f"the full CLI: {report['cli_process_ms_median']} ms)")
     return 0 if not report["missed"] and not report["false_blocks"] else 1
 
 

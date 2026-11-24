@@ -1,6 +1,8 @@
 """Proactive guard: precision-first constraint reminders."""
 import sys
+import os
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,15 +122,46 @@ class GuardCooldownTests(unittest.TestCase):
     def test_same_memory_does_not_repeat_within_cooldown(self):
         import tempfile
         from pathlib import Path as P
-        from link_core.guard import recently_guarded
-        from link_core.usage import record_retrieval
+        from link_core.guard import note_guarded, recently_guarded
         with tempfile.TemporaryDirectory() as temp:
             root = P(temp)
             self.assertFalse(recently_guarded(root, "deploy-tuesdays"))
-            record_retrieval(root, "guard", ["deploy-tuesdays"])
+            note_guarded(root, "deploy-tuesdays")
             self.assertTrue(recently_guarded(root, "deploy-tuesdays"))
             # A different constraint is still allowed to fire.
             self.assertFalse(recently_guarded(root, "no-force-push"))
+
+
+class GuardCooldownWithoutUsageTests(unittest.TestCase):
+    """LINK_USAGE=off turns off the usage ledger, not the cooldown."""
+
+    def test_cooldown_holds_with_usage_recording_off(self):
+        import tempfile
+        from pathlib import Path as P
+        from link_core.guard import note_guarded, recently_guarded
+        with mock.patch.dict(os.environ, {"LINK_USAGE": "off"}), tempfile.TemporaryDirectory() as temp:
+            root = P(temp)
+            note_guarded(root, "deploy-tuesdays", now="2026-10-28T10:00:00Z")
+            self.assertTrue(recently_guarded(root, "deploy-tuesdays", now="2026-10-28T10:05:00Z"))
+            self.assertFalse(recently_guarded(root, "deploy-tuesdays", now="2026-10-29T10:05:00Z"), "it expires")
+            (root / ".link-cache" / "guard-cooldown.json").write_text("not json", encoding="utf-8")
+            self.assertFalse(recently_guarded(root, "deploy-tuesdays"), "a broken file just means no cooldown")
+            (root / ".link-cache" / "guard-cooldown.json").write_text('{"deploy-tuesdays": "2026-10-28T10:00:00"}',
+                                                                     encoding="utf-8")
+            self.assertTrue(recently_guarded(root, "deploy-tuesdays", now="2026-10-28T10:05:00Z"),
+                            "a stamp without a zone is UTC, not an error")
+            note_guarded(root, "no-force-push", now="2026-10-28T10:06:00Z")
+            self.assertTrue(recently_guarded(root, "deploy-tuesdays", now="2026-10-28T10:07:00Z"), "kept")
+
+    def test_two_sessions_noting_at_once_keep_both(self):
+        import tempfile
+        from concurrent.futures import ProcessPoolExecutor
+        from pathlib import Path as P
+        from link_core.guard import _cooldown, note_guarded
+        with tempfile.TemporaryDirectory() as temp, ProcessPoolExecutor(8) as pool:
+            names = [f"memory-{i}" for i in range(16)]
+            list(pool.map(note_guarded, [temp] * len(names), names))
+            self.assertEqual(sorted(_cooldown(P(temp))), sorted(names))
 
 
 class McpGuardTests(unittest.TestCase):

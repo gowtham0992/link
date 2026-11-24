@@ -3,6 +3,7 @@ import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import date, timedelta
 from io import StringIO
 from pathlib import Path
 
@@ -189,6 +190,15 @@ class DemoSnapshotTests(unittest.TestCase):
         self.assertEqual(inbox["items"][0]["issues"][0]["code"], "pending_review")
         self.assertIn("Memory Review Inbox", html)
         self.assertIn("pending_review", html)
+
+    def test_demo_is_dated_to_the_days_it_was_made(self):
+        # Fixed seed dates aged out of the six-month trust window in November 2026.
+        target = self.make_demo()
+        today = date.today()
+        dates = {date.fromisoformat(found) for path in (target / "wiki").rglob("*.md")
+                 for found in re.findall(r"\d{4}-\d{2}-\d{2}", path.read_text(encoding="utf-8"))}
+        self.assertTrue(dates)
+        self.assertTrue(all(today - timedelta(days=2) <= day <= today for day in dates), sorted(dates))
 
     def test_demo_memory_dashboard_snapshot(self):
         target = self.make_demo()

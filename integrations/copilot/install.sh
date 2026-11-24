@@ -29,9 +29,14 @@ else
     bash "$SCRIPT_DIR/../_shared/scaffold.sh"
 fi
 
+# Copilot's MCP entry is per project (.vscode/mcp.json); its hooks are
+# global (~/.copilot/hooks/link.json), so only a global install adds them.
 LINK_CONNECTED=""
 if [ "$MODE" = "--project" ]; then
     link_connect copilot "${WIKI_PATH%/wiki}"
+else
+    link_connect copilot "${WIKI_PATH%/wiki}" --hooks-only
+    if [ "$LINK_CONNECTED" = 1 ]; then LINK_CONNECTED=""; fi  # the MCP entry is still each project's
 fi
 # Built-in registration, used only when lnk connect is unavailable.
 if [ -z "$LINK_CONNECTED" ]; then
@@ -42,7 +47,7 @@ if [ -f "$MCP_MARKER" ]; then
 fi
 
 echo ""
-echo "  MCP: add to your Copilot MCP config:"
+echo "  MCP: in each project run lnk connect copilot --write, or add to its .vscode/mcp.json:"
 echo "  { \"mcpServers\": { \"link\": { \"command\": \"$MCP_PYTHON\", \"args\": [\"-m\", \"link_mcp\", \"--wiki\", \"$WIKI_PATH\", \"--surface\", \"slim\"] } } }"
 
 fi

@@ -8,9 +8,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
 
 from link_core.memory import (  # noqa: E402
+    mark_memory_reviewed,
     memory_explanation,
     memory_records,
     recall_memories,
+    rules_in_force,
+    update_memory_page,
     write_memory_page,
 )
 
@@ -67,6 +70,22 @@ class SupersedesTests(unittest.TestCase):
                 "Daily releases", "2026-06-01T00:00:00Z", supersedes="weekly-releases",
             )
             self.assertTrue(accepted.get("created"), accepted)
+
+    def test_a_memory_that_enforces_rules_is_never_superseded(self):
+        with tempfile.TemporaryDirectory() as temp:
+            wiki = self._wiki(temp)
+            self._write(wiki, "Never force-push to main.", "No force push", "2026-01-01T00:00:00Z",
+                        enforce=["ask command: git push --force*"])
+            mark_memory_reviewed(wiki, "no-force-push", None, "2026-01-01T00:01:00Z")
+            # A rule waiting in enforce_active (the memory sent back to review) is as much a rule.
+            update_memory_page(wiki, "no-force-push", "Never force-push to main or release.", "test",
+                               "2026-01-02T00:00:00Z")
+            with self.assertRaisesRegex(ValueError, "Only the person can supersede"):
+                self._write(wiki, "Force pushes to feature branches are fine.", "Force push ok",
+                            "2026-06-01T00:00:00Z", supersedes="no-force-push")
+            record = next(r for r in memory_records(wiki) if r["name"] == "no-force-push")
+            self.assertEqual(record["status"], "active")
+            self.assertEqual(rules_in_force(record), ["ask command: git push --force*"])
 
     def test_supersedes_requires_existing_active_target(self):
         with tempfile.TemporaryDirectory() as temp:

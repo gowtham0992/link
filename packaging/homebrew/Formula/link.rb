@@ -17,7 +17,7 @@ class Link < Formula
   end
 
   def install
-    libexec.install "link.py", "serve.py", "LINK.md", ".linkignore"
+    libexec.install "link.py", "link_hook.py", "serve.py", "LINK.md", ".linkignore"
     libexec.install "logo.svg"
     libexec.install "logo.png" if File.exist?("logo.png")
 

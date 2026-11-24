@@ -30,8 +30,9 @@ if [ "$MODE" = "--global" ]; then
         MCP_PYTHON="$(cat "$HOME/link/.link-mcp-python")"
     fi
 
-    # Auto-register Link MCP server in Kiro's mcp.json
-    link_connect kiro "${WIKI_PATH%/wiki}"
+    # Auto-register Link MCP server in Kiro's mcp.json, with Kiro's hooks
+    # (~/.kiro/hooks/link.json and the ~/.kiro/agents/link.json profile).
+    link_connect kiro "${WIKI_PATH%/wiki}" --hooks
     MCP_CONFIG="$HOME/.kiro/settings/mcp.json"
     if [ -z "$LINK_CONNECTED" ] && [ -f "$MCP_CONFIG" ]; then
         LINK_MCP_PYTHON="$MCP_PYTHON" LINK_WIKI_PATH="$WIKI_PATH" python3 - << 'PYEOF'

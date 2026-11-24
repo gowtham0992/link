@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Take Link out of the agent itself: its MCP server entry and session
 # hooks. Uninstalling used to remove only the instruction block, so new
 # sessions kept trying to start a workspace that was gone.
-link_cli disconnect vscode --write || echo "  · Could not run lnk disconnect; remove the \"link\" MCP entry by hand"
+link_cli disconnect vscode --write || echo "  · lnk disconnect did not finish; remove the \"link\" MCP entry and Link's hooks it names by hand"
 
 TARGET=".vscode/settings.json"
 if [ ! -f "$TARGET" ]; then echo "No $TARGET found"; exit 0; fi

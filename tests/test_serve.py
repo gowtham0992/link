@@ -617,10 +617,11 @@ class ServeTests(unittest.TestCase):
         self.assertIn("data-inbox-visibility", body)
         self.assertIn("data-inbox-list", _asset_text())
 
-    def test_review_activates_rules_only_when_the_request_acknowledges_them(self):
-        # Reviewing a memory with enforced rules turns them on for the agent's
-        # tool calls. The inbox shows the rules; a single Review repeats them;
-        # bulk review never does, so it can never activate rules unseen.
+    def test_viewer_never_turns_a_rule_on_or_off(self):
+        # Any local process can send the viewer's POST with its header (an
+        # agent's curl), so the viewer cannot tell the person's click from the
+        # agent's: reviewing, archiving, restoring or updating a memory that
+        # carries rules is refused and sent to `lnk` in the person's terminal.
         wiki = self.make_wiki()
         rules = ["ask command: git push --force*", "deny write: migrations/**"]
         write_page(wiki, "memories/no-force-push.md",
@@ -628,32 +629,32 @@ class ServeTests(unittest.TestCase):
                    "review_status: pending\n"
                    "enforce: [\"ask command: git push --force*\", \"deny write: migrations/**\"]\n"
                    "---\n\n# No force push\n\n> **TLDR:** Never force-push.\n")
+        write_page(wiki, "memories/no-rebase.md",
+                   "---\ntype: memory\ntitle: No rebase\nmemory_type: decision\nscope: user\nstatus: archived\n"
+                   "review_status: reviewed\nenforce: [\"deny command: git rebase*\"]\n"
+                   "---\n\n# No rebase\n\n> **TLDR:** Never rebase.\n")
         reset_wiki(wiki)
         status, body = run_handler_text("GET", "/inbox")
         self.assertEqual(status, 200)
         self.assertIn('data-rule="ask command: git push --force*"', body)
         self.assertIn('data-rule="deny write: migrations/**"', body)
         self.assertIn("active once reviewed", body)
-        self.assertIn("acknowledge_rules", _asset_text())
-        self.assertIn("review them one at a time", _asset_text())
-        headers = {"Content-Type": "application/json", "X-Link-Local-Action": "true"}
-
-        def review(payload: dict) -> tuple[int, dict]:
-            raw = json.dumps(payload).encode()
-            return run_handler("POST", "/api/review-memory", body=raw,
-                               headers={**headers, "Content-Length": str(len(raw))})
-
         page = wiki / "memories/no-force-push.md"
-        status, payload = review({"memory": "no-force-push"})  # what a bulk request sends
-        self.assertEqual(status, 409, payload)
-        self.assertEqual(payload["rules"], rules)
-        self.assertIn("review_status: pending", page.read_text(encoding="utf-8"))
-        status, _ = review({"memory": "no-force-push", "acknowledge_rules": rules[:1]})
-        self.assertEqual(status, 409)
-        self.assertIn("review_status: pending", page.read_text(encoding="utf-8"))
-        status, payload = review({"memory": "no-force-push", "acknowledge_rules": list(reversed(rules))})
-        self.assertEqual(status, 200, payload)
-        self.assertIn("review_status: reviewed", page.read_text(encoding="utf-8"))
+        before = page.read_text(encoding="utf-8")
+        retired = (wiki / "memories/no-rebase.md").read_text(encoding="utf-8")
+        for endpoint, payload in (
+            # Echoing the rules shown used to count as the person's acknowledgement.
+            ("/api/review-memory", {"memory": "no-force-push", "acknowledge_rules": rules}),
+            ("/api/archive-memory", {"memory": "No force push"}),
+            ("/api/update-memory", {"memory": "no-force-push", "text": "Force pushes are fine now."}),
+            ("/api/restore-memory", {"memory": "no-rebase"}),
+        ):
+            status, reply = post_json(endpoint, payload)
+            self.assertEqual(status, 403, (endpoint, reply))
+            self.assertIn("lnk ", reply["error"])
+            self.assertIn("in your own terminal", reply["error"])
+        self.assertEqual(page.read_text(encoding="utf-8"), before)
+        self.assertEqual((wiki / "memories/no-rebase.md").read_text(encoding="utf-8"), retired)
 
     def test_memory_page_shows_rules_and_anchors(self):
         wiki = self.make_wiki()

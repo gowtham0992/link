@@ -214,8 +214,8 @@ class PipCliPackagingTests(unittest.TestCase):
         self.assertIn('lnk = "link_cli:main"', pyproject)
         # Staged locally by hatch_build.py: a "../" reference here fails
         # when the wheel is built from an extracted sdist.
-        for shipped in ('"link_cli.py" = "link_cli.py"', '"serve.py" = "serve.py"',
-                        '"LINK.md" = "LINK.md"'):
+        for shipped in ('"link_cli.py" = "link_cli.py"', '"link_hook.py" = "link_hook.py"',
+                        '"serve.py" = "serve.py"', '"LINK.md" = "LINK.md"'):
             self.assertIn(shipped, pyproject)
 
     def test_runtime_copy_falls_back_to_link_cli(self):
@@ -226,11 +226,13 @@ class PipCliPackagingTests(unittest.TestCase):
             source = P(temp) / "site-packages"
             source.mkdir()
             (source / "link_cli.py").write_text("# cli\n", encoding="utf-8")
+            (source / "link_hook.py").write_text("# tool hooks\n", encoding="utf-8")
             (source / "LINK.md").write_text("# schema\n", encoding="utf-8")
             target = P(temp) / "ws"
             copy_runtime_files(source, target)
             self.assertTrue((target / "link.py").exists(),
                             "wheel installs must plant link.py from link_cli.py")
+            self.assertTrue((target / "link_hook.py").exists(), "the tool hooks' small entry point ships too")
 
 
 class LinkBarBundlingTests(unittest.TestCase):

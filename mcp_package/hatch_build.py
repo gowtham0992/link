@@ -32,6 +32,7 @@ except ImportError:  # tests exercise the staging logic without the backend
 # repo-root file -> name inside the package
 STAGED_RUNTIME_FILES = {
     "link.py": "link_cli.py",
+    "link_hook.py": "link_hook.py",
     "serve.py": "serve.py",
     "LINK.md": "LINK.md",
     ".linkignore": ".linkignore",

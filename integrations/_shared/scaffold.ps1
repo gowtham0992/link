@@ -98,6 +98,7 @@ if ($isUpdate) {
 Copy-LinkFile (Join-Path $LinkRoot "serve.py") (Join-Path $TargetDir "serve.py") "serve.py"
 Copy-LinkFile (Join-Path $LinkRoot "LINK.md") (Join-Path $TargetDir "LINK.md") "LINK.md"
 Copy-LinkFile (Join-Path $LinkRoot "link.py") (Join-Path $TargetDir "link.py") "link.py"
+Copy-LinkFile (Join-Path $LinkRoot "link_hook.py") (Join-Path $TargetDir "link_hook.py")
 Copy-LinkFile (Join-Path $LinkRoot "logo.png") (Join-Path $TargetDir "logo.png")
 Copy-LinkFile (Join-Path $LinkRoot "logo.svg") (Join-Path $TargetDir "logo.svg")
 Copy-LinkFile (Join-Path $LinkRoot ".linkignore") (Join-Path $TargetDir ".linkignore")
@@ -191,7 +192,9 @@ if (-not $installed -and (Test-Path $marker)) {
 }
 
 if ($installed) {
-    Set-Content -Encoding UTF8 -Path $marker -Value ($mcpPython + "`n")
+    # No BOM: Windows PowerShell 5.1's Set-Content -Encoding UTF8 writes one,
+    # and lnk connect would read it as part of the Python path.
+    [System.IO.File]::WriteAllText($marker, ($mcpPython + "`n"), (New-Object System.Text.UTF8Encoding($false)))
     if ($reused) {
         Write-Host "  ✓ existing link-mcp available"
         Write-Host "  · Automatic upgrade did not complete; run verify-mcp to confirm the installed version."

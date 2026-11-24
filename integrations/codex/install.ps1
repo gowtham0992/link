@@ -10,7 +10,8 @@ $instructionsFile = if ($Project) {
 } else {
     Join-Path $ScriptDir "..\_shared\link-instructions.md"
 }
-$target = if ($Project) { "AGENTS.md" } else { Join-Path $HOME "AGENTS.md" }
+$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+$target = if ($Project) { "AGENTS.md" } else { Join-Path $codexHome "AGENTS.md" }
 $wikiPath = if ($Project) { Join-Path (Get-Location).Path "wiki" } else { Join-Path $HOME "link\wiki" }
 
 Link-UpsertInstructions $target $instructionsFile "Link instructions"
@@ -22,7 +23,7 @@ if ($Project) {
 }
 
 $mcpPython = Link-ReadMcpPython $wikiPath
-$codexConfig = Join-Path $HOME ".codex\config.toml"
+$codexConfig = Join-Path $codexHome "config.toml"
 if (Test-Path $codexConfig) {
     $command = $mcpPython | ConvertTo-Json -Compress
     $wiki = $wikiPath | ConvertTo-Json -Compress
@@ -37,7 +38,8 @@ if (Test-Path $codexConfig) {
     } else {
         $text = $text.TrimEnd() + "`n`n" + $block
     }
-    Set-Content -Encoding UTF8 -NoNewline -Path $codexConfig -Value $text
+    # Set-Content -Encoding UTF8 writes a BOM on Windows PowerShell 5.1.
+    Link-WriteTextFile -Path $codexConfig -Text $text
     Write-Host "  ✓ Link MCP registered in $codexConfig"
 } else {
     Write-Host "  MCP config: add to ${codexConfig}:"

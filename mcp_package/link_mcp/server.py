@@ -457,6 +457,7 @@ from link_core.handoff import (
 )
 from link_core.guard import (
     guard_reminder as _core_guard_reminder,
+    note_guarded as _core_note_guarded,
     recently_guarded as _core_recently_guarded,
     render_guard_text as _core_render_guard_text,
 )
@@ -577,6 +578,17 @@ def _clear_cache() -> None:
     _cache = {}
     _cache_mtime = 0.0
     _cache_checked_at = 0.0
+
+
+def _memory_changed() -> None:
+    """After a memory joined, changed or left the reviewed set: fresh caches and global files."""
+    _clear_cache()
+    try:
+        from link_core.global_compile import refresh_after_memory_change
+
+        refresh_after_memory_change(WIKI_DIR)
+    except Exception:  # the memory change itself already succeeded
+        pass
 
 
 def _build_cache() -> dict:
@@ -748,7 +760,7 @@ def _starter_prompts(project: str = "") -> dict[str, object]:
 
 def _migrate_wiki() -> dict[str, object]:
     payload = _core_migrate_wiki(WIKI_DIR)
-    _clear_cache()
+    _memory_changed()
     return payload
 
 
@@ -793,6 +805,7 @@ def _guard_note_for(query: str, records: list[dict[str, object]] | None = None) 
         name = str(reminder.get("name") or "")
         if _core_recently_guarded(WIKI_DIR.parent, name):
             return ""
+        _core_note_guarded(WIKI_DIR.parent, name)
         _core_record_retrieval(WIKI_DIR.parent, "guard", [name], surface="mcp")
         return _core_render_guard_text(reminder)
     except Exception:
@@ -1106,25 +1119,27 @@ def _refuse_rule_change(identifier: str, action: str) -> None:
 
     Over MCP an agent could otherwise mark its own rule reviewed, or clear,
     archive, forget or update (which resets review on) a rule that just
-    stopped it. Those changes stay with the person: the CLI, the viewer and
-    LinkBar make them.
+    stopped it, or restore one the person retired. Those changes stay with
+    the person: the CLI in their own terminal and LinkBar make them (the
+    viewer refuses them too: it cannot tell a click from an agent's curl).
     """
+    from link_core.memory import carries_rules
     from link_core.memory import resolve_memory_page as _resolve
 
     _path, record, _error = _resolve(WIKI_DIR, _clean_text_input(identifier, max_len=300), records=_memory_records())
-    rules = record.get("enforce") if record else None
-    if isinstance(rules, list) and rules:
+    rules = carries_rules(record) if record else []
+    if rules:
         name = str(record.get("name") if record else identifier)
         raise ValueError(
-            f"{name} enforces rules on tool calls ({'; '.join(str(rule) for rule in rules)}). "
+            f"{name} enforces rules on tool calls ({'; '.join(rules)}). "
             f"Only the person can {action} it: ask them to run `lnk review-memory {name}`, "
-            f"`lnk enforce {name} --clear` or use the viewer or LinkBar."
+            f"`lnk enforce {name} --clear` in their own terminal, or use LinkBar."
         )
 
 
 def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[str, object]:
-    if status != "active":
-        _refuse_rule_change(identifier, status.rstrip("d") if status.endswith("d") else status)
+    # Restoring a retired rule turns it back on: as much the person's call as retiring it.
+    _refuse_rule_change(identifier, "restore" if status == "active" else status.removesuffix("d"))
     result = _core_set_memory_status(
         WIKI_DIR,
         _clean_text_input(identifier, max_len=300),
@@ -1135,7 +1150,7 @@ def _set_memory_status(identifier: str, status: str, reason: str = "") -> dict[s
         log_writer=_append_log,
     )
     if result["updated"]:
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1149,7 +1164,7 @@ def _set_memory_visibility(identifier: str, visibility: str) -> dict[str, object
         log_writer=_append_log,
     )
     if result["updated"]:
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1165,7 +1180,7 @@ def _forget_memory(identifier: str, confirm: bool = False) -> dict[str, object]:
         rebuild_backlinks=_rebuild_memory_backlinks,
     )
     if result.get("forgotten"):
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1181,7 +1196,7 @@ def _mark_memory_reviewed(identifier: str, note: str = "") -> dict[str, object]:
         log_writer=_append_log,
     )
     if result["updated"]:
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1202,7 +1217,7 @@ def _update_memory_page(
         allow_conflict=allow_conflict,
         **options,
     )
-    _clear_cache()
+    _memory_changed()
     return result
 
 
@@ -1239,7 +1254,7 @@ def _write_mcp_memory_page(
         **options,
     )
     if result.get("created"):
-        _clear_cache()
+        _memory_changed()
     return result
 
 
@@ -1269,7 +1284,9 @@ def link_instructions_resource() -> str:
         "after the user approves each one.\n"
         "9. Use `admin` only for maintenance, graph/context expansion, pages, backups, migrations, and captures.\n"
         "10. Some reviewed memories carry enforce rules: a tool call may wait for the user's OK or be blocked, "
-        "and the decision names the memory - follow it. Never review, clear, archive, forget or update a "
+        "and the decision names the memory - follow it. On agents that cannot ask, the call is held: tell the "
+        "user what you wanted to run, give them the `lnk approve <id>` line, and retry the exact call only after "
+        "they approved it; never run `lnk approve` yourself. Never review, clear, archive, forget or update a "
         "memory that carries rules; only the user does. Set `remember(enforce=...)` or `admin(action=\"set_enforce\")` "
         "only when the user asks; rules act after the user reviews the memory.\n"
         "11. A brief may end with \"Waiting for the user's OK\": show those items at a pause and run a listed "
@@ -1986,7 +2003,7 @@ def admin(action: str, arguments: str = "{}") -> str:
                 WIKI_DIR, _str_arg(payload, "identifier"), [] if _bool_arg(payload, "clear", False) else rules,
                 timestamp=_utc_timestamp(), records=_memory_records(), log_writer=_append_log,
             )
-            _clear_cache()
+            _memory_changed()
             return json.dumps({"surface": "slim", "tool": "admin", "action": clean_action, "ok": True, **result})
     except ValueError as exc:
         return json.dumps({"surface": "slim", "tool": "admin", "ok": False, "action": clean_action, "error": str(exc)})

@@ -111,6 +111,10 @@ jobs:
       - name: Release hygiene
         run: python scripts/check_release_hygiene.py
 
+      - name: PowerShell instruction-file round trip
+        shell: pwsh
+        run: ./tests/powershell/instructions_roundtrip.ps1
+
       - name: MCP verification smoke test
         shell: pwsh
         run: |
@@ -158,6 +162,14 @@ jobs:
           export HOME="$RUNNER_TEMP/cleanhome"
           echo '{"session_id":"ci-cold","source":"startup"}' \
             | python "$HOME/link/link.py" hook session-start "$HOME/link" | grep -q "Link memory"
+
+      - name: The installed tool hooks run the small entry point
+        run: |
+          export HOME="$RUNNER_TEMP/cleanhome"
+          test -f "$HOME/link/link_hook.py"
+          grep -q "link_hook.py hook pre-tool" "$HOME/.claude/settings.json"
+          echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' \
+            | python "$HOME/link/link_hook.py" hook pre-tool "$HOME/link"
 
       - name: MCP server answers over stdio from the provisioned venv
         run: |

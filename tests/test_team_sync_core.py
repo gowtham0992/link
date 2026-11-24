@@ -1,11 +1,17 @@
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp_package"))
+
+# These fixtures were captured in May 2026; read them on a day inside their six-month trust window.
+ON_FIXTURE_DAY = patch("link_core.memory._today",
+                       lambda today=None: date.fromisoformat(str(today or "2026-05-25")[:10]))
 
 from link_core.team_sync import build_team_sync_payload, render_team_sync_text  # noqa: E402
 
@@ -133,6 +139,7 @@ class TeamSyncCoreTests(unittest.TestCase):
         self.assertIn("active private memories", " ".join(payload["warnings"]))
         self.assertIn("1 private", text)
 
+    @ON_FIXTURE_DAY
     def test_user_scoped_team_visibility_can_be_intentionally_shared(self):
         root = Path(tempfile.mkdtemp(prefix="link-team-sync-"))
         (root / "wiki").mkdir()

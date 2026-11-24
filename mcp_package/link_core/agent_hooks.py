@@ -13,16 +13,32 @@ Supported agents differ in mechanism, so each config records its schema:
 - Cursor: a flat `~/.cursor/hooks.json` with `version: 1`; session-start must
   print a JSON envelope with `additional_context`; sessionEnd is fire-and-forget
   and only captures when Cursor provides a readable transcript path.
+
+Before-tool hooks (enforced rules) reach every agent with a pre-tool seam;
+each answers in its own shape (tool_events.render_reply):
+- Claude Code: PreToolUse for shell, file reads, writes and Grep (Devin CLI
+  runs these same hooks with its own tool names, which the matcher includes).
+- Codex: PreToolUse for Bash and apply_patch; it can only allow or block.
+- Cursor: beforeShellExecution, beforeReadFile, and preToolUse for writes
+  and deletes.
+- Gemini CLI: BeforeTool in `~/.gemini/settings.json` (timeouts in ms).
+- Antigravity: PreToolUse in `~/.gemini/config/hooks.json`, under a named key.
+- Copilot CLI and VS Code's Copilot harness: `~/.copilot/hooks/link.json`
+  (`$COPILOT_HOME/hooks/link.json` when that is set).
+- Windsurf (Cascade): pre_run_command, pre_read_code, pre_write_code;
+  blocking is by exit code, and there is no session-start event.
 """
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .files import atomic_write_json
+from .agent_instructions import agent_home_path
+from .files import write_config_bytes
 from .mcp_verify import display_command
 
 SESSION_START_TIMEOUT_SECONDS = 30
@@ -31,10 +47,16 @@ SESSION_END_TIMEOUT_SECONDS = 60
 GUARD_TIMEOUT_SECONDS = 10
 # Tool hooks run on every tool call and read a compiled index.
 TOOL_HOOK_TIMEOUT_SECONDS = 10
-PRE_TOOL_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|Grep"
+# Claude Code's tools, then Devin CLI's: Devin runs the hooks in
+# ~/.claude/settings.json by default, with its own tool names.
+PRE_TOOL_MATCHER = "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|exec|read|write|edit|apply_patch"
 POST_TOOL_MATCHER = "Read|Edit|Write|MultiEdit"
 
-_HOOK_SCRIPT_MARKER = "link.py"
+_HOOK_SCRIPT_MARKERS = ("link.py", "link_hook.py")
+# The tool hooks fire around every shell command and file access; they run
+# the small link_hook.py next to the CLI when it is there (link_hook.py says why).
+_FAST_HOOK_SCRIPT = "link_hook.py"
+_FAST_HOOK_EVENTS = ("pre-tool", "post-tool")
 
 
 @dataclass(frozen=True)
@@ -43,22 +65,39 @@ class AgentHookConfig:
     display_name: str
     aliases: tuple[str, ...]
     default_settings: str
-    schema: str = "nested"  # "nested" (Claude Code, Codex) or "flat" (Cursor)
-    start_event: str = "SessionStart"
+    # "nested": event -> [{matcher, hooks: [entry]}] (Claude Code, Codex, Gemini CLI);
+    # "flat": event -> [entry] (Cursor, Copilot, Windsurf);
+    # "named": like nested under a hook-name key, lifecycle events flat (Antigravity);
+    # "triggers": a list of named hooks, each with its trigger (Kiro CLI V3).
+    schema: str = "nested"
+    root_key: str = "hooks"
+    version: int | str | None = None  # files that carry {"version": 1} (or "v1")
+    # Keys a new file starts with (a Kiro agent profile needs a name and tools).
+    file_defaults: tuple[tuple[str, object], ...] = ()
+    timeout_key: str | None = "timeout"
+    timeout_scale: int = 1  # Gemini CLI counts milliseconds
+    entry_extra: tuple[tuple[str, object], ...] = ()
+    start_event: str | None = "SessionStart"
     end_event: str | None = "SessionEnd"
     # Skip "resume": the resumed context already carries the earlier brief.
     start_matcher: str | None = "startup|clear|compact"
-    start_emit: str = "text"  # "text" stdout-to-context, or "cursor" JSON envelope
+    start_emit: str = "text"  # the session-start envelope (link.py _emit_session_start)
     # Per-prompt guard (constraint reminders). Only agents with a
     # prompt-submit hook event support it.
     guard_event: str | None = None
-    # Before a tool call: reviewed rules ask or block (tool_hooks).
-    pre_tool_event: str | None = None
-    pre_tool_matcher: str | None = None
+    # Before a tool call: reviewed rules ask or block (tool_hooks), as
+    # (event, matcher) pairs - some agents split shell, read and write.
+    pre_tool: tuple[tuple[str, str | None], ...] = ()
     pre_tool_emit: str = "text"
     # After a file read or edit: memories anchored to that file.
     post_tool_event: str | None = None
     post_tool_matcher: str | None = None
+    # Other hook files the same agent install also writes (Gemini CLI and
+    # Antigravity share ~/.gemini; Link connects them as one agent).
+    companions: tuple[str, ...] = ()
+    # A file that holds hooks only (not the agent's whole settings): removing
+    # Link's hooks deletes it when nothing but Link's own skeleton is left.
+    hooks_only_file: bool = True
     restart_hint: str = "Restart the agent; new sessions will start with the Link memory brief."
 
 
@@ -68,9 +107,9 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         display_name="Claude Code",
         aliases=("claude-code", "claude", "claude-code-cli"),
         default_settings="~/.claude/settings.json",
+        hooks_only_file=False,
         guard_event="UserPromptSubmit",
-        pre_tool_event="PreToolUse",
-        pre_tool_matcher=PRE_TOOL_MATCHER,
+        pre_tool=(("PreToolUse", PRE_TOOL_MATCHER),),
         post_tool_event="PostToolUse",
         post_tool_matcher=POST_TOOL_MATCHER,
     ),
@@ -80,8 +119,10 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         aliases=("codex",),
         default_settings="~/.codex/hooks.json",
         end_event=None,
+        pre_tool=(("PreToolUse", "Bash|apply_patch"),),
+        pre_tool_emit="codex",
         restart_hint=(
-            "Restart Codex and approve the hook when Codex asks you to trust it; "
+            "Restart Codex and approve the hooks when Codex asks you to trust them (/hooks); "
             "new sessions will then start with the Link memory brief."
         ),
     ),
@@ -91,14 +132,116 @@ HOOK_AGENT_CONFIGS: tuple[AgentHookConfig, ...] = (
         aliases=("cursor",),
         default_settings="~/.cursor/hooks.json",
         schema="flat",
+        version=1,
         start_event="sessionStart",
         end_event="sessionEnd",
         start_matcher=None,
         start_emit="cursor",
-        # Cursor asks its hooks before shell commands; file edits have no
-        # before-event there, so only command rules apply.
-        pre_tool_event="beforeShellExecution",
+        pre_tool=(("beforeShellExecution", None), ("beforeReadFile", None), ("preToolUse", "Write|Delete")),
         pre_tool_emit="cursor",
+    ),
+    AgentHookConfig(
+        name="antigravity",
+        display_name="Antigravity",
+        aliases=("antigravity", "antigravity-cli"),
+        default_settings="~/.gemini/config/hooks.json",
+        schema="named",
+        root_key="link",
+        end_event=None,
+        start_matcher=None,
+        start_emit="antigravity",
+        pre_tool=(("PreToolUse", "run_command|view_file|write_to_file|replace_file_content|multi_replace_file_content"),),
+        pre_tool_emit="antigravity",
+        companions=("gemini",),
+    ),
+    AgentHookConfig(
+        name="gemini",
+        display_name="Gemini CLI",
+        aliases=("gemini", "gemini-cli"),
+        default_settings="~/.gemini/settings.json",
+        hooks_only_file=False,
+        end_event=None,
+        start_matcher=None,
+        start_emit="gemini",
+        timeout_scale=1000,
+        pre_tool=(("BeforeTool", "run_shell_command|read_file|read_many_files|write_file|replace"),),
+        pre_tool_emit="gemini",
+    ),
+    AgentHookConfig(
+        name="copilot",
+        display_name="GitHub Copilot (CLI and VS Code)",
+        aliases=("copilot", "github-copilot", "copilot-cli"),
+        default_settings="~/.copilot/hooks/link.json",
+        schema="flat",
+        version=1,
+        timeout_key="timeoutSec",
+        entry_extra=(("type", "command"),),
+        start_event="sessionStart",
+        end_event=None,
+        start_matcher=None,
+        start_emit="copilot",
+        pre_tool=(("preToolUse", "bash|powershell|view|create|edit"),),
+        pre_tool_emit="copilot",
+    ),
+    AgentHookConfig(
+        name="kiro",
+        display_name="Kiro",
+        aliases=("kiro", "kiro-cli"),
+        default_settings="~/.kiro/hooks/link.json",
+        schema="triggers",
+        version="v1",
+        end_event=None,
+        start_matcher=None,
+        # No matcher: every tool, as in the agent profile. Kiro's tags and tool ids
+        # differ by version, and a matcher that misses would leave rules unchecked.
+        pre_tool=(("PreToolUse", None),),
+        pre_tool_emit="kiro",
+        companions=("kiro-agent",),
+        restart_hint=(
+            "Kiro CLI V3 (kiro-cli chat --v3) runs ~/.kiro/hooks/link.json in every workspace; trust the "
+            "workspace when asked. The default engine runs hooks only from an agent profile: use Link's with "
+            "`kiro-cli chat --agent link`, or make it the default with `kiro-cli agent set-default link` "
+            "(it keeps your steering and MCP servers). The Kiro IDE reads hooks per workspace only."
+        ),
+    ),
+    AgentHookConfig(
+        name="kiro-agent",
+        display_name="Kiro (agent profile for the default engine)",
+        aliases=("kiro-agent",),
+        default_settings="~/.kiro/agents/link.json",
+        schema="flat",
+        timeout_key="timeout_ms",
+        timeout_scale=1000,
+        file_defaults=(
+            ("name", "link"),
+            ("description", "Kiro's default tools and steering, with Link's memory brief and rule checks"),
+            ("tools", ["*"]),
+            ("includeMcpJson", True),
+        ),
+        start_event="agentSpawn",
+        end_event=None,
+        start_matcher=None,
+        pre_tool=(("preToolUse", None),),
+        pre_tool_emit="kiro-agent",
+        restart_hint="",  # Kiro's own hint covers both files
+    ),
+    AgentHookConfig(
+        name="windsurf",
+        display_name="Windsurf",
+        aliases=("windsurf", "devin-desktop", "cascade"),
+        default_settings="~/.codeium/windsurf/hooks.json",
+        schema="flat",
+        timeout_key=None,
+        entry_extra=(("show_output", True),),
+        start_event=None,
+        end_event=None,
+        start_matcher=None,
+        pre_tool=(("pre_run_command", None), ("pre_read_code", None), ("pre_write_code", None)),
+        pre_tool_emit="windsurf",
+        restart_hint=(
+            "Windsurf has no session-start hook: memory reaches it through MCP and the instructions "
+            "file. The rule checks start with the next tool call."
+        ),
     ),
 )
 
@@ -129,7 +272,7 @@ def _hook_agent_by_name(agent: str) -> AgentHookConfig:
 
 
 def _settings_path(default_settings: str, override: str | None) -> Path:
-    path = Path(override or default_settings).expanduser()
+    path = Path(override).expanduser() if override else agent_home_path(default_settings)
     if not path.is_absolute():
         path = (Path.cwd() / path).resolve()
     return path
@@ -142,26 +285,39 @@ def _hook_command(
     target: Path,
     emit: str = "text",
 ) -> str:
-    parts = [python_cmd, str(runtime_script), "hook", event, str(target)]
+    script = runtime_script
+    if event in _FAST_HOOK_EVENTS and (runtime_script.parent / _FAST_HOOK_SCRIPT).is_file():
+        script = runtime_script.parent / _FAST_HOOK_SCRIPT
+    parts = [python_cmd, str(script), "hook", event, str(target)]
     if emit != "text":
         parts.extend(["--emit", emit])
     return display_command(parts)
 
 
-def _nested_entry(command: str, timeout: int) -> dict[str, object]:
-    return {"type": "command", "command": command, "timeout": timeout}
+def _entry(config: AgentHookConfig, command: str, timeout: int, *, grouped: bool,
+           matcher: str | None = None) -> dict[str, object]:
+    """One hook handler in this agent's shape."""
+    typed = grouped or config.schema == "named"  # Antigravity's lifecycle handlers carry a type too
+    entry: dict[str, object] = {"type": "command", "command": command} if typed else {"command": command}
+    entry.update(dict(config.entry_extra))
+    if config.timeout_key:
+        entry[config.timeout_key] = timeout * config.timeout_scale
+    if matcher and not grouped:
+        entry["matcher"] = matcher
+    return entry
 
 
-def _flat_entry(command: str, timeout: int) -> dict[str, object]:
-    return {"command": command, "timeout": timeout}
+def _grouped(config: AgentHookConfig, matcher: str | None) -> bool:
+    """Nested files group handlers under a matcher; Antigravity does that for tool events only."""
+    return config.schema == "nested" or (config.schema == "named" and matcher is not None)
 
 
 def _is_link_hook_command(command: object, event: str) -> bool:
     if not isinstance(command, str):
         return False
-    # Hooks run the workspace's link.py today; an installed `lnk` launcher
-    # counts too, so disconnect finds either form.
-    launcher = _HOOK_SCRIPT_MARKER in command or re.search(r"(?:^|[\s/\"'])lnk(?:\s|\"|$)", command)
+    # Hooks run the workspace's link.py (link_hook.py for the tool hooks); an
+    # installed `lnk` launcher counts too, so disconnect finds every form.
+    launcher = any(marker in command for marker in _HOOK_SCRIPT_MARKERS) or re.search(r"(?:^|[\s/\"'])lnk(?:\s|\"|$)", command)
     return bool(launcher) and f" hook {event}" in command
 
 
@@ -175,69 +331,166 @@ def remove_link_hooks(path: Path, agent: str, *, write: bool) -> dict[str, objec
                                  "found": [], "removed": False}
     if config is None or not path.exists():
         return result
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if not text.strip():
+    try:
+        current = _read_json_file(path)
+    except json.JSONDecodeError as exc:
+        result["error"] = f"{path} is not valid JSON ({exc}); remove Link's hooks by hand"
         return result
-    settings = json.loads(text)
-    hooks = settings.get("hooks") if isinstance(settings, dict) else None
-    if not isinstance(hooks, dict):
+    except (OSError, ValueError) as exc:
+        result["error"] = f"{exc}; remove Link's hooks by hand"
         return result
+    if current is None:
+        return result
+    settings = current.settings
+    hooks = settings.get(config.root_key) if isinstance(settings, dict) else None
     found: list[str] = []
-    for event_name in list(hooks):
-        groups = hooks.get(event_name)
-        if not isinstance(groups, list):
-            continue
-        kept_groups: list[object] = []
-        for group in groups:
-            if config.schema == "nested" and isinstance(group, dict) and isinstance(group.get("hooks"), list):
-                inner = [h for h in group["hooks"]
-                         if not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
-                                                             for e in LINK_HOOK_EVENTS))]
-                if len(inner) != len(group["hooks"]):
+    if isinstance(hooks, list):  # Kiro's named hooks, in its global file or a migrated agent profile
+        found = sorted({str(e.get("trigger")) for e in hooks if _is_link_trigger(e)})
+        settings[config.root_key] = [entry for entry in hooks if not _is_link_trigger(entry)]
+    elif isinstance(hooks, dict):
+        for event_name in list(hooks):
+            groups = hooks.get(event_name)
+            if not isinstance(groups, list):
+                continue
+            kept_groups: list[object] = []
+            for group in groups:
+                if isinstance(group, dict) and isinstance(group.get("hooks"), list):
+                    inner = [h for h in group["hooks"]
+                             if not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
+                                                                 for e in LINK_HOOK_EVENTS))]
+                    if len(inner) != len(group["hooks"]):
+                        found.append(event_name)
+                    if inner:
+                        kept_groups.append({**group, "hooks": inner})
+                elif isinstance(group, dict) and any(_is_link_hook_command(group.get("command"), e)
+                                                     for e in LINK_HOOK_EVENTS):
                     found.append(event_name)
-                if inner:
-                    kept_groups.append({**group, "hooks": inner})
-            elif isinstance(group, dict) and any(_is_link_hook_command(group.get("command"), e)
-                                                 for e in LINK_HOOK_EVENTS):
-                found.append(event_name)
+                else:
+                    kept_groups.append(group)
+            if kept_groups:
+                hooks[event_name] = kept_groups
             else:
-                kept_groups.append(group)
-        if kept_groups:
-            hooks[event_name] = kept_groups
-        else:
-            del hooks[event_name]
+                del hooks[event_name]
     result["found"] = sorted(set(found))
-    if found and write:
-        atomic_write_json(path, settings)
-        result["removed"] = True
+    if not found or not write:
+        return result
+    # Emptied by taking Link's hooks out: the key Link's install added goes too.
+    if not settings.get(config.root_key):
+        settings.pop(config.root_key, None)
+    try:
+        if config.hooks_only_file and _only_links(settings, config):
+            path.unlink()  # nothing of the person's left in it: Link's skeleton only
+        else:
+            _write_json_file(path, settings, current)
+    except OSError as exc:
+        result["error"] = f"{exc}; remove Link's hooks by hand"
+        return result
+    result["removed"] = True
     return result
 
 
-def _merge_nested_event(
-    settings: dict[str, Any],
+def _only_links(settings: Mapping[str, object], config: AgentHookConfig) -> bool:
+    """Is what is left of the file only what Link itself starts it with?"""
+    defaults = dict(config.file_defaults)
+    if config.version is not None:
+        defaults["version"] = config.version
+    return not settings.get(config.root_key) and all(
+        key == config.root_key or (key in defaults and value == defaults[key]) for key, value in settings.items())
+
+
+_BOM = "\ufeff"
+
+
+@dataclass
+class _JsonFile:
+    """A JSON file as read, with how it was written: kept when Link writes it back."""
+    settings: Any
+    bom: bool = False
+    newline: str = "\n"
+    indent: str | int = 2
+    final_newline: bool = True
+
+
+def _read_json_file(path: Path) -> _JsonFile | None:
+    """The parsed file and its style; None when absent or blank. Bytes that are not UTF-8 are refused."""
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    try:
+        raw = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path} is not UTF-8 text (byte {exc.start}); Link left it as it was") from exc
+    bom = raw.startswith(_BOM)
+    text = raw[len(_BOM):] if bom else raw
+    if not text.strip():
+        return None
+    indent_match = re.search(r"\n([ \t]+)\S", text)
+    return _JsonFile(
+        settings=json.loads(text),
+        bom=bom,
+        newline="\r\n" if "\r\n" in text else "\n",
+        indent=indent_match.group(1) if indent_match else 2,
+        final_newline=text.endswith("\n"),
+    )
+
+
+def _write_json_file(path: Path, settings: Any, style: _JsonFile | None) -> None:
+    """Write settings in the file's own style: indent, line endings, BOM, characters as typed, mode, symlink."""
+    style = style or _JsonFile(settings)
+    try:
+        text = json.dumps(settings, indent=style.indent, ensure_ascii=False)
+        text.encode("utf-8")
+    except UnicodeEncodeError:  # a lone surrogate the file spelt as \ud800 stays escaped
+        text = json.dumps(settings, indent=style.indent)
+    if style.final_newline:
+        text += "\n"
+    if style.newline == "\r\n":
+        text = text.replace("\n", "\r\n")
+    data = ((_BOM if style.bom else "") + text).encode("utf-8")
+    try:
+        if path.read_bytes() == data:
+            return  # installing twice changes nothing, not even the file's time
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_config_bytes(path, data)
+
+
+def _merge_grouped_event(
+    hooks: dict[str, Any],
     event_name: str,
     event: str,
     entry: dict[str, object],
     matcher: str | None = None,
 ) -> None:
-    hooks = settings.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-        settings["hooks"] = hooks
     groups = hooks.get(event_name)
     if not isinstance(groups, list):
         groups = []
     replaced = False
-    for group in groups:
+    for group in list(groups):
         if not isinstance(group, dict):
             continue
         group_hooks = group.get("hooks")
         if not isinstance(group_hooks, list):
             continue
-        for index, existing in enumerate(group_hooks):
-            if isinstance(existing, dict) and _is_link_hook_command(existing.get("command"), event):
-                group_hooks[index] = dict(entry)
-                replaced = True
+        links = [i for i, h in enumerate(group_hooks)
+                 if isinstance(h, dict) and _is_link_hook_command(h.get("command"), event)]
+        if not links:
+            continue
+        theirs = any(not (isinstance(h, dict) and any(_is_link_hook_command(h.get("command"), e)
+                                                      for e in LINK_HOOK_EVENTS)) for h in group_hooks)
+        if theirs and group.get("matcher") != matcher:
+            # The person's handlers share this group: changing its matcher
+            # would run their script on other tools. Link's handler moves to
+            # a group of its own; theirs keep the group as they wrote it.
+            group["hooks"] = [h for i, h in enumerate(group_hooks) if i not in links]
+            continue
+        for index in links:
+            group_hooks[index] = dict(entry)
+        if matcher:
+            group["matcher"] = matcher
+        replaced = True
     if not replaced:
         group: dict[str, object] = {"hooks": [dict(entry)]}
         if matcher:
@@ -247,16 +500,11 @@ def _merge_nested_event(
 
 
 def _merge_flat_event(
-    settings: dict[str, Any],
+    hooks: dict[str, Any],
     event_name: str,
     event: str,
     entry: dict[str, object],
 ) -> None:
-    settings.setdefault("version", 1)
-    hooks = settings.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-        settings["hooks"] = hooks
     entries = hooks.get(event_name)
     if not isinstance(entries, list):
         entries = []
@@ -272,98 +520,120 @@ def _merge_flat_event(
 
 def _event_plan(config: AgentHookConfig, python_cmd: str, runtime_script: Path, target: Path) -> list[dict[str, object]]:
     """Return the ordered event entries this agent should install."""
-    make_entry = _nested_entry if config.schema == "nested" else _flat_entry
-    plan: list[dict[str, object]] = [
-        {
-            "event_name": config.start_event,
-            "event": "session-start",
-            "matcher": config.start_matcher,
-            "entry": make_entry(
-                _hook_command(python_cmd, runtime_script, "session-start", target, emit=config.start_emit),
-                SESSION_START_TIMEOUT_SECONDS,
-            ),
-        }
-    ]
+    plan: list[dict[str, object]] = []
+
+    def add(event_name: str, event: str, matcher: str | None, emit: str, timeout: int) -> None:
+        grouped = _grouped(config, matcher)
+        command = _hook_command(python_cmd, runtime_script, event, target, emit=emit)
+        if config.schema == "triggers":
+            entry: dict[str, object] = {"name": f"Link {event}", "trigger": event_name}
+            if matcher:
+                entry["matcher"] = matcher
+            entry.update({"action": {"type": "command", "command": command}, "timeout": timeout})
+        else:
+            entry = _entry(config, command, timeout, grouped=grouped, matcher=matcher)
+        plan.append({"event_name": event_name, "event": event, "matcher": matcher, "grouped": grouped,
+                     "entry": entry})
+
+    if config.start_event:
+        add(config.start_event, "session-start", config.start_matcher, config.start_emit, SESSION_START_TIMEOUT_SECONDS)
     if config.end_event:
-        plan.append({
-            "event_name": config.end_event,
-            "event": "session-end",
-            "matcher": None,
-            "entry": make_entry(
-                _hook_command(python_cmd, runtime_script, "session-end", target),
-                SESSION_END_TIMEOUT_SECONDS,
-            ),
-        })
+        add(config.end_event, "session-end", None, "text", SESSION_END_TIMEOUT_SECONDS)
     if config.guard_event:
-        plan.append({
-            "event_name": config.guard_event,
-            "event": "prompt-check",
-            "matcher": None,
-            "entry": make_entry(
-                _hook_command(python_cmd, runtime_script, "prompt-check", target),
-                GUARD_TIMEOUT_SECONDS,
-            ),
-        })
-    if config.pre_tool_event:
-        plan.append({
-            "event_name": config.pre_tool_event,
-            "event": "pre-tool",
-            "matcher": config.pre_tool_matcher,
-            "entry": make_entry(
-                _hook_command(python_cmd, runtime_script, "pre-tool", target, emit=config.pre_tool_emit),
-                TOOL_HOOK_TIMEOUT_SECONDS,
-            ),
-        })
+        add(config.guard_event, "prompt-check", None, "text", GUARD_TIMEOUT_SECONDS)
+    for event_name, matcher in config.pre_tool:
+        add(event_name, "pre-tool", matcher, config.pre_tool_emit, TOOL_HOOK_TIMEOUT_SECONDS)
     if config.post_tool_event:
-        plan.append({
-            "event_name": config.post_tool_event,
-            "event": "post-tool",
-            "matcher": config.post_tool_matcher,
-            "entry": make_entry(
-                _hook_command(python_cmd, runtime_script, "post-tool", target),
-                TOOL_HOOK_TIMEOUT_SECONDS,
-            ),
-        })
+        add(config.post_tool_event, "post-tool", config.post_tool_matcher, "text", TOOL_HOOK_TIMEOUT_SECONDS)
     return plan
 
 
+def _is_link_trigger(entry: object) -> bool:
+    action = entry.get("action") if isinstance(entry, dict) else None
+    command = action.get("command") if isinstance(action, dict) else (
+        entry.get("command") if isinstance(entry, dict) else None)
+    return any(_is_link_hook_command(command, event) for event in LINK_HOOK_EVENTS)
+
+
 def _hooks_snippet(config: AgentHookConfig, plan: list[dict[str, object]]) -> str:
-    hooks: dict[str, object] = {}
-    for item in plan:
-        entry = item["entry"]
-        if config.schema == "nested":
-            group: dict[str, object] = {"hooks": [entry]}
-            if item["matcher"]:
-                group["matcher"] = item["matcher"]
-            hooks[str(item["event_name"])] = [group]
-        else:
-            hooks[str(item["event_name"])] = [entry]
-    payload: dict[str, object] = {"hooks": hooks}
-    if config.schema == "flat":
-        payload = {"version": 1, "hooks": hooks}
+    if config.schema == "triggers":
+        return json.dumps({"version": config.version, config.root_key: [item["entry"] for item in plan]}, indent=2)
+    hooks: dict[str, Any] = {}
+    _merge_plan(hooks, plan)
+    payload: dict[str, object] = {config.root_key: hooks}
+    if config.version is not None:
+        payload = {"version": config.version, **payload}
     return json.dumps(payload, indent=2)
 
 
-def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, object]]) -> None:
-    settings: dict[str, Any] = {}
-    if path.exists() and path.read_text(encoding="utf-8", errors="replace").strip():
-        settings = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        if not isinstance(settings, dict):
-            raise ValueError(f"{path} must contain a JSON object")
+def _merge_plan(hooks: dict[str, Any], plan: list[dict[str, object]]) -> None:
     for item in plan:
         entry = item["entry"]
         assert isinstance(entry, dict)
-        if config.schema == "nested":
-            _merge_nested_event(
-                settings,
-                str(item["event_name"]),
-                str(item["event"]),
-                entry,
-                matcher=item["matcher"] if isinstance(item["matcher"], str) else None,
-            )
+        if item["grouped"]:
+            matcher = item["matcher"] if isinstance(item["matcher"], str) else None
+            _merge_grouped_event(hooks, str(item["event_name"]), str(item["event"]), entry, matcher=matcher)
         else:
-            _merge_flat_event(settings, str(item["event_name"]), str(item["event"]), entry)
-    atomic_write_json(path, settings)
+            _merge_flat_event(hooks, str(item["event_name"]), str(item["event"]), entry)
+
+
+def _write_hooks(path: Path, config: AgentHookConfig, plan: list[dict[str, object]]) -> None:
+    current = _read_json_file(path)
+    settings: dict[str, Any] = current.settings if current is not None else {}
+    if not isinstance(settings, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    for key, value in config.file_defaults:
+        settings.setdefault(key, value)
+    if config.version is not None:
+        settings.setdefault("version", config.version)
+    hooks = settings.get(config.root_key)
+    wanted = list if config.schema == "triggers" else dict
+    if hooks is not None and not isinstance(hooks, wanted):
+        # Never replace hooks Link cannot read as its own kind: they are the person's.
+        raise ValueError(f"{path} keeps \"{config.root_key}\" in a form Link does not edit; "
+                         "add Link's hooks by hand from the snippet")
+    if config.schema == "triggers":
+        kept = [entry for entry in hooks or [] if not _is_link_trigger(entry)]
+        settings[config.root_key] = kept + [item["entry"] for item in plan]
+    else:
+        if not isinstance(hooks, dict):
+            hooks = {}
+            settings[config.root_key] = hooks
+        _merge_plan(hooks, plan)
+    _write_json_file(path, settings, current)
+
+
+def hooks_write_problems(agent: str, settings_path: str | None = None) -> list[str]:
+    """Why Link could not write this agent's hook files (and its companions'), before anything is written.
+
+    `lnk connect --hooks` checks them first, so a file Link would refuse
+    (comments in Gemini CLI's settings.json, bytes that are not UTF-8,
+    hooks in a form Link does not edit) stops the connect before the MCP
+    entry or another hooks file is half-written.
+    """
+    config = _hook_agent_by_name(agent)
+    targets = [(config, _settings_path(config.default_settings, settings_path))]
+    targets += [(other, _settings_path(other.default_settings, None))
+                for other in (_find_hook_agent(name) for name in config.companions) if other is not None]
+    problems: list[str] = []
+    for each, path in targets:
+        try:
+            current = _read_json_file(path)
+        except json.JSONDecodeError as exc:
+            problems.append(f"{path} is not plain JSON ({exc.msg} at line {exc.lineno}); Link writes hooks only "
+                            "into plain JSON, so add them by hand from the snippet")
+            continue
+        except (OSError, ValueError) as exc:
+            problems.append(str(exc))
+            continue
+        settings = current.settings if current is not None else {}
+        hooks = settings.get(each.root_key) if isinstance(settings, dict) else None
+        wanted = list if each.schema == "triggers" else dict
+        if not isinstance(settings, dict):
+            problems.append(f"{path} must contain a JSON object")
+        elif hooks is not None and not isinstance(hooks, wanted):
+            problems.append(f"{path} keeps \"{each.root_key}\" in a form Link does not edit")
+    return problems
 
 
 def build_agent_hooks_payload(
@@ -387,13 +657,16 @@ def build_agent_hooks_payload(
         except Exception as exc:
             write_status = {"requested": True, "ok": False, "message": str(exc)}
 
-    entry_commands = {
-        str(item["event_name"]): str(item["entry"]["command"])  # type: ignore[index]
-        for item in plan
-    }
-    behavior = [
-        f"{config.start_event}: injects a bounded Link memory brief into new agent sessions.",
-    ]
+    entry_commands = {}
+    for item in plan:
+        entry = item["entry"]
+        assert isinstance(entry, dict)
+        action = entry.get("action")
+        entry_commands[str(item["event_name"])] = str(action.get("command") if isinstance(action, dict)
+                                                      else entry.get("command"))
+    behavior: list[str] = []
+    if config.start_event:
+        behavior.append(f"{config.start_event}: injects a bounded Link memory brief into new agent sessions.")
     if config.end_event:
         behavior.append(
             f"{config.end_event}: stores proposal-only session notes locally; durable memory still requires review."
@@ -403,22 +676,33 @@ def build_agent_hooks_payload(
             f"{config.display_name} has no session-end hook event; end sessions with `lnk session-end` "
             "or the MCP session_end action to capture memory proposals."
         )
-    if config.pre_tool_event:
+    if config.pre_tool:
+        events = ", ".join(event_name for event_name, _ in config.pre_tool)
         behavior.append(
-            f"{config.pre_tool_event}: reviewed memories with enforce rules ask before (or block) the "
-            "tool calls they name; nothing is checked until a rule has been reviewed."
+            f"{events}: reviewed memories with enforce rules ask before (or block) the tool calls they "
+            "name; nothing is checked until a rule has been reviewed."
         )
+        if config.pre_tool_emit not in {"text", "gemini", "copilot", "antigravity"}:
+            behavior.append(
+                f"{config.display_name} can only allow or block a call, so an ask rule holds the call and "
+                "the agent asks you in chat; `lnk approve <id>` lets that exact call through once."
+            )
     if config.post_tool_event:
         behavior.append(
             f"{config.post_tool_event}: when a file is read or edited, the reviewed memories anchored to it "
             "are shown once per session."
         )
-    if config.name in {"codex", "cursor"}:
+    if config.name != "claude-code":
         behavior.append(
             f"New: {config.display_name} hook support follows the vendor's documented schema; "
             "if a hook misbehaves, please open an issue."
         )
 
+    companions = [
+        build_agent_hooks_payload(target=target, agent=name, runtime_script=runtime_script,
+                                  python_cmd=python_cmd, write=write)
+        for name in config.companions
+    ]
     return {
         "agent": config.name,
         "display_name": config.display_name,
@@ -429,6 +713,7 @@ def build_agent_hooks_payload(
         "write": write_status,
         "behavior": behavior,
         "restart_hint": config.restart_hint,
+        "companions": companions,
     }
 
 

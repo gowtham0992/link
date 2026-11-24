@@ -22,6 +22,10 @@ instead of a chore.
 - The last-session card warns when the agent did not get all of its memory
   (a brief cut short or never shown) and says how many tool calls enforced
   rules asked about or blocked (Link 5.0+)
+- Held tool calls: agents that cannot ask you themselves (Codex, Windsurf,
+  Cursor's file checks) are stopped by an ask rule until you approve the
+  call once; LinkBar lists them under "Waiting for your OK" with an Approve
+  once button and notifies you when one arrives (Link 6.0+)
 - Backend: the `lnk` CLI's `--json` output. No server, no sockets, no new
   API surface. Workspace: chosen in Settings, or `LINK_WORKSPACE` for a
   launch, defaulting to `~/link`.

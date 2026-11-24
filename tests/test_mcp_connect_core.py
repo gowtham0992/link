@@ -415,11 +415,35 @@ class DisconnectTests(unittest.TestCase):
         from link_core.mcp_connect import build_disconnect_payload
         config = self.dir / "claude.json"
         config.write_text('{"mcpServers": {"link"', encoding="utf-8")
-        with self.assertRaises(ValueError) as caught:
-            build_disconnect_payload("claude-code", config_path=str(config),
-                                     hooks_settings=str(self.dir / "none.json"), write=True)
-        self.assertIn("not valid JSON", str(caught.exception))
+        payload = build_disconnect_payload("claude-code", config_path=str(config),
+                                           hooks_settings=str(self.dir / "none.json"), write=True)
+        self.assertFalse(payload["ok"])
+        self.assertIn("not valid JSON", str(payload["mcp"]["error"]))
         self.assertEqual(config.read_text(encoding="utf-8"), '{"mcpServers": {"link"')
+
+    def test_a_config_link_cannot_edit_still_lets_the_hooks_go(self):
+        # The hooks block every tool call once the workspace is gone: a broken
+        # MCP config (or a folder where the file should be) must not keep them.
+        from link_core.agent_hooks import build_agent_hooks_payload
+        from link_core.mcp_connect import build_disconnect_payload
+        settings = self.dir / "settings.json"
+        build_agent_hooks_payload(target=self.dir / "link", agent="cursor", runtime_script=self.dir / "link.py",
+                                  python_cmd="python3", settings_path=str(settings), write=True)
+        for broken in ("file", "folder"):
+            config = self.dir / f"mcp-{broken}.json"
+            if broken == "folder":
+                config.mkdir()
+            else:
+                config.write_text('{"mcpServers": {"link"', encoding="utf-8")
+            if not settings.exists():
+                build_agent_hooks_payload(target=self.dir / "link", agent="cursor", runtime_script=self.dir / "link.py",
+                                          python_cmd="python3", settings_path=str(settings), write=True)
+            payload = build_disconnect_payload("cursor", config_path=str(config), hooks_settings=str(settings),
+                                               write=True)
+            self.assertFalse(payload["ok"], broken)
+            self.assertIn("by hand", str(payload["mcp"]["error"]), broken)
+            self.assertTrue(payload["hooks"]["removed"], broken)
+            self.assertFalse(settings.exists(), broken)
 
     def test_disconnect_keeps_comments_in_jsonc(self):
         from link_core.mcp_connect import _jsonc_loads, build_disconnect_payload

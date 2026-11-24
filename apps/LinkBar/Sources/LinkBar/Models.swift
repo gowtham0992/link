@@ -545,7 +545,7 @@ struct MemoryReceipt: Decodable {
         let truncated: Bool?
         let delivery: String?
     }
-    /// One enforced-rule decision before a tool call: "ask" or "deny".
+    /// One enforced-rule decision before a tool call: "ask", "deny", "held" or "approved".
     struct RuleCheck: Decodable {
         let decision: String
         let memories: [String]
@@ -595,11 +595,14 @@ struct MemoryReceipt: Decodable {
         var ruleCheckLabel: String? {
             let checks = ruleChecks ?? []
             guard !checks.isEmpty else { return nil }
-            let asked = checks.filter { $0.decision == "ask" }.count
+            // "held": an agent that cannot ask was stopped until you approve the call once.
+            let asked = checks.filter { $0.decision == "ask" || $0.decision == "held" }.count
             let blocked = checks.filter { $0.decision == "deny" }.count
+            let approved = checks.filter { $0.decision == "approved" }.count
             var parts: [String] = []
             if asked > 0 { parts.append("\(asked) asked for your OK") }
             if blocked > 0 { parts.append("\(blocked) blocked") }
+            if approved > 0 { parts.append("\(approved) approved once") }
             return parts.isEmpty ? nil : parts.joined(separator: " · ")
         }
 
@@ -627,3 +630,73 @@ struct MemoryReceipt: Decodable {
 
     var last: Session? { sessions.first }
 }
+
+
+/// A tool call an agent that cannot ask (Codex, Windsurf, Cursor's file
+/// checks) was stopped from making until the person approves it once.
+/// Read straight from `.link-cache/approvals.json`, the file the pre-tool
+/// hook writes, so showing it costs no extra lnk process per refresh.
+struct HeldCall: Identifiable, Equatable {
+    let id: String
+    let kind: String   // "command", "read" or "write" (of the first part of the call)
+    /// The whole call, every command, read and write it names, line breaks
+    /// kept: what the person is approving, shown in full before they do.
+    let display: String
+    let title: String  // the memory whose rule held it
+    let rule: String
+    let agent: String
+    let at: Date
+
+    /// The pending requests `lnk approve` would accept, read the way approvals.py `_load` and `_prune`
+    /// read them, so LinkBar never offers a call the CLI would then refuse:
+    /// - a file with a second hard link reads as empty (another name for it could have written it);
+    /// - an entry needs its call `key` and a creation time in Link's own format, at most a minute ahead;
+    /// - requests older than a day have expired (REQUEST_HOURS), a request with a bad or stale `used`
+    ///   stamp is gone, and only the newest 200 are kept (MAX_REQUESTS).
+    static func load(from workspace: String, now: Date = Date()) -> [HeldCall] {
+        let path = (workspace as NSString).appendingPathComponent(".link-cache/approvals.json")
+        var info = stat()
+        guard stat(path, &info) == 0, info.st_nlink <= 1,
+              let data = FileManager.default.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let requests = root["requests"] as? [String: Any] else { return [] }
+        var kept: [(stamp: String, call: HeldCall?)] = []
+        // One malformed entry must not hide the rest.
+        for (id, value) in requests {
+            guard let entry = value as? [String: Any],
+                  entry["key"] is String,
+                  let stamp = entry["at"] as? String,
+                  let at = linkStamp.date(from: stamp),
+                  now.timeIntervalSince(at) <= 24 * 3600,
+                  at.timeIntervalSince(now) <= 60 else { continue }
+            if let used = entry["used"] {
+                guard let usedAt = (used as? String).flatMap(linkStamp.date(from:)),
+                      now.timeIntervalSince(usedAt) <= 5 else { continue }
+            }
+            // Counted towards the 200 like any request, but not shown: there would be nothing to approve.
+            guard let display = entry["display"] as? String, !display.isEmpty else {
+                kept.append((stamp, nil))
+                continue
+            }
+            let kind = display.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+            kept.append((stamp, HeldCall(id: id, kind: kind, display: display, title: entry["title"] as? String ?? "",
+                                         rule: entry["rule"] as? String ?? "", agent: entry["agent"] as? String ?? "",
+                                         at: at)))
+        }
+        return kept.sorted { $0.stamp > $1.stamp }.prefix(200).compactMap(\.call)
+    }
+
+    /// approvals.py `_stamp`: "%Y-%m-%dT%H:%M:%SZ", UTC.
+    private static let linkStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        return formatter
+    }()
+
+    var agentName: String {
+        ["codex": "Codex", "cursor": "Cursor", "windsurf": "Windsurf", "kiro": "Kiro", "devin": "Devin"][agent] ?? agent
+    }
+}
+

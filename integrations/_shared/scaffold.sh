@@ -92,6 +92,10 @@ if [ -f "$LINK_ROOT/link.py" ]; then
     echo "  Updated link.py"
 fi
 
+if [ -f "$LINK_ROOT/link_hook.py" ]; then
+    cp "$LINK_ROOT/link_hook.py" "$TARGET_DIR/link_hook.py"
+fi
+
 if [ -d "$LINK_ROOT/mcp_package/link_core" ]; then
     mkdir -p "$TARGET_DIR/link_core"
     cp "$LINK_ROOT/mcp_package/link_core/"*.py "$TARGET_DIR/link_core/"

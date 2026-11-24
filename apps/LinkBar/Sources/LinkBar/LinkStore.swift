@@ -30,6 +30,8 @@ final class LinkStore: ObservableObject {
     @Published var digest: DigestPayload?
     @Published var syncState: SyncStatus?
     @Published var handoffsWaiting: [HandoffsPayload.Handoff] = []
+    /// Tool calls held until you approve them once (agents that cannot ask).
+    @Published var heldCalls: [HeldCall] = []
     @Published var runtimeWarning: String?
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
@@ -55,6 +57,8 @@ final class LinkStore: ObservableObject {
     @Published var staleUnsupported = false
     /// Set by a status-row Fix to steer the popover (e.g. to the stale filter).
     @Published var requestedTab: PopoverView.Tab?
+    /// A held call whose notification was opened: the popover scrolls to it and marks it.
+    @Published var focusedHeldCall: String?
     @Published var memoryFilterStale = false
     /// Published copy of LinkCLI.workspace so Settings and the footer update
     /// the moment the workspace changes.
@@ -118,6 +122,8 @@ final class LinkStore: ObservableObject {
             (root as NSString).appendingPathComponent("raw/handoffs"),
             (root as NSString).appendingPathComponent("wiki/memories"),
             (root as NSString).appendingPathComponent("wiki"),
+            // Held tool calls land here the moment an agent is stopped.
+            (root as NSString).appendingPathComponent(".link-cache"),
         ]
     }
 
@@ -188,6 +194,7 @@ final class LinkStore: ObservableObject {
             async let receiptRead = Self.fetch(MemoryReceipt.self, ["receipt", workspace, "--sessions", "1", "--json"])
             let sessions = Self.scanAgentSessions()
             let memories = MemoryPage.load(from: workspace)
+            let held = HeldCall.load(from: workspace)
             let (inbox, captures, log, status, handoffs) = await (inboxRead, capturesRead, logRead, statusRead, handoffsRead)
             let receipt = await receiptRead
             // Only when both inbox reads failed: say why, instead of always
@@ -203,6 +210,7 @@ final class LinkStore: ObservableObject {
                 self.activeSessions = sessions
                 self.rememberStaleRepo(from: sessions)
                 self.memories = memories
+                self.heldCalls = held
                 self.lastError = failure
                 self.handoffsWaiting = handoffs?.handoffs ?? self.handoffsWaiting
                 self.receipt = receipt ?? self.receipt
@@ -224,6 +232,7 @@ final class LinkStore: ObservableObject {
                 if let waiting = self.inbox?.items.filter({ !$0.rules.isEmpty }) {
                     NotificationManager.shared.announceWaitingRules(waiting)
                 }
+                NotificationManager.shared.announceHeldCalls(held)
             }
             // Health surfaces are heavier (each spawns a Python probe), so
             // refresh them at most every 15s and after the fast data is on
@@ -497,7 +506,7 @@ final class LinkStore: ObservableObject {
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .warn,
                               detail: "Claude Code: not wired — no automatic capture, no enforced rules",
                               fix: .init(label: "Wire") { [weak self] in self?.wireClaudeHooks() }))
-        case .none:
+        case nil:
             rows.append(.init(icon: "bolt.horizontal", name: "Hooks", level: .info, detail: "checking…"))
         }
         switch cursorHooksWired {
@@ -510,7 +519,7 @@ final class LinkStore: ObservableObject {
         case .some(.none):
             rows.append(.init(icon: "bolt.horizontal", name: "Cursor hooks", level: .warn,
                               detail: "not wired — run lnk connect cursor --hooks --write"))
-        case .none:
+        case nil:
             break
         }
 
@@ -665,6 +674,44 @@ final class LinkStore: ObservableObject {
 
     /// Approve a waiting rule from its notification: the same review the
     /// inbox's checkmark runs, by memory name.
+    /// Let one held tool call through once; the agent repeats it within 10 minutes.
+    /// Success only on `"approved": true`: `lnk approve` prints the call before it grants anything, so
+    /// output alone does not mean the grant was written (an expired request, a busy approvals file).
+    func approveHeldCall(id: String) {
+        if focusedHeldCall == id { focusedHeldCall = nil }
+        // LinkBar shows the call itself and the person clicked to approve it: no terminal prompt, a JSON answer.
+        let args = ["approve", id, LinkCLI.workspace, "--json", "--yes"]
+        busy = true
+        Task.detached(priority: .userInitiated) {
+            let failure: String? = {
+                do {
+                    let data = try LinkCLI.run(args)
+                    let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    if reply?["approved"] as? Bool == true { return nil }
+                    return reply?["error"] as? String ?? "lnk approve did not approve the call."
+                } catch {
+                    return String(describing: error)
+                }
+            }()
+            await MainActor.run {
+                if let failure {
+                    self.lastError = failure
+                    self.busy = false
+                } else {
+                    self.showFlash("Approved once \u{2014} the agent can run exactly that call again in the next 10 minutes.",
+                                   tone: .success)
+                    self.refresh()
+                }
+            }
+        }
+    }
+
+    /// Steer the popover to one held call (from its notification), where the whole call is shown.
+    func showHeldCall(id: String) {
+        focusedHeldCall = id
+        requestedTab = .inbox
+    }
+
     func markReviewedByName(_ name: String) {
         act(["review-memory", name, LinkCLI.workspace], success: "Reviewed \u{2014} its rules now apply to tool calls.")
     }

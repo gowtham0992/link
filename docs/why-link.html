@@ -80,7 +80,7 @@
       </aside>
       <article class="doc-content">
         <h2 id="architecture">The Architecture Is the Product</h2>
-        <p>Every other agent-memory system — Mem0/OpenMemory, Zep/Graphiti, Letta — stores memory as embeddings in a vector database or as an LLM-extracted graph. You cannot read your own memory, and a model sits inside the write path. Link made five architectural commitments that cannot be bolted onto those designs:</p>
+        <p>The best-known agent-memory systems — Mem0/OpenMemory, Zep/Graphiti, Letta — store memory as embeddings in a vector database or as an LLM-extracted graph. You cannot read your own memory, and a model sits inside the write path. Link made five architectural commitments that cannot be bolted onto those designs:</p>
         <div class="grid two-up">
           <article class="panel"><h3>Memory you can read</h3><p>Every memory is a plain Markdown file. Open it, grep it, git-diff it, back it up. If Link disappeared tomorrow, your memory is still yours.</p></article>
           <article class="panel"><h3>Review-gated writes</h3><p>No durable memory is created without your approval. Agents propose; you decide. Automatic session hooks capture proposals — never facts.</p></article>

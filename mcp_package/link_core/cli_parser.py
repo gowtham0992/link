@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from .tool_events import EMITS as HOOK_EMITS
 from .memory import MEMORY_SCOPES, MEMORY_TYPES, MEMORY_VISIBILITIES
 from .version import LINK_VERSION
 
@@ -28,7 +29,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "capture-inbox", "accept-capture", "delete-capture", "dedup-captures",
         "redact-capture", "capture-session", "propose-memories", "update-memory",
         "archive-memory", "restore-memory", "forget-memory",
-        "set-memory-visibility", "enforce", "memory-log", "memory-audit",
+        "set-memory-visibility", "enforce", "approve", "memory-log", "memory-audit",
     )),
     ("Agents & automation", (
         "connect", "disconnect", "hook", "verify-mcp", "compile",
@@ -160,7 +161,8 @@ def build_cli_parser(
     onboard_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also configure session hooks for selected agents that support them (Claude Code, Codex, Cursor)",
+        help="also configure hooks for selected agents that support them (Claude Code, Codex, Cursor, "
+             "Antigravity and Gemini CLI, Copilot, Windsurf, Kiro)",
     )
     onboard_cmd.add_argument("--first-memory", default=None, help="seed one explicit memory for review")
     onboard_cmd.add_argument(
@@ -423,6 +425,21 @@ def build_cli_parser(
                              help="show rules Link can derive from the memory's text, without changing it")
     enforce_cmd.add_argument("--json", action="store_true", help="print machine-readable status")
 
+    approve_cmd = sub.add_parser(
+        "approve",
+        help="let one held tool call through once (agents that cannot ask you themselves)",
+        epilog=(
+            "Codex, Windsurf, Kiro, Devin and Cursor's file events can only allow or block. When an "
+            "ask rule fires there, Link holds the call and the agent asks you in chat; approving lets "
+            "the exact same call through once, within 10 minutes. Without an id: list what is waiting."
+        ),
+    )
+    approve_cmd.add_argument("request", nargs="?", default=None, help="the id the agent showed you")
+    approve_cmd.add_argument("target", nargs="?", default=".")
+    approve_cmd.add_argument("--json", action="store_true",
+                             help="print machine-readable status (at a terminal, approving also needs --yes)")
+    approve_cmd.add_argument("--yes", action="store_true", help="approve without asking to confirm at a terminal")
+
     recall_cmd = sub.add_parser("recall", help="search local agent memories")
     recall_cmd.add_argument("query", help="memory query")
     recall_cmd.add_argument("target", nargs="?", default=".")
@@ -484,9 +501,10 @@ def build_cli_parser(
     )
     hook_cmd.add_argument(
         "--emit",
-        choices=["text", "cursor"],
+        choices=list(HOOK_EMITS),
         default="text",
-        help="session-start output envelope: plain text (Claude Code, Codex) or Cursor additional_context JSON",
+        help="the agent's answer format: text (Claude Code), cursor, codex, gemini, copilot, windsurf, kiro, "
+             "antigravity or devin",
     )
 
     semantic_cmd = sub.add_parser("semantic", help="show or set up optional local semantic recall")
@@ -599,6 +617,11 @@ def build_cli_parser(
         "--instructions", action="store_true",
         help="check the repository's agent instruction files (AGENTS.md, CLAUDE.md, rules) instead of memories",
     )
+    stale_cmd.add_argument(
+        "--wiki", action="store_true",
+        help="check the compiled wiki instead: pages citing a source that changed or does not exist, pages "
+             "supported only by other wiki pages, and likely duplicates (no repository needed)",
+    )
     stale_cmd.add_argument("--json", action="store_true", help="machine-readable report")
 
     compile_cmd = sub.add_parser(
@@ -619,6 +642,12 @@ def build_cli_parser(
     compile_cmd.add_argument("--include-private", action="store_true", dest="include_private",
                              help="also write private memories (these files are usually committed)")
     compile_cmd.add_argument("--project", default="", help="project slug (default: the repository folder name)")
+    compile_cmd.add_argument(
+        "--global", action="store_true", dest="global_files",
+        help="write your reviewed personal memory into the global instruction file of agents with no "
+             "session-start hook (Windsurf, Zed, and the Kiro IDE, which reads hooks per workspace only); "
+             "--targets then picks among windsurf, kiro, zed",
+    )
     compile_cmd.add_argument("--json", action="store_true", help="machine-readable plan and result")
 
     verify_mcp_cmd = sub.add_parser(
@@ -642,7 +671,16 @@ def build_cli_parser(
     connect_cmd.add_argument(
         "--hooks",
         action="store_true",
-        help="also install hooks: the session brief at start, proposals at end, and on Claude Code (shell commands on Cursor) enforce rules checked before tool calls and memories surfaced when the agent opens anchored code",
+        help="also install hooks: the session brief at start (where the agent has the event), proposals at end, "
+             "enforce rules checked before tool calls (Claude Code, Cursor, Codex, Gemini CLI, Antigravity, Copilot, "
+             "Windsurf, Kiro), and on Claude Code memories surfaced when the agent opens anchored code",
+    )
+    connect_cmd.add_argument(
+        "--hooks-only",
+        action="store_true",
+        dest="hooks_only",
+        help="install the agent's hooks and leave its MCP config alone (Copilot's MCP entry is per project, "
+             "its hooks are global)",
     )
     connect_cmd.add_argument(
         "--hooks-settings",
@@ -660,6 +698,8 @@ def build_cli_parser(
     disconnect_cmd.add_argument("--config", default=None, help="override the agent config file path")
     disconnect_cmd.add_argument("--hooks-settings", default=None, dest="hooks_settings",
                                 help="override the hooks settings file")
+    disconnect_cmd.add_argument("--no-hooks", action="store_false", dest="hooks",
+                                help="leave session hooks alone (they are global; a project uninstall uses this)")
     disconnect_cmd.add_argument("--json", action="store_true", help="print the removal plan as JSON")
 
     return parser
@@ -863,6 +903,9 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             enforce=args.enforce,
             json_output=args.json,
         )
+    if command == "approve":
+        return handlers["approve"](Path(args.target), args.request, json_output=bool(args.json),
+                                   yes=bool(args.yes))
     if command == "enforce":
         return handlers["enforce"](
             Path(args.target),
@@ -1077,12 +1120,12 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["receipt"](Path(args.target), sessions=int(args.sessions), json_output=bool(args.json))
     if command == "stale":
         return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json),
-                                 instructions=bool(args.instructions))
+                                 instructions=bool(args.instructions), wiki=bool(args.wiki))
     if command == "compile":
         return handlers["compile"](
             Path(args.target), repo=Path(args.repo), targets=str(args.targets), check=bool(args.check),
             dry_run=bool(args.dry_run), include_private=bool(args.include_private), project=str(args.project),
-            json_output=bool(args.json),
+            json_output=bool(args.json), global_files=bool(args.global_files),
         )
     if command == "verify-mcp":
         from .mcp_connect import agent_alias_matches
@@ -1098,7 +1141,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
     if command == "disconnect":
         return handlers["disconnect"](
             args.agent, write=args.write, config_path=args.config,
-            hooks_settings=args.hooks_settings, json_output=args.json,
+            hooks_settings=args.hooks_settings, hooks=args.hooks, json_output=args.json,
         )
     if command == "connect":
         return handlers["connect"](
@@ -1108,6 +1151,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
             config_path=args.config,
             python_cmd=args.python,
             hooks=args.hooks,
+            hooks_only=args.hooks_only,
             hooks_settings=args.hooks_settings,
             json_output=args.json,
         )

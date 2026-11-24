@@ -124,6 +124,17 @@ _BUNDLED_CORE = ROOT / "mcp_package"
 if (_BUNDLED_CORE / "link_core").exists():
     sys.path.insert(0, str(_BUNDLED_CORE))
 
+# The pre-tool and post-tool hooks run around every shell command and file
+# access an agent makes. They are decided here, before the rest of the CLI
+# loads; anything the fast path does not recognise falls through to it.
+# LINK_HOOK_FULL_CLI=1 skips it, so tests and benchmarks can compare the two paths.
+if sys.argv[1:2] == ["hook"] and not os.environ.get("LINK_HOOK_FULL_CLI"):
+    from link_core.tool_hooks import fast_tool_hook
+
+    _fast_hook_exit = fast_tool_hook(sys.argv[2:])
+    if _fast_hook_exit is not None:
+        sys.exit(_fast_hook_exit)
+
 from link_core.memory import (
     classify_memory_segment as _core_classify_memory_segment,
     list_recipes as _core_list_recipes,
@@ -264,6 +275,7 @@ from link_core.files import (
 from link_core.guard import (
     guard_reminder as _core_guard_reminder,
     render_guard_text as _core_render_guard_text,
+    note_guarded as _core_note_guarded,
     recently_guarded as _core_recently_guarded,
     render_switch_nudge as _core_render_switch_nudge,
     switch_intent as _core_switch_intent,
@@ -279,19 +291,18 @@ from link_core.importers import (
 )
 from link_core.agent_instructions import (
     instruction_file_status as _core_instruction_file_status,
+    migrate_codex_instructions as _core_migrate_codex_instructions,
     refresh_instruction_file as _core_refresh_instruction_file,
 )
+from link_core.tool_events import render_reply as _core_render_reply
 from link_core.tool_hooks import (
-    anchored_reminders as _core_anchored_reminders,
-    cached_repo_identity as _core_cached_repo_identity,
-    evaluate_tool_call as _core_evaluate_tool_call,
-    find_repo_root as _core_find_repo_root,
-    load_hook_index as _core_load_hook_index,
-    load_shown as _core_load_shown,
+    hook_project as _core_hook_project,
+    hook_project_dir as _core_hook_project_dir,
     new_delivery_id as _core_new_delivery_id,
-    remember_shown as _core_remember_shown,
-    render_touch_text as _core_render_touch_text,
-    tool_call as _core_tool_call,
+    post_tool_output as _core_post_tool_output,
+    emit_reply as _core_emit_reply,
+    pre_tool_reply as _core_pre_tool_reply,
+    read_hook_event as _core_read_hook_event,
     verify_deliveries as _core_verify_deliveries,
     wrap_for_delivery as _core_wrap_for_delivery,
 )
@@ -340,7 +351,10 @@ from link_core.mcp_verify import (
 )
 from link_core.mcp_connect import (
     build_mcp_connect_payload as _core_build_mcp_connect_payload,
+    detect_hook_only_agents as _core_detect_hook_only_agents,
     detect_installed_agents as _core_detect_installed_agents,
+    disconnected_agents as _core_disconnected_agents,
+    mark_disconnected as _core_mark_disconnected,
     read_agent_link_server as _core_read_agent_link_server,
     supported_agents as _core_supported_agents,
 )
@@ -348,6 +362,7 @@ from link_core.agent_hooks import (
     build_agent_hooks_payload as _core_build_agent_hooks_payload,
     extract_transcript_text as _core_extract_transcript_text,
     hook_supported_agents as _core_hook_supported_agents,
+    hooks_write_problems as _core_hooks_write_problems,
     supports_agent_hooks as _core_supports_agent_hooks,
     transcript_untrusted_inputs as _core_transcript_untrusted_inputs,
 )
@@ -1325,6 +1340,7 @@ def compile_memories(
     include_private: bool = False,
     project: str = "",
     json_output: bool = False,
+    global_files: bool = False,
 ) -> int:
     """Render reviewed memories into this repository's agent instruction files."""
     from link_core.compile import TARGET_KEYS, apply_plan, plan_changes, plan_compile, plan_diff, plan_summary
@@ -1332,6 +1348,8 @@ def compile_memories(
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
+    if global_files:
+        return _compile_global(wiki_dir, targets=targets, check=check, dry_run=dry_run, json_output=json_output)
     repo_dir = Path(repo).expanduser().resolve()
     if not repo_dir.is_dir():
         print(f"{repo_dir} is not a directory", file=sys.stderr)
@@ -1383,7 +1401,182 @@ def compile_memories(
     return 0
 
 
-def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False) -> int:
+_WIKI_FINDING_LABELS = {
+    "cites-changed-source": "Cites a source that changed or is gone since the page was written",
+    "source-changed": "Source page older than its raw file",
+    "source-raw-missing": "Source page whose raw file is gone",
+    "cites-missing-source": "Cites a source that does not exist",
+    "wiki-only-support": "Supported only by other wiki pages",
+    "possible-duplicate": "Possible duplicate",
+}
+
+
+def _stale_wiki(root: Path, *, json_output: bool) -> int:
+    """`lnk stale --wiki`: is the compiled wiki still standing on its sources?"""
+    from link_core.wiki_integrity import wiki_findings
+
+    report = wiki_findings(root)
+    findings = report["findings"]
+    assert isinstance(findings, list)
+    if json_output:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 1 if findings else 0
+    if not findings:
+        print(f"Wiki checked: {report['pages_checked']} pages; every citation reaches a current source and no "
+              "two pages look like the same one.")
+        return 0
+    print(f"Wiki checked: {report['pages_checked']} pages, {len(findings)} finding(s).")
+    current = ""
+    for finding in findings:
+        label = _WIKI_FINDING_LABELS.get(str(finding["kind"]), str(finding["kind"]))
+        if label != current:
+            print(f"\n{label}:")
+            current = label
+        print(f"  {finding['page']}: {finding['evidence']}")
+        if finding.get("other"):
+            print(f"    and {finding['other']}")
+    print("\nRe-read the changed sources and refresh the pages that cite them; nothing was rewritten.")
+    return 1
+
+
+def _compile_global(wiki_dir: Path, *, targets: str, check: bool, dry_run: bool, json_output: bool,
+                    home: Path | None = None) -> int:
+    """`lnk compile --global`: personal memory into agents' global instruction files.
+
+    Always from the personal workspace, the one every later refresh follows:
+    compiling some other workspace's memories would be undone by the next
+    memory change. A workspace that was only resolved from the current
+    directory gives way to it; one named explicitly is refused.
+    """
+    from link_core.global_compile import (
+        GLOBAL_TARGET_KEYS,
+        ZED_PERMISSIONS,
+        apply_global_plan,
+        detected_global_targets,
+        personal_wiki_dir,
+        plan_global_compile,
+    )
+    from link_core.zed_permissions import ZED_SETTINGS
+
+    personal = personal_wiki_dir()
+    if wiki_dir.resolve() != personal.resolve():
+        if wiki_dir.resolve() != (Path.cwd() / "wiki").resolve():
+            print(f"lnk compile --global writes your personal memory, from {personal.parent} (LINK_WORKSPACE, "
+                  f"else ~/link), not from {wiki_dir.parent}: global files follow the personal workspace only. "
+                  "Run it without a path, or set LINK_WORKSPACE to make that workspace your personal one.",
+                  file=sys.stderr)
+            return 2
+        if not personal.exists():
+            print(f"No personal workspace at {personal.parent} (LINK_WORKSPACE, else ~/link): "
+                  "`lnk compile --global` writes your personal memory from it. Create it with `lnk onboard`.",
+                  file=sys.stderr)
+            return 2
+        print(f"Global files follow your personal workspace: compiling from {personal.parent}, "
+              f"not {wiki_dir.parent}.", file=sys.stderr)
+        wiki_dir = personal
+
+    chosen = [key.strip() for key in targets.split(",") if key.strip()] if targets else None
+    if chosen == ["all"]:
+        chosen = list(GLOBAL_TARGET_KEYS)
+    known = (*GLOBAL_TARGET_KEYS, ZED_PERMISSIONS)
+    unknown = [key for key in chosen or [] if key not in known]
+    if unknown:
+        print(f"Unknown global target(s): {', '.join(unknown)}. Choose from: {', '.join(known)}",
+              file=sys.stderr)
+        return 2
+    if chosen and "zed" in chosen and ZED_PERMISSIONS not in chosen:
+        chosen.append(ZED_PERMISSIONS)  # Zed's rules live in its settings, its memory in AGENTS.md
+    plan = plan_global_compile(_core_memory_records(wiki_dir), home or Path.home(), targets=chosen)
+    written = [] if (check or dry_run) else apply_global_plan(plan)
+    summary = {
+        "mode": "check" if check else "dry-run" if dry_run else "write",
+        "changed": sorted(plan.files), "unchanged": plan.unchanged, "written": written,
+        "included": plan.included, "dropped": plan.dropped, "excluded": plan.excluded, "conflicts": plan.conflicts,
+        "zed_rules_skipped": plan.zed_rules_skipped, "zed_permissions_snippet": plan.zed_snippet,
+        "no_room": plan.no_room, "skipped": plan.skipped,
+    }
+    if json_output:
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    else:
+        verb = "Would update" if (check or dry_run) else "Updated"
+        for rel in sorted(plan.files):
+            if plan.files[rel] is None:
+                print(f"{'Would remove' if (check or dry_run) else 'Removed'}: ~/{rel} (Link wrote it; "
+                      "it is no longer needed)")
+            elif rel == ZED_SETTINGS:
+                count = len(plan.included.get(ZED_PERMISSIONS, []))
+                print(f"{verb}: ~/{rel} (Zed tool permissions from {count} "
+                      f"{'memory' if count == 1 else 'memories'} with rules)")
+            else:
+                count = len(plan.included.get(_global_key(rel), []))
+                print(f"{verb}: ~/{rel} ({count} {'memory' if count == 1 else 'memories'})")
+        for rel in plan.unchanged:
+            print(f"Up to date: ~/{rel}")
+        if not plan.files and not plan.unchanged:
+            if plan.conflicts or plan.dropped or plan.no_room or plan.skipped:
+                print("Nothing written" + (f" to {', '.join(chosen)}" if chosen else "") + ": see why below.")
+            elif chosen:  # every file asked for gets at least an empty block; only Zed's permissions wait
+                print(f"Nothing written to {', '.join(chosen)}: no reviewed rule for Zed's permissions yet. "
+                      "`--targets zed` keeps them in step from the first one.")
+            elif not detected_global_targets(home or Path.home()):
+                print("No global instruction files to write: no Windsurf, Kiro or Zed install found. "
+                      "Pass --targets windsurf,kiro,zed to write anyway.")
+            else:
+                print("No global instruction files to write yet: no reviewed personal memory. "
+                      "Pass --targets windsurf,kiro,zed to set the files up now; they fill in as memories are "
+                      "reviewed.")
+        for item in plan.dropped:
+            print(f"Left out of {item['target']} (size limit): {item['name']} - {item['reason']}")
+        for item in plan.no_room:
+            print(f"No room: ~/{item['path']} - {item['reason']}")
+        for item in plan.skipped:
+            print(f"Not written: ~/{item['path']} - {item['reason']}")
+        for item in plan.conflicts:
+            print(f"Not touched: ~/{item['path']} - {item['reason']}")
+        if plan.zed_snippet:
+            print("Zed tool permissions to merge into ~/.config/zed/settings.json by hand:")
+            print("\n".join(f"  {line}" for line in plan.zed_snippet.splitlines()))
+        for item in plan.zed_rules_skipped:
+            print(f"Not in Zed's permissions: {item['rule']} ({item['name']}) - {item['reason']}")
+    return 1 if check and plan.files else 0
+
+
+# Commands after which a memory may have joined, changed or left the reviewed set.
+_MEMORY_CHANGING_COMMANDS = {
+    "review-memory", "archive-memory", "restore-memory", "forget-memory", "update-memory", "remember",
+    "accept-capture", "set-memory-visibility", "sync", "team-sync", "import", "enforce", "restore-backup",
+    "migrate",
+}
+
+
+def _refresh_global_files(target: Path, home: Path | None = None) -> None:
+    """Keep the global files `lnk compile --global` wrote in step with the reviewed memories.
+
+    Only the personal workspace feeds them, so a change in some other
+    workspace (a team's, a scratch one) never rewrites a person's global
+    files. Only files that already carry Link's block are rewritten, so
+    nothing new appears in a home directory without `lnk compile --global`.
+    Never fails the command that triggered it.
+    """
+    try:
+        from link_core.global_compile import refresh_after_memory_change
+
+        warnings: list[dict[str, str]] = []
+        refresh_after_memory_change(_resolve_wiki_dir(target), home, warnings)
+        for item in warnings:
+            print(f"No room for your memory in ~/{item['path']}: {item['reason']}", file=sys.stderr)
+    except Exception as exc:  # the memory change itself already succeeded
+        print(f"Could not refresh compiled global instruction files: {exc}", file=sys.stderr)
+
+
+def _global_key(rel: str) -> str:
+    from link_core.global_compile import GLOBAL_TARGETS
+
+    return next((target.key for target in GLOBAL_TARGETS if target.path == rel), "")
+
+
+def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False,
+          wiki: bool = False) -> int:
     """Report memories that name repository paths git no longer has.
 
     Read-only by design. A memory that mentions something that moved is a
@@ -1392,9 +1585,16 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, in
     """
     from link_core.staleness import StalenessChecker, describe_findings
 
+    if wiki and instructions:
+        # Two checks of different things, each with its own report and exit code: one at a time.
+        print("lnk stale: --wiki and --instructions are separate checks; run `lnk stale --wiki` and "
+              "`lnk stale --instructions` one after the other.", file=sys.stderr)
+        return 2
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
+    if wiki:
+        return _stale_wiki(_resolve_link_root(target), json_output=json_output)
     repo_dir = Path(repo).expanduser().resolve()
     inside = subprocess.run(
         ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
@@ -1467,6 +1667,80 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, in
     return 1
 
 
+def approve_held_call(target: Path, request_id: str | None, *, json_output: bool = False, yes: bool = False) -> int:
+    """Let one held tool call through once, or list the calls waiting for you.
+
+    The call is shown before anything is granted; at a terminal the person
+    confirms it (`--yes` skips that). LinkBar runs this without a terminal
+    and shows the call itself. `--json` shows nothing to confirm, so at a
+    terminal it approves only with `--yes`.
+    """
+    from link_core import approvals
+
+    printable = approvals.printable  # requests filed before Link wrote out control characters
+
+    root = _resolve_link_root(target)
+    if not request_id:
+        waiting = approvals.pending(root)
+        if json_output:
+            print(json.dumps({"pending": waiting}, indent=2))
+            return 0
+        if not waiting:
+            print("No tool calls are waiting for your OK.")
+            return 0
+        print("Tool calls waiting for your OK (each approval lets the exact call through once):")
+        for row in waiting:
+            held_on = f"held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')})"
+            print(printable(f"\n  {row['id']}  {held_on}"))
+            for line in str(row.get("display") or "").splitlines():
+                print(f"      {printable(line)}")
+        print(f"Approve one: {_display_command(['lnk', 'approve', '<id>', str(target)])}")
+        return 0
+    missing = f"No held call {request_id!r} is waiting (requests expire after a day, approvals after 10 minutes)."
+    row = next((row for row in approvals.pending(root) if row["id"] == request_id.strip().lower()), None)
+    if row is None:
+        print(json.dumps({"approved": False, "error": missing}) if json_output else missing,
+              file=sys.stdout if json_output else sys.stderr)
+        return 1
+    # Both ends at a terminal: on Windows the NUL device reports itself as one, and a
+    # caller that captures the output (LinkBar, a script) shows the call itself.
+    interactive = not yes and sys.stdin.isatty() and sys.stdout.isatty()
+    if json_output and interactive:
+        plain = _display_command(["lnk", "approve", request_id, str(target)])
+        print(json.dumps({"approved": False, "error": f"At a terminal, --json approves only with --yes: run {plain} "
+                          "to see the call first, or add --yes."}))
+        return 1
+    if not json_output:
+        print(printable(f"Held on {row.get('agent')} by \"{row.get('title')}\" ({row.get('rule')}):"))
+        for line in str(row.get("display") or "").splitlines():
+            print(f"  {printable(line)}")
+        if interactive:
+            try:
+                answer = input("Approve once? [y/N] ")
+            except EOFError:
+                answer = ""
+            if answer.strip().lower() not in {"y", "yes"}:
+                print("Not approved; the call stays held.")
+                return 1
+    try:
+        entry = approvals.approve(root, request_id)
+    except TimeoutError:
+        busy = "Link's approvals file is busy; nothing was approved. Try again in a moment."
+        print(json.dumps({"approved": False, "error": busy}) if json_output else busy,
+              file=sys.stdout if json_output else sys.stderr)
+        return 1
+    if entry is None:
+        print(json.dumps({"approved": False, "error": missing}) if json_output else missing,
+              file=sys.stdout if json_output else sys.stderr)
+        return 1
+    if json_output:
+        print(json.dumps({"approved": True, "id": request_id, "call": entry.get("display")}))
+    else:
+        print(f"Approved once. The agent can now run exactly that again within {approvals.GRANT_MINUTES} minutes; "
+              "after that, or for anything different, it asks again.")
+    return 0
+
+
 def receipt(target: Path, *, sessions: int = 3, json_output: bool = False) -> int:
     """What reached the agents from memory, session by session.
 
@@ -1520,9 +1794,12 @@ def receipt(target: Path, *, sessions: int = 3, json_output: bool = False) -> in
             lines.append(f"  Shown when the agent opened anchored code: {', '.join(named)}")
         checks = item.get("rule_checks") or []
         if checks:
-            asked = sum(1 for check in checks if check.get("decision") == "ask")  # type: ignore[union-attr]
-            blocked = sum(1 for check in checks if check.get("decision") == "deny")  # type: ignore[union-attr]
-            lines.append(f"  Rules enforced on tool calls: {asked} asked for your OK, {blocked} blocked")
+            decisions = [str(check.get("decision")) for check in checks]  # type: ignore[union-attr]
+            asked = sum(1 for decision in decisions if decision in {"ask", "held"})
+            blocked = decisions.count("deny")
+            approved = decisions.count("approved")
+            line = f"  Rules enforced on tool calls: {asked} asked for your OK, {blocked} blocked"
+            lines.append(line + (f", {approved} let through once after your approval" if approved else ""))
         delivery = item.get("delivery") or {}
         if item.get("anything_undelivered"):
             lines.append(
@@ -2880,19 +3157,7 @@ def start(
 
 def _read_hook_stdin() -> dict[str, object]:
     """Read the agent hook event JSON from stdin, if one was piped in."""
-    if sys.stdin is None or sys.stdin.isatty():
-        return {}
-    try:
-        raw = sys.stdin.read()
-    except OSError:
-        return {}
-    if not raw.strip():
-        return {}
-    try:
-        payload = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return _core_read_hook_event(sys.stdin)
 
 
 def semantic(
@@ -3060,20 +3325,21 @@ def consolidate(target: Path, limit: int = 50, project: str | None = None, json_
 
 def _hook_project_dir(hook_event: dict[str, object]) -> str:
     """Return the project directory the hook fired in, across agent schemas."""
-    hook_cwd = str(hook_event.get("cwd") or "").strip()
-    if hook_cwd:
-        return hook_cwd
-    roots = hook_event.get("workspace_roots")
-    if isinstance(roots, list) and roots and isinstance(roots[0], str) and roots[0].strip():
-        return roots[0].strip()
-    return ""
+    return _core_hook_project_dir(hook_event)
 
 
 def _emit_session_start(text: str, emit: str) -> None:
+    """The session-start brief in the envelope each agent reads (plain text for the rest)."""
     if emit == "cursor":
         print(json.dumps({"additional_context": text}))
-        return
-    print(text)
+    elif emit in {"gemini", "devin"}:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+    elif emit == "copilot":
+        print(json.dumps({"additionalContext": text}))
+    elif emit == "antigravity":
+        print(json.dumps({"injectSteps": [{"systemMessage": text}]}))
+    else:
+        print(text)
 
 
 def _hook_session_start(
@@ -3347,6 +3613,7 @@ def _hook_prompt_check(target: Path, hook_event: dict[str, object], project: str
         # work - one reminder is a guard, ten is a nag.
         if _core_recently_guarded(root, str(reminder.get("name") or "")):
             return 0
+        _core_note_guarded(root, str(reminder.get("name") or ""))
         delivery_id = _core_new_delivery_id()
         _core_record_retrieval(
             root, "guard", [str(reminder.get("name") or "")],
@@ -3410,110 +3677,19 @@ def _pending_approvals(target: Path, wiki_dir: Path, captures: Mapping[str, obje
 
 
 def _hook_project(target: Path, hook_event: dict[str, object], project: str | None) -> str:
-    """The project the agent is working in: its repository's, wherever in it the cwd is.
-
-    Tool hooks fire with the agent's current directory, which follows every
-    `cd`; naming the project from that directory alone left project rules
-    unscoped in any subdirectory.
-    """
-    if project:
-        return project
-    project_dir = _hook_project_dir(hook_event)
-    if not project_dir:
-        return ""
-    repo_root = _core_find_repo_root(Path(project_dir))
-    return _default_project(repo_root) if repo_root else ""
+    return _core_hook_project(hook_event, project)
 
 
 def _hook_pre_tool(target: Path, hook_event: dict[str, object], project: str | None, emit: str) -> int:
     """Reviewed rules ask before (or block) the tool calls they name."""
-    def allow() -> int:
-        if emit == "cursor":
-            print(json.dumps({"permission": "allow"}))
-        return 0
-
-    wiki_dir = _resolve_wiki_dir(target)
-    if not wiki_dir.exists():
-        return allow()
-    root = _resolve_link_root(target)
-    index = _core_load_hook_index(wiki_dir, root)
-    if not index.get("rules"):
-        return allow()
-    project_dir = _hook_project_dir(hook_event)
-    repo_root = _core_find_repo_root(Path(project_dir)) if project_dir else None
-    decision = _core_evaluate_tool_call(
-        index, hook_event, project=_hook_project(target, hook_event, project), repo_root=repo_root,
-        context_path=project_dir or None, protected=[wiki_dir / "memories"],
-    )
-    if decision is None:
-        return allow()
-    _core_record_retrieval(
-        root, "enforce", [str(name) for name in decision["memories"]],  # type: ignore[union-attr]
-        project=_hook_project(target, hook_event, project), surface="hook",
-        session=str(hook_event.get("session_id") or hook_event.get("conversation_id") or ""),
-        decision=str(decision["decision"]),
-    )
-    if emit == "cursor":
-        print(json.dumps({
-            "permission": decision["decision"],
-            "userMessage": decision["reason"],
-            "agentMessage": decision["reason"],
-        }))
-        return 0
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": decision["decision"],
-        "permissionDecisionReason": decision["reason"],
-    }}))
-    return 0
+    return _core_emit_reply(_core_pre_tool_reply(target, hook_event, project=project, emit=emit))
 
 
 def _hook_post_tool(target: Path, hook_event: dict[str, object], project: str | None) -> int:
     """After a file is read or edited, the reviewed memories anchored to it."""
-    call = _core_tool_call(hook_event)
-    if call is None or call[0] not in {"read", "write"}:
-        return 0
-    file_path = Path(call[1]).expanduser()
-    if not file_path.is_absolute():
-        project_dir = _hook_project_dir(hook_event)
-        file_path = Path(project_dir or ".") / file_path
-    wiki_dir = _resolve_wiki_dir(target)
-    if not wiki_dir.exists():
-        return 0
-    root = _resolve_link_root(target)
-    index = _core_load_hook_index(wiki_dir, root)
-    anchors = index.get("anchors") if isinstance(index.get("anchors"), dict) else {}
-    if not anchors:
-        return 0
-    repo_root = _core_find_repo_root(file_path)
-    if repo_root is None:
-        return 0
-    try:
-        rel = file_path.resolve().relative_to(repo_root.resolve()).as_posix()
-    except (OSError, ValueError):
-        return 0
-    if rel not in anchors:  # type: ignore[operator]
-        return 0  # the common case, decided before any git call
-    session = str(hook_event.get("session_id") or "")
-    entries = _core_anchored_reminders(
-        index, str(file_path), repo_root=repo_root, identity=_core_cached_repo_identity(root, repo_root),
-        project=_hook_project(target, hook_event, project),
-        already_shown=_core_load_shown(root, session) if session else (),
-    )
-    if not entries:
-        return 0
-    names = [str(entry.get("name") or "") for entry in entries]
-    delivery_id = _core_new_delivery_id()
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PostToolUse",
-        "additionalContext": _core_render_touch_text(entries, rel, delivery_id),
-    }}))
-    if session:
-        _core_remember_shown(root, session, names)
-    _core_record_retrieval(
-        root, "touch", names, project=_hook_project(target, hook_event, project), surface="hook",
-        session=session, delivery=delivery_id,
-    )
+    output = _core_post_tool_output(target, hook_event, project=project)
+    if output:
+        print(output)
     return 0
 
 
@@ -3563,6 +3739,12 @@ def run_agent_hook(
         print(f"Unknown hook event: {event}", file=sys.stderr)
     except Exception as exc:
         print(f"Link {event} hook failed: {exc}", file=sys.stderr)
+        if event == "pre-tool":
+            # Cursor blocks a permission hook that prints nothing; answer
+            # "allow" the way each agent reads it, as the fast path does.
+            allow = _core_render_reply(None, emit, hook_event).stdout
+            if allow:
+                print(allow)
     return 0
 
 
@@ -3733,24 +3915,32 @@ def disconnect_agent(
     write: bool = False,
     config_path: str | None = None,
     hooks_settings: str | None = None,
+    hooks: bool = True,
     json_output: bool = False,
 ) -> int:
     """Remove Link from one agent: its MCP entry and its session hooks."""
     from link_core.mcp_connect import build_disconnect_payload
 
     try:
-        payload = build_disconnect_payload(agent, config_path=config_path, hooks_settings=hooks_settings, write=write)
-    except (ValueError, json.JSONDecodeError) as exc:
+        payload = build_disconnect_payload(agent, config_path=config_path, hooks_settings=hooks_settings,
+                                           hooks=hooks, write=write)
+    except (ValueError, OSError) as exc:
         print(f"Disconnect failed: {exc}", file=sys.stderr)
         return 1
+    if write and hooks and not config_path:
+        # `lnk setup` leaves this agent alone until `lnk connect` brings it back.
+        _core_mark_disconnected(_resolve_link_root(_default_workspace()), str(payload["agent"]), True)
+    code = 0 if payload.get("ok", True) else 1
     if json_output:
         print(json.dumps(payload, indent=2))
-        return 0
+        return code
     mcp = payload["mcp"] if isinstance(payload["mcp"], dict) else {}
     hooks = payload["hooks"] if isinstance(payload["hooks"], dict) else {}
     verb = "Removed" if write else "Would remove"
     lines = [f"Link in {payload['display_name']}:"]
-    if mcp.get("found"):
+    if mcp.get("error"):
+        lines.append(f"  Not touched: {mcp['error']}")
+    elif mcp.get("found"):
         lines.append(f"  {verb} the MCP server entry from {mcp.get('path')}")
     else:
         lines.append(f"  No Link MCP entry in {mcp.get('path')}")
@@ -3759,15 +3949,17 @@ def disconnect_agent(
         lines.append(f"  {verb} session hooks ({', '.join(str(e) for e in found_hooks)}) from {hooks.get('path')}")
     elif hooks.get("supported"):
         lines.append(f"  No Link hooks in {hooks.get('path')}")
+    if hooks.get("error"):
+        lines.append(f"  Not touched: {hooks['error']}")
     if not payload["found"]:
-        lines.append("Nothing to remove.")
+        lines.append("Nothing to remove." if code == 0 else "Nothing removed.")
     elif write:
         lines.append(str(payload["restart_hint"]))
         lines.append("Other servers, other hooks and comments in those files were left as they were.")
     else:
         lines.append("Preview only. Run again with --write to remove.")
     _print_text("\n".join(lines))
-    return 0
+    return code
 
 
 def connect_mcp(
@@ -3778,89 +3970,131 @@ def connect_mcp(
     config_path: str | None = None,
     python_cmd: str | None = None,
     hooks: bool = False,
+    hooks_only: bool = False,
     hooks_settings: str | None = None,
     json_output: bool = False,
 ) -> int:
     target = target.expanduser().resolve()
     wiki_dir = _resolve_wiki_dir(target)
+    hooks = hooks or hooks_only
     if hooks and not _core_supports_agent_hooks(agent):
         supported = ", ".join(_core_hook_supported_agents())
         print(f"--hooks is not supported for {agent}. Session hooks are available for: {supported}", file=sys.stderr)
         return 1
-    payload = _core_build_mcp_connect_payload(
-        target=target,
-        wiki_dir=wiki_dir,
-        agent=agent,
-        expected_version=LINK_VERSION,
-        init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
-        python_cmd=python_cmd,
-        default_python=sys.executable,
-        config_path=config_path,
-        write=write,
-    )
-    hooks_payload: dict[str, object] | None = None
-    if hooks:
-        runtime_script = target / "link.py"
-        runtime_note = ""
-        if runtime_script.exists():
-            # A workspace runtime copied before session hooks existed would
-            # make every installed hook fail with an argparse error, and an
-            # older runtime silently runs old capture behavior after upgrades.
-            stale_version = _core_workspace_runtime_is_older(target, LINK_VERSION)
-            if not (target / "link_core" / "agent_hooks.py").exists():
-                if write:
-                    _copy_runtime_files(target)
-                    runtime_note = f"Refreshed the Link runtime at {target}: it predated session hooks."
-                else:
-                    runtime_note = (
-                        f"The Link runtime at {target} predates session hooks; "
-                        "--write will refresh it automatically (or run "
-                        f"{_display_command(['lnk', 'init', str(target)])} first)."
-                    )
-            elif stale_version:
-                if write:
-                    _copy_runtime_files(target)
-                    runtime_note = (
-                        f"Refreshed the Link runtime at {target}: "
-                        f"{stale_version} → {LINK_VERSION} (hooks run the workspace copy)."
-                    )
-                else:
-                    runtime_note = (
-                        f"The Link runtime at {target} is {stale_version} but installed Link is "
-                        f"{LINK_VERSION}; --write will refresh it (or run "
-                        f"{_display_command(['lnk', 'init', str(target)])})."
-                    )
-        else:
-            runtime_script = ROOT / "link.py"
-        hooks_payload = _core_build_agent_hooks_payload(
+    if write and hooks:
+        # Every hooks file is checked before anything is written: a refusal
+        # leaves the MCP config and the other hook files as they were.
+        problems = _core_hooks_write_problems(agent, hooks_settings)
+        if problems:
+            print("Nothing written; Link cannot add its hooks:", file=sys.stderr)
+            for problem in problems:
+                print(f"  {problem}", file=sys.stderr)
+            return 1
+    if write and not config_path:
+        try:  # connecting again undoes `lnk disconnect` for `lnk setup` too
+            _core_mark_disconnected(_resolve_link_root(_default_workspace()), agent, False)
+        except ValueError:
+            pass
+    payload: dict[str, object] = {}
+    if not hooks_only:
+        payload = _core_build_mcp_connect_payload(
             target=target,
+            wiki_dir=wiki_dir,
             agent=agent,
-            runtime_script=runtime_script,
-            python_cmd=sys.executable,
-            settings_path=hooks_settings,
+            expected_version=LINK_VERSION,
+            init_command=[sys.executable, str(Path(__file__).resolve()), "init", str(target)],
+            python_cmd=python_cmd,
+            default_python=sys.executable,
+            config_path=config_path,
             write=write,
         )
-        if runtime_note:
-            hooks_payload["runtime_note"] = runtime_note
-        payload["session_hooks"] = hooks_payload
+    hooks_payload: dict[str, object] | None = None
+    if hooks:
+        hooks_payload = _connect_hooks(target, agent, write=write, hooks_settings=hooks_settings)
+        if hooks_only:
+            payload = hooks_payload
+        else:
+            payload["session_hooks"] = hooks_payload
 
     if json_output:
         print(json.dumps(payload, indent=2))
-        write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
-        ok = not write or bool(write_status.get("ok"))
+        ok = True
+        if write and not hooks_only:
+            write_status = payload.get("write") if isinstance(payload.get("write"), dict) else {}
+            ok = bool(write_status.get("ok"))
         if write and hooks_payload is not None:
-            hooks_write = hooks_payload.get("write") if isinstance(hooks_payload.get("write"), dict) else {}
-            ok = ok and bool(hooks_write.get("ok"))
+            companions = hooks_payload.get("companions")
+            for part in [hooks_payload, *(companions if isinstance(companions, list) else [])]:
+                hooks_write = part.get("write") if isinstance(part, dict) and isinstance(part.get("write"), dict) else {}
+                ok = ok and bool(hooks_write.get("ok"))
         return 0 if ok else 1
 
-    code, text = _core_render_mcp_connect_text(payload)
-    _print_text(text)
+    code = 0
+    if not hooks_only:
+        code, text = _core_render_mcp_connect_text(payload)
+        _print_text(text)
     if hooks_payload is not None:
         hooks_code, hooks_text = _core_render_agent_hooks_text(hooks_payload)
-        print()
+        if not hooks_only:
+            print()
         _print_text(hooks_text)
         code = code or hooks_code
     return code
+
+
+def _connect_hooks(target: Path, agent: str, *, write: bool, hooks_settings: str | None) -> dict[str, object]:
+    """Install (or preview) one agent's session hooks, refreshing a workspace runtime that predates them."""
+    runtime_script = target / "link.py"
+    runtime_note = ""
+    if runtime_script.exists():
+        # A workspace runtime copied before session hooks existed would
+        # make every installed hook fail with an argparse error, and an
+        # older runtime silently runs old capture behavior after upgrades.
+        stale_version = _core_workspace_runtime_is_older(target, LINK_VERSION)
+        # A runtime missing the hook entry point or the agent adapters
+        # would make every installed tool hook exit 2 (argparse or "can't
+        # open file"), which Codex, Copilot, Windsurf and Gemini treat as
+        # a block on every call.
+        missing_hook_files = not all(
+            (target / name).exists()
+            for name in ("link_hook.py", "link_core/agent_hooks.py", "link_core/tool_events.py")
+        )
+        if missing_hook_files:
+            if write:
+                _copy_runtime_files(target)
+                runtime_note = f"Refreshed the Link runtime at {target}: it predated session hooks."
+            else:
+                runtime_note = (
+                    f"The Link runtime at {target} predates session hooks; "
+                    "--write will refresh it automatically (or run "
+                    f"{_display_command(['lnk', 'init', str(target)])} first)."
+                )
+        elif stale_version:
+            if write:
+                _copy_runtime_files(target)
+                runtime_note = (
+                    f"Refreshed the Link runtime at {target}: "
+                    f"{stale_version} → {LINK_VERSION} (hooks run the workspace copy)."
+                )
+            else:
+                runtime_note = (
+                    f"The Link runtime at {target} is {stale_version} but installed Link is "
+                    f"{LINK_VERSION}; --write will refresh it (or run "
+                    f"{_display_command(['lnk', 'init', str(target)])})."
+                )
+    else:
+        runtime_script = ROOT / "link.py"
+    hooks_payload = _core_build_agent_hooks_payload(
+        target=target,
+        agent=agent,
+        runtime_script=runtime_script,
+        python_cmd=sys.executable,
+        settings_path=hooks_settings,
+        write=write,
+    )
+    if runtime_note:
+        hooks_payload["runtime_note"] = runtime_note
+    return hooks_payload
 
 
 def _copy_runtime_files(target: Path) -> None:
@@ -4187,15 +4421,24 @@ def setup(
     runtime refresh, MCP provisioning, session hooks. Idempotent — after
     `brew upgrade`, re-running it refreshes everything in one step.
     """
-    detected = _core_detect_installed_agents()
+    # An agent the person took Link out of with `lnk disconnect` stays out
+    # until they run `lnk connect` for it again.
+    disconnected = set(_core_disconnected_agents(_resolve_link_root(_default_workspace())))
+    found = _core_detect_installed_agents()
+    skipped = [name for name in found + _core_detect_hook_only_agents() if name in disconnected]
+    detected = [name for name in found if name not in disconnected]
     hookable = [name for name in detected if _core_supports_agent_hooks(name)]
+    # Copilot: global hooks, per-project MCP config - setup wires the hooks only.
+    hooks_only = [name for name in _core_detect_hook_only_agents() if name not in found and name not in disconnected]
     if not json_output:
-        if detected:
-            display = ", ".join(detected)
+        for name in dict.fromkeys(skipped):
+            _print_text(f"Skipped {name}: you disconnected it (lnk connect {name} --write brings it back).")
+        if detected or hooks_only:
+            display = ", ".join(detected + [f"{name} (session hooks)" for name in hooks_only])
             _print_text(f"Detected agents: {display}")
-            if not preview:
+            if not preview and detected:
                 _print_text("Wiring MCP" + (" + session hooks" if hookable else "") + " for all of them.\n")
-        else:
+        elif not skipped:
             _print_text(
                 "No agent configs detected (looked for Claude Code, Codex, Cursor, "
                 "Windsurf, Zed, Kiro, Gemini CLI). Setting up the workspace; connect "
@@ -4208,6 +4451,20 @@ def setup(
         hooks=bool(hookable) and not preview,
         json_output=json_output,
     )
+    if code == 0 and hooks_only:
+        resolved = target.expanduser().resolve()
+        runtime_script = (resolved / "link.py") if (resolved / "link.py").exists() else ROOT / "link.py"
+        for name in hooks_only:
+            payload = _core_build_agent_hooks_payload(target=resolved, agent=name, runtime_script=runtime_script,
+                                                      python_cmd=sys.executable, write=not preview)
+            if not json_output:
+                status = payload["write"] if isinstance(payload["write"], dict) else {}
+                if preview:
+                    _print_text(f"Would install {payload['display_name']} session hooks in {payload['settings_path']}")
+                elif status.get("ok"):
+                    _print_text(f"{payload['display_name']} session hooks: {payload['settings_path']}")
+                else:
+                    _print_text(f"{payload['display_name']} session hooks not written: {status.get('message')}")
     # Instruction files rot the same way MCP configs do — a steering file
     # from an older Link can name tools the configured server no longer
     # exposes, sending the agent back to grep. Same idempotent treatment:
@@ -4215,6 +4472,12 @@ def setup(
     # Refresh-only: files Link never wrote are never created here.
     refreshed_instructions: list[str] = []
     stale_instructions: list[str] = []
+    if code == 0 and "codex" in detected:
+        moved = _core_migrate_codex_instructions(write=not preview)
+        if moved.get("moved"):
+            refreshed_instructions.append(f"{moved['to']} (moved from {moved['from']}, which Codex never reads)")
+        elif moved.get("needed"):
+            stale_instructions.append(f"{moved['from']} -> {moved['to']} (Codex never reads ~/AGENTS.md)")
     if code == 0:
         for agent in detected:
             status = _core_instruction_file_status(agent)
@@ -4226,11 +4489,45 @@ def setup(
             result = _core_refresh_instruction_file(agent)
             if result.get("refreshed"):
                 refreshed_instructions.append(str(result.get("path")))
+            elif result.get("error"):
+                stale_instructions.append(f"{result.get('path')} (not refreshed: {result['error']})")
     if not json_output:
         for path in stale_instructions:
             _print_text(f"Instruction file is stale (would refresh): {path}")
         for path in refreshed_instructions:
             _print_text(f"Refreshed Link instructions: {path}")
+    if code == 0 and not preview:
+        # Windsurf and Zed have no session-start hook, and the Kiro IDE reads
+        # hooks per workspace only: their global instruction file is how
+        # personal memory reaches them unasked. Setup only refreshes files the person
+        # already chose with `lnk compile --global`; it never creates one.
+        from link_core.global_compile import (
+            detected_global_targets,
+            kiro_start_hook,
+            owned_global_targets,
+            refresh_global_files,
+        )
+
+        personal_wiki = _resolve_wiki_dir(_default_workspace())
+        if personal_wiki.exists():
+            no_room: list[dict[str, str]] = []
+            for written in refresh_global_files(_core_memory_records(personal_wiki), warnings=no_room):
+                if not json_output:
+                    _print_text(f"Refreshed reviewed personal memory in {written}")
+            for item in no_room:
+                if not json_output:
+                    _print_text(f"No room for your memory in ~/{item['path']}: {item['reason']}")
+        from link_core.global_compile import GLOBAL_TARGETS
+
+        owned = owned_global_targets(Path.home())
+        unwritten = [t.agent for t in GLOBAL_TARGETS
+                     if t.key in detected_global_targets(Path.home()) and t.key not in owned]
+        kiro_hooked = bool(kiro_start_hook(Path.home()))
+        if unwritten and not json_output:
+            names = " and ".join(unwritten) if len(unwritten) < 3 else ", ".join(unwritten[:-1]) + " and " + unwritten[-1]
+            where = " (Kiro CLI gets it from Link's hooks; the Kiro IDE does not)" if kiro_hooked and "Kiro" in unwritten else ""
+            _print_text(f"{names} cannot load your memory at every session start{where}. `lnk compile --global` "
+                        "writes your reviewed personal memory into their global rules (preview it with --dry-run).")
     if code == 0 and not preview and not no_semantic:
         # Meaning-based recall by default: the measured gap between the
         # lexical default (hit@1 0.589) and the fast tier (0.703) is the
@@ -4842,7 +5139,7 @@ _WORKSPACE_COMMANDS = {
     "remember", "recall", "recipes", "query", "query-link", "brief", "start",
     "session-end", "end", "propose-memories", "capture-session",
     "capture-inbox", "accept-capture", "redact-capture", "delete-capture",
-    "dedup-captures", "update-memory", "set-memory-visibility", "enforce",
+    "dedup-captures", "update-memory", "set-memory-visibility", "enforce", "approve",
     "memory-inbox", "memory-log",
     "review-memory", "explain-memory", "memory-audit", "archive-memory",
     "restore-memory", "forget-memory", "consolidate", "profile", "wins",
@@ -4850,7 +5147,7 @@ _WORKSPACE_COMMANDS = {
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale", "receipt",
-    "verify-mcp", "connect",
+    "verify-mcp", "connect", "compile",
 }
 
 
@@ -4874,6 +5171,16 @@ def _normalize_review_all_args(args) -> None:
     ):
         args.target = args.identifier
         args.identifier = None
+    # `lnk approve ~/link` lists what is waiting in that workspace: a lone
+    # positional that names a directory is the target, not a request id.
+    if (
+        getattr(args, "command", "") == "approve"
+        and getattr(args, "request", None)
+        and getattr(args, "target", ".") == "."
+        and Path(str(args.request)).expanduser().is_dir()
+    ):
+        args.target = args.request
+        args.request = None
 
 
 def _apply_default_workspace(args) -> None:
@@ -4906,7 +5213,7 @@ def main(argv: list[str] | None = None) -> int:
             "",
             "  lnk proof     see cross-agent memory work (~1 second, throwaway)",
             "  lnk try       build a full demo wiki you can explore",
-            "  lnk setup     make it yours: wire every agent you have, one command",
+            "  lnk setup     make it yours: wire every agent it finds, one command",
             "  lnk status    is my workspace healthy?",
             "  lnk --help    everything else, grouped by task",
             "",
@@ -4921,7 +5228,7 @@ def main(argv: list[str] | None = None) -> int:
     _apply_default_workspace(args)
     _configure_link_command_display()
     try:
-        return _core_dispatch_cli_command(args, {
+        code = _core_dispatch_cli_command(args, {
             "init": init_wiki,
             "serve": serve_wiki,
             "demo": create_demo,
@@ -4964,6 +5271,7 @@ def main(argv: list[str] | None = None) -> int:
             "update-memory": update_memory,
             "set-memory-visibility": set_memory_visibility,
             "enforce": enforce_memory,
+            "approve": approve_held_call,
             "recall": recall,
             "query": query,
             "graph-summary": graph_summary,
@@ -4994,6 +5302,9 @@ def main(argv: list[str] | None = None) -> int:
             "disconnect": disconnect_agent,
             "version": lambda: print(f"Link {LINK_VERSION}") or 0,
         })
+        if code == 0 and getattr(args, "command", "") in _MEMORY_CHANGING_COMMANDS:
+            _refresh_global_files(Path(str(getattr(args, "target", "."))))
+        return code
     except ValueError as exc:
         parser.error(str(exc))
         return 2

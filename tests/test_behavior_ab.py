@@ -1,7 +1,9 @@
 """The behavioral A/B harness is a CI gate in dry mode."""
 import json
+import shlex
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -27,6 +29,23 @@ class BehaviorAbTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("--yes", result.stderr)
+
+    def test_an_outage_partway_through_stops_the_run_instead_of_scoring_wrong_answers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fake = Path(temp) / "outage_agent.py"
+            # Answers the canary, then reports an outage with exit code 0 as agent CLIs do.
+            fake.write_text("import sys\nprompt = sys.stdin.read()\n"
+                            "print('READY' if 'exactly the word READY' in prompt else "
+                            "'Credit balance is too low to access the Anthropic API.')\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "eval_behavior_ab.py"), "--mode", "live", "--yes", "--json",
+                 "--agent-command", shlex.join([sys.executable, str(fake)])],
+                capture_output=True, text=True, timeout=300, check=False,
+            )
+        self.assertEqual(result.returncode, 2, result.stdout[-500:])
+        self.assertEqual(result.stdout, "", "no report, so no numbers to publish")
+        self.assertIn("Credit balance is too low", result.stderr)
+        self.assertIn("nothing was scored", result.stderr)
 
 
 if __name__ == "__main__":

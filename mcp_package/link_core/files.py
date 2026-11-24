@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 import time
 from contextlib import contextmanager
@@ -215,3 +216,27 @@ def append_text_unlocked(path: Path, text: str, *, encoding: str = "utf-8", init
         handle.write(text)
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def write_config_bytes(path: Path, data: bytes) -> Path:
+    """Replace a file the person owns, through its symlink and with its mode.
+
+    A config kept in a dotfiles repo and linked into place
+    (~/.claude/CLAUDE.md -> ~/dotfiles/CLAUDE.md) is written at its target,
+    so the link stays a link and the repo copy is the one that changes. A
+    file the person made read-only is refused, never replaced. Returns the
+    path actually written.
+    """
+    target = path.expanduser()
+    if target.is_symlink():
+        target = Path(os.path.realpath(target))
+    mode: int | None = None
+    if target.exists():
+        mode = stat.S_IMODE(target.stat().st_mode)
+        if not os.access(target, os.W_OK):
+            raise PermissionError(f"{path} is read-only; Link left it as it was. "
+                                  "Make it writable and run this again, or make the change by hand.")
+    atomic_write_bytes(target, data)
+    if mode is not None:
+        os.chmod(target, mode)
+    return target

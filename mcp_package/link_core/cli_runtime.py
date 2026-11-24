@@ -553,6 +553,12 @@ def render_agent_hooks_text(payload: Mapping[str, object]) -> tuple[int, str]:
     restart_hint = payload.get("restart_hint")
     if restart_hint:
         lines.extend(["", f"  {restart_hint}"])
+    companions = payload.get("companions")
+    for companion in companions if isinstance(companions, list) else []:
+        if isinstance(companion, Mapping):
+            companion_code, companion_text = render_agent_hooks_text(companion)
+            code = code or companion_code
+            lines.extend(["", companion_text])
     return code, "\n".join(lines)
 
 

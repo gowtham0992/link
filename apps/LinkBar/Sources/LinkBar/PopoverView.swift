@@ -20,7 +20,8 @@ struct PopoverView: View {
         : ProcessInfo.processInfo.environment["LINKBAR_TAB"] == "settings" ? .settings : .inbox
 
     private var isFullyIdle: Bool {
-        (store.inbox?.items.isEmpty ?? true)
+        store.heldCalls.isEmpty
+            && (store.inbox?.items.isEmpty ?? true)
             && (store.captures?.captures.isEmpty ?? true)
             && store.recallResults.isEmpty
             && store.searchedQuery == nil
@@ -40,12 +41,15 @@ struct PopoverView: View {
                 switch tab {
                 case .inbox: inboxTab
                 case .memory: memoryTab
-                case .status: statusTab
+                case .status: ScrollView { statusTab }
                 case .settings:
-                    SettingsPane(done: { tab = .inbox })
-                        .environmentObject(store)
+                    ScrollView {
+                        SettingsPane(done: { tab = .inbox })
+                            .environmentObject(store)
+                    }
                 }
             }
+            .frame(height: Self.contentHeight, alignment: .top)
             .animation(.easeOut(duration: 0.18), value: store.pendingCount)
 
             footer
@@ -66,11 +70,15 @@ struct PopoverView: View {
         }
     }
 
-    /// The popover has to stay on screen on a 13" laptop. Anything longer
-    /// than this scrolls; anything shorter sizes to its content.
-    private static var contentCap: CGFloat {
+    /// Every tab gets the same height, and scrolls within it. A menu bar
+    /// window that sizes to its content broke both ways on macOS 27: a
+    /// ScrollView proposes no height of its own, so the inbox opened empty,
+    /// and a window that changed height on a tab switch was resized from its
+    /// bottom edge, which pulled its top away from the menu bar. Short
+    /// enough to stay on screen on a 13" laptop.
+    private static var contentHeight: CGFloat {
         let visible = NSScreen.main?.visibleFrame.height ?? 800
-        return min(640, max(360, visible - 200))
+        return min(540, max(340, visible - 220))
     }
 
     // MARK: tab bar
@@ -116,42 +124,57 @@ struct PopoverView: View {
     // MARK: inbox tab (the original memory view)
 
     private var inboxTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
-                if let handoff = store.handoffsWaiting.first {
-                    handoffBanner(handoff)
-                }
-                if !store.activeSessions.isEmpty {
-                    pulseRow
-                }
-                if let warning = store.runtimeWarning {
-                    runtimeBanner(warning)
-                }
-                recallField
-                if store.searchedQuery != nil || !store.recallResults.isEmpty {
-                    recallSection
-                }
-                if isFullyIdle {
-                    idleState
-                } else {
-                    inboxSection
-                    if let captures = store.captures, !captures.captures.isEmpty {
-                        capturesSection(captures)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: LinkBrand.betweenSections) {
+                    if let handoff = store.handoffsWaiting.first {
+                        handoffBanner(handoff)
+                    }
+                    if !store.activeSessions.isEmpty {
+                        pulseRow
+                    }
+                    if let warning = store.runtimeWarning {
+                        runtimeBanner(warning)
+                    }
+                    if !store.heldCalls.isEmpty {
+                        heldCallsSection
+                    }
+                    recallField
+                    if store.searchedQuery != nil || !store.recallResults.isEmpty {
+                        recallSection
+                    }
+                    if isFullyIdle {
+                        idleState
+                    } else {
+                        inboxSection
+                        if let captures = store.captures, !captures.captures.isEmpty {
+                            capturesSection(captures)
+                        }
+                    }
+                    if let session = store.receipt?.last,
+                       !session.memoriesUsed.isEmpty || session.recalls > 0
+                        || session.anythingUndelivered == true || !(session.ruleChecks ?? []).isEmpty {
+                        receiptSection(session)
+                    }
+                    if !store.activity.isEmpty && !isFullyIdle {
+                        activitySection
                     }
                 }
-                if let session = store.receipt?.last,
-                   !session.memoriesUsed.isEmpty || session.recalls > 0
-                    || session.anythingUndelivered == true || !(session.ruleChecks ?? []).isEmpty {
-                    receiptSection(session)
-                }
-                if !store.activity.isEmpty && !isFullyIdle {
-                    activitySection
-                }
+                .padding(LinkBrand.pad)
             }
-            .padding(LinkBrand.pad)
+            .frame(maxHeight: .infinity)
+            .onAppear {
+                recallFocused = true
+                scrollToFocusedHeldCall(proxy)
+            }
+            .onChange(of: store.focusedHeldCall) { _, _ in scrollToFocusedHeldCall(proxy) }
         }
-        .frame(maxHeight: Self.contentCap)
-        .onAppear { recallFocused = true }
+    }
+
+    /// A held call opened from its notification: bring its whole text into view.
+    private func scrollToFocusedHeldCall(_ proxy: ScrollViewProxy) {
+        guard let id = store.focusedHeldCall, store.heldCalls.contains(where: { $0.id == id }) else { return }
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("held-\(id)", anchor: .top) }
     }
 
 
@@ -303,7 +326,7 @@ struct PopoverView: View {
                     }
                 }
             }
-            .frame(maxHeight: 320)
+            .frame(maxHeight: .infinity)
         }
         .padding(LinkBrand.pad)
     }
@@ -638,6 +661,53 @@ struct PopoverView: View {
             .padding(.vertical, 1.5)
             .background(confidenceColor(value).opacity(0.13))
             .clipShape(Capsule())
+    }
+
+    // MARK: held tool calls
+
+    /// Calls an agent that cannot ask was stopped from making. The agent is
+    /// waiting on the person: this outranks the review inbox.
+    private var heldCallsSection: some View {
+        VStack(alignment: .leading, spacing: LinkBrand.inGroup) {
+            SectionHeader(title: "Waiting for your OK", count: store.heldCalls.count, highlight: true)
+            ForEach(store.heldCalls) { call in
+                HoverRow {
+                    HStack(alignment: .center, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                                HStack(alignment: .top, spacing: 5) {
+                                Image(systemName: call.kind == "command" ? "terminal"
+                                      : call.kind == "write" ? "square.and.pencil" : "doc.text")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(LinkBrand.amber)
+                                // The whole call, wrapped, never truncated: approving
+                                // something you could not fully see is not approving it.
+                                Text(call.display)
+                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                            Text("\(call.agentName) \u{00B7} \(call.title)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .help("\(call.agentName) was stopped by \(call.rule) (\(call.title)). " +
+                              "Approving lets exactly this call through once, within 10 minutes.")
+                        Spacer(minLength: 6)
+                        Button("Approve once") { store.approveHeldCall(id: call.id) }
+                            .buttonStyle(.borderedProminent)
+                            .tint(LinkBrand.rust)
+                            .controlSize(.small)
+                            .help("Let exactly this call through once; anything different is held again")
+                    }
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(LinkBrand.amber, lineWidth: store.focusedHeldCall == call.id ? 1.5 : 0)
+                )
+                .id("held-\(call.id)")
+            }
+        }
     }
 
     // MARK: review inbox

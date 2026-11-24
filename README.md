@@ -42,11 +42,48 @@
 
 ```bash
 brew install gowtham0992/link/link   # or: pip install link-mcp
-lnk setup                            # wires every agent you have
+lnk setup                            # wires every agent it finds
 ```
 
 Then work normally. Tell an agent "remember that we deploy on Tuesdays",
 approve it once, and every other agent recalls it in a new session tomorrow.
+
+What each agent gets depends on what it lets Link plug into:
+
+| Agent | How memory arrives | Session hooks | Rules checked before the tool call | Code reminders |
+|---|---|---|---|---|
+| Claude Code | hooks, MCP, compiled files | start, end, every prompt | shell, file reads and writes, Grep; asks you | yes |
+| Cursor | hooks, MCP, compiled rules | start, end | shell (asks you); file reads and writes (held) | no |
+| Codex | start hook, MCP, `~/.codex/AGENTS.md` | start | shell commands and patches (held) | no |
+| Gemini CLI | start hook, MCP, `GEMINI.md` | start | shell, file reads and writes; asks you | no |
+| Antigravity | start hook, MCP | start | shell, file reads and writes; asks you | no |
+| Copilot CLI and VS Code | start hook, MCP (VS Code, per project), compiled files | start | shell, file reads and writes; asks you (a block in autopilot; the cloud agent never sees Link's hooks) | no |
+| Windsurf | MCP, global rules file, compiled rules | none (no such event) | shell, file reads and writes (held) | no |
+| Devin CLI | Claude Code's hooks, which it runs | start, end | shell and files (held) | no |
+| Kiro | start hook, MCP, global steering file | start | shell, file reads and writes (held) | no |
+| Zed | MCP, global `AGENTS.md` | none (no hooks) | shell and file writes, by Zed's own permission rules; not reads | no |
+
+"Asks you": the agent shows you the call and waits. "Held": the agent can
+only allow or block, so Link blocks the call and the agent asks you in chat;
+`lnk approve <id>` lets that exact call through once. For agents with no
+session-start hook, `lnk compile --global` writes your reviewed personal
+memory into the instruction file they read every session, and keeps it in
+step as memories change. Recall, review, stale
+checks, receipts, sync and `lnk compile` work the same for every agent.
+On a live Codex session the hook stopped every tempting call the model
+tried while all ordinary work went through (one run per task, in
+RESULTS.md; those rows are being re-confirmed under the tightened harness).
+The offline benchmark decides 51 hand-written Claude Code-shaped calls with
+the same matcher, in process; a live Claude Code session has not been
+benchmarked yet. On the other agents it follows each vendor's documented
+hook schema and is new in 6.0 - report what you see.
+Kiro's hooks run in Kiro CLI V3 for every workspace, and on the default
+engine through Link's `link` agent profile (`kiro-cli agent set-default
+link`). Zed has no hooks, so `lnk compile --global` writes your personal
+rules into Zed's own tool permissions; Zed decides those calls itself, so
+they are not held for `lnk approve` or counted in receipts.
+Devin CLI does not document its file tools' arguments, so its file checks
+read the usual path fields and any other argument named for a path or file.
 
 ```bash
 lnk status                                   # is it wired up and being used?
@@ -105,17 +142,18 @@ compound over time.
 
 ## Why Link Is Different
 
-Every other agent-memory system stores memory as embeddings in a vector
-database or as an LLM-extracted graph. Link made five architectural
-commitments those designs cannot bolt on:
+Most agent-memory systems store memory as embeddings in a vector database or
+as an LLM-extracted graph. Link made five architectural commitments that are
+hard to add to those designs:
 
 1. **Memory you can read.** Every memory is a plain Markdown file — open it,
    grep it, git-diff it. If Link disappeared tomorrow, your memory is still yours.
 2. **Review-gated writes.** Agents propose; you approve. Even the automatic
    session hooks capture proposals, never facts.
-3. **No LLM in the memory layer.** Ingestion and recall are deterministic —
-   nothing can hallucinate a fact into your memory, because there is no model
-   in the write path.
+3. **No LLM in the memory layer.** Saving, deduplicating, contradiction checks
+   and recall are deterministic — nothing can hallucinate a fact into your
+   memory, because there is no model in its write path. (Wiki pages compiled
+   from raw sources are written by your agent, and Link treats them that way.)
 4. **Provably local.** CI blocks outbound network code in the runtime, and the
    optional semantic models load offline-only after one explicit setup.
 5. **Memory that holds when the agent acts.** A memory you reviewed can carry a
@@ -137,17 +175,19 @@ that have one everywhere:
 
 | What | Link | For comparison |
 |---|---|---|
-| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks) | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
+| **LoCoMo end-to-end QA** — full 1,540 questions under [mem0's own open harness](https://github.com/mem0ai/memory-benchmarks); measured on Link 3.x, not yet re-run on 5.x | **84.8%** | mem0's cloud platform: **83.2%** under the same judge — with GPT-5 writing their answers and a budget model (claude-haiku-4-5) writing Link's. Confirmed by a second, independent judge (Tencent Hunyuan 3): **85.5% vs 83.6%** |
 | **LongMemEval evidence retrieval** — did the memory layer put the gold evidence in context? (deterministic, no LLM judge) | **99.4%** of 500 questions | of 102 answer failures, only 3 were retrieval misses — the rest happened with the evidence already retrieved |
-| **Memory hygiene** — junk stored over a simulated multi-month session stream | **0%** (by construction, CI-enforced) | the same pipeline with governance off: 35.7% |
-| **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (CI-enforced) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
+| **Memory hygiene** — junk stored over a simulated multi-month session stream we wrote | **0%** (a CI regression floor on our own fixtures) | the same pipeline with governance off: 35.7% |
+| **Memory poisoning** — 18 authored prompt-injection attacks on the capture pipeline (guardrail bypass, exfil conventions, credential planting, spoofed approvals, MemGhost-class untrusted-channel writes) | **0** reach the inbox unlabeled; 0 false positives on benign directives (a CI regression floor on attacks we wrote) | to our knowledge the only published adversarial benchmark on an agent-memory write path |
 | **Token economics** — real recall packets, measured through the query path | **1,697–3,752 tokens** per recall (micro→large budget); a **64× larger store grows the packet 1.56×**, and the last quadrupling moves it 0.3% | bounded by the budget you ask for, not by how much you have remembered; CI-enforced. Over MCP, the *first* response of a session also carries a one-time memory brief, bounded to a hard 4,000-character budget (~365 tokens of overhead, measured) — see RESULTS.md |
-| **Enforced rules** — 17 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`), against 34 ordinary coding-agent calls | **17 of 17 caught, 0 of 34 stopped**, under 0.2 ms per decision | a rule acts only after you review it; the agent cannot approve, clear or bypass one |
+| **Enforced rules** — 33 forbidden tool calls, including shell disguises (`cd x && sudo …`, quoting, `bash -c`, options reordered or bundled, PowerShell), against 53 ordinary coding-agent calls; the same matcher serves every agent with rule checks in the table above | **33 of 33 caught, 0 of 53 stopped**, about 0.2 ms per decision | a rule acts only after you review it, and only you approve, clear or retire one; the hook runs as you, so it stops mistaken and disguised calls, not an agent set on escaping it |
 | **Staleness checks** — memories and instruction files (AGENTS.md, CLAUDE.md, Cursor rules…) checked against the repository | **0 false flags**: 345 memory references in Link's own docs and 604 instruction-file references across eight public repositories; every planted deletion caught | a reference is reported only when git history shows the thing existed |
 | **Bundled 1,176-case recall benchmark** — deterministic, no network, no LLM | pip default (lexical) hit@1 **0.671**; `lnk setup` provisions the fast local tier by default: **0.740**; optional quality tier **0.789**, plus rerank **0.798** | reproducible with one command; CI runs the suite and gates dataset integrity, not the score |
 
-Every number ships with its config, judge model, caveats, and the
-experiments that *lost* — including LongMemEval end-to-end, where we
+The zeros are regression floors: CI fails any change that breaks them, on
+fixtures we wrote, so they say the behaviour cannot silently regress - not
+that a stranger's data will score the same. Every number ships with its
+config, judge model, caveats, and the experiments that *lost* — including LongMemEval end-to-end, where we
 re-judged both sides under the neutral Hunyuan 3 referee: mem0's GPT-5
 answers score 91.0%, Link's budget-model answers 80.6%. Their published
 number holds up, and the gap tracks the answering model, not the memory
@@ -192,7 +232,7 @@ The quick start above is the whole install. This is what each step does.
 ```bash
 brew install gowtham0992/link/link
 lnk proof     # see the promise (~1 second, no setup)
-lnk setup     # wire every agent you have — workspace, MCP, session hooks, one command
+lnk setup     # wire every agent it finds — workspace, MCP, session hooks, one command
 ```
 
 Already have memory scattered across tools? Bring it home as reviewable
@@ -227,9 +267,10 @@ Result: proof passed
 the MCP runtime, and wires the agent. Swap `claude-code` for `codex`,
 `cursor`, `kiro`, `copilot`, `antigravity`, `windsurf`, `zed` or `vscode`.
 Session hooks - a brief at session start, proposals captured at session end -
-exist for Claude Code, Cursor and Codex (Codex has no session-end event, so it
-gets the start brief only). The other agents get memory through MCP, where the
-first tool response of a session carries the same brief. Drop `--write` to
+exist for Claude Code and Cursor; Codex, Gemini CLI, Antigravity and Copilot
+get the start brief. Rule checks before tool calls are installed for every
+agent in the table above except Zed, whose own permission rules carry them. Agents without a start hook get memory through MCP,
+where the first tool response of a session carries the same brief. Drop `--write` to
 preview without touching anything, or drop `--agent` to just create the
 workspace. `lnk disconnect <agent> --write` takes Link back out: its MCP entry
 and hooks, nothing else.
@@ -406,9 +447,13 @@ bash integrations/antigravity/install.sh
 
 Installers create or update `~/link`, install or upgrade `link-mcp`, write
 lightweight agent instructions, and preserve existing wiki data on reinstall.
-Use `--project` when a repo needs separate project memory.
+A global install also adds the agent's hooks (Copilot's: hooks only, since
+its MCP entry is per project); use `--project` when a repo needs separate
+project memory (it leaves your global hooks alone).
 
-On Windows, use the matching PowerShell installer:
+On Windows, use the matching PowerShell installer. It registers the MCP
+server and writes the instructions; add hooks afterwards with
+`lnk connect <agent> ~/link --hooks --write`.
 
 ```powershell
 .\integrations\codex\install.ps1
@@ -455,25 +500,33 @@ lnk connect kiro ~/link --write
 lnk verify-mcp ~/link
 ```
 
-For agents with session-hook support — Claude Code, Codex, and Cursor — add
-`--hooks` (works with `lnk onboard` too) to make the memory loop automatic:
-the brief is injected at session start and proposal-only notes are captured at
-session end, so memory no longer depends on the agent remembering to call
-Link. Empty sessions and duplicate end events are skipped, and when the
+For agents with hook support — Claude Code, Cursor, Codex, Gemini CLI,
+Antigravity, Copilot, Windsurf and Kiro — add `--hooks` (works with `lnk onboard`
+too) to make the memory loop automatic:
+the brief is injected at session start where the agent has a start event
+(every one listed except Windsurf), and on Claude Code, Cursor and Devin
+proposal-only notes are captured at session end, so memory no longer depends
+on the agent remembering to call Link. Empty sessions and duplicate end events are skipped, and when the
 backlog builds up the brief nudges the agent to offer a read-only
 `lnk consolidate` pass. On Claude Code the hooks also run before shell and
 file tool calls: a reviewed memory's enforced rules are checked there, and
 memories anchored to the file being read or edited are surfaced at that
-moment; on Cursor the shell-command check runs the same way. `lnk receipt`
-shows what actually arrived in each session. Durable memory still requires
-your approval. Codex and Cursor hook support is new (wired to their
-documented schemas — report issues).
+moment. The same rule checks run on Cursor, Codex, Gemini CLI, Antigravity,
+Copilot, Windsurf and Kiro, each through its own hook. `lnk receipt` shows what
+actually arrived in each session and every rule check. Durable memory still
+requires your approval. Hook support beyond Claude Code follows each
+vendor's documented schema and is new - report issues.
 
 ```bash
 lnk connect claude-code ~/link --hooks --write
-lnk connect codex ~/link --hooks --write    # session-start brief (Codex has no session-end event)
+lnk connect codex ~/link --hooks --write        # start brief + rule checks (approve them in Codex's /hooks)
 lnk connect cursor ~/link --hooks --write
-lnk consolidate ~/link                      # read-only backlog plan, apply only with approval
+lnk connect antigravity ~/link --hooks --write  # Antigravity and Gemini CLI (both read ~/.gemini)
+lnk connect copilot ~/link --hooks --write      # Copilot CLI and VS Code's Copilot (~/.copilot/hooks)
+lnk connect windsurf ~/link --hooks --write     # rule checks only: Windsurf has no session-start event
+lnk connect kiro ~/link --hooks --write         # start brief + rule checks (V3 hooks and the `link` agent profile)
+lnk approve ~/link                              # calls an agent that cannot ask is holding for your OK
+lnk consolidate ~/link                          # read-only backlog plan, apply only with approval
 ```
 
 ### Optional: hybrid semantic recall (still fully local)

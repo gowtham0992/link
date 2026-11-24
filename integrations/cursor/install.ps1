@@ -16,7 +16,8 @@ $wikiPath = if ($Project) { Join-Path (Get-Location).Path "wiki" } else { Join-P
 Link-NewParentDirectory $target
 $instructions = Get-Content -Raw -Encoding UTF8 $instructionsFile
 $rule = "---`ndescription: Link knowledge wiki context`nalwaysApply: true`n---`n`n$instructions"
-Set-Content -Encoding UTF8 -Path $target -Value $rule
+# Set-Content -Encoding UTF8 writes a BOM on Windows PowerShell 5.1.
+Link-WriteTextFile -Path (Link-FullPath $target) -Text ($rule.TrimEnd("`r", "`n") + "`n")
 Write-Host "Link rule -> $target"
 
 if ($Project) {
