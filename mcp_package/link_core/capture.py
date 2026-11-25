@@ -1,16 +1,19 @@
 """Shared raw capture helpers for Link CLI and MCP runtimes."""
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 
 from .files import atomic_write_text
 from .frontmatter import frontmatter_string, parse_frontmatter
 from .log import utc_timestamp
 from .mcp_verify import display_command
 from .memory import (
+    imported_memory_fingerprint,
+    imported_memory_proposals,
     normalize_project,
     proposal_fingerprint,
     propose_memories_from_text,
@@ -133,7 +136,12 @@ def load_dismissed_fingerprints(root: Path) -> dict[str, dict[str, str]]:
     }
 
 
-def record_dismissed_proposals(root: Path, memories: list[str]) -> int:
+def record_dismissed_proposals(
+    root: Path,
+    memories: list[str],
+    *,
+    fingerprint: Callable[[str], str] = proposal_fingerprint,
+) -> int:
     """Add proposal fingerprints to the dismissed ledger; returns count added.
 
     Bounded FIFO (oldest dismissals fall off past DISMISSED_LEDGER_LIMIT) so
@@ -149,10 +157,10 @@ def record_dismissed_proposals(root: Path, memories: list[str]) -> int:
     added = 0
     stamp = utc_timestamp()
     for text in texts:
-        fingerprint = proposal_fingerprint(text)
-        if fingerprint in entries:
+        key = fingerprint(text)
+        if key in entries:
             continue
-        entries[fingerprint] = {"memory": text[:160], "dismissed_at": stamp}
+        entries[key] = {"memory": text[:160], "dismissed_at": stamp}
         added += 1
     if not added:
         return 0
@@ -171,19 +179,19 @@ CAPTURE_FINGERPRINT_LIMIT = 50
 
 def capture_proposal_fingerprints(text: str, project: str | None = None) -> set[str]:
     """Fingerprints of everything a saved capture would propose on re-mining."""
-    mining_text = capture_proposal_source(text)
-    if mining_text is None:
-        _, mining_text = capture_notes_from_markdown(text)
-    if not mining_text:
-        return set()
     # Must see every proposal a capture can yield: at limit=10 a capture
     # whose first ten were covered was deleted as "all duplicates" even when
     # proposals 11+ were new.
-    mined = propose_memories_from_text(mining_text, [], limit=CAPTURE_FINGERPRINT_LIMIT, project=project)
+    mined = mine_capture_proposals(
+        text,
+        mine=lambda mining_text, curated: propose_memories_from_text(
+            mining_text, [], limit=CAPTURE_FINGERPRINT_LIMIT, project=project, curated=curated,
+        ) if mining_text else {"proposals": []},
+    )
     proposals = mined.get("proposals")
     items: list[object] = proposals if isinstance(proposals, list) else []
     return {
-        proposal_fingerprint(str(item.get("memory") or ""))
+        capture_proposal_fingerprint(text, str(item.get("memory") or ""))
         for item in items
         if isinstance(item, dict) and str(item.get("memory") or "").strip()
     }
@@ -257,8 +265,14 @@ def write_session_capture(
     conversation_id: str | None = None,
     source_type: str = "conversation",
     untrusted_inputs: list[str] | None = None,
+    imported_memories: Iterable[Mapping[str, object]] | None = None,
+    imported_from: str = "",
 ) -> dict[str, object]:
     """Persist proposal-only session notes under raw/memory-captures.
+
+    `imported_memories` are whole records another agent kept in its own
+    memory store; they are written as they are, and review proposes each
+    one exactly instead of mining the notes.
 
     `proposal_text` records exactly which turns memory is mined from (the
     user's own turns), so accept-time re-mining reads the same words the
@@ -314,6 +328,20 @@ def write_session_capture(
     if mined and mined != original_notes:
         mined_section = f"\n## Proposal Source\n\nMemory is mined only from these (the user's own turns):\n\n{redact(mined)}\n"
 
+    imported_section = ""
+    if imported_memories is not None:
+        records = [
+            {key: redact(value) if isinstance(value, str) else value for key, value in dict(item).items()}
+            for item in imported_memories
+        ]
+        payload = json.dumps({"agent": imported_from or "another agent", "memories": records},
+                             indent=2, ensure_ascii=False)
+        imported_section = (
+            "\n## Imported Memories\n\n"
+            f"Each record below is one proposal, as {imported_from or 'the agent'} wrote it:\n\n"
+            f"```json\n{payload}\n```\n"
+        )
+
     trail_section = ""
     if decision_trail:
         safe_lines = [f"- {redact(str(line))}" for line in decision_trail]
@@ -347,7 +375,7 @@ Captured locally for Link memory review. This raw note is proposal-only until th
 ## Source Input
 
 {source_value}
-{trail_section}{mined_section}
+{trail_section}{mined_section}{imported_section}
 ## Notes
 
 {notes}
@@ -444,6 +472,66 @@ def capture_notes_from_markdown(text: str) -> tuple[dict[str, object], str]:
     return meta, notes
 
 
+def capture_imported_memories(text: str) -> tuple[str, list[dict[str, object]]] | None:
+    """The agent and the whole records of an import capture, or None.
+
+    An import capture whose record block cannot be read yields no records
+    rather than falling back to mining its notes: proposing pieces of
+    records would put words in front of the person that no agent wrote.
+    """
+    _, body = parse_frontmatter(text)
+    match = re.search(r"^## Imported Memories\s*(.*?)(?=^## |\Z)", body, flags=re.MULTILINE | re.DOTALL)
+    if not match:
+        return None
+    block = re.search(r"```json\s*\n(.*?)\n```", match.group(1), flags=re.DOTALL)
+    try:
+        data = json.loads(block.group(1)) if block else {}
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    memories = data.get("memories")
+    items = [dict(item) for item in memories if isinstance(item, dict)] if isinstance(memories, list) else []
+    return str(data.get("agent") or "another agent"), items
+
+
+def mine_capture_proposals(
+    text: str,
+    *,
+    mine: Callable[[str, bool], dict[str, object]],
+    records: Iterable[Mapping[str, object]] = (),
+    source: str = "",
+    limit: int = 200,
+    exclude_fingerprints: Collection[str] = (),
+    command_target: str | Path = ".",
+) -> dict[str, object]:
+    """Every proposal a saved capture offers, read the one way.
+
+    Preview, accept, dismissal and inbox clean-up all call this, so the
+    proposal numbered 2 in the inbox is the proposal 2 that accept saves.
+    Imported records are proposed whole; anything else is mined, from the
+    user's own turns when the capture kept them, by `mine(text, curated)`.
+    """
+    imported = capture_imported_memories(text)
+    if imported is not None:
+        agent, items = imported
+        return imported_memory_proposals(
+            items, records, source=source, agent=agent, limit=limit,
+            exclude_fingerprints=exclude_fingerprints, command_target=command_target,
+        )
+    meta, notes = capture_notes_from_markdown(text)
+    mining_text = capture_proposal_source(text) or notes
+    curated = str(meta.get("source_type") or "").strip().lower() == "import"
+    return mine(mining_text, curated)
+
+
+def capture_proposal_fingerprint(text: str, memory: str) -> str:
+    """The identity a capture's proposal is dismissed and deduplicated by."""
+    if capture_imported_memories(text) is not None:
+        return imported_memory_fingerprint(memory)
+    return proposal_fingerprint(memory)
+
+
 def capture_proposal_source(text: str) -> str | None:
     """Return the `## Proposal Source` body (user turns) when present.
 
@@ -509,16 +597,20 @@ def capture_proposal_selection(
     # Mine from the user's own turns when the capture recorded them, so accept
     # never re-attributes the assistant's prose. Fall back to full notes for
     # older captures written before proposal-source provenance existed.
-    mining_text = capture_proposal_source(raw_text) or notes
     # Imported captures mine in curated mode: the source was a deliberate
-    # instruction file, so chat-junk heuristics do not apply to it.
-    curated = str(meta.get("source_type") or "").strip().lower() == "import"
-    proposals = propose_memories(
-        mining_text,
-        rel_path,
-        max(1, min(max(proposal_index, 10), 50)),
-        project_name,
-        curated,
+    # instruction file, so chat-junk heuristics do not apply to it. Records
+    # imported from another agent's store are proposed whole.
+    proposals = mine_capture_proposals(
+        raw_text,
+        mine=lambda mining_text, curated: propose_memories(
+            mining_text,
+            rel_path,
+            max(1, min(max(proposal_index, 10), 50)),
+            project_name,
+            curated,
+        ),
+        source=rel_path,
+        exclude_fingerprints=set(load_dismissed_fingerprints(root)),
     )
     proposal_items = proposals.get("proposals")
     if not isinstance(proposal_items, list):
@@ -553,7 +645,10 @@ def capture_accept_memory_args(
     proposal = selection.get("proposal")
     if not isinstance(proposal, Mapping):
         raise ValueError("capture proposal is invalid")
-    project_name = str(selection.get("project") or "")
+    # A record imported from another agent's store names its own project
+    # (the repository that agent fenced it to); a mined proposal carries the
+    # capture's project, which is the selection's.
+    project_name = str(proposal.get("project") or selection.get("project") or "")
     chosen_scope = str(scope or proposal.get("scope") or "user")
     return {
         "text": str(proposal.get("memory") or ""),
@@ -562,7 +657,13 @@ def capture_accept_memory_args(
         "scope": chosen_scope,
         "visibility": visibility or str(proposal.get("visibility") or ""),
         "tags": tags,
-        "source": str(selection.get("capture") or ""),
+        # The capture is cleared once handled; the record it came from is
+        # what still says where an imported memory was first written.
+        "source": " \u00b7 ".join(part for part in (
+            str(selection.get("capture") or ""),
+            " rev ".join(part for part in (str(proposal.get("origin") or ""),
+                                           str(proposal.get("revision") or "")) if part),
+        ) if part),
         "project": project_name if chosen_scope == "project" else "",
         "trigger": str(proposal.get("trigger") or "") or None,
         "context": str(proposal.get("context") or "") or None,
@@ -651,12 +752,12 @@ def delete_capture_file(
         try:
             text = capture_path.read_text(encoding="utf-8", errors="replace")
             meta, _ = parse_frontmatter(text)
-            mining_text = capture_proposal_source(text)
-            if mining_text is None:
-                _, mining_text = capture_notes_from_markdown(text)
-            mined = propose_memories_from_text(
-                mining_text or "", [], limit=CAPTURE_FINGERPRINT_LIMIT,
-                project=normalize_project(str(meta.get("project") or "")),
+            mined = mine_capture_proposals(
+                text,
+                mine=lambda mining_text, curated: propose_memories_from_text(
+                    mining_text or "", [], limit=CAPTURE_FINGERPRINT_LIMIT,
+                    project=normalize_project(str(meta.get("project") or "")), curated=curated,
+                ),
             )
             proposals = mined.get("proposals")
             items: list[object] = proposals if isinstance(proposals, list) else []
@@ -665,7 +766,10 @@ def delete_capture_file(
                 for item in items
                 if isinstance(item, dict)
             ]
-            payload["dismissed_count"] = record_dismissed_proposals(root, memories)
+            payload["dismissed_count"] = record_dismissed_proposals(
+                root, memories,
+                fingerprint=lambda memory: capture_proposal_fingerprint(text, memory),
+            )
         except OSError:
             pass
 
@@ -804,15 +908,17 @@ def capture_records(
         # matches the outcome and never surfaces the assistant's prose.
         # Dismissed proposals stay hidden here for the same reason: accept
         # excludes them, so showing them would desync preview from outcome.
-        mining_text = capture_proposal_source(text) or notes
         # Imported captures preview in curated mode, mirroring accept — a
         # chat-mode preview of a curated file would hide most of what
         # accept can actually save.
-        curated = str(meta.get("source_type") or "").strip().lower() == "import"
         preview_cap = max(1, min(int(proposal_limit or 3), 50))
-        mined = propose_memories_from_text(
-            mining_text, [], source=rel, limit=preview_cap,
-            exclude_fingerprints=dismissed, curated=curated,
+        mined = mine_capture_proposals(
+            text,
+            mine=lambda mining_text, curated: propose_memories_from_text(
+                mining_text, [], source=rel, limit=preview_cap,
+                exclude_fingerprints=dismissed, curated=curated,
+            ),
+            source=rel, limit=preview_cap, exclude_fingerprints=dismissed,
         )
         proposals_obj = mined.get("proposals")
         proposal_items: list[object] = proposals_obj if isinstance(proposals_obj, list) else []

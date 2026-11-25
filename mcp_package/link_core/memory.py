@@ -4978,6 +4978,108 @@ def propose_memories_from_text(
     }
 
 
+# ── Imported records: another agent's memory, one proposal per record ─────
+
+IMPORTED_MEMORY_LIMIT = 200
+
+
+def imported_memory_fingerprint(memory: str) -> str:
+    """Identity of an imported record: its lead line, the claim recall shows.
+
+    A saved memory is known by its one-line TLDR, so keying imported records
+    on the same line is what lets a second import recognise the first one's
+    saved memories, and lets the inbox clear a capture once it is handled.
+    """
+    return proposal_fingerprint(memory_summary_line(memory))
+
+
+def imported_memory_proposals(
+    items: Iterable[Mapping[str, object]],
+    records: Iterable[Mapping[str, object]],
+    *,
+    source: str,
+    agent: str,
+    limit: int = IMPORTED_MEMORY_LIMIT,
+    exclude_fingerprints: Collection[str] = (),
+    command_target: str | Path = ".",
+) -> dict[str, object]:
+    """Proposals for records another agent wrote to its own memory store.
+
+    Nothing is mined or split: each record is one proposal, with the type,
+    scope and project the agent gave it. The agent wrote these, not the
+    person, so every proposal says so and waits for review like any other.
+    A record Link already holds, or one dismissed or waiting elsewhere, is
+    skipped, which makes a second import a no-op.
+    """
+    record_list = [dict(record) for record in records]
+    saved = {
+        imported_memory_fingerprint(str(record.get("tldr") or ""))
+        for record in record_list if is_active_memory(record) and str(record.get("tldr") or "").strip()
+    }
+    excluded = set(exclude_fingerprints) | saved
+    proposals: list[dict[str, object]] = []
+    seen: set[str] = set()
+    skipped = 0
+    for item in items:
+        memory = str(item.get("memory") or "").strip()
+        if not memory:
+            continue
+        fingerprint = imported_memory_fingerprint(memory)
+        if fingerprint in seen or fingerprint in excluded:
+            skipped += 1
+            continue
+        seen.add(fingerprint)
+        memory_type = str(item.get("memory_type") or "note")
+        memory_type = memory_type if memory_type in MEMORY_TYPES else "note"
+        project_name = normalize_project(str(item.get("project") or ""))
+        scope = "project" if project_name else "user"
+        title = " ".join(str(item.get("title") or "").split())[:120] or proposal_title(
+            memory_summary_line(memory), memory_type)
+        duplicate_candidates = memory_duplicate_candidates(
+            record_list, memory, title, memory_type, scope, project=project_name,
+        )
+        conflict_candidates = memory_conflict_candidates(
+            record_list, memory, title, memory_type, scope, project=project_name,
+        )
+        revision = str(item.get("revision") or "").strip()
+        origin = str(item.get("origin") or "").strip()
+        proposal: dict[str, object] = {
+            "title": title,
+            "memory": memory,
+            "memory_type": memory_type,
+            "scope": scope,
+            "project": project_name,
+            "confidence": confidence_label(70),
+            "confidence_score": 70,
+            "reason": (
+                f"Written by {agent}'s own memory, not by you"
+                + (f" ({origin}, revision {revision})" if origin and revision else f" ({origin})" if origin else "")
+                + ". Check it says what you meant before accepting."
+            ),
+            "source": source,
+            "origin": origin,
+            "revision": revision,
+            "duplicate_candidates": duplicate_candidates,
+            "conflict_candidates": conflict_candidates,
+            "suggested_action": "review-conflict" if conflict_candidates else (
+                "update-memory" if duplicate_candidates else "remember"
+            ),
+        }
+        proposal["primary_action"] = memory_proposal_action(proposal, command_target=command_target)
+        proposals.append(proposal)
+        if len(proposals) >= max(1, limit):
+            break
+    return {
+        "proposed": True,
+        "source": source,
+        "project": "",
+        "count": len(proposals),
+        "skipped_count": skipped,
+        "proposals": proposals,
+        "writes_memory": False,
+    }
+
+
 # ── Temporal recall: what did I believe *then*? ───────────────────────────
 # The field's open problem is temporal reasoning — published work measures a
 # ~15-point spread between architectures on time-scoped questions, and notes

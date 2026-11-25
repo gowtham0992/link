@@ -239,7 +239,7 @@ Already have memory scattered across tools? Bring it home as reviewable
 proposals — nothing is auto-accepted:
 
 ```bash
-lnk import claude-code   # or: cursor, codex, file --file chatgpt.txt
+lnk import claude-code   # or: kiro, cursor, codex, file --file chatgpt.txt
 ```
 
 `lnk setup` detects the agents installed on your machine — Claude Code,

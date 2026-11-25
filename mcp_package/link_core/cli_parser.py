@@ -114,8 +114,8 @@ def build_cli_parser(
     proof_cmd.add_argument("--port", type=int, default=3000)
     proof_cmd.add_argument("--json", action="store_true", help="print machine-readable proof data")
 
-    import_cmd = sub.add_parser("import", help="bring memory home from other tools (claude-code, cursor, codex, or any text file) as reviewable proposals")
-    import_cmd.add_argument("import_source", metavar="source", choices=["claude-code", "cursor", "codex", "file"], help="where to import from")
+    import_cmd = sub.add_parser("import", help="bring memory home from other tools (claude-code, cursor, codex, kiro, or any text file) as reviewable proposals")
+    import_cmd.add_argument("import_source", metavar="source", choices=["claude-code", "cursor", "codex", "kiro", "file"], help="where to import from")
     import_cmd.add_argument("target", nargs="?", default=".")
     import_cmd.add_argument("--file", default=None, dest="import_file", help="path to a text/markdown file (required for source 'file'; e.g. ChatGPT memories pasted into a file)")
     import_cmd.add_argument("--project", default=None, help="project slug for the imported proposals")

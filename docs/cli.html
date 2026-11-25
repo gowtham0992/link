@@ -154,10 +154,11 @@ lnk handoffs               # list pending
 lnk handoffs --clear FILE  # after the next session picks it up</code></pre>
 
         <h2 id="import">Import Your Scattered Memory</h2>
-        <p>Your memory already exists — in <code>~/.claude/CLAUDE.md</code> and Claude Code's auto-memory, Cursor rules, a hand-tended <code>AGENTS.md</code>, or memories copied out of ChatGPT. <code>lnk import</code> reads those surfaces and turns each deliberate line into a reviewable proposal in the capture inbox — through the same dedup, secret-scanning, and injection-labeling gates as any capture. Nothing is ever auto-accepted, Link's own instruction sections are excluded, and re-running an import is a no-op for anything already pending, dismissed, or saved.</p>
+        <p>Your memory already exists — in <code>~/.claude/CLAUDE.md</code> and Claude Code's auto-memory, Kiro's and Codex's own memory, Cursor rules, a hand-tended <code>AGENTS.md</code>, or memories copied out of ChatGPT. <code>lnk import</code> reads those surfaces and turns each deliberate line into a reviewable proposal in the capture inbox — through the same dedup, secret-scanning, and injection-labeling gates as any capture. Nothing is ever auto-accepted, Link's own instruction sections are excluded, and re-running an import is a no-op for anything already pending, dismissed, or saved.</p>
         <pre><code>lnk import claude-code    # CLAUDE.md + auto-memory
 lnk import cursor         # rules files
-lnk import codex          # AGENTS.md (minus Link's own section)
+lnk import kiro           # Kiro's own memories, one proposal per record
+lnk import codex          # AGENTS.md (minus Link's own section) + Codex's MEMORY.md
 lnk import file --file chatgpt-memories.txt   # anything pasted to a file</code></pre>
         <p>Review at bulk speed when a capture is trustworthy: <code>lnk accept-capture FILE --all</code> accepts every proposal (duplicates and conflicts are skipped and reported, never forced), and <code>lnk delete-capture TARGET --all --confirm</code> clears the whole inbox with dismissals recorded.</p>
 

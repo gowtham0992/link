@@ -6,7 +6,34 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ## [Unreleased]
 
+### Added
+
+- **`lnk import kiro`: the memories Kiro keeps for itself come home for
+  review.** Kiro 1.4 remembers on its own, in a store only Kiro reads.
+  Link reads that store without writing to it, and each Kiro memory becomes
+  one proposal in the capture inbox, kept whole: its title, its summary as
+  the claim, the detail, why it matters and how to apply it, Kiro's type
+  (preference, fact, or a note), and the repository it was fenced to as the
+  project. The saved memory's source names the Kiro record and revision it
+  came from. Nothing is saved until you accept it; importing again skips
+  what was saved, dismissed or is already waiting. A store laid out in a
+  way Link does not recognise is refused rather than guessed at.
+- **`lnk import codex` also reads the memory Codex consolidates for
+  itself**, `MEMORY.md` in its memories folder (`$CODEX_HOME` respected),
+  next to `~/AGENTS.md`.
+- **`lnk setup` says when your agents keep memory Link has not reviewed.**
+  Kiro's store, Claude Code's auto memory and Codex's `MEMORY.md` are each
+  read only by the agent that wrote them. Setup counts what Link has not
+  seen yet and names the `lnk import` command for each; it goes quiet once
+  those memories are saved, dismissed or waiting for review.
+
 ### Fixed
+
+- **The inbox, accept and dismissal could read an imported file
+  differently.** Previews and accept mined an imported instruction file
+  line by line, but dismissing a capture or deciding whether it was fully
+  handled mined it as chat, which keeps fewer lines; a dismissed import
+  could be proposed again. All four now read a capture the one way.
 
 - **Homebrew installs never got the fast tool hook.** The tap's formula
   was bumped by editing its `url` and `sha256` lines, so it kept installing

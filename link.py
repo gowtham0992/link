@@ -158,6 +158,7 @@ from link_core.memory import (
     parse_time_expression as _core_parse_time_expression,
     proposal_fingerprint as _core_proposal_fingerprint,
     propose_memories_from_text as _core_propose_memories_from_text,
+    imported_memory_proposals as _core_imported_memory_proposals,
     recall_memories as _core_recall_memories,
     recall_abstention as _core_recall_abstention,
     recent_memories as _core_recent_memories,
@@ -4118,6 +4119,73 @@ def _onboard_agent_names(agents: list[str] | None, all_agents: bool) -> list[str
     return list(dict.fromkeys(agent.strip() for agent in requested if agent and agent.strip()))
 
 
+def _import_unit_proposals(
+    unit: Mapping[str, object],
+    *,
+    source: str,
+    records: list[dict[str, object]],
+    exclude: set[str],
+    project: str | None,
+    root: Path,
+) -> tuple[list[dict[str, object]], list[dict[str, object]] | None]:
+    """What importing one unit would propose, and the whole records to keep.
+
+    Another agent's own store arrives as whole records, one proposal each,
+    and the capture keeps only those Link does not already hold. Any other
+    surface is text, mined line by line in curated mode.
+    """
+    imported = unit.get("records")
+    if isinstance(imported, list):
+        preview = _core_imported_memory_proposals(
+            imported, records, source=f"import:{source}",
+            agent=str(unit.get("label") or "").split(" \u00b7 ", 1)[0],
+            exclude_fingerprints=exclude, command_target=root,
+        )
+    else:
+        preview = _core_propose_memories_from_text(
+            str(unit.get("text") or ""), records, source=f"import:{source}", limit=50,
+            project=project, command_target=root,
+            exclude_fingerprints=exclude, curated=True,
+        )
+    found = preview.get("proposals")
+    proposals = [item for item in found if isinstance(item, dict)] if isinstance(found, list) else []
+    if not isinstance(imported, list):
+        return proposals, None
+    fresh = {str(item.get("memory")) for item in proposals}
+    return proposals, [item for item in imported if isinstance(item, dict) and str(item.get("memory")) in fresh]
+
+
+# The memory agents keep for themselves, as opposed to instructions a person
+# wrote for them: setup points at these when Link has not reviewed them yet.
+AGENT_OWN_MEMORY = (
+    ("kiro", "Kiro", lambda label: True),
+    ("claude-code", "Claude Code", lambda label: "auto-memory" in label),
+    ("codex", "Codex", lambda label: label.endswith("MEMORY.md")),
+)
+
+
+def _unreviewed_agent_memory(root: Path, wiki_dir: Path) -> list[tuple[str, str, int]]:
+    """(source, agent, count) for agents' own memories Link has not seen.
+
+    Already saved, waiting in the inbox, or dismissed all count as seen, so
+    this goes quiet once the person has been through an import.
+    """
+    records = _memory_records(wiki_dir)
+    exclude = set(_core_load_dismissed_fingerprints(root)) | set(_core_pending_proposal_fingerprints(root))
+    waiting: list[tuple[str, str, int]] = []
+    for source, agent, own in AGENT_OWN_MEMORY:
+        try:
+            units = [unit for unit in _core_collect_import_units(source) if own(str(unit.get("label") or ""))]
+        except (ValueError, OSError):
+            continue
+        count = sum(len(_import_unit_proposals(
+            unit, source=source, records=records, exclude=exclude, project=None, root=root,
+        )[0]) for unit in units)
+        if count:
+            waiting.append((source, agent, count))
+    return waiting
+
+
 def import_memory(
     target: Path,
     *,
@@ -4150,26 +4218,28 @@ def import_memory(
     results: list[dict[str, object]] = []
     total_proposals = 0
     for unit in units:
-        preview = _core_propose_memories_from_text(
-            unit["text"], records, source=f"import:{source}", limit=50,
-            project=project, command_target=root,
-            exclude_fingerprints=exclude, curated=True,
+        label, origin, text = str(unit["label"]), str(unit["origin"]), str(unit["text"])
+        agent = label.split(" \u00b7 ", 1)[0]
+        proposals, imported = _import_unit_proposals(
+            unit, source=source, records=records, exclude=exclude, project=project, root=root,
         )
-        proposals = preview.get("proposals") if isinstance(preview.get("proposals"), list) else []
         if not proposals:
-            results.append({"label": unit["label"], "origin": unit["origin"], "proposals": 0, "capture": ""})
+            results.append({"label": label, "origin": origin, "proposals": 0, "capture": ""})
             continue
         capture = _core_write_session_capture(
             root,
-            text=unit["text"],
-            source=f"import:{source} \u00b7 {unit['origin']}",
-            title=unit["label"],
+            text=text if imported is None else "\n\n".join(
+                f"{item.get('title') or 'Memory'}: {item.get('memory')}" for item in imported),
+            source=f"import:{source} \u00b7 {origin}",
+            title=label,
             project=project,
             source_type="import",
+            imported_memories=imported,
+            imported_from=agent,
         )
         total_proposals += len(proposals)
         results.append({
-            "label": unit["label"], "origin": unit["origin"],
+            "label": label, "origin": origin,
             "proposals": len(proposals), "capture": str(capture.get("path") or ""),
             "secret_warnings": capture.get("secret_warnings") or [],
         })
@@ -4577,6 +4647,19 @@ def setup(
             if not json_output:
                 _print_text(f"  (meaning-based recall setup skipped: {exc})")
     if code == 0 and not json_output:
+        try:
+            link_root = _resolve_link_root(target)
+            waiting = _unreviewed_agent_memory(link_root, _resolve_wiki_dir(target))
+        except Exception:
+            waiting = []
+        if waiting:
+            # Agents now keep memory of their own, each where no other agent
+            # reads it. Link is where it gets reviewed once and reaches all.
+            names = ", ".join(f"{agent} {count}" for _, agent, count in waiting)
+            _print_text(f"\nYour agents keep memory of their own that Link has not reviewed ({names}).")
+            _print_text("Bring it in as proposals; nothing is saved until you accept it:")
+            for source, _, _ in waiting:
+                _print_text(f"  lnk import {source}")
         extras: list[str] = []
         try:
             from link_core.semantic import model_available, provider_installed
