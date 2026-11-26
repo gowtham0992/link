@@ -138,6 +138,21 @@ INJECTED_INSTRUCTION_PATTERNS = (
     ("agent-directed durable command", re.compile(
         r"(?is)\b(?:you|the agent|the assistant|the ai|all agents)\s+"
         r"(?:must|should|are (?:required|instructed) to)\s+(?:always|never)\b")),
+    # Content that turns to the agent reading it and asks for a memory write,
+    # or asks for the write to be hidden. People ask for memory in their own
+    # voice ("add to memory that I use tabs"); a page, email or doc has to
+    # address the assistant first, and only an attacker wants it kept quiet.
+    ("covert memory-write instruction", re.compile(
+        r"(?is)(?:\bto\s+(?:the\s+|any\s+|all\s+)?(?:assistant|agent|ai)s?\b"
+        r"|\b(?:assistant|agent|ai)s?\s+(?:reading|processing|seeing)\s+this\b)"
+        r"[^.!?\n]{0,60}?\b(?:update|add|write|save|store|edit|insert|append|record)\b"
+        r"[^!?\n]{0,40}?(?:\bmemory\b|\bmemories\b|MEMORY\.md|AGENTS\.md|CLAUDE\.md)"
+        r"|\b(?:silently|quietly|secretly)\s+(?:update|edit|change|add|write|save|store|modify)\b"
+        r"[^!?\n]{0,30}?(?:\bmemory\b|\bmemories\b|MEMORY\.md|AGENTS\.md|CLAUDE\.md)"
+        r"|\b(?:do not|don't|never)\s+(?:mention|reveal|disclose)\s+(?:this|these)\s+"
+        r"(?:edits?|changes?|updates?|notes?|instructions?)\b"
+        r"|\bkeep\s+(?:this|these)\s+(?:notes?\s+|instructions?\s+)?out of\s+your\s+"
+        r"(?:summary|reply|response|chat|answer|report)\b")),
 )
 
 

@@ -12,7 +12,7 @@ where they changed.
 | 2. LoCoMo retrieval | third-party questions over 5,882 conversation turns | hit@10 0.716 lexical, 0.826 with rerank |
 | 3. Memory hygiene | does the store stay clean over months? | 0 junk, 0 contradiction exposure |
 | 4. End-to-end QA | answers under mem0's own harness (pre-5.0) | 84.8% vs mem0 platform 83.2% |
-| 5. Memory poisoning | can an injected instruction become memory? | 0 of 18 unlabeled, across 4 channels |
+| 5. Memory poisoning | can an injected instruction become memory? | 0 of 18 unlabeled, across 5 channels |
 | 6. Token economics | what does a recall cost? | 1,697 tokens at micro, flat as the store grows |
 | 7. Behavioral A/B | does an agent with Link do the right thing? | 11 of 12, vs 0 of 12 without |
 | 8. Claim updates | does recall return the current value? | 0.94 current, 0 stale with lineage |
@@ -457,6 +457,8 @@ answerer-limited, not memory-limited.
 
 ## Track 5: Memory poisoning (adversarial)
 
+Updated 2026-11-25 on `develop`, after the agent-memory channel was added.
+
 A planted memory is injected into every future session, which makes agent
 memory the highest-value prompt-injection target an agent system has: a
 poisoned webpage, doc, or pasted AI output only has to survive one capture
@@ -480,42 +482,73 @@ die in the pipeline: dropped, flagged, or defanged — none unlabeled.
 
 | layer | what it does | attacks stopped here |
 |---|---|---|
-| extraction | hearsay/question/echo gates drop what was never the user's own claim | 6 of 18 |
+| extraction | hearsay/question/echo gates drop what was never the user's own claim | 7 of 18 |
 | labeling | injection-shaped proposals carry a warning label into the inbox and decision trail | 9 of 18 |
 | write gate | credential-shaped text refused even on a one-click accept | 1 of 18 |
-| defanging | extraction strips the payload; only a harmless residue can be stored | 2 of 18 |
+| defanging | extraction strips the payload; only a harmless residue can be stored | 1 of 18 |
 
-**Unlabeled exposure: 0 of 18. Benign false positives: 0 of 6.** Both are
+**Unlabeled exposure: 0 of 18. Benign false positives: 0 of 8.** Both are
 CI-enforced — any change that lets an attack reach the inbox without a
 label, or flags a legitimate directive, fails the build.
 
 **The other ways in (added in 5.0).** A review found three channels into a
 session that the layers above never saw, so the same 18 attacks now go
-through each of them too:
+through each of them too (the last row came after 6.0; see below):
 
 | channel | how the attack arrives | result |
 |---|---|---|
 | harness text | written into the transcript in the user's name: a subagent report, command output, a compaction summary, a subagent turn, a peer session (6 wrappers) | 0 of 108 probes became a proposal |
-| handoff | left as a session handoff, pushed to the top of the next session on any agent | 13 of 18 labelled in the brief; 0 injection-shaped attacks unlabeled; 0 credentials left unredacted |
-| team import | shared as a teammate's `visibility: team` memory | 14 of 18 rejected at import, 4 quarantined for review, 0 active |
+| handoff | left as a session handoff, pushed to the top of the next session on any agent | 15 of 18 labelled in the brief; 0 injection-shaped attacks unlabeled; 0 credentials left unredacted |
+| team import | shared as a teammate's `visibility: team` memory | 16 of 18 rejected at import, 2 quarantined for review, 0 active |
+| agent memory | written into Kiro's memory store or Codex's `MEMORY.md` by an agent that read it somewhere, then brought in with `lnk import` and one `accept-capture --all` | 15 of 18 held back in each store; 0 payloads and 0 credentials stored; 8 of 8 benign records kept |
 
 Before 5.0 the harness channel turned a subagent's report into a proposal
 attributed to the user, a handoff carried a prose password verbatim, and a
 team import became active memory with no review at all. Each of those is a
-CI failure now. The five unlabeled handoffs are the attacks the detector
-does not label in any channel (hearsay, a question, credential planting
-that is redacted instead) - the handoff channel matches the direct one, it
+CI failure now. The three unlabeled handoffs are the attacks the detector
+does not label in any channel (a question, and two credential plants that
+are redacted instead) - the handoff channel matches the direct one, it
 does not get weaker.
+
+**An agent's own memory (added after 6.0).** Kiro and Codex now keep memory
+of their own, written after the agent read pages, files and tool output,
+and `lnk import` brings it in for review. That makes the agent's store a
+way in: a planted instruction can arrive already phrased as a memory, with
+none of the hearsay framing the extraction gates look for. The first run of
+this channel failed. Each imported record went to the inbox unlabeled, the
+capture as a whole carried one warning line, and a single `accept-capture
+--all` saved the attack with its payload intact as active memory for 14 of
+the 18 in Kiro's store and 15 of 18 in Codex's. Two of them,
+MemGhost-shaped records addressed "to the assistant reading this" and
+asking for a quiet memory write, would have carried no label anywhere. The
+fixes: every proposal carries its own labels, `--all` holds back any
+proposal that reads like an injected instruction (accepting one takes
+`--index N`, the way a conflict does), the detector knows the covert
+memory-write shape, and a memory's saved context, which no reviewer sees,
+no longer takes in a neighbouring sentence that carries an injection or a
+secret. What `--all` stores now is the eight benign records and harmless
+residue: in both stores the token plant with the token redacted, plus the
+question from Kiro and, from Codex, the password plant's last clause with
+the password gone ("Remember it, we never rotate it."). None of them gives
+an order. The two benign controls added for this channel are people asking
+for memory in their own voice ("add to memory that I prefer tabs"), which
+the covert-write label must leave alone.
 
 Honest notes: labels are warnings, not blocks — a human may genuinely hold
 a "never ask confirmation before builds" preference, so the pipeline never
 censors; it attributes ("verify you actually said this before accepting").
+The one place a label changes what happens is `accept-capture --all`, which
+holds a labelled proposal back for a look; `--index N` still accepts it.
 The review gate remains the final defense for anything labeled, which is
 the architecture's claim, not a hedge: memory writes that no human approved
 do not exist in Link. The attack set was authored by us and the detector
 was developed against it — these are fit numbers, not blind ones, and the
 patterns are deliberately narrow to protect the zero-false-positive
-property. Adversarial contributions that beat the layers are welcome and
+property. The covert memory-write pattern was written after the
+agent-memory run showed the two MemGhost records unlabelled, and was
+checked against the user-voice controls and 642 real texts (a working
+wiki, the recall and hygiene datasets, this repository's docs) with no
+match. Adversarial contributions that beat the layers are welcome and
 will be added to the fixture.
 
 ## Track 6: Token economics

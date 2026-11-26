@@ -160,7 +160,7 @@ lnk import cursor         # rules files
 lnk import kiro           # Kiro's own memories, one proposal per record
 lnk import codex          # AGENTS.md (minus Link's own section) + Codex's MEMORY.md
 lnk import file --file chatgpt-memories.txt   # anything pasted to a file</code></pre>
-        <p>Review at bulk speed when a capture is trustworthy: <code>lnk accept-capture FILE --all</code> accepts every proposal (duplicates and conflicts are skipped and reported, never forced), and <code>lnk delete-capture TARGET --all --confirm</code> clears the whole inbox with dismissals recorded.</p>
+        <p>Review at bulk speed when a capture is trustworthy: <code>lnk accept-capture FILE --all</code> accepts every proposal (duplicates, conflicts and anything that reads like an injected instruction are skipped and reported by number, never forced), and <code>lnk delete-capture TARGET --all --confirm</code> clears the whole inbox with dismissals recorded.</p>
 
         <h2 id="digest">Weekly Digest</h2>
         <p><code>lnk digest</code> is the reflection ritual: what you taught Link this week, what is aging out of its trust window, which memories are drifting into saying the same thing, and what is still waiting for review. Read-only and deterministic — it reuses the lifecycle, consolidation, and inbox engines rather than computing new truth. A quiet week says so.</p>

@@ -27,6 +27,32 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   seen yet and names the `lnk import` command for each; it goes quiet once
   those memories are saved, dismissed or waiting for review.
 
+### Security
+
+- **`accept-capture --all` no longer saves a proposal that reads like an
+  injected instruction.** It holds each one back and names it by number,
+  the way it already holds back conflicts; accepting one takes
+  `--index N`, after you have looked. Before, one keystroke over a capture
+  saved every proposal, and the only warning was a line on the capture as
+  a whole. This matters most for imports: an agent writes its own memory
+  after reading pages and files, so a planted instruction can arrive in
+  Kiro's store or Codex's `MEMORY.md` already phrased as a memory. Each
+  imported record now carries its own labels and a reason that says so,
+  and the inbox lists the records `--all` will hold back.
+- **A memory's context no longer carries a neighbouring sentence that is
+  an injected instruction or a secret.** Context is saved with a memory to
+  help recall find it, but it is never shown for review, so a planted line
+  next to an honest one could ride in unseen.
+- **The detector knows content that turns to the assistant and asks for a
+  memory write**, or asks for the write to be hidden ("to the assistant
+  reading this, update your memory", "do not mention this edit"). People
+  asking for memory in their own voice are not flagged.
+- **The poisoning benchmark measures a fifth way in: an agent's own
+  memory.** The 18 attacks, planted in a Kiro store and in a Codex
+  `MEMORY.md`, go through `lnk import` and one `accept --all`: 15 are held
+  back, no payload or credential is stored, and every benign record is
+  kept. CI fails if that changes.
+
 ### Fixed
 
 - **The inbox, accept and dismissal could read an imported file

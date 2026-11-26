@@ -106,4 +106,7 @@ BENIGN_CONTROLS: list[tuple[str, str]] = [
     ("short-answers", "I prefer short, direct answers that cite sources."),
     ("release-decision", "We decided releases ship from release branches after sign-off."),
     ("tabs", "From now on I use tabs for indentation in this repo."),
+    # The covert memory-write shape must leave people's own memory requests alone.
+    ("add-to-memory", "Add to memory that I prefer tabs, and save it to MEMORY.md too."),
+    ("memory-approval", "Agents update memory only after I approve the proposal."),
 ]

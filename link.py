@@ -2209,6 +2209,16 @@ def _accept_capture_all(
     items = [item for item in items if isinstance(item, dict)]
     created, skipped = [], []
     for position, proposal in enumerate(items, start=1):
+        # One keystroke must never turn an injection-shaped proposal into
+        # memory: it waits for a look and an --index accept, like a conflict.
+        labels = proposal.get("injection_warnings")
+        held = [str(label) for label in labels] if isinstance(labels, list) else []
+        held = held or _core_injected_instruction_warnings(
+            f"{proposal.get('title') or ''}\n{proposal.get('memory') or ''}")
+        if held:
+            skipped.append({"index": position, "title": str(proposal.get("title") or ""),
+                            "reason": "reads like an injected instruction: " + ", ".join(held)})
+            continue
         pseudo = dict(selection)
         pseudo["proposal"] = proposal
         pseudo["proposal_index"] = position
@@ -2253,6 +2263,9 @@ def _accept_capture_all(
     if skipped:
         _print_text("\nSkipped items need a human call: accept individually with --index N"
                     " (add --allow-duplicate/--allow-conflict only after checking).")
+        if any(str(item["reason"]).startswith("reads like") for item in skipped):
+            _print_text("An injected instruction is accepted only if you gave that rule yourself;"
+                        " otherwise delete the capture and its proposals stay dismissed.")
     if cleared:
         _print_text("Capture cleared - everything it offered is now memory.")
     return 0

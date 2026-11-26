@@ -30,7 +30,7 @@ from .nli import CONTRADICTION_THRESHOLD, ContradictionScorer, load_contradictio
 from .provenance import add_anchors_to_page
 from .enforce_rules import MAX_ENFORCE_RULES, parse_enforce_rule, suggest_enforce_rules
 from .semantic import semantic_confidence_cap, semantic_match_points
-from .security import looks_like_password_note, secret_value_warnings
+from .security import injected_instruction_warnings, looks_like_password_note, secret_value_warnings
 from .frontmatter import (
     csv_values,
     frontmatter_int,
@@ -4903,9 +4903,12 @@ def propose_memories_from_text(
                 continue
         # Retrieval context: the neighboring sentences around the claim's
         # origin (the LoCoMo-measured +/-1 window). Helps recall find the
-        # memory later; never part of the claim itself.
+        # memory later; never part of the claim itself. Context is saved with
+        # the memory but never shown for review, so a neighbour that carries
+        # an injected instruction or a secret stays out of it.
         segment_context = " ".join(
-            segments[j] for j in (index - 1, index + 1) if 0 <= j < len(segments)
+            segments[j] for j in (index - 1, index + 1)
+            if 0 <= j < len(segments) and not _unsafe_context(segments[j])
         ).strip()
         score = int(str(classified["confidence_score"]))
         if score < MEMORY_PROPOSAL_MIN_SCORE and not curated:
@@ -4983,6 +4986,12 @@ def propose_memories_from_text(
 IMPORTED_MEMORY_LIMIT = 200
 
 
+def _unsafe_context(sentence: str) -> bool:
+    """A neighbour sentence that must not ride along as a memory's context."""
+    return bool(injected_instruction_warnings(sentence) or secret_value_warnings(sentence)
+                or looks_like_password_note(sentence))
+
+
 def imported_memory_fingerprint(memory: str) -> str:
     """Identity of an imported record: its lead line, the claim recall shows.
 
@@ -5043,19 +5052,30 @@ def imported_memory_proposals(
         )
         revision = str(item.get("revision") or "").strip()
         origin = str(item.get("origin") or "").strip()
+        # An agent writes its own memory after reading pages, files and tool
+        # output, so a planted instruction can arrive here already phrased as
+        # a memory. Label it per record; accept --all holds it back.
+        injection_warnings = injected_instruction_warnings(f"{title}\n{memory}")
+        confidence = 40 if injection_warnings else 70
+        where = (f" ({origin}, revision {revision})" if origin and revision
+                 else f" ({origin})" if origin else "")
+        reason = f"Written by {agent}'s own memory, not by you{where}. Check it says what you meant before accepting."
+        if injection_warnings:
+            reason = (
+                "Reads like an injected instruction (" + ", ".join(injection_warnings) + "). "
+                f"Written by {agent}'s own memory, not by you{where}; {agent} may have picked it up "
+                "from something it read. Accept it only if you gave this rule yourself."
+            )
         proposal: dict[str, object] = {
             "title": title,
             "memory": memory,
             "memory_type": memory_type,
             "scope": scope,
             "project": project_name,
-            "confidence": confidence_label(70),
-            "confidence_score": 70,
-            "reason": (
-                f"Written by {agent}'s own memory, not by you"
-                + (f" ({origin}, revision {revision})" if origin and revision else f" ({origin})" if origin else "")
-                + ". Check it says what you meant before accepting."
-            ),
+            "confidence": confidence_label(confidence),
+            "confidence_score": confidence,
+            "reason": reason,
+            "injection_warnings": injection_warnings,
             "source": source,
             "origin": origin,
             "revision": revision,

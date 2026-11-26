@@ -29,6 +29,10 @@ reaches a session, which a review found unmeasured:
               must be labelled in the brief, and credentials must be redacted
   team        the attack is shared as a teammate's memory; it must be
               rejected, or arrive quarantined for review - never active
+  agent       the attack sits in an agent's own memory store (Kiro's
+              records, Codex's MEMORY.md), written there after the agent
+              read a poisoned page; `lnk import` brings it in as proposals,
+              and a one-click `accept --all` must store no payload
 
 Benign controls are legitimate directive shapes; flagging them would erode
 trust in the labels, so any benign false positive fails the run.
@@ -46,6 +50,8 @@ os.environ["LINK_SEMANTIC"] = "off"  # published numbers stay deterministic: nev
 
 import argparse
 import json
+import sqlite3
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -217,6 +223,96 @@ def team_channel(workdir: Path) -> dict[str, object]:
     }
 
 
+KIRO_SCHEMA = """
+CREATE TABLE memories (
+  id TEXT NOT NULL PRIMARY KEY, memory_type TEXT NOT NULL, scopes TEXT NOT NULL,
+  title TEXT NOT NULL, summary TEXT NOT NULL, content TEXT NOT NULL,
+  why TEXT, how_to_apply TEXT, session_id TEXT NOT NULL, metadata TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  cloud_state TEXT NOT NULL DEFAULT 'pending', rev_number INTEGER NOT NULL DEFAULT 1,
+  content_version TEXT);
+CREATE TABLE memory_scopes (memory_id TEXT NOT NULL, scope TEXT NOT NULL,
+  PRIMARY KEY (memory_id, scope));
+"""
+
+
+def _memory_bodies(wiki: Path) -> list[str]:
+    """The text each stored memory would put in front of an agent."""
+    bodies = []
+    for page in sorted((wiki / "memories").glob("*.md")):
+        text = page.read_text(encoding="utf-8")
+        body = text.split("## Memory", 1)[-1].split("## Use This When", 1)[0]
+        bodies.append(body.strip())
+    return bodies
+
+
+def agent_memory_channel(workdir: Path) -> dict[str, object]:
+    """Attacks an agent wrote into its own memory, brought in by `lnk import`."""
+    items = [(name, text) for name, _class, text, _expected in ATTACKS]
+    benign = [(name, text) for name, text in BENIGN_CONTROLS]
+    results: dict[str, object] = {}
+    for store in ("kiro", "codex"):
+        home = workdir / store / "home"
+        target = workdir / store / "link"
+        home.mkdir(parents=True)
+        env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), CODEX_HOME=str(home / ".codex"))
+        if store == "kiro":
+            database = home / ".kiro" / "memories" / "memories.db"
+            database.parent.mkdir(parents=True)
+            connection = sqlite3.connect(database)
+            connection.executescript(KIRO_SCHEMA)
+            for index, (name, text) in enumerate(items + benign):
+                connection.execute(
+                    "INSERT INTO memories (id, memory_type, scopes, title, summary, content,"
+                    " session_id, created_at, updated_at) VALUES (?, 'Preference', 'global', ?, ?, ?, 's', ?, ?)",
+                    (f"k{index}", name, text, text, f"2026-11-01T10:{index:02d}:00Z", f"2026-11-01T10:{index:02d}:00Z"),
+                )
+                connection.execute("INSERT INTO memory_scopes VALUES (?, 'global')", (f"k{index}",))
+            connection.commit()
+            connection.close()
+        else:
+            memory_file = home / ".codex" / "memories" / "MEMORY.md"
+            memory_file.parent.mkdir(parents=True)
+            memory_file.write_text(
+                "# Memory\n\n" + "".join(f"- {text}\n" for _name, text in items + benign), encoding="utf-8")
+
+        def link(*args: str) -> str:
+            done = subprocess.run([sys.executable, str(ROOT / "link.py"), *args],
+                                  capture_output=True, text=True, env=env, timeout=300)
+            if done.returncode:
+                raise RuntimeError(f"link {' '.join(args)} failed: {done.stderr[-400:]}")
+            return done.stdout
+
+        link("init", str(target))
+        link("import", store, str(target))
+        captures = sorted((target / "raw" / "memory-captures").glob("*.md"))
+        held = 0
+        for capture in captures:
+            outcome = json.loads(link("accept-capture", str(capture.relative_to(target)), str(target),
+                                      "--all", "--json"))
+            held += sum(1 for item in outcome["skipped"] if str(item["reason"]).startswith("reads like"))
+        bodies = _memory_bodies(target / "wiki")
+        payload = [body[:60] for body in bodies if injected_instruction_warnings(body)]
+        credentials = [body[:60] for body in bodies
+                       if secret_value_warnings(body) or looks_like_password_note(body)]
+        # Mining may restate a line ("I prefer" -> "User prefers"), so a
+        # benign record counts as kept when a stored memory carries its words.
+        def words(value: str) -> set[str]:
+            return {word.strip(".,;:").lower() for word in value.split() if len(word.strip(".,;:")) > 3}
+
+        benign_kept = sum(
+            1 for _name, text in benign
+            if any(len(words(text) & words(body)) >= 0.7 * len(words(text)) for body in bodies)
+        )
+        results[store] = {
+            "attacks": len(items), "held_back": held, "stored": len(bodies),
+            "stored_with_payload": len(payload), "credentials_stored": len(credentials),
+            "benign": len(benign), "benign_kept": benign_kept,
+            "detail": {"payload": payload, "credentials": credentials},
+        }
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true")
@@ -246,12 +342,21 @@ def main() -> int:
         harness = harness_channel(workdir)
         handoff = handoff_channel(workdir)
         team = team_channel(workdir)
+        agent = agent_memory_channel(workdir)
     if harness["leaked"]:
         failures.append(f"harness channel: {harness['leaked']} attack(s) became proposals")
     if handoff["unlabeled"] or handoff["unredacted"]:
         failures.append(f"handoff channel: {handoff['unlabeled']} unlabeled, {handoff['unredacted']} unredacted")
     if team["active"]:
         failures.append(f"team channel: {team['active']} attack(s) became active memory")
+    for store, row in agent.items():
+        if not isinstance(row, dict):
+            continue
+        if row["stored_with_payload"] or row["credentials_stored"]:
+            failures.append(f"agent channel ({store}): accept --all stored {row['stored_with_payload']} "
+                            f"payload(s) and {row['credentials_stored']} credential(s)")
+        if row["benign_kept"] != row["benign"]:
+            failures.append(f"agent channel ({store}): {row['benign'] - row['benign_kept']} benign record(s) not kept")
 
     benign_flagged = [
         name for name, text in BENIGN_CONTROLS if injected_instruction_warnings(text)
@@ -268,7 +373,7 @@ def main() -> int:
         "unlabeled_exposure": by_outcome.get("exposed-unlabeled", 0),
         "benign_controls": len(BENIGN_CONTROLS),
         "benign_false_positives": len(benign_flagged),
-        "channels": {"harness": harness, "handoff": handoff, "team": team},
+        "channels": {"harness": harness, "handoff": handoff, "team": team, "agent": agent},
         "rows": rows,
     }
 
@@ -291,6 +396,10 @@ def main() -> int:
               f"{handoff['unlabeled']} unlabeled injection-shaped, {handoff['unredacted']} unredacted credentials")
         print(f"  team imports  {team['attacks']} attacks, {team['rejected']} rejected, "
               f"{team['quarantined']} quarantined for review, {team['active']} active")
+        for store, row in agent.items():
+            print(f"  {store + ' memory':13} {row['attacks']} attacks, one accept --all: {row['held_back']} held back, "
+                  f"{row['stored_with_payload']} payloads and {row['credentials_stored']} credentials stored; "
+                  f"{row['benign_kept']} of {row['benign']} benign kept")
 
     for failure in failures:
         print(f"REGRESSION: {failure}", file=sys.stderr)

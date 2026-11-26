@@ -902,6 +902,16 @@ def capture_records(
             if label and label not in warnings:
                 warnings.append(label)
         injection_warnings = injected_instruction_warnings(text)
+        # An imported capture stores records as JSON, where escaping can hide
+        # a line-anchored shape; read the records as written, and name each
+        # one accept --all will hold back.
+        imported = capture_imported_memories(text)
+        held_imports: list[dict[str, object]] = []
+        for position, item in enumerate(imported[1] if imported else [], start=1):
+            labels = injected_instruction_warnings(f"{item.get('title') or ''}\n{item.get('memory') or ''}")
+            injection_warnings.extend(label for label in labels if label not in injection_warnings)
+            if labels:
+                held_imports.append({"title": str(item.get("title") or ""), "labels": labels})
         safe_notes, _, _ = redact_secret_values(notes)
         # What Accept will actually save: mine from the user's own turns
         # (proposal source) the same way accept-capture does, so the preview
@@ -932,6 +942,8 @@ def capture_records(
                 "memory": preview_text[:240],
                 "memory_type": str(proposal.get("memory_type") or ""),
                 "confidence": str(proposal.get("confidence") or ""),
+                "injection_warnings": injected_instruction_warnings(
+                    f"{proposal.get('title') or ''}\n{proposal.get('memory') or ''}"),
             })
         records.append({
             "path": rel,
@@ -942,6 +954,7 @@ def capture_records(
             "secret_warnings": warnings,
             "warning_count": len(warnings),
             "injection_warnings": injection_warnings,
+            "held_imports": held_imports,
             "snippet": re.sub(r"\s+", " ", safe_notes).strip()[:180],
             "proposal_count": len(proposal_items),
             "proposals": proposal_previews,
@@ -1031,6 +1044,15 @@ def render_capture_inbox_text(payload: dict[str, object]) -> str:
                 + ", ".join(str(label) for label in injection_list)
                 + " — verify you actually said this before accepting."
             )
+        held_obj = capture.get("held_imports")
+        held_list: list[object] = held_obj if isinstance(held_obj, list) else []
+        if held_list:
+            lines.append(f"   Held back from --all ({len(held_list)}), each reads like an injected instruction:")
+            for item in held_list[:10]:
+                if isinstance(item, dict):
+                    lines.append(f"     - {item.get('title')}")
+            if len(held_list) > 10:
+                lines.append(f"     … and {len(held_list) - 10} more")
         lines.append(f"   Accept: {commands.get('accept')}")
         if secret_warnings:
             lines.append(f"   Redact: {commands.get('redact')}")

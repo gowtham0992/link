@@ -364,7 +364,7 @@ def build_cli_parser(
     accept_capture_cmd.add_argument("capture", help="raw capture path or filename")
     accept_capture_cmd.add_argument("target", nargs="?", default=".")
     accept_capture_cmd.add_argument("--index", type=int, default=1, help="1-based proposal index to accept")
-    accept_capture_cmd.add_argument("--all", action="store_true", dest="accept_all", help="accept every proposal in this capture (duplicates and conflicts are skipped and reported)")
+    accept_capture_cmd.add_argument("--all", action="store_true", dest="accept_all", help="accept every proposal in this capture (duplicates, conflicts and injection-shaped proposals are skipped and reported)")
     accept_capture_cmd.add_argument("--title", default=None, help="override accepted memory title")
     accept_capture_cmd.add_argument("--type", dest="memory_type", choices=MEMORY_TYPES, default=None)
     accept_capture_cmd.add_argument("--scope", choices=MEMORY_SCOPES, default=None)
