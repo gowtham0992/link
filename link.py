@@ -2952,6 +2952,9 @@ def recall(
                 f"{'it' if len(waiting) == 1 else 'them'} out: "
                 + _display_command(["lnk", "memory-inbox", str(target)])
             )
+    if not results and not miss_hint and as_of:
+        miss_hint = (f"Nothing matching was active on {as_of}. "
+                     "Leave out the date to search what is active now.")
     code, text = _core_render_recall_text(
         query=query,
         results=results,

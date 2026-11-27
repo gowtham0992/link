@@ -100,6 +100,22 @@ class ReviewClarityTests(unittest.TestCase):
         self.assertIn("Shared by: your team",
                       self.link("explain-memory", "deploys-happen-on-tuesdays-only", str(self.target)).stdout)
 
+    def test_a_sentence_is_reworded_whole_or_left_in_the_persons_words(self):
+        from link_core.memory import normalize_proposed_memory as reword
+
+        self.assertEqual(reword("I prefer tabs over spaces", "preference"), "User prefers tabs over spaces.")
+        self.assertEqual(reword("We decided to use Kong", "decision"), "Project decided to use Kong.")
+        # Rewording only the opening would speak as two people.
+        self.assertEqual(reword("My name is Sam and I work at Acme", "fact"), "My name is Sam and I work at Acme.")
+        self.assertEqual(reword("I prefer tabs because my editor handles them", "preference"),
+                         "I prefer tabs because my editor handles them.")
+
+    def test_a_dated_recall_that_finds_nothing_says_it_is_the_date(self):
+        self.link("remember", "I prefer tabs over spaces", str(self.target), "--type", "preference")
+        text = self.link("recall", "tabs", str(self.target), "--as-of", "2020-01-01").stdout
+        self.assertIn("Nothing matching was active on 2020-01-01", text)
+        self.assertNotIn("Try different words", text)
+
     def test_next_steps_name_a_command_that_exists_for_an_installed_user(self):
         self.link("remember", "I prefer tabs", str(self.target), "--type", "preference")
         for command in ("memory-audit", "brief"):

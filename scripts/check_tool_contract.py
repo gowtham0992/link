@@ -56,7 +56,7 @@ EXPECTED_CLI_COMMANDS = {
     "query-link",
     "rebuild-index",
     "rebuild-backlinks",
-    "stale", "compile",
+    "stale", "compile", "folder",
     "receipt",
     "recall",
     "recipes",

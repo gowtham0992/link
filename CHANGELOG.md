@@ -137,6 +137,11 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   command.** Each finding now carries it, with what the origin says now.
 - **A held-back proposal stayed listed as held after you accepted it by
   number.**
+- **A proposal could speak as two people.** "My name is Sam and I work at
+  Acme" was proposed as "User's name is Sam and I work at Acme". When only
+  the opening can be reworded, the sentence is now kept in your own words.
+- **`lnk recall --as-of <date>` with nothing active on that date said "try
+  different words".** It now says it is the date.
 - **A capture you had partly accepted could never be finished with
   `--all`.** `accept-capture --all` treated a proposal already accepted
   from that capture as a duplicate needing a decision, so it reported a

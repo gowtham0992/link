@@ -4286,6 +4286,9 @@ def memory_proposal_segments(text: str) -> list[str]:
     return segments
 
 
+_LEFTOVER_FIRST_PERSON_RE = re.compile(r"\b(?:I|I'm|I've|I'd|I'll|my|me|mine|myself|we|we're|we've|our|ours|us)\b")
+
+
 def normalize_proposed_memory(text: str, memory_type: str) -> str:
     value = text.strip()
     value = re.sub(r"^please remember(?: that)?\s+", "", value, flags=re.IGNORECASE)
@@ -4310,8 +4313,13 @@ def normalize_proposed_memory(text: str, memory_type: str) -> str:
         (r"^we chose\b", "Project chose"),
         (r"^we settled\b", "Project settled"),
     ]
+    own_words = value
     for pattern, replacement in replacements:
         value = re.sub(pattern, replacement, value, count=1, flags=re.IGNORECASE)
+    if value != own_words and _LEFTOVER_FIRST_PERSON_RE.search(value):
+        # Only the opening was reworded: "User's name is Sam and I work at
+        # Acme" speaks as two people. The person's own sentence is clearer.
+        value = own_words
     if memory_type == "decision" and value.lower().startswith("decision:"):
         value = value.split(":", 1)[1].strip()
         value = "Project decided " + value[0].lower() + value[1:] if value else "Project decision"
