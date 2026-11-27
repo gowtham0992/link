@@ -342,7 +342,7 @@ def origin_findings(
             saved, current = str(record.get("origin_revision") or "").strip(), str(row.get("rev_number") or "").strip()
             if saved.isdigit() and current.isdigit() and int(current) > int(saved):
                 now = str(kiro_import_item(row).get("memory") or "").splitlines()[0][:200]
-                findings.append({**entry, "kind": "origin_revised",
+                findings.append({**entry, "kind": "origin_revised", "now": now,
                                  "evidence": f"Kiro revised this record (revision {saved} to {current}). It now says: {now}"})
         elif origin.startswith("file:"):
             name = origin[len("file:"):]

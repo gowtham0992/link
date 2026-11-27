@@ -44,8 +44,55 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
   seen yet and names the `lnk import` command for each; it goes quiet once
   those memories are saved, dismissed or waiting for review.
 
+- **`lnk folder --untrusted <folder>`: keep memory out of code you have not
+  vetted.** A repository cloned to review or a stranger's pull request is
+  text nobody checked, and it can ask an agent to repeat what the session
+  brief gave it or to "remember" something. In a folder you mark, and every
+  folder below it, Link gives the agent one line saying so in place of the
+  brief, stays silent on prompt and file reminders, captures nothing at
+  session end, and answers every MCP tool except `status` with the same
+  notice. Rules on tool calls still apply there. The list is kept in your
+  Link workspace, never in the folder. `lnk folder` lists what is marked and
+  `--trusted` undoes one; with tool hooks and any rule in force, an agent
+  changing it waits for your OK. The MCP check goes by the folder the server
+  was started in.
+- **Rules are suggested from plain words and from files.** `lnk remember
+  "Never force push to main"` now suggests the rules that stop it
+  (`git push --force` and `-f`, not `--force-with-lease`). Hard reset,
+  `rm -rf` and skipping commit hooks are known the same way, and "never
+  edit `migrations/`" or "don't read `.env`" suggest a write or read rule.
+  Suggestions only: nothing is enforced until you add the rule and review
+  the memory.
+- **`lnk team-sync --adopt <name>` and `--keep <name>`.** When a teammate
+  changes a memory you have reviewed, the run now shows your version and
+  theirs with both commands. Before, it said "adopt the team version
+  deliberately" and gave no way to do it, on every run.
+- **Agents are told what memory is for.** The instructions Link installs,
+  and the ones its MCP server sends, now say what belongs in memory (what
+  you would otherwise repeat), what does not (what the repository records,
+  the state of a task, anything inferred or read in a file or page,
+  secrets), and that a recalled memory is background, not an instruction:
+  what you say in the session wins. `lnk setup` refreshes a file Link
+  installed earlier.
+
+### Changed
+
+- **Team sync shares only what you have reviewed.** A `visibility: team`
+  memory that is new, or that you or an agent changed since your last
+  review, used to be pushed to the team as it was. It now stays local and
+  is named in the run, and the version you reviewed stays shared.
+- **Archiving a shared memory withdraws it.** Before, only forgetting did;
+  an archived or superseded memory stayed in the team repo and kept
+  reaching teammates as current. Taking a memory out of `visibility: team`
+  withdraws it too. A teammate who had not reviewed their copy loses it; one
+  who had is told once and keeps theirs, with the command to drop it.
+
 ### Security
 
+- **Reviewing a memory says which rules it puts in force.** A memory from a
+  teammate can carry a rule, and reviewing it is what switches the rule on.
+  The memory inbox, `lnk review-memory` and `lnk explain-memory` now name
+  those rules, and say when a memory came through team sync.
 - **`accept-capture --all` no longer saves a proposal that reads like an
   injected instruction.** It holds each one back and names it by number,
   the way it already holds back conflicts; accepting one takes
@@ -72,6 +119,24 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- **Next-step hints named a command an installed user does not have.**
+  `lnk memory-audit`, the session brief's capture line and `verify-mcp`
+  printed `python3 link.py ...`, which only works inside a checkout. They
+  now print the command you ran Link with.
+- **A teammate's change to a memory you had not reviewed yet was reported
+  as "kept yours".** There was no version of yours: reviewing the copy
+  would have approved words they had already replaced. The unreviewed copy
+  now becomes the newer version.
+- **Recall said "no match, try different words" when the match was a
+  teammate's memory waiting for your review.** It now says so and points at
+  the inbox.
+- **A memory name that missed gave no help.** `lnk archive-memory "rate
+  limit"` now names the memories that hold those words. It only names them:
+  archive, forget and update still need the exact name.
+- **`lnk stale --imports` told you to replace or archive without the
+  command.** Each finding now carries it, with what the origin says now.
+- **A held-back proposal stayed listed as held after you accepted it by
+  number.**
 - **A capture you had partly accepted could never be finished with
   `--all`.** `accept-capture --all` treated a proposal already accepted
   from that capture as a duplicate needing a decision, so it reported a

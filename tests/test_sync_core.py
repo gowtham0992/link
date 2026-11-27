@@ -189,6 +189,7 @@ class TeamMemoryTests(unittest.TestCase):
             "scope: project\n"
             "status: active\n"
             f"visibility: {visibility}\n"
+            "review_status: reviewed\n"  # sharing waits for the author's review
             "---\n\n"
             f"# {name}\n\n{text}\n",
             encoding="utf-8",
@@ -316,10 +317,100 @@ class TeamImportGateTests(unittest.TestCase):
     def test_teammate_edit_after_import_keeps_yours_and_says_so(self):
         self._team_page("deploy-window", "Deploys happen on Tuesdays.")
         self._import()
+        self._review_local("deploy-window")
         self._team_page("deploy-window", "Deploys happen on Wednesdays.")
         report = self._import()
         self.assertEqual(report["conflicts"], ["deploy-window"])
+        self.assertEqual(report["updated"], [])
+        self.assertEqual(report["conflict_details"][0]["name"], "deploy-window")
         self.assertIn("Tuesdays", (self.wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8"))
+
+    def _review_local(self, name):
+        from link_core.frontmatter import update_frontmatter_fields
+        page = self.wiki / "memories" / f"{name}.md"
+        page.write_text(update_frontmatter_fields(
+            page.read_text(encoding="utf-8"), {"review_status": "reviewed"}), encoding="utf-8")
+
+    def test_teammate_edit_before_your_review_replaces_the_unreviewed_copy(self):
+        """Reviewing the old copy would approve words the teammate no longer stands behind."""
+        self._team_page("deploy-window", "Deploys happen on Tuesdays.")
+        self._import()
+        self._team_page("deploy-window", "Deploys happen on Wednesdays.")
+        report = self._import()
+        self.assertEqual(report["updated"], ["deploy-window"])
+        self.assertEqual(report["conflicts"], [])
+        text = (self.wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8")
+        self.assertIn("Wednesdays", text)
+        self.assertIn("review_status: pending", text)
+        self.assertIn("imported_from: team", text)
+        self.assertEqual(self._import()["updated"], [])
+
+    def test_a_withdrawn_team_memory_is_removed_unreviewed_and_kept_reviewed(self):
+        self._team_page("deploy-window", "Deploys happen on Tuesdays.")
+        self._team_page("review-rule", "Two approvals before merging.")
+        self._import()
+        self._review_local("review-rule")
+        (self.team_wiki / "memories" / "deploy-window.md").unlink()
+        (self.team_wiki / "memories" / "review-rule.md").unlink()
+        report = self._import()
+        self.assertEqual(
+            sorted((item["name"], item["action"]) for item in report["withdrawn"]),
+            [("deploy-window", "removed"), ("review-rule", "kept")],
+        )
+        self.assertFalse((self.wiki / "memories" / "deploy-window.md").exists())
+        self.assertTrue((self.wiki / "memories" / "review-rule.md").exists())
+        # Said once, and a memory shared again later is a new import.
+        self.assertEqual(self._import()["withdrawn"], [])
+        self._team_page("deploy-window", "Deploys happen on Thursdays.")
+        self.assertEqual(self._import()["imported"], ["deploy-window"])
+
+    def test_adopt_takes_the_team_version_into_review_and_keep_silences_it(self):
+        from link_core.sync import SyncError, settle_team_conflict
+        self._team_page("deploy-window", "Deploys happen on Tuesdays.")
+        self._import()
+        self._review_local("deploy-window")
+        self._team_page("deploy-window", "Deploys happen on Wednesdays.")
+        settle_team_conflict(self.team_wiki, self.wiki, "deploy-window", adopt=False, ledger_path=self.ledger)
+        self.assertEqual(self._import()["conflicts"], [])
+        self.assertIn("Tuesdays", (self.wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8"))
+        # A later team change is a new difference and is reported again.
+        self._team_page("deploy-window", "Deploys happen on Fridays.")
+        self.assertEqual(self._import()["conflicts"], ["deploy-window"])
+        settle_team_conflict(self.team_wiki, self.wiki, "deploy-window", adopt=True, ledger_path=self.ledger)
+        text = (self.wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8")
+        self.assertIn("Fridays", text)
+        self.assertIn("review_status: pending", text)
+        self.assertEqual(self._import()["conflicts"], [])
+        with self.assertRaises(SyncError):
+            settle_team_conflict(self.team_wiki, self.wiki, "../../etc/passwd", adopt=True, ledger_path=self.ledger)
+
+    def test_sharing_waits_for_review_and_archiving_withdraws(self):
+        from link_core.frontmatter import update_frontmatter_fields
+        from link_core.sync import export_team_memories
+        page = self.wiki / "memories" / "deploy-window.md"
+        page.write_text(
+            "---\ntitle: deploy\nvisibility: team\nstatus: active\nreview_status: pending\n---\n\nDeploys on Tuesdays.\n",
+            encoding="utf-8")
+        held: list[str] = []
+        self.assertEqual(export_team_memories(self.wiki, self.team_wiki, ledger_path=self.ledger, held=held), [])
+        self.assertEqual(held, ["deploy-window"])
+        self.assertFalse((self.team_wiki / "memories" / "deploy-window.md").exists())
+        page.write_text(update_frontmatter_fields(page.read_text(encoding="utf-8"), {"review_status": "reviewed"}), encoding="utf-8")
+        self.assertEqual(export_team_memories(self.wiki, self.team_wiki, ledger_path=self.ledger), ["deploy-window"])
+        # An edit sends it back to review: the reviewed version stays shared.
+        shared = (self.team_wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8")
+        page.write_text(update_frontmatter_fields(
+            page.read_text(encoding="utf-8").replace("Tuesdays", "Fridays"), {"review_status": "pending"}), encoding="utf-8")
+        held = []
+        self.assertEqual(export_team_memories(self.wiki, self.team_wiki, ledger_path=self.ledger, held=held), [])
+        self.assertEqual(held, ["deploy-window"])
+        self.assertEqual((self.team_wiki / "memories" / "deploy-window.md").read_text(encoding="utf-8"), shared)
+        # Archiving takes the shared copy back.
+        page.write_text(update_frontmatter_fields(shared, {"status": "archived"}), encoding="utf-8")
+        withdrawn: list[str] = []
+        export_team_memories(self.wiki, self.team_wiki, ledger_path=self.ledger, withdrawn=withdrawn)
+        self.assertEqual(withdrawn, ["deploy-window"])
+        self.assertFalse((self.team_wiki / "memories" / "deploy-window.md").exists())
 
     def test_export_never_writes_through_a_symlinked_team_file(self):
         from link_core.sync import export_team_memories
@@ -327,7 +418,7 @@ class TeamImportGateTests(unittest.TestCase):
         victim.write_text("do not overwrite\n", encoding="utf-8")
         (self.team_wiki / "memories" / "deploy-window.md").symlink_to(victim)
         (self.wiki / "memories" / "deploy-window.md").write_text(
-            "---\ntitle: deploy\nvisibility: team\nstatus: active\n---\n\nDeploys on Tuesdays.\n", encoding="utf-8")
+            "---\ntitle: deploy\nvisibility: team\nstatus: active\nreview_status: reviewed\n---\n\nDeploys on Tuesdays.\n", encoding="utf-8")
         self.assertEqual(export_team_memories(self.wiki, self.team_wiki), [])
         self.assertEqual(victim.read_text(encoding="utf-8"), "do not overwrite\n")
 

@@ -75,11 +75,68 @@ class RuleTests(_Store):
     def test_a_named_command_is_suggested_and_a_file_is_not(self):
         self.assertEqual(suggest_enforce_rules("Never run `git push --force` on main."),
                          ["ask command: git push --force", "ask command: git push --force *"])
-        self.assertEqual(suggest_enforce_rules("Never edit `src/app.py` by hand."), [])
+        self.assertEqual(suggest_enforce_rules("Never edit `src/app.py` by hand."), ["ask write: src/app.py"])
         self.assertEqual(suggest_enforce_rules("We always use `pytest -q`."), [])
         # The command the user wants run is never turned into a rule against it.
         self.assertEqual(suggest_enforce_rules("Don't forget to run `make test`."), [])
         self.assertEqual(suggest_enforce_rules("Never merge without running `pnpm lint`."), [])
+
+    def test_files_and_actions_named_in_words_are_suggested(self):
+        cases = {
+            "Never edit `migrations/` by hand.": ["ask write: migrations/**"],
+            "Do not modify anything in `vendor/`": ["ask write: vendor/**"],
+            "Don't read `.env`, ever.": ["ask read: .env"],
+            "Never print the file `secrets/prod.json` in a reply": ["ask read: secrets/prod.json"],
+            "Never force push to main": [
+                "ask command: git push --force", "ask command: git push --force *",
+                "ask command: git push -f", "ask command: git push -f *"],
+            "We never force-push.": [
+                "ask command: git push --force", "ask command: git push --force *",
+                "ask command: git push -f", "ask command: git push -f *"],
+            "Do not hard reset shared branches": ["ask command: git reset --hard", "ask command: git reset --hard *"],
+            "Never skip the pre-commit hooks": [
+                "ask command: git commit *--no-verify*", "ask command: git push *--no-verify*"],
+            "Don't use --no-verify": ["ask command: git commit *--no-verify*", "ask command: git push *--no-verify*"],
+            "never run rm -rf in this repo": ["ask command: rm -rf *"],
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(suggest_enforce_rules(text), expected)
+                for rule in expected:
+                    parse_enforce_rule(rule)
+        # Named, but not forbidden - or not a file - gets nothing.
+        for text in (
+            "Force push when I ask you to rebase.",
+            "Use rm -rf to clear the build folder.",
+            "Never edit `the config` without asking.",
+            "Never change `timeout` in production.",
+            "No changes to the API without a design doc.",
+            "We always read `.env.example` first.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(suggest_enforce_rules(text), [])
+        # A backticked command is read once, by the command pattern.
+        self.assertEqual(suggest_enforce_rules("Never run `git push --force` on main."),
+                         ["ask command: git push --force", "ask command: git push --force *"])
+
+    def test_a_suggested_rule_stops_the_call_it_describes(self):
+        from link_core.shell_parse import command_forms, read_shell
+        import fnmatch
+
+        def stopped(text: str, command: str) -> bool:
+            patterns = [parse_enforce_rule(rule).pattern for rule in suggest_enforce_rules(text)]
+            forms = [" ".join(form) for words in read_shell(command).commands for form in command_forms(words)]
+            return any(fnmatch.fnmatchcase(form, pattern) for form in forms for pattern in patterns)
+
+        self.assertTrue(stopped("Never force push", "git push origin main --force"))
+        self.assertTrue(stopped("Never force push", "git push -f"))
+        self.assertTrue(stopped("Never force push", "cd repo && git -C . push --force origin main"))
+        self.assertFalse(stopped("Never force push", "git push --force-with-lease origin main"))
+        self.assertFalse(stopped("Never force push", "git push origin main"))
+        self.assertTrue(stopped("Never skip hooks", "git commit -m wip --no-verify"))
+        self.assertTrue(stopped("never run rm -rf here", "rm -fr build"))
+        self.assertTrue(stopped("Do not hard reset", "git reset --hard HEAD~3"))
+        self.assertFalse(stopped("Do not hard reset", "git reset --soft HEAD~1"))
 
     def test_a_rule_acts_only_after_review(self):
         self._memory("Never force-push to main.", ["ask command: git push --force*"], reviewed=False)

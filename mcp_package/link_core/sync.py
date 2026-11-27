@@ -844,6 +844,35 @@ def _memory_is_active(path: Path) -> bool:
     return str(meta.get("status") or "active").strip().lower() == "active"
 
 
+def _memory_meta(path: Path) -> dict[str, object]:
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return {}
+    return dict(meta)
+
+
+def _memory_is_reviewed(path: Path) -> bool:
+    return str(_memory_meta(path).get("review_status") or "pending").strip().lower() == "reviewed"
+
+
+def _memory_is_quarantined(path: Path) -> bool:
+    """A teammate's page nobody here has reviewed or edited (memory.memory_quarantined)."""
+    meta = _memory_meta(path)
+    return (
+        str(meta.get("imported_from") or "").strip().lower() == "team"
+        and str(meta.get("review_status") or "pending").strip().lower() in {"pending", "needs_review"}
+    )
+
+
+def _memory_summary(text: str) -> str:
+    meta, body = parse_frontmatter(text)
+    for line in body.splitlines():
+        if line.startswith("> **TLDR:**"):
+            return line.removeprefix("> **TLDR:**").strip()
+    return str(meta.get("title") or "").strip().strip('"')
+
+
 def _imported_from_team(path: Path) -> bool:
     try:
         meta, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
@@ -869,6 +898,7 @@ def _refuse_symlinked_dirs(*paths: Path) -> None:
 
 def export_team_memories(
     wiki_dir: Path, team_wiki: Path, *, ledger_path: Path | None = None,
+    held: list[str] | None = None, withdrawn: list[str] | None = None,
 ) -> list[str]:
     """Mirror local active visibility:team memories into the team repo.
 
@@ -879,8 +909,13 @@ def export_team_memories(
     `imported_from` from its frontmatter.
 
     Every page shared from here is noted in the team ledger, so a memory
-    you later forget is retracted from the shared repo (when it still holds
-    what you shared) and never comes back as a teammate's import.
+    you later forget, archive or take back out of `visibility: team` is
+    retracted from the shared repo (when it still holds what you shared)
+    and never comes back as a teammate's import.
+
+    Sharing waits for your review. A page that is new or was changed since
+    you last reviewed it (by you, or by an agent through `update`) is named
+    in `held` and stays local; the version you reviewed stays shared.
     """
     exported: list[str] = []
     source_dir = wiki_dir / "memories"
@@ -890,14 +925,22 @@ def export_team_memories(
     ledger_file = ledger_path or (wiki_dir.parent / TEAM_IMPORT_LEDGER)
     ledger = _load_import_ledger(ledger_file)
     changed_ledger = False
-    # Retract what this machine shared and has since forgotten.
+    # Retract what this machine shared and has since forgotten, archived or
+    # made private again. An archived page left in the shared repo kept
+    # reaching every teammate who had not imported it yet.
     for name, entry in list(ledger.items()):
         shared = str(entry.get("exported_sha256") or "")
-        if not shared or (source_dir / f"{name}.md").exists() or entry.get("retracted"):
+        if not shared or entry.get("retracted"):
+            continue
+        local = source_dir / f"{name}.md"
+        if local.is_file() and not local.is_symlink() \
+                and _memory_visibility(local) == "team" and _memory_is_active(local):
             continue
         copy = target_dir / f"{name}.md"
         if copy.is_file() and not copy.is_symlink() and _sha256(copy.read_text(encoding="utf-8", errors="replace")) == shared:
             copy.unlink()
+            if withdrawn is not None:
+                withdrawn.append(name)
         ledger[name] = {**entry, "retracted": "yes"}
         changed_ledger = True
     if not source_dir.exists():
@@ -916,6 +959,11 @@ def export_team_memories(
         content = path.read_text(encoding="utf-8", errors="replace")
         target = target_dir / path.name
         if target.is_symlink():
+            continue
+        if not _memory_is_reviewed(path):
+            if not (target.exists() and target.read_text(encoding="utf-8", errors="replace") == content):
+                if held is not None:
+                    held.append(path.stem)
             continue
         if target.exists() and target.read_text(encoding="utf-8", errors="replace") == content:
             if ledger.get(path.stem, {}).get("exported_sha256") != _sha256(content):
@@ -966,7 +1014,10 @@ def import_team_memories(
     memory you forgot or archived after importing it stays gone.
     """
     imported: list[str] = []
+    updated: list[str] = []
     conflicts: list[str] = []
+    conflict_details: list[dict[str, str]] = []
+    withdrawn: list[dict[str, str]] = []
     rejected: list[dict[str, str]] = []
     skipped_forgotten: list[str] = []
     source_dir = team_wiki / "memories"
@@ -977,11 +1028,30 @@ def import_team_memories(
     ledger = _load_import_ledger(ledger_file)
     changed_ledger = False
     result: dict[str, list] = {
-        "imported": imported, "conflicts": conflicts,
+        "imported": imported, "updated": updated, "conflicts": conflicts,
+        "conflict_details": conflict_details, "withdrawn": withdrawn,
         "rejected": rejected, "skipped_forgotten": skipped_forgotten,
     }
     if not source_dir.exists():
         return result
+    # A memory imported from here that the team repo no longer holds was
+    # withdrawn by whoever shared it (archived, forgotten, or made private).
+    for name, entry in list(ledger.items()):
+        if not entry.get("team_sha256") or entry.get("withdrawn") or (source_dir / f"{name}.md").exists():
+            continue
+        local = target_dir / f"{name}.md"
+        if not local.is_file() or local.is_symlink() or not _imported_from_team(local):
+            continue
+        if _memory_is_quarantined(local):
+            # Never reviewed here: still only the teammate's claim, and they
+            # took it back. Nothing of the person's own is lost.
+            local.unlink()
+            del ledger[name]
+            withdrawn.append({"name": name, "action": "removed"})
+        else:
+            ledger[name] = {**entry, "withdrawn": "yes"}
+            withdrawn.append({"name": name, "action": "kept"})
+        changed_ledger = True
     for path in sorted(source_dir.glob("*.md")):
         name = path.stem
         if path.is_symlink() or not path.is_file():
@@ -1026,14 +1096,79 @@ def import_team_memories(
             continue
         if previous and previous.get("exported_sha256"):
             continue  # your own shared page (perhaps archived here): nothing to import
+        local_text = target.read_text(encoding="utf-8", errors="replace")
         if previous and previous.get("team_sha256") != team_hash:
+            if _memory_is_quarantined(target):
+                # Not reviewed here yet, so there is no local version to
+                # keep: reviewing the copy the teammate has since replaced
+                # would approve words they no longer stand behind.
+                gated = update_frontmatter_fields(content, {
+                    "review_status": "pending",
+                    "imported_from": "team",
+                }, remove={"reviewed_at", "enforce_active"})
+                target.write_text(gated, encoding="utf-8")
+                ledger[name] = {"team_sha256": team_hash}
+                changed_ledger = True
+                updated.append(name)
+                continue
+            if previous.get("kept_over_sha256") == team_hash:
+                continue  # the person already chose their version over this one
             # The teammate changed it since you imported it; yours stays.
             conflicts.append(name)
-        elif not previous and target.read_text(encoding="utf-8", errors="replace") != content:
+            conflict_details.append({
+                "name": name, "yours": _memory_summary(local_text), "team": _memory_summary(content),
+            })
+        elif not previous and local_text != content:
             conflicts.append(name)
+            conflict_details.append({
+                "name": name, "yours": _memory_summary(local_text), "team": _memory_summary(content),
+            })
     if changed_ledger:
         _save_import_ledger(ledger_file, ledger)
     return result
+
+
+def settle_team_conflict(
+    team_wiki: Path, wiki_dir: Path, name: str, *, adopt: bool, ledger_path: Path | None = None,
+) -> dict[str, str]:
+    """Settle one memory that differs from the team's version.
+
+    adopt: the team's version replaces yours and waits for your review, like
+    any import. keep: yours stays and this team version stops being reported.
+    """
+    clean = Path(str(name)).name.removesuffix(".md")
+    source = team_wiki / "memories" / f"{clean}.md"
+    target = wiki_dir / "memories" / f"{clean}.md"
+    _refuse_symlinked_dirs(team_wiki, team_wiki / "memories")
+    if not clean or not source.is_file() or source.is_symlink():
+        raise SyncError(f"the team workspace has no memory named {clean or name!r}")
+    if target.is_symlink():
+        raise SyncError(f"local path for {clean} is a symlink")
+    content = source.read_text(encoding="utf-8", errors="replace")
+    ledger_file = ledger_path or (wiki_dir.parent / TEAM_IMPORT_LEDGER)
+    ledger = _load_import_ledger(ledger_file)
+    team_hash = _sha256(content)
+    if not adopt:
+        if not target.is_file():
+            raise SyncError(f"there is no local memory named {clean} to keep")
+        ledger[clean] = {**ledger.get(clean, {}), "team_sha256": str(ledger.get(clean, {}).get("team_sha256") or ""),
+                         "kept_over_sha256": team_hash}
+        _save_import_ledger(ledger_file, ledger)
+        return {"name": clean, "action": "kept"}
+    meta, _ = parse_frontmatter(content)
+    problems = secret_value_warnings(content) + injected_instruction_warnings(content)
+    if str(meta.get("visibility") or "").strip().lower() != "team" or problems:
+        raise SyncError(f"the team version of {clean} cannot be imported"
+                        + (": " + ", ".join(problems) if problems else ": it is not marked visibility: team"))
+    gated = update_frontmatter_fields(content, {
+        "review_status": "pending",
+        "imported_from": "team",
+    }, remove={"reviewed_at", "enforce_active"})
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(gated, encoding="utf-8")
+    ledger[clean] = {"team_sha256": team_hash}
+    _save_import_ledger(ledger_file, ledger)
+    return {"name": clean, "action": "adopted"}
 
 
 def team_sync_workspace(
@@ -1058,7 +1193,17 @@ def team_sync_workspace(
     # append (or log merge) write into that file.
     _refuse_symlinks(_symlinks_under(team_root), str(team_root))
 
-    exported = export_team_memories(wiki_dir, team_wiki, ledger_path=root / TEAM_IMPORT_LEDGER)
+    held: list[str] = []
+    retracted: list[str] = []
+    exported = export_team_memories(
+        wiki_dir, team_wiki, ledger_path=root / TEAM_IMPORT_LEDGER, held=held, withdrawn=retracted,
+    )
+    if retracted:
+        append_log(
+            team_wiki, utc_timestamp(), "team-withdraw",
+            f"Withdrew {len(retracted)} team memory(ies) from {platform.node().split('.')[0]}",
+            [f"memory: {name}" for name in retracted],
+        )
     if exported:
         append_log(
             team_wiki, utc_timestamp(), "team-export",
@@ -1068,21 +1213,28 @@ def team_sync_workspace(
     sync_report = sync_workspace(team_root, team_wiki, regenerate=lambda: None, forbid_symlinks=True)
     _refuse_symlinks(_symlinks_under(team_root), str(team_root))
     imports = import_team_memories(team_wiki, wiki_dir, ledger_path=root / TEAM_IMPORT_LEDGER)
-    if imports["imported"] or imports["conflicts"] or imports["rejected"]:
+    if imports["imported"] or imports["updated"] or imports["withdrawn"] or imports["conflicts"] or imports["rejected"]:
         append_log(
             wiki_dir, utc_timestamp(), "team-sync",
             f"Imported {len(imports['imported'])} team memory(ies) for review; "
             f"{len(imports['conflicts'])} kept local over team version; "
             f"{len(imports['rejected'])} rejected",
             [f"imported (pending review): {name}" for name in imports["imported"]]
+            + [f"replaced by the team's newer version (pending review): {name}" for name in imports["updated"]]
+            + [f"withdrawn by the team ({item['action']} here): {item['name']}" for item in imports["withdrawn"]]
             + [f"kept local: {name}" for name in imports["conflicts"]]
             + [f"rejected: {item['name']} ({item['reason']})" for item in imports["rejected"]],
         )
-        if imports["imported"]:
+        if imports["imported"] or imports["updated"] or any(item["action"] == "removed" for item in imports["withdrawn"]):
             regenerate()
     return {
         "exported": exported,
+        "held_unreviewed": held,
+        "retracted": retracted,
         "imported": imports["imported"],
+        "updated": imports["updated"],
+        "withdrawn": imports["withdrawn"],
+        "conflict_details": imports["conflict_details"],
         "conflicts": imports["conflicts"],
         "rejected": imports["rejected"],
         "skipped_forgotten": imports["skipped_forgotten"],

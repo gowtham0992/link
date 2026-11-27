@@ -67,7 +67,7 @@ def _workspace(root: Path) -> Path:
 
 def _memory(wiki: Path, name: str, text: str, visibility: str = "") -> Path:
     path = wiki / "memories" / f"{name}.md"
-    vis = f"visibility: {visibility}\n" if visibility else ""
+    vis = f"visibility: {visibility}\nreview_status: reviewed\n" if visibility else ""
     path.write_text(
         f"---\ntitle: \"{name}\"\ntype: decision\nscope: project\nstatus: active\n{vis}---\n\n# {name}\n\n{text}\n",
         encoding="utf-8",
@@ -405,12 +405,17 @@ class TeamDeletionTests(unittest.TestCase):
             report = import_team_memories(team_wiki, wiki, ledger_path=ledger)
             self.assertIn("deploy-window", report["skipped_forgotten"])
             self.assertFalse((wiki / "memories" / "deploy-window.md").exists())
-            # Archived here: stays shared for teammates, is not re-imported, is not a conflict.
+            # Archived here: the author retired it, so it stops reaching teammates
+            # (a superseded claim is archived, and must not stay shared as current).
+            # It is not re-imported and is not a conflict.
             set_memory_status(wiki, "review-rule", "archived", "", timestamp="2026-09-21T00:00:00Z")
             export_team_memories(wiki, team_wiki, ledger_path=ledger)
-            self.assertTrue((team_wiki / "memories" / "review-rule.md").exists())
+            self.assertFalse((team_wiki / "memories" / "review-rule.md").exists())
             report = import_team_memories(team_wiki, wiki, ledger_path=ledger)
             self.assertNotIn("review-rule", report["imported"] + report["conflicts"])
+            # Restored: shared again.
+            set_memory_status(wiki, "review-rule", "active", "", timestamp="2026-09-22T00:00:00Z")
+            self.assertEqual(export_team_memories(wiki, team_wiki, ledger_path=ledger), ["review-rule"])
 
     def test_an_edited_import_is_not_exported_or_reported_as_a_conflict(self):
         from link_core.memory import mark_memory_reviewed, memory_records, update_memory_page

@@ -726,6 +726,16 @@ included by a broad `git add wiki`.
 lnk team-sync ~/link --remote git@example.com:team/link-memory.git
 ```
 
+Only memories you have reviewed are shared, and archiving or forgetting one
+withdraws it. When a teammate changes a memory you already reviewed, the run
+shows both versions; `lnk team-sync --adopt <name>` takes theirs into your
+review, `--keep <name>` keeps yours.
+
+Working in code you have not vetted (a repository cloned to review, a
+stranger's pull request)? `lnk folder --untrusted .` keeps memory out of it:
+agents get no memory in that folder and Link proposes none from their sessions,
+while your rules on tool calls still apply.
+
 For a teammate, reviewer, or another agent, `lnk share` resolves a page,
 memory, title, alias, or search phrase into a local viewer URL:
 

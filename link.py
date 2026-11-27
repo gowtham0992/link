@@ -153,6 +153,7 @@ from link_core.memory import (
     memory_audit_next_actions as _core_memory_audit_next_actions,
     memory_records as _core_memory_records,
     is_active_memory as _core_is_active_memory,
+    memory_quarantined as _core_memory_quarantined,
     memory_merge_candidates as _core_memory_merge_candidates,
     memory_review_issues as _core_memory_review_issues,
     parse_time_expression as _core_parse_time_expression,
@@ -298,6 +299,12 @@ from link_core.agent_instructions import (
     refresh_instruction_file as _core_refresh_instruction_file,
 )
 from link_core.tool_events import render_reply as _core_render_reply
+from link_core.folder_trust import (
+    set_folder_trust as _core_set_folder_trust,
+    untrusted_folders as _core_untrusted_folders,
+    untrusted_notice as _core_untrusted_notice,
+    untrusted_parent as _core_untrusted_parent,
+)
 from link_core.tool_hooks import (
     hook_project as _core_hook_project,
     hook_project_dir as _core_hook_project_dir,
@@ -325,6 +332,8 @@ from link_core.sync import (
     sync_status as _core_sync_status,
     sync_workspace as _core_sync_workspace,
     team_config as _core_team_config,
+    settle_team_conflict as _core_settle_team_conflict,
+    TEAM_IMPORT_LEDGER as _core_team_import_ledger,
     team_init as _core_team_init,
     team_sync_workspace as _core_team_sync_workspace,
 )
@@ -1100,11 +1109,38 @@ def team_sync(
     init: bool = False,
     team_dir: str | None = None,
     json_output: bool = False,
+    adopt: str | None = None,
+    keep: str | None = None,
 ) -> int:
     target = target.expanduser().resolve()
     root = _resolve_link_root(target)
     wiki_dir = _resolve_wiki_dir(target)
     try:
+        if adopt or keep:
+            if adopt and keep or init:
+                print("Use one of --adopt, --keep or --init at a time.", file=sys.stderr)
+                return 2
+            config = _core_team_config(root)
+            if not config:
+                print("Team memory is not set up: "
+                      + _shell_words_for_target("team-sync", target, "--init", "--remote", "<git-url>"), file=sys.stderr)
+                return 1
+            settled = _core_settle_team_conflict(
+                Path(config["dir"]) / "wiki", wiki_dir, str(adopt or keep), adopt=bool(adopt),
+                ledger_path=root / _core_team_import_ledger,
+            )
+            if adopt:
+                _core_rebuild_index(wiki_dir)
+                _rebuild_backlinks_quiet(wiki_dir)
+            if json_output:
+                print(json.dumps(settled, indent=2))
+                return 0
+            if adopt:
+                _print_text(f"Took the team's version of {settled['name']}. It waits for your review, like any import:")
+                _print_text("  " + _core_display_command(["lnk", "review-memory", settled["name"], str(target)]))
+            else:
+                _print_text(f"Kept your version of {settled['name']}; this team version will not be reported again.")
+            return 0
         if init:
             if not wiki_dir.exists():
                 return _missing_wiki_error(wiki_dir)
@@ -1139,11 +1175,21 @@ def team_sync(
             imported: list[object] = imported_obj if isinstance(imported_obj, list) else []
             conflicts_obj = payload.get("conflicts")
             conflicts: list[object] = conflicts_obj if isinstance(conflicts_obj, list) else []
+            def _names(key: str) -> list[object]:
+                value = payload.get(key)
+                return value if isinstance(value, list) else []
+
+            updated, withdrawn, held, retracted = (
+                _names("updated"), _names("withdrawn"), _names("held_unreviewed"), _names("retracted"))
             parts = []
             if exported:
                 parts.append(f"shared {len(exported)}")
+            if retracted:
+                parts.append(f"withdrew {len(retracted)}")
             if imported:
                 parts.append(f"imported {len(imported)}")
+            if updated:
+                parts.append(f"updated {len(updated)}")
             rejected_obj = payload.get("rejected")
             rejected: list[object] = rejected_obj if isinstance(rejected_obj, list) else []
             if rejected:
@@ -1157,17 +1203,41 @@ def team_sync(
                     if isinstance(finding, dict):
                         _print_text(f"    {finding.get('path')}: {finding.get('label')}")
                 _print_text(f"  {sync_obj.get('message') or ''}")
+            for name in retracted:
+                _print_text(f"  no longer shared (you archived, forgot or unshared it): {name}")
+            for name in held:
+                _print_text(f"  not shared until you review it: {name}")
+            if held:
+                _print_text("  Review, then sync again: " + _shell_words_for_target("memory-inbox", target))
             for name in imported:
                 _print_text(f"  new from the team, pending your review: {name}")
-            if imported:
+            for name in updated:
+                _print_text(f"  changed by the team before you reviewed it, now the newer version: {name}")
+            if imported or updated:
                 _print_text("  Review them: " + _shell_words_for_target("memory-inbox", target))
+            for item in withdrawn:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("action") == "removed":
+                    _print_text(f"  withdrawn by the team before you reviewed it, removed: {item.get('name')}")
+                else:
+                    _print_text(f"  withdrawn by the team, yours is kept: {item.get('name')}")
+                    _print_text("    Drop it too: " + _core_display_command(["lnk", "archive-memory", str(item.get("name")), str(target)]))
             for item in rejected:
                 if isinstance(item, dict):
                     _print_text(f"  not imported: {item.get('name')} ({item.get('reason')})")
             if conflicts:
-                _print_text(f"  {len(conflicts)} memory(ies) differ from the team version — kept yours:")
+                noun = "memory differs" if len(conflicts) == 1 else "memories differ"
+                _print_text(f"  {len(conflicts)} {noun} from the team version — kept yours:")
+                details = {str(item.get("name")): item for item in _names("conflict_details") if isinstance(item, dict)}
                 for name in conflicts:
-                    _print_text(f"    {name} (edit and re-share, or adopt the team version deliberately)")
+                    _print_text(f"    {name}")
+                    detail = details.get(str(name))
+                    if detail:
+                        _print_text(f"      yours: {detail.get('yours')}")
+                        _print_text(f"      team:  {detail.get('team')}")
+                    _print_text("      take the team's: " + _shell_words_for_target("team-sync", target, "--adopt", str(name)))
+                    _print_text("      keep yours:      " + _shell_words_for_target("team-sync", target, "--keep", str(name)))
             return 0
     except _core_sync_error as exc:
         print(f"Team sync failed: {exc}", file=sys.stderr)
@@ -1617,9 +1687,71 @@ def _stale_imports(wiki_dir: Path, *, json_output: bool) -> int:
             print(f"\n{label}:")
             current = label
         print(f"  {finding['name']}: {finding['evidence']}")
-    print("\nNothing was rewritten. Import again to review what changed, then replace the old memory "
-          "(`lnk remember ... --supersedes NAME`) or archive it.")
+        name = str(finding["name"])
+        if finding.get("now"):
+            print("    Replace it: " + _display_command(
+                ["lnk", "remember", str(finding["now"]), str(wiki_dir.parent), "--supersedes", name]))
+        else:
+            print("    Retire it:  " + _display_command(["lnk", "archive-memory", name, str(wiki_dir.parent)]))
+    print("\nNothing was rewritten. Each line above is yours to run, or not: an origin that moved on "
+          "does not mean your memory is wrong.")
     return 1
+
+
+def folder(
+    target: Path, *, untrusted: str | None = None, trusted: str | None = None, json_output: bool = False,
+) -> int:
+    """Mark a folder untrusted (no memory given or captured there), trust it again, or list them."""
+    target = target.expanduser().resolve()
+    wiki_dir = _resolve_wiki_dir(target)
+    if not wiki_dir.exists():
+        return _missing_wiki_error(wiki_dir)
+    root = _resolve_link_root(target)
+    if untrusted and trusted:
+        print("Use --untrusted or --trusted, not both.", file=sys.stderr)
+        return 2
+    if untrusted or trusted:
+        try:
+            result = _core_set_folder_trust(root, str(untrusted or trusted), untrusted=bool(untrusted))
+        except ValueError as exc:
+            print(f"Could not change the folder: {exc}", file=sys.stderr)
+            return 1
+        if json_output:
+            print(json.dumps(result, indent=2))
+            return 0
+        where = result["folder"]
+        if untrusted:
+            _print_text(
+                (f"Marked untrusted: {where}" if result["changed"] else f"Already marked untrusted: {where}")
+                + "\nIn it and every folder below, Link gives agents no memory and proposes none from their "
+                "sessions. Rules on tool calls still apply."
+                + "\nUndo: " + _display_command(["lnk", "folder", "--trusted", str(where), str(target)])
+            )
+        elif result["covered_by"]:
+            _print_text(
+                f"{where} was not marked itself; it is inside {result['covered_by']}, which still is."
+                + "\nTrust that one: " + _display_command(["lnk", "folder", "--trusted", str(result["covered_by"]), str(target)])
+            )
+        else:
+            _print_text(f"Trusted again: {where}" if result["changed"] else f"Was not marked untrusted: {where}")
+        return 0
+    folders = _core_untrusted_folders(root)
+    here = _core_untrusted_parent(root, Path.cwd())
+    if json_output:
+        print(json.dumps({"folders": folders, "current_folder_untrusted": bool(here)}, indent=2))
+        return 0
+    if not folders:
+        _print_text(
+            "No folder is marked untrusted: Link works the same everywhere."
+            "\nWorking in code you have not vetted? Keep memory out of it: "
+            + _display_command(["lnk", "folder", "--untrusted", ".", str(target)])
+        )
+        return 0
+    lines = [f"Untrusted folders ({len(folders)}): no memory given to agents there, none proposed from their sessions."]
+    lines += [f"  {item}" + ("   <- you are here" if item == here else "") for item in folders]
+    lines.append("Trust one again: " + _display_command(["lnk", "folder", "--trusted", "<folder>", str(target)]))
+    _print_text("\n".join(lines))
+    return 0
 
 
 def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False,
@@ -2225,9 +2357,8 @@ def _capture_review_summary(target: Path, project: str | None = None, limit: int
         project=project,
         commands_for=lambda rel_path: _core_cli_capture_commands(rel_path, root),
     )
-    summary["next_action"] = f'python3 link.py capture-inbox "{root}"'
-    if summary["project"]:
-        summary["next_action"] = f'python3 link.py capture-inbox "{root}" --project "{summary["project"]}"'
+    project_args = ["--project", str(summary["project"])] if summary["project"] else []
+    summary["next_action"] = _core_display_command(["lnk", "capture-inbox", str(root), *project_args])
     return summary
 
 
@@ -2675,7 +2806,13 @@ def enforce_memory(
             if current:
                 print(f"{record['name']} already enforces: " + "; ".join(current))
             else:
-                print(f"No rule to suggest for {record['name']}: it names no command in backticks.")
+                print(
+                    f"No rule to suggest for {record['name']}: it names no command or file in backticks "
+                    "after a \"never\", and none of the actions Link knows by name (force push, hard reset, "
+                    "rm -rf, skipping commit hooks).\nWrite one yourself: "
+                    + _display_command(["lnk", "enforce", str(record["name"]), str(target), "--rule",
+                                        "ask command: <command> *"])
+                )
             return 0
         print(f"Rules Link can enforce for {record['name']}:")
         for rule in suggestions:
@@ -2796,13 +2933,33 @@ def recall(
             f"searching by topic. Use --as-of YYYY-MM-DD to pin the moment.\n"
         )
 
+    miss_hint = ""
+    all_records = _memory_records(wiki_dir) if not results else []
+    if not results:
+        # A teammate's memory nobody here has reviewed is kept out of recall on
+        # purpose. Saying "no match" for one would send the user looking for
+        # different words when the answer is sitting in their inbox.
+        words = {word for word in re.findall(r"[a-z0-9]+", search_query.lower()) if len(word) > 2}
+        waiting = [
+            record for record in all_records
+            if _core_memory_quarantined(record)
+            and words & set(re.findall(r"[a-z0-9]+", f"{record.get('title') or ''} {record.get('tldr') or ''}".lower()))
+        ]
+        if waiting:
+            noun = "memory from your team matches but is" if len(waiting) == 1 else "memories from your team match but are"
+            miss_hint = (
+                f"{len(waiting)} {noun} waiting for your review, so recall leaves "
+                f"{'it' if len(waiting) == 1 else 'them'} out: "
+                + _display_command(["lnk", "memory-inbox", str(target)])
+            )
     code, text = _core_render_recall_text(
         query=query,
         results=results,
         include_archived=include_archived,
         project=project_name,
         target=target,
-        store_count=len(_memory_records(wiki_dir)) if not results else -1,
+        store_count=len(all_records) if not results else -1,
+        miss_hint=miss_hint,
     )
     _print_text(text)
     return code
@@ -3804,6 +3961,16 @@ def run_agent_hook(
     target = target.expanduser().resolve()
     hook_event = _read_hook_stdin()
     try:
+        if event in {"session-start", "session-end", "prompt-check", "post-tool"}:
+            # A folder the person marked untrusted gets no memory and gives
+            # none. pre-tool is left alone: rules are protection, not context.
+            marked = _core_untrusted_parent(_resolve_link_root(target), _hook_project_dir(hook_event))
+            if marked:
+                if event == "session-start":
+                    _emit_session_start(_core_untrusted_notice(marked), emit)
+                elif event == "session-end" and explain:
+                    print(f"[session-end] skipped: {marked} is marked untrusted, so nothing is captured from it.")
+                return 0
         if event == "session-start":
             return _hook_session_start(target, hook_event, limit, project, emit)
         if event == "session-end":
@@ -5338,7 +5505,7 @@ _WORKSPACE_COMMANDS = {
     "backup", "restore-backup", "ingest-status", "serve", "share",
     "snapshot", "graph-summary", "benchmark", "team-sync",
     "compliance-export", "migrate", "rebuild-index", "rebuild-backlinks", "stale", "receipt",
-    "verify-mcp", "connect", "compile",
+    "verify-mcp", "connect", "compile", "folder",
 }
 
 
@@ -5486,6 +5653,7 @@ def main(argv: list[str] | None = None) -> int:
             "rebuild-index": rebuild_index,
             "rebuild-backlinks": rebuild_backlinks,
             "stale": stale,
+            "folder": folder,
             "compile": compile_memories,
             "receipt": receipt,
             "verify-mcp": verify_mcp,

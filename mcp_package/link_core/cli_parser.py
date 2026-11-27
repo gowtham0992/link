@@ -45,7 +45,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Utilities", (
         "version", "benchmark", "wins", "receipt", "profile", "rebuild-index",
-        "rebuild-backlinks", "query-link", "stale",
+        "rebuild-backlinks", "query-link", "stale", "folder",
     )),
 )
 
@@ -240,6 +240,8 @@ def build_cli_parser(
     team_sync_cmd.add_argument("--init", action="store_true", dest="team_init", help="set up the shared team workspace (idempotent)")
     team_sync_cmd.add_argument("--remote", default=None, help="shared git remote URL (with --init)")
     team_sync_cmd.add_argument("--dir", default=None, dest="team_dir", help="where the team workspace lives (default: sibling of the workspace)")
+    team_sync_cmd.add_argument("--adopt", default=None, metavar="MEMORY", help="take the team's version of a memory that differs from yours; it then waits for your review")
+    team_sync_cmd.add_argument("--keep", default=None, metavar="MEMORY", help="keep your version of a memory that differs from the team's, and stop reporting that team version")
     team_sync_cmd.add_argument("--json", action="store_true", help="print machine-readable team sync details")
 
     share_cmd = sub.add_parser("share", help="print a local viewer permalink for a page or memory")
@@ -604,6 +606,19 @@ def build_cli_parser(
     receipt_cmd.add_argument("--sessions", type=int, default=3, help="how many recent sessions (default 3)")
     receipt_cmd.add_argument("--json", action="store_true", help="machine-readable receipts")
 
+    folder_cmd = sub.add_parser(
+        "folder",
+        help="mark a folder untrusted: Link gives agents no memory there and proposes none from their sessions",
+        description="Working in code you have not vetted (a repository cloned to review, a stranger's pull "
+                    "request)? Mark the folder untrusted. In it and every folder below, Link gives agents no "
+                    "memory and proposes none from their sessions; rules on tool calls still apply. "
+                    "With no option, lists the marked folders.",
+    )
+    folder_cmd.add_argument("target", nargs="?", default=".", help="Link workspace")
+    folder_cmd.add_argument("--untrusted", default=None, metavar="FOLDER", help="mark this folder untrusted")
+    folder_cmd.add_argument("--trusted", default=None, metavar="FOLDER", help="trust this folder again")
+    folder_cmd.add_argument("--json", action="store_true", help="machine-readable result")
+
     stale_cmd = sub.add_parser(
         "stale",
         help="list memories that name repository paths git no longer has",
@@ -837,6 +852,7 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["team-sync"](
             Path(args.target), remote=args.remote, init=args.team_init,
             team_dir=args.team_dir, json_output=args.json,
+            adopt=args.adopt, keep=args.keep,
         )
     if command == "share":
         return handlers["share"](
@@ -1123,6 +1139,9 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["rebuild-backlinks"](Path(args.target))
     if command == "receipt":
         return handlers["receipt"](Path(args.target), sessions=int(args.sessions), json_output=bool(args.json))
+    if command == "folder":
+        return handlers["folder"](Path(args.target), untrusted=args.untrusted, trusted=args.trusted,
+                                  json_output=bool(args.json))
     if command == "stale":
         return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json),
                                  instructions=bool(args.instructions), wiki=bool(args.wiki),

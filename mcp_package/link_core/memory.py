@@ -786,6 +786,7 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "supersedes": str(meta.get("supersedes") or ""),
         "superseded_by": str(meta.get("superseded_by") or ""),
         "imported_from": str(meta.get("imported_from") or "").strip(),
+        "originally_imported_from": str(meta.get("originally_imported_from") or "").strip(),
         # The words a memory was made from, and where an imported one came
         # from (capture.memory_provenance); checked by lnk stale --imports.
         "evidence": str(meta.get("evidence") or ""),
@@ -1362,6 +1363,7 @@ def memory_explanation(
         "memory": slim_memory(record),
         "lineage": lineage if len(lineage) > 1 else [],
         "recall": recall_state(record, issues),
+        "rules": {"in_force": rules_in_force(record), "carried": carries_rules(record)},
         "review": {
             "status": record.get("review_status", "pending"),
             "reviewed_at": record.get("reviewed_at", ""),
@@ -1378,6 +1380,8 @@ def memory_explanation(
             "evidence": record.get("evidence", ""),
             "origin": record.get("origin", ""),
             "origin_revision": record.get("origin_revision", ""),
+            "imported_from": record.get("imported_from", ""),
+            "originally_imported_from": record.get("originally_imported_from", ""),
         },
         "lifecycle": {
             "status": record.get("status", "active"),
@@ -1390,6 +1394,23 @@ def memory_explanation(
         "log_entries": memory_log_entries(wiki_dir, record),
         "body": body,
     }
+
+
+def _closest_memory_names(needle: str, records: Iterable[Mapping[str, object]], limit: int = 3) -> list[str]:
+    """Names of memories whose name or title holds every word of a phrase that matched none exactly.
+
+    A wrong guess is only ever named, never acted on: archive, forget and update still need the exact name.
+    """
+    words = [word for word in re.findall(r"[a-z0-9]+", needle.lower()) if len(word) > 1]
+    if not words or "/" in needle or needle.endswith(".md"):
+        return []
+    names: list[str] = []
+    for record in records:
+        name = str(record.get("name") or "")
+        haystack = set(re.findall(r"[a-z0-9]+", f"{name} {record.get('title') or ''}".lower()))
+        if name and all(word in haystack for word in words):
+            names.append(name)
+    return sorted(names)[:limit]
 
 
 def resolve_memory_page(
@@ -1444,7 +1465,9 @@ def resolve_memory_page(
         names = ", ".join(str(record.get("name") or "") for record in matches[:5])
         return None, None, f"memory identifier is ambiguous: {names}"
     if not matches:
-        return None, None, f"memory not found: {identifier}"
+        close = _closest_memory_names(needle, record_list)
+        hint = f". Did you mean: {', '.join(close)}?" if close else ""
+        return None, None, f"memory not found: {identifier}{hint}"
     record = matches[0]
     return wiki_dir / str(record["path"]).removeprefix("wiki/"), record, None
 
@@ -1969,6 +1992,7 @@ def mark_memory_reviewed(
         "review_status": "reviewed",
         "remaining_issue_count": len(issues),
         "remaining_issues": issues,
+        "rules_in_force": rules_in_force(updated_record),
     }
 
 
@@ -2726,21 +2750,21 @@ def memory_audit_next_actions(
     risks = list(risk_factors)
 
     if mode == "cli":
-        project_arg = f' --project "{project_name}"' if project_name else ""
+        project_args = ["--project", project_name] if project_name else []
         return [
             {
                 "label": "Review memory inbox",
-                "command": f'python3 link.py memory-inbox "{root}"{project_arg}',
+                "command": display_command(["lnk", "memory-inbox", str(root), *project_args]),
                 "recommended": review_recommended,
             },
             {
                 "label": "Review raw captures",
-                "command": f'python3 link.py capture-inbox "{root}"{project_arg}',
+                "command": display_command(["lnk", "capture-inbox", str(root), *project_args]),
                 "recommended": capture_recommended,
             },
             {
                 "label": "Run doctor",
-                "command": f'python3 link.py doctor "{root}"',
+                "command": display_command(["lnk", "doctor", str(root)]),
                 "recommended": not risks,
             },
         ]
@@ -2771,27 +2795,27 @@ def memory_audit_next_actions(
 
     if mode == "web":
         project_query = f"?project={urllib.parse.quote(project_name, safe='')}" if project_name else ""
-        project_arg = f' --project "{project_name}"' if project_name else ""
+        project_args = ["--project", project_name] if project_name else []
         return [
             {
                 "label": "Review memory inbox",
                 "detail": "Review pending, stale, invalid, or underspecified memories.",
                 "href": f"/inbox{project_query}",
-                "command": f'python3 link.py memory-inbox "{root}"{project_arg}',
+                "command": display_command(["lnk", "memory-inbox", str(root), *project_args]),
                 "recommended": review_recommended,
             },
             {
                 "label": "Review raw captures",
                 "detail": "Accept, redact, or delete saved proposal-only raw captures.",
                 "href": f"/captures{project_query}",
-                "command": f'python3 link.py capture-inbox "{root}"{project_arg}',
+                "command": display_command(["lnk", "capture-inbox", str(root), *project_args]),
                 "recommended": capture_recommended,
             },
             {
                 "label": "Run doctor",
                 "detail": "Check graph, source, memory, raw capture, and secret hygiene.",
                 "href": "",
-                "command": f'python3 link.py doctor "{root}"',
+                "command": display_command(["lnk", "doctor", str(root)]),
                 "recommended": not risks,
             },
         ]

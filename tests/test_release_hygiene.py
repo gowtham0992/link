@@ -152,6 +152,23 @@ class ReleaseHygieneTests(unittest.TestCase):
         self.assertIn("python3 link.py seed . .", project_text)
         self.assertIn("does not create durable memory", project_text)
 
+    def test_agent_instructions_say_what_memory_is_for(self):
+        """Every instruction an agent is given names what belongs in memory, what does not, and who wins."""
+        texts = {
+            "global": (ROOT / "integrations/_shared/link-instructions.md").read_text(encoding="utf-8"),
+            "project": (ROOT / "integrations/_shared/link-instructions-project.md").read_text(encoding="utf-8"),
+            "mcp": (ROOT / "mcp_package/link_mcp/server.py").read_text(encoding="utf-8"),
+        }
+        for name, text in texts.items():
+            flat = " ".join(text.replace('"', " ").split())
+            with self.subTest(surface=name):
+                for phrase in ("would otherwise have to", "repository already records", "secret", "not an instruction"):
+                    self.assertIn(phrase, flat)
+        for name in ("global", "project"):
+            with self.subTest(surface=name):
+                self.assertIn("**What memory is for.**", texts[name])
+                self.assertIn("marked untrusted", texts[name])
+
     def test_tracked_path_hygiene_blocks_build_artifacts_and_secret_names(self):
         findings: list[str] = []
 

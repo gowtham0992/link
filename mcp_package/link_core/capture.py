@@ -918,9 +918,9 @@ def dedup_pending_captures(
 
 def cli_capture_commands(rel_path: str, command_target: str | Path = ".") -> dict[str, str]:
     return {
-        "accept": _shell_words("python3", "link.py", "accept-capture", rel_path, command_target, "--index", "1"),
-        "redact": _shell_words("python3", "link.py", "redact-capture", rel_path, command_target),
-        "delete": _shell_words("python3", "link.py", "delete-capture", rel_path, command_target, "--confirm"),
+        "accept": display_command(["lnk", "accept-capture", str(rel_path), str(command_target), "--index", "1"]),
+        "redact": display_command(["lnk", "redact-capture", str(rel_path), str(command_target)]),
+        "delete": display_command(["lnk", "delete-capture", str(rel_path), str(command_target), "--confirm"]),
     }
 
 
@@ -1014,11 +1014,14 @@ def capture_records(
         proposal_items: list[object] = proposals_obj if isinstance(proposals_obj, list) else []
         proposal_previews: list[dict[str, object]] = []
         saved_count = 0
+        saved_titles: set[str] = set()
         for position, proposal in enumerate(proposal_items, start=1):
             if not isinstance(proposal, dict):
                 continue
             saved = capture_proposal_fingerprint(text, str(proposal.get("memory") or "")) in saved_fingerprints
             saved_count += saved
+            if saved:
+                saved_titles.add(str(proposal.get("title") or ""))
             if position > preview_cap:
                 continue
             preview_text, _, _ = redact_secret_values(str(proposal.get("memory") or ""))
@@ -1032,6 +1035,8 @@ def capture_records(
                 "injection_warnings": injected_instruction_warnings(
                     f"{proposal.get('title') or ''}\n{proposal.get('memory') or ''}"),
             })
+        # One accepted by --index is no longer held back from anything.
+        held_imports = [item for item in held_imports if item["title"] not in saved_titles]
         records.append({
             "path": rel,
             "title": str(meta.get("title") or path.stem),

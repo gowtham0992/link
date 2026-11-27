@@ -2507,7 +2507,7 @@ class LinkCliTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("Wiki: missing", out.getvalue())
-        self.assertIn("python3 link.py init", out.getvalue())
+        self.assertIn("lnk init", out.getvalue())
 
     def test_doctor_reports_dead_links(self):
         tmp = Path(tempfile.mkdtemp(prefix="link-doctor-test-"))

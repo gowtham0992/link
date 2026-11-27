@@ -261,6 +261,7 @@ def render_recall_text(
         lines.append("No matching memories found.")
         if miss_hint:
             lines.extend(["", miss_hint])
+            return 0, "\n".join(lines)
         if store_count > 0:
             # The store has memories; "add one" is the wrong advice - the
             # query and the stored words just did not overlap.
@@ -366,6 +367,12 @@ def render_forget_memory_text(result: Mapping[str, object], *, identifier: str, 
     ])
 
 
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
 def render_review_memory_text(result: Mapping[str, object]) -> tuple[int, str]:
     lines = [
         "Memory reviewed" if result["updated"] else "Memory was already reviewed",
@@ -374,6 +381,9 @@ def render_review_memory_text(result: Mapping[str, object]) -> tuple[int, str]:
         f"Previous review status: {result['previous_review_status']}",
         f"Review status: {result['review_status']}",
     ]
+    in_force = _string_list(result.get("rules_in_force"))
+    if in_force:
+        lines.append("Rules now in force on agent tool calls: " + "; ".join(in_force))
     if result["remaining_issue_count"]:
         lines.extend([
             "",
@@ -415,11 +425,17 @@ def render_memory_inbox_text(
             continue
         lines.append(f"- {item['title']} ({item['memory_type']} · {item['scope']} · {item['status']})")
         lines.append(f"  {item['path']}")
+        if str(item.get("imported_from") or "").strip():
+            lines.append(f"  Shared by your {item['imported_from']}: a teammate's claim until you review it.")
         issues = item.get("issues", [])
         if isinstance(issues, Sequence) and not isinstance(issues, (str, bytes)):
             for issue in issues:
                 if isinstance(issue, Mapping):
                     lines.append(f"  [{issue['severity']}] {issue['code']}: {issue['message']}")
+        waiting_rules = _string_list(item.get("enforce"))
+        if waiting_rules and str(item.get("review_status") or "pending").lower() != "reviewed":
+            # Reviewing is what puts a rule in force, so say what the yes covers.
+            lines.append("  Reviewing it puts these rules on agent tool calls: " + "; ".join(waiting_rules))
         primary = item.get("primary_action") if isinstance(item.get("primary_action"), Mapping) else {}
         if primary:
             lines.append(f"  Next: {primary['label']} - {primary['description']}")
@@ -551,6 +567,18 @@ def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, 
             origin_lines.append(f"Came from: {origin}" + (f" (revision {revision})" if revision else ""))
         if evidence:
             origin_lines.append(f'Original words: "{evidence}"')
+        shared_by = str(provenance.get("imported_from") or provenance.get("originally_imported_from") or "")
+        if shared_by:
+            origin_lines.append(f"Shared by: your {shared_by} (through team sync)")
+    rule_lines: list[str] = []
+    rules = explanation.get("rules")
+    if isinstance(rules, Mapping):
+        in_force = _string_list(rules.get("in_force"))
+        waiting = [rule for rule in _string_list(rules.get("carried")) if rule not in in_force]
+        if in_force:
+            rule_lines.append("Rules in force: " + "; ".join(in_force))
+        if waiting:
+            rule_lines.append("Rules waiting for your review: " + "; ".join(waiting))
     lines = [
         f"Link memory explanation: {memory['title']}",
         "",
@@ -559,6 +587,7 @@ def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, 
         f"Source: {provenance['source'] or 'missing'}",
         f"Captured: {provenance['date_captured'] or 'missing'}",
         *origin_lines,
+        *rule_lines,
         f"Review: {review['status']} · Issues: {review['issue_count']}",
         f"Recall: {recall_info['state']} ({'enabled' if recall_info['default_enabled'] else 'disabled'} by default)",
         f"Reason: {recall_info['reason']}",

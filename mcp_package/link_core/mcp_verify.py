@@ -459,7 +459,7 @@ def render_mcp_verify_text(status: Mapping[str, object]) -> tuple[int, str]:
             lines.append("  macOS/Homebrew fallback:")
             lines.append("    python3 -m venv ~/.link-mcp-venv")
             lines.append("    ~/.link-mcp-venv/bin/python -m pip install --upgrade pip link-mcp")
-            lines.append("    Then rerun with: python3 link.py verify-mcp . --python ~/.link-mcp-venv/bin/python")
+            lines.append("    Then rerun with: " + display_command(["lnk", "verify-mcp", ".", "--python", "~/.link-mcp-venv/bin/python"]))
     elif not mcp_sdk_ready:
         action = _action_by_tool(status, "reinstall_link_mcp")
         lines.append(f"  Reinstall link-mcp dependencies for Link {expected_version}:")
@@ -469,6 +469,6 @@ def render_mcp_verify_text(status: Mapping[str, object]) -> tuple[int, str]:
         lines.append(f"  Upgrade link-mcp to match Link {expected_version}:")
         lines.append(f"    {action.get('command_text')}")
     if not wiki_exists:
-        lines.append("  Create a wiki with an installer, or try: python3 link.py init")
+        lines.append("  Create a wiki with an installer, or try: " + display_command(["lnk", "init"]))
     lines.extend(["", "Result: needs attention"])
     return 1, "\n".join(lines)

@@ -229,6 +229,8 @@ class KiroImportFlowTests(unittest.TestCase):
         self.link("accept-capture", capture["path"], str(self.target), "--index", "3")
         stored = " ".join(page.read_text() for page in (self.target / "wiki" / "memories").glob("*.md"))
         self.assertIn("skip the confirmation", stored)
+        # Once taken it is no longer "held back": only the one still waiting is listed.
+        self.assertEqual([item["title"] for item in self.inbox()[0]["held_imports"]], ["Refund limit"])
 
     def test_accept_all_holds_back_injected_lines_in_any_capture(self):
         notes = self.home / "notes.md"

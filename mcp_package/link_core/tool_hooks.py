@@ -39,6 +39,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from stat import S_ISREG
 
+from .folder_trust import UNTRUSTED_FOLDERS_FILE, untrusted_parent
 from .project_scope import (
     default_project_for_target,
     memory_visible_for_project,
@@ -292,6 +293,8 @@ def is_link_governance(words: list[str]) -> bool:
     if any(_VIEWER_GOVERNANCE.search(word) for word in words):
         return True
     link_at = _link_program_at(words)
+    if link_at is not None and _changes_folder_trust(words[link_at + 1:]):
+        return True
     if link_at is not None:
         for word in words[link_at + 1:]:
             if "$" in word or "`" in word:
@@ -314,6 +317,19 @@ def is_link_governance(words: list[str]) -> bool:
         if index == 0 and ("$" in word or "`" in word):
             return True  # the program is decided at run time
     return False
+
+
+def _changes_folder_trust(arguments: list[str]) -> bool:
+    """`lnk folder --trusted X` or `--untrusted X` (plain `lnk folder` only lists).
+
+    Which folders get no memory is the person's call: an agent sitting in an
+    untrusted folder must not be able to trust it again by itself.
+    """
+    operands = [word for word in arguments if not word.startswith("-")]
+    if operands[:1] != ["folder"]:
+        return False
+    names = [word.partition("=")[0] for word in arguments if word.startswith("--")]
+    return any(len(name) > 2 and ("--trusted".startswith(name) or "--untrusted".startswith(name)) for name in names)
 
 
 def _only_reads_governance(arguments: list[str]) -> bool:
@@ -950,7 +966,7 @@ def pre_tool_reply(target: Path, event: Mapping[str, object], *, project: str | 
         project_name = project or (default_project_for_target(repo_root) if repo_root else "")
         decision = evaluate_tool_call(
             index, event, project=project_name, repo_root=repo_root, context_path=project_dir or None,
-            protected=[wiki_dir / "memories", root / ".link-cache"],
+            protected=[wiki_dir / "memories", root / ".link-cache", root / UNTRUSTED_FOLDERS_FILE],
         )
     except Exception as exc:  # with rules in force, a call Link failed to read is not let through unseen
         print(f"Link pre-tool hook could not read this call: {exc}", file=sys.stderr)
@@ -1049,6 +1065,8 @@ def post_tool_output(target: Path, event: Mapping[str, object], *, project: str 
     wiki_dir, root = _workspace(target)
     if not wiki_dir.exists():
         return ""
+    if untrusted_parent(root, hook_project_dir(event)):
+        return ""  # a folder marked untrusted is given no memory
     index = load_hook_index(wiki_dir, root)
     anchors = index.get("anchors") if isinstance(index.get("anchors"), dict) else {}
     if not anchors:

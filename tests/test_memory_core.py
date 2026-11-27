@@ -465,7 +465,7 @@ class MemoryCoreTests(unittest.TestCase):
             project="Link Product",
         )
 
-        self.assertEqual(cli_actions[0]["command"], 'python3 link.py memory-inbox "/tmp/link" --project "link-product"')
+        self.assertEqual(cli_actions[0]["command"], 'lnk memory-inbox /tmp/link --project link-product')
         self.assertTrue(cli_actions[1]["recommended"])
         self.assertFalse(cli_actions[2]["recommended"])
         self.assertEqual(mcp_actions[0]["tool"], "memory_inbox")

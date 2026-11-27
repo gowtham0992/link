@@ -135,6 +135,13 @@ class ProvenanceFlowTests(unittest.TestCase):
         self.assertIn("Postgres 17", findings["origin_revised"]["evidence"])
         # Reading never changes the memory or Kiro's store.
         self.assertEqual(self.memory("billing-service-uses-postgres-16"), saved)
+        # Each finding comes with the one command that settles it.
+        text = self.link("stale", str(self.target), "--imports", code=1).stdout
+        self.assertIn("Replace it:", text)
+        self.assertIn("--supersedes billing-service-uses-postgres-16", text)
+        self.assertIn("Postgres 17", text.split("Replace it:")[1].splitlines()[0])
+        self.assertIn("Retire it:", text)
+        self.assertIn("archive-memory", text)
 
     def test_an_origin_that_cannot_be_read_is_unchecked_not_fine(self):
         database = make_kiro_store(self.home)
