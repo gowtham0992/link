@@ -622,6 +622,11 @@ def build_cli_parser(
         help="check the compiled wiki instead: pages citing a source that changed or does not exist, pages "
              "supported only by other wiki pages, and likely duplicates (no repository needed)",
     )
+    stale_cmd.add_argument(
+        "--imports", action="store_true",
+        help="check imported memories against where they came from instead: a record the agent revised or "
+             "removed since you accepted it, a line no longer in its file (no repository needed)",
+    )
     stale_cmd.add_argument("--json", action="store_true", help="machine-readable report")
 
     compile_cmd = sub.add_parser(
@@ -1120,7 +1125,8 @@ def dispatch_cli_command(args: Any, handlers: Mapping[str, CliHandler]) -> int:
         return handlers["receipt"](Path(args.target), sessions=int(args.sessions), json_output=bool(args.json))
     if command == "stale":
         return handlers["stale"](Path(args.target), repo=Path(args.repo), json_output=bool(args.json),
-                                 instructions=bool(args.instructions), wiki=bool(args.wiki))
+                                 instructions=bool(args.instructions), wiki=bool(args.wiki),
+                                 imports=bool(args.imports))
     if command == "compile":
         return handlers["compile"](
             Path(args.target), repo=Path(args.repo), targets=str(args.targets), check=bool(args.check),

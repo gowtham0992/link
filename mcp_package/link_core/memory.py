@@ -576,7 +576,7 @@ def _extract_preference_pairs(value: str) -> list[tuple[set[str], set[str]]]:
 
 
 def slim_memory(record: Mapping[str, object]) -> dict[str, object]:
-    return {key: value for key, value in record.items() if key not in {"body", "context"}}
+    return {key: value for key, value in record.items() if key not in {"body", "context", "evidence"}}
 
 
 def memory_claim_text(record: Mapping[str, object]) -> str:
@@ -786,6 +786,11 @@ def memory_record_from_page(wiki_dir: Path, path: Path, include_body: bool = Tru
         "supersedes": str(meta.get("supersedes") or ""),
         "superseded_by": str(meta.get("superseded_by") or ""),
         "imported_from": str(meta.get("imported_from") or "").strip(),
+        # The words a memory was made from, and where an imported one came
+        # from (capture.memory_provenance); checked by lnk stale --imports.
+        "evidence": str(meta.get("evidence") or ""),
+        "origin": str(meta.get("origin") or "").strip(),
+        "origin_revision": str(meta.get("origin_revision") or "").strip(),
         # file:line anchors added when the memory was written inside a repo
         # (provenance.py); checked by lnk stale and the recall packet.
         "anchors": _frontmatter_string_list(meta.get("anchors")),
@@ -1370,6 +1375,9 @@ def memory_explanation(
             "source": record.get("source", ""),
             "date_captured": record.get("date_captured", ""),
             "path": record.get("path", ""),
+            "evidence": record.get("evidence", ""),
+            "origin": record.get("origin", ""),
+            "origin_revision": record.get("origin_revision", ""),
         },
         "lifecycle": {
             "status": record.get("status", "active"),
@@ -4976,6 +4984,8 @@ def propose_memories_from_text(
             "scope": scope,
             "project": project_name if scope == "project" else "",
             "context": segment_context[:600],
+            # The sentence as it was said or written, before any rewording.
+            "evidence": segment,
             "confidence": confidence_label(score),
             "confidence_score": score,
             "reason": classified["reason"],

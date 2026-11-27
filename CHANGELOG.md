@@ -21,6 +21,23 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 - **`lnk import codex` also reads the memory Codex consolidates for
   itself**, `MEMORY.md` in its memories folder (`$CODEX_HOME` respected),
   next to `~/AGENTS.md`.
+- **A memory keeps the words it came from.** When Link rewords what you
+  said ("I prefer short answers" is saved as "User prefers short
+  answers"), the capture it came from is deleted once handled, and your
+  own sentence went with it. An accepted proposal now keeps it as
+  `evidence`, and `lnk explain-memory` shows it as "Original words". It
+  stays out of recall packets, and a sentence carrying an injected
+  instruction or a secret is never kept, since no reviewer sees it.
+- **`lnk stale --imports`: notice when an imported memory's origin moved
+  on.** A memory accepted from `lnk import` records where it came from:
+  the Kiro record and revision, or the file and the line. Kiro keeps
+  revising its own memory and people keep editing `AGENTS.md`, while
+  Link's copy stays as it was. This lists a record revised since you
+  accepted it (with what it says now), a record that is gone, and a line
+  no longer in its file. An origin that cannot be read on this machine is
+  counted as unchecked rather than as fine. Read-only: findings are for
+  you to act on with `--supersedes` or archive. Memories imported before
+  this change carry no origin and are not checked.
 - **`lnk setup` says when your agents keep memory Link has not reviewed.**
   Kiro's store, Claude Code's auto memory and Codex's `MEMORY.md` are each
   read only by the agent that wrote them. Setup counts what Link has not

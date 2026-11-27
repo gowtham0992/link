@@ -431,6 +431,7 @@ from link_core.backup import (
 )
 from link_core.capture import (
     capture_accept_memory_args as _core_capture_accept_memory_args,
+    record_memory_provenance as _core_record_memory_provenance,
     capture_accept_payload as _core_capture_accept_payload,
     capture_inbox as _core_capture_inbox,
     capture_proposal_selection as _core_capture_proposal_selection,
@@ -1005,6 +1006,7 @@ def _accept_capture(
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
+        payload["provenance"] = _core_record_memory_provenance(root, str(result.get("path") or ""), selection)
         _append_log(
             _utc_timestamp(),
             "accept-capture",

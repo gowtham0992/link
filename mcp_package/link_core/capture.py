@@ -8,7 +8,7 @@ from pathlib import Path
 from collections.abc import Callable, Collection, Iterable, Mapping
 
 from .files import atomic_write_text
-from .frontmatter import frontmatter_string, parse_frontmatter
+from .frontmatter import frontmatter_string, parse_frontmatter, update_frontmatter_fields
 from .log import utc_timestamp
 from .mcp_verify import display_command
 from .memory import (
@@ -22,6 +22,7 @@ from .memory import (
 )
 from .security import (
     injected_instruction_warnings,
+    looks_like_password_note,
     redact_password_values,
     redact_secret_values,
     secret_value_warnings,
@@ -669,6 +670,75 @@ def capture_accept_memory_args(
         "trigger": str(proposal.get("trigger") or "") or None,
         "context": str(proposal.get("context") or "") or None,
     }
+
+
+EVIDENCE_LIMIT = 400
+
+
+def memory_provenance(selection: Mapping[str, object], *, home: Path | None = None) -> dict[str, str]:
+    """What an accepted proposal should remember about where it came from.
+
+    `evidence` is the sentence as it was said or written. It is kept when
+    mining reworded it ("I prefer" became "User prefers"), because the
+    capture is deleted once handled and the memory is then the only place
+    the original words can live, and for a line imported from a file, so
+    the line can be looked for there later. `origin` names where an import
+    came from: another agent's record, or a file.
+
+    Evidence is saved but no reviewer sees it, so a sentence carrying an
+    injected instruction or a secret is never kept as evidence.
+    """
+    proposal = selection.get("proposal")
+    if not isinstance(proposal, Mapping):
+        return {}
+    meta = selection.get("meta")
+    meta = meta if isinstance(meta, Mapping) else {}
+    fields: dict[str, str] = {}
+    origin = str(proposal.get("origin") or "").strip()
+    if origin:
+        fields["origin"] = origin
+        if str(proposal.get("revision") or "").strip():
+            fields["origin_revision"] = str(proposal.get("revision")).strip()
+    elif str(meta.get("source_type") or "").strip().lower() == "import":
+        # write_session_capture records "import:<kind> · <path>" under
+        # "## Source Input".
+        capture_path = selection.get("capture_path")
+        try:
+            capture_text = capture_path.read_text(encoding="utf-8", errors="replace") \
+                if isinstance(capture_path, Path) else ""
+        except OSError:
+            capture_text = ""
+        recorded = re.search(r"^## Source Input\s*\n+(import:[^\n]+)$", capture_text, flags=re.MULTILINE)
+        _kind, _sep, path = (recorded.group(1) if recorded else "").partition(" \u00b7 ")
+        path = path.strip()
+        if path:
+            try:
+                relative = Path(path).expanduser().resolve().relative_to((home or Path.home()).resolve())
+                path = "~/" + relative.as_posix()
+            except (OSError, ValueError):
+                pass
+            fields["origin"] = f"file:{path}"
+    evidence = " ".join(str(proposal.get("evidence") or "").split())
+    memory = " ".join(str(proposal.get("memory") or "").split())
+    unsafe = bool(injected_instruction_warnings(evidence) or secret_value_warnings(evidence)
+                  or looks_like_password_note(evidence))
+    reworded = evidence.rstrip(".").lower() != memory.rstrip(".").lower()
+    if evidence and not unsafe and len(evidence) <= EVIDENCE_LIMIT and (
+            reworded or fields.get("origin", "").startswith("file:")):
+        fields["evidence"] = evidence
+    return fields
+
+
+def record_memory_provenance(root: Path, memory_path: str, selection: Mapping[str, object]) -> dict[str, str]:
+    """Write an accepted proposal's provenance into the memory it became."""
+    fields = memory_provenance(selection)
+    path = root / memory_path
+    if not fields or not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8", errors="replace")
+    atomic_write_text(path, update_frontmatter_fields(
+        text, {key: f'"{frontmatter_string(value)}"' for key, value in fields.items()}))
+    return fields
 
 
 def capture_accept_payload(selection: Mapping[str, object], result: Mapping[str, object]) -> dict[str, object]:

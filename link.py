@@ -249,6 +249,7 @@ from link_core.cli_memory import (
 )
 from link_core.capture import (
     capture_accept_memory_args as _core_capture_accept_memory_args,
+    record_memory_provenance as _core_record_memory_provenance,
     capture_accept_payload as _core_capture_accept_payload,
     capture_inbox as _core_capture_inbox,
     capture_proposal_selection as _core_capture_proposal_selection,
@@ -1577,8 +1578,52 @@ def _global_key(rel: str) -> str:
     return next((target.key for target in GLOBAL_TARGETS if target.path == rel), "")
 
 
+_ORIGIN_FINDING_LABELS = {
+    "origin_revised": "Revised where it came from",
+    "origin_removed": "Removed where it came from",
+    "origin_missing": "Its file is gone",
+    "origin_line_gone": "Its line is gone from the file",
+}
+
+
+def _stale_imports(wiki_dir: Path, *, json_output: bool) -> int:
+    """`lnk stale --imports`: has an imported memory's origin moved on?"""
+    from link_core.importers import origin_findings
+
+    records = [record for record in _core_memory_records(wiki_dir) if _core_is_active_memory(record)]
+    report = origin_findings(records, Path.home())
+    findings = report["findings"]
+    assert isinstance(findings, list)
+    if json_output:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 1 if findings else 0
+    unchecked = int(str(report["unchecked"]))
+    note = (f" {unchecked} could not be checked ({report['unchecked_reason'] or 'origin not readable here'})."
+            if unchecked else "")
+    if not report["checked"] and not unchecked:
+        print("No imported memories to check: nothing here records where it was imported from. "
+              "Memories accepted from `lnk import` from now on do.")
+        return 0
+    count = int(str(report["checked"]))
+    checked = f"{count} imported memor{'y' if count == 1 else 'ies'}"
+    if not findings:
+        print(f"Checked {checked}: {'it is' if count == 1 else 'each is'} still as its origin has it.{note}")
+        return 0
+    print(f"Checked {checked}: {len(findings)} finding{'' if len(findings) == 1 else 's'}.{note}")
+    current = ""
+    for finding in sorted(findings, key=lambda item: str(item["kind"])):
+        label = _ORIGIN_FINDING_LABELS.get(str(finding["kind"]), str(finding["kind"]))
+        if label != current:
+            print(f"\n{label}:")
+            current = label
+        print(f"  {finding['name']}: {finding['evidence']}")
+    print("\nNothing was rewritten. Import again to review what changed, then replace the old memory "
+          "(`lnk remember ... --supersedes NAME`) or archive it.")
+    return 1
+
+
 def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, instructions: bool = False,
-          wiki: bool = False) -> int:
+          wiki: bool = False, imports: bool = False) -> int:
     """Report memories that name repository paths git no longer has.
 
     Read-only by design. A memory that mentions something that moved is a
@@ -1587,16 +1632,18 @@ def stale(target: Path, *, repo: Path = Path("."), json_output: bool = False, in
     """
     from link_core.staleness import StalenessChecker, describe_findings
 
-    if wiki and instructions:
-        # Two checks of different things, each with its own report and exit code: one at a time.
-        print("lnk stale: --wiki and --instructions are separate checks; run `lnk stale --wiki` and "
-              "`lnk stale --instructions` one after the other.", file=sys.stderr)
+    if sum((wiki, instructions, imports)) > 1:
+        # Checks of different things, each with its own report and exit code: one at a time.
+        print("lnk stale: --wiki, --instructions and --imports are separate checks; run them one after "
+              "the other.", file=sys.stderr)
         return 2
     wiki_dir = _resolve_wiki_dir(target)
     if not wiki_dir.exists():
         return _missing_wiki_error(wiki_dir)
     if wiki:
         return _stale_wiki(_resolve_link_root(target), json_output=json_output)
+    if imports:
+        return _stale_imports(wiki_dir, json_output=json_output)
     repo_dir = Path(repo).expanduser().resolve()
     inside = subprocess.run(
         ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
@@ -2266,6 +2313,7 @@ def _accept_capture_all(
         )
         if result.get("created"):
             created.append(str(result.get("name")))
+            _core_record_memory_provenance(root, str(result.get("path") or ""), pseudo)
         else:
             reason = "conflict" if result.get("conflict") else "duplicate"
             skipped.append({"index": position, "title": str(args["title"]), "reason": reason})
@@ -2381,6 +2429,7 @@ def accept_capture(
     )
     payload = _core_capture_accept_payload(selection, result)
     if result.get("created"):
+        payload["provenance"] = _core_record_memory_provenance(root, str(result.get("path") or ""), selection)
         # A capture is proposal-only staging. Once its accepted claim is a
         # memory, the file only earns its inbox slot if it still offers
         # something fresh — otherwise the user would have to delete what

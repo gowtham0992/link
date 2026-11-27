@@ -283,3 +283,93 @@ def collect_import_units(
     raise ImportError_(
         f"unknown import source '{source}' (expected one of: {', '.join(IMPORT_SOURCES)})"
     )
+
+
+def _origin_line(text: str) -> str:
+    return " ".join(str(text or "").split()).rstrip(".").lower()
+
+
+def origin_findings(
+    records: Sequence[Mapping[str, object]],
+    home: Path,
+) -> dict[str, object]:
+    """Has the place an imported memory came from changed since it was accepted?
+
+    An accepted import records its origin: another agent's record and the
+    revision read, or a file and the line taken from it. The agent keeps
+    writing its own memory and people keep editing their files, so the
+    origin can move on while Link's copy stays as it was. This reports, per
+    memory, a record the agent revised or removed and a line that is no
+    longer in its file. It reads; it never rewrites a memory, and never
+    writes the agent's store.
+
+    A memory whose origin cannot be read here (the agent is not installed,
+    its store has a layout Link does not recognise) is counted as
+    unchecked, not as fine.
+    """
+    from .memory import curated_candidate_lines
+
+    kiro: dict[str, dict[str, str]] | None = None
+    kiro_error = ""
+    file_lines: dict[str, set[str] | None] = {}
+    text: str | None
+    findings: list[dict[str, str]] = []
+    checked = unchecked = 0
+    for record in records:
+        origin = str(record.get("origin") or "").strip()
+        if not origin:
+            continue
+        entry = {"name": str(record.get("name") or ""), "title": str(record.get("title") or ""),
+                 "path": str(record.get("path") or ""), "origin": origin}
+        if origin.startswith("kiro:"):
+            if kiro is None and not kiro_error:
+                try:
+                    rows = kiro_memory_records(home)
+                except (ImportError_, sqlite3.Error, OSError) as exc:
+                    rows, kiro_error = [], str(exc) or exc.__class__.__name__
+                if not rows and not kiro_error and not (home / ".kiro" / "memories" / "memories.db").is_file():
+                    kiro_error = "Kiro's memory store is not on this machine"
+                kiro = {f"kiro:{row.get('id', '')}": row for row in rows}
+            if kiro_error:
+                unchecked += 1
+                continue
+            checked += 1
+            row = (kiro or {}).get(origin)
+            if row is None:
+                findings.append({**entry, "kind": "origin_removed",
+                                 "evidence": "Kiro no longer has this record."})
+                continue
+            saved, current = str(record.get("origin_revision") or "").strip(), str(row.get("rev_number") or "").strip()
+            if saved.isdigit() and current.isdigit() and int(current) > int(saved):
+                now = str(kiro_import_item(row).get("memory") or "").splitlines()[0][:200]
+                findings.append({**entry, "kind": "origin_revised",
+                                 "evidence": f"Kiro revised this record (revision {saved} to {current}). It now says: {now}"})
+        elif origin.startswith("file:"):
+            name = origin[len("file:"):]
+            path = Path(name).expanduser() if not name.startswith("~/") else home / name[2:]
+            key = str(path)
+            if key not in file_lines:
+                if path.is_dir():
+                    # Claude Code's auto memory: one file per memory, read
+                    # the way the importer read it.
+                    text = "\n\n".join(
+                        _strip_frontmatter(_read(page)).strip()
+                        for page in sorted(path.glob("*.md")) if page.name != "MEMORY.md")
+                elif path.is_file():
+                    text = _strip_link_sections(_strip_frontmatter(_read(path)))
+                else:
+                    text = None
+                file_lines[key] = None if text is None else {
+                    _origin_line(line) for line in curated_candidate_lines(text)}
+            lines = file_lines[key]
+            checked += 1
+            if lines is None:
+                findings.append({**entry, "kind": "origin_missing", "evidence": f"{name} is no longer there."})
+                continue
+            wanted = _origin_line(str(record.get("evidence") or record.get("tldr") or ""))
+            if wanted and wanted not in lines:
+                findings.append({**entry, "kind": "origin_line_gone",
+                                 "evidence": f"The line it was taken from is no longer in {name}."})
+        else:
+            unchecked += 1
+    return {"checked": checked, "unchecked": unchecked, "unchecked_reason": kiro_error, "findings": findings}

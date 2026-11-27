@@ -544,6 +544,13 @@ def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, 
     if not all(isinstance(value, Mapping) for value in (memory, recall_info, review, provenance, lifecycle, graph)):
         raise ValueError("Invalid memory explanation payload")
 
+    origin_lines: list[str] = []
+    if isinstance(provenance, Mapping):
+        origin, revision, evidence = (str(provenance.get(key) or "") for key in ("origin", "origin_revision", "evidence"))
+        if origin:
+            origin_lines.append(f"Came from: {origin}" + (f" (revision {revision})" if revision else ""))
+        if evidence:
+            origin_lines.append(f'Original words: "{evidence}"')
     lines = [
         f"Link memory explanation: {memory['title']}",
         "",
@@ -551,6 +558,7 @@ def render_explain_memory_text(explanation: Mapping[str, object]) -> tuple[int, 
         f"Type: {memory['memory_type']} · Scope: {memory['scope']} · Visibility: {memory.get('visibility', 'private')} · Status: {lifecycle['status']}",
         f"Source: {provenance['source'] or 'missing'}",
         f"Captured: {provenance['date_captured'] or 'missing'}",
+        *origin_lines,
         f"Review: {review['status']} · Issues: {review['issue_count']}",
         f"Recall: {recall_info['state']} ({'enabled' if recall_info['default_enabled'] else 'disabled'} by default)",
         f"Reason: {recall_info['reason']}",
