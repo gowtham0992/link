@@ -55,6 +55,37 @@ Release sections use `MAJOR.MINOR.PATCH` versions that match `link-mcp` on PyPI 
 
 ### Fixed
 
+- **A capture you had partly accepted could never be finished with
+  `--all`.** `accept-capture --all` treated a proposal already accepted
+  from that capture as a duplicate needing a decision, so it reported a
+  skip and left the capture in the inbox with nothing left to do. A
+  proposal that is already memory now counts as done, and the capture
+  clears once everything it offers is saved or dismissed.
+- **The inbox said 3 proposals when a capture offered more, and never
+  showed them.** `proposal_count` was the size of the preview, not of the
+  capture, and the text inbox listed no proposals at all, so there was no
+  way to know what `--index 4` would save. The count is now the real one,
+  the text inbox numbers each proposal, and one accepted earlier is marked
+  saved (`saved`, `saved_count` and `remaining_count` in `--json`).
+  LinkBar leaves saved proposals out instead of offering an Accept that
+  is refused.
+- **Importing a file again proposed lines you had already accepted.**
+  Kiro records were skipped once saved; lines from `AGENTS.md`, Codex's
+  `MEMORY.md` and Claude Code's auto memory were not, so every import
+  offered the whole file again and `lnk setup` kept counting memory you
+  had already reviewed.
+- **A second import said "your Link memory already covers these files"
+  about proposals that were only waiting in the inbox.** It now says how
+  many are still waiting and where to review them.
+- **Saving a changed value was called a duplicate.** `lnk remember "The
+  API rate limit is 250..."` next to a saved 100 answered "similar memory
+  already exists" and offered `--allow-duplicate`. Notes skip conflict
+  detection, so this is where a plain `remember` of a new value landed.
+  It now says the saved memory holds a different value and gives the
+  `--supersedes` command that replaces it with lineage.
+- **`lnk recall ""` answered "try different words".** With nothing asked,
+  it now says so and points at `lnk brief`.
+
 - **The inbox, accept and dismissal could read an imported file
   differently.** Previews and accept mined an imported instruction file
   line by line, but dismissing a capture or deciding whether it was fully

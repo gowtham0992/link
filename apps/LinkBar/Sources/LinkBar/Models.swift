@@ -42,9 +42,12 @@ struct ProposalPreview: Decodable {
     let title: String?
     let memory: String?
     let memoryType: String?
+    /// The number `accept --index` takes, and whether it is already memory.
+    let index: Int?
+    let saved: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case title, memory
+        case title, memory, index, saved
         case memoryType = "memory_type"
     }
 }
@@ -73,6 +76,16 @@ struct CaptureItem: Decodable, Identifiable {
     }
 
     var readOutsideContent: Bool { !(untrustedInputs ?? []).isEmpty }
+
+    /// Proposals still waiting, each with the number `accept --index` takes.
+    /// Numbers never shift when one is saved, so a saved proposal is left
+    /// out here rather than offered again (accepting it twice is refused).
+    /// An older CLI sends neither `index` nor `saved`: position is the number.
+    var waiting: [(index: Int, proposal: ProposalPreview)] {
+        (proposals ?? []).enumerated().compactMap { position, proposal in
+            proposal.saved == true ? nil : (proposal.index ?? position + 1, proposal)
+        }
+    }
 
     var id: String { path }
     var displayTitle: String {

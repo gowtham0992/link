@@ -260,6 +260,79 @@ class KiroImportFlowTests(unittest.TestCase):
         short = next(item for item in proposals if "short answers" in item["memory"])
         self.assertNotIn("skip the confirmation", short["context"])
 
+    SIX = ("I always plot the loss curve every 500 steps when training.\n\n"
+           "I prefer short, direct answers that cite sources.\n\n"
+           "We decided releases ship from release branches after sign-off.\n\n"
+           "From now on I use tabs for indentation in this repo.\n\n"
+           "I only push to the develop branch, never straight to main.\n\n"
+           "Please always ask before deleting files.\n")
+
+    def six_capture(self) -> dict:
+        notes = self.home / "six.md"
+        notes.write_text(self.SIX, encoding="utf-8")
+        self.link("capture-session", str(notes), str(self.target), "--title", "chat")
+        return self.inbox()[0]
+
+    def test_the_inbox_counts_every_proposal_and_marks_the_saved_ones(self):
+        capture = self.six_capture()
+        # The count is what the capture offers, not how many the preview shows.
+        self.assertEqual(capture["proposal_count"], 6)
+        self.assertEqual(len(capture["proposals"]), 3)
+        self.assertEqual([item["index"] for item in capture["proposals"]], [1, 2, 3])
+        self.link("accept-capture", capture["path"], str(self.target), "--index", "2")
+        capture = self.inbox()[0]
+        self.assertEqual((capture["proposal_count"], capture["saved_count"], capture["remaining_count"]), (6, 1, 5))
+        self.assertEqual([item["saved"] for item in capture["proposals"]], [False, True, False])
+        text = self.link("capture-inbox", str(self.target)).stdout
+        self.assertIn("Proposals: 5 waiting \u00b7 1 already saved", text)
+        self.assertIn("[saved]", text)
+        self.assertIn("and 3 more", text)
+
+    def test_accept_all_after_a_single_accept_finishes_the_capture(self):
+        capture = self.six_capture()
+        self.link("accept-capture", capture["path"], str(self.target), "--index", "2")
+        outcome = json.loads(self.link("accept-capture", capture["path"], str(self.target), "--all", "--json").stdout)
+        # The one accepted earlier is done, not a duplicate to decide on, so
+        # the capture does not sit in the inbox with nothing left to do.
+        self.assertEqual(len(outcome["accepted"]), 5)
+        self.assertEqual(outcome["skipped"], [])
+        self.assertEqual(outcome["already_saved"], 1)
+        self.assertTrue(outcome["capture_cleared"])
+        self.assertEqual(self.inbox(), [])
+
+    def test_a_changed_value_is_offered_as_a_replacement_not_called_a_duplicate(self):
+        self.link("remember", "The API rate limit is 100 requests per minute", str(self.target))
+        out = self.link("remember", "The API rate limit is 250 requests per minute", str(self.target)).stdout
+        self.assertIn("A similar memory holds a different value", out)
+        self.assertIn("--supersedes the-api-rate-limit-is-100-requests-per-minute", out)
+        # The same sentence again is still just a duplicate.
+        again = self.link("remember", "The API rate limit is 100 requests per minute", str(self.target)).stdout
+        self.assertIn("Similar memory already exists", again)
+        self.assertNotIn("--supersedes", again)
+        self.link("remember", "The API rate limit is 250 requests per minute", str(self.target),
+                  "--supersedes", "the-api-rate-limit-is-100-requests-per-minute")
+        recall = self.link("recall", "API rate limit", str(self.target)).stdout
+        self.assertIn("250", recall)
+        self.assertNotIn("100 requests", recall)
+
+    def test_a_second_import_says_what_is_still_waiting_not_that_memory_has_it(self):
+        rules = self.home / "rules.md"
+        rules.write_text("# Rules\n\n- Use pnpm, never npm.\n- Tests run with pytest -q.\n", encoding="utf-8")
+        self.link("import", "file", str(self.target), "--file", str(rules))
+        again = self.link("import", "file", str(self.target), "--file", str(rules)).stdout
+        self.assertIn("2 from an earlier import still waiting in the inbox", again)
+        self.assertIn("are not saved yet", again)
+        self.assertNotIn("already covers", again)
+        capture = self.inbox()[0]
+        self.link("accept-capture", capture["path"], str(self.target), "--all")
+        done = self.link("import", "file", str(self.target), "--file", str(rules)).stdout
+        self.assertIn("already saved or dismissed", done)
+
+    def test_an_empty_recall_asks_for_a_question(self):
+        out = self.link("recall", "", str(self.target)).stdout
+        self.assertIn("Recall needs something to look for", out)
+        self.assertNotIn("Try different words", out)
+
     def test_imported_proposals_carry_their_own_labels(self):
         sys.path.insert(0, str(ROOT / "mcp_package"))
         from link_core.memory import imported_memory_proposals

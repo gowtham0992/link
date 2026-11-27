@@ -14,6 +14,7 @@ from .mcp_verify import display_command
 from .memory import (
     imported_memory_fingerprint,
     imported_memory_proposals,
+    memory_records,
     normalize_project,
     proposal_fingerprint,
     propose_memories_from_text,
@@ -877,6 +878,12 @@ def capture_records(
     project_name = normalize_project(project)
     command_builder = commands_for or cli_capture_commands
     dismissed = set(load_dismissed_fingerprints(root))
+    # What is already memory, so a proposal accepted earlier from a capture
+    # shows as saved instead of looking like it still waits.
+    saved_fingerprints = {
+        proposal_fingerprint(str(record.get("tldr") or record.get("snippet") or ""))
+        for record in memory_records(root / "wiki")
+    } if (root / "wiki").is_dir() else set()
     records: list[dict[str, object]] = []
     for path in sorted(capture_dir.rglob("*.md")):
         if path.name.startswith("."):
@@ -921,23 +928,33 @@ def capture_records(
         # Imported captures preview in curated mode, mirroring accept — a
         # chat-mode preview of a curated file would hide most of what
         # accept can actually save.
+        # Mined in full, previewed up to the cap: the count is what the
+        # capture offers, not how many the preview happens to show. Numbers
+        # match accept --index (accept mines at least ten deep).
         preview_cap = max(1, min(int(proposal_limit or 3), 50))
         mined = mine_capture_proposals(
             text,
             mine=lambda mining_text, curated: propose_memories_from_text(
-                mining_text, [], source=rel, limit=preview_cap,
+                mining_text, [], source=rel, limit=50,
                 exclude_fingerprints=dismissed, curated=curated,
             ),
-            source=rel, limit=preview_cap, exclude_fingerprints=dismissed,
+            source=rel, exclude_fingerprints=dismissed,
         )
         proposals_obj = mined.get("proposals")
         proposal_items: list[object] = proposals_obj if isinstance(proposals_obj, list) else []
         proposal_previews: list[dict[str, object]] = []
-        for proposal in proposal_items[:preview_cap]:
+        saved_count = 0
+        for position, proposal in enumerate(proposal_items, start=1):
             if not isinstance(proposal, dict):
+                continue
+            saved = capture_proposal_fingerprint(text, str(proposal.get("memory") or "")) in saved_fingerprints
+            saved_count += saved
+            if position > preview_cap:
                 continue
             preview_text, _, _ = redact_secret_values(str(proposal.get("memory") or ""))
             proposal_previews.append({
+                "index": position,
+                "saved": saved,
                 "title": str(proposal.get("title") or ""),
                 "memory": preview_text[:240],
                 "memory_type": str(proposal.get("memory_type") or ""),
@@ -957,6 +974,8 @@ def capture_records(
             "held_imports": held_imports,
             "snippet": re.sub(r"\s+", " ", safe_notes).strip()[:180],
             "proposal_count": len(proposal_items),
+            "saved_count": saved_count,
+            "remaining_count": len(proposal_items) - saved_count,
             "proposals": proposal_previews,
             "decision_trail": capture_decision_trail(text),
             "untrusted_inputs": [part.strip() for part in str(meta.get("untrusted_inputs") or "").split(",")
@@ -1044,6 +1063,20 @@ def render_capture_inbox_text(payload: dict[str, object]) -> str:
                 + ", ".join(str(label) for label in injection_list)
                 + " — verify you actually said this before accepting."
             )
+        previews_obj = capture.get("proposals")
+        previews: list[object] = previews_obj if isinstance(previews_obj, list) else []
+        total = capture.get("proposal_count")
+        remaining = capture.get("remaining_count")
+        if isinstance(total, int) and isinstance(remaining, int) and total:
+            lines.append(f"   Proposals: {remaining} waiting" + (f" · {total - remaining} already saved" if total != remaining else ""))
+        for preview in previews:
+            if not isinstance(preview, dict):
+                continue
+            flags = [str(label) for label in preview.get("injection_warnings") or []]
+            mark = "saved" if preview.get("saved") else ("reads like an injected instruction" if flags else "")
+            lines.append(f"     {preview.get('index')}. {preview.get('memory')}" + (f"  [{mark}]" if mark else ""))
+        if isinstance(total, int) and total > len(previews):
+            lines.append(f"     … and {total - len(previews)} more (--proposals {min(total, 50)} lists them)")
         held_obj = capture.get("held_imports")
         held_list: list[object] = held_obj if isinstance(held_obj, list) else []
         if held_list:

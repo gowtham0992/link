@@ -94,6 +94,12 @@ def render_remember_text(result: Mapping[str, object], *, target: object = ".") 
             "Next:",
         ]
         first = _first_candidate_name(result.get("candidates", []))
+        changed = str(result.get("changed_value") or "")
+        if changed:
+            lines[0] = "A similar memory holds a different value"
+            lines.append(
+                f"  Replace the old memory (archives it with lineage): rerun this remember with --supersedes {changed}"
+            )
         if first:
             lines.append(f"  {_shell_words('python3', 'link.py', 'explain-memory', first, target)}")
         lines.append("  Use --allow-duplicate only if this should be a separate memory.")
@@ -240,6 +246,17 @@ def render_recall_text(
     if include_archived:
         lines.append("Including archived/stale memories")
     lines.append("")
+    if not results and not query.strip():
+        # Nothing was asked: "try different words" would be advice about a
+        # question that was never put.
+        lines.extend([
+            "Recall needs something to look for.",
+            "",
+            "Next:",
+            f"  Ask about a topic: {_shell_words('python3', 'link.py', 'recall', 'deploy checklist', target)}",
+            f"  Or get the session-start summary: {_shell_words('python3', 'link.py', 'brief', 'session start', target)}",
+        ])
+        return 0, "\n".join(lines)
     if not results:
         lines.append("No matching memories found.")
         if miss_hint:

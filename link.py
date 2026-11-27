@@ -157,6 +157,7 @@ from link_core.memory import (
     memory_review_issues as _core_memory_review_issues,
     parse_time_expression as _core_parse_time_expression,
     proposal_fingerprint as _core_proposal_fingerprint,
+    memory_summary_line as _core_memory_summary_line,
     propose_memories_from_text as _core_propose_memories_from_text,
     imported_memory_proposals as _core_imported_memory_proposals,
     recall_memories as _core_recall_memories,
@@ -2183,6 +2184,26 @@ def _capture_review_summary(target: Path, project: str | None = None, limit: int
     return summary
 
 
+def _clear_capture_if_handled(root: Path, wiki_dir: Path, capture_path: object, project: str | None) -> bool:
+    """Remove a capture once everything it offers is memory or dismissed."""
+    try:
+        if not isinstance(capture_path, Path) or not capture_path.is_file():
+            return False
+        remaining = _core_capture_proposal_fingerprints(
+            capture_path.read_text(encoding="utf-8", errors="replace"), project=project or None,
+        )
+        saved = {
+            _core_proposal_fingerprint(str(record.get("tldr") or record.get("snippet") or ""))
+            for record in _memory_records(wiki_dir)
+        }
+        if remaining and remaining <= saved | set(_core_load_dismissed_fingerprints(root)):
+            capture_path.unlink()
+            return True
+    except OSError:
+        pass
+    return False
+
+
 def _accept_capture_all(
     target: Path, root: Path, wiki_dir: Path, capture: str,
     *, project: str | None, json_output: bool,
@@ -2208,7 +2229,17 @@ def _accept_capture_all(
     items = proposals_obj.get("proposals") if isinstance(proposals_obj, dict) else []
     items = [item for item in items if isinstance(item, dict)]
     created, skipped = [], []
+    already = 0
+    saved_before = {
+        _core_proposal_fingerprint(str(record.get("tldr") or record.get("snippet") or ""))
+        for record in _memory_records(wiki_dir)
+    }
     for position, proposal in enumerate(items, start=1):
+        # Accepted earlier from this capture (or saved some other way): done,
+        # not a duplicate that needs a decision.
+        if _core_proposal_fingerprint(_core_memory_summary_line(str(proposal.get("memory") or ""))) in saved_before:
+            already += 1
+            continue
         # One keystroke must never turn an injection-shaped proposal into
         # memory: it waits for a look and an --index accept, like a conflict.
         labels = proposal.get("injection_warnings")
@@ -2239,11 +2270,8 @@ def _accept_capture_all(
             reason = "conflict" if result.get("conflict") else "duplicate"
             skipped.append({"index": position, "title": str(args["title"]), "reason": reason})
     cleared = False
-    if created and not skipped:
-        capture_path = selection.get("capture_path")
-        if isinstance(capture_path, Path) and capture_path.is_file():
-            capture_path.unlink()
-            cleared = True
+    if not skipped:
+        cleared = _clear_capture_if_handled(root, wiki_dir, selection.get("capture_path"), project)
     if created:
         _append_log(
             wiki_dir, _core_utc_timestamp(), "accept-capture",
@@ -2252,10 +2280,11 @@ def _accept_capture_all(
         )
     if json_output:
         print(json.dumps({
-            "accepted": created, "skipped": skipped, "capture_cleared": cleared,
+            "accepted": created, "skipped": skipped, "already_saved": already, "capture_cleared": cleared,
         }, indent=2))
         return 0
-    _print_text(f"Accepted {len(created)} of {len(items)} proposal(s)")
+    _print_text(f"Accepted {len(created)} of {len(items) - already} proposal(s)"
+                + (f" ({already} already saved)" if already else ""))
     for name in created:
         _print_text(f"  + {name}")
     for item in skipped:
@@ -2356,23 +2385,9 @@ def accept_capture(
         # memory, the file only earns its inbox slot if it still offers
         # something fresh — otherwise the user would have to delete what
         # they already handled (found in the cold walk).
-        try:
-            capture_path = selection.get("capture_path")
-            if isinstance(capture_path, Path) and capture_path.is_file():
-                remaining = _core_capture_proposal_fingerprints(
-                    capture_path.read_text(encoding="utf-8", errors="replace"),
-                    project=str(memory_args["project"]) or None,
-                )
-                accepted_now = {
-                    _core_proposal_fingerprint(str(record.get("tldr") or record.get("snippet") or ""))
-                    for record in _memory_records(wiki_dir)
-                }
-                covered = accepted_now | set(_core_load_dismissed_fingerprints(root))
-                if remaining and remaining <= covered:
-                    capture_path.unlink()
-                    payload["capture_cleared"] = True
-        except OSError:
-            pass
+        if _clear_capture_if_handled(root, wiki_dir, selection.get("capture_path"),
+                                     str(memory_args["project"]) or None):
+            payload["capture_cleared"] = True
         _append_log(
             wiki_dir,
             _utc_timestamp(),
@@ -4163,7 +4178,14 @@ def _import_unit_proposals(
     found = preview.get("proposals")
     proposals = [item for item in found if isinstance(item, dict)] if isinstance(found, list) else []
     if not isinstance(imported, list):
-        return proposals, None
+        # A line that is already a memory, word for word, is not new: without
+        # this a file accepted in full was proposed again on every import.
+        saved = {
+            _core_proposal_fingerprint(str(record.get("tldr") or ""))
+            for record in records if _core_is_active_memory(record) and str(record.get("tldr") or "").strip()
+        }
+        return [item for item in proposals
+                if _core_proposal_fingerprint(str(item.get("memory") or "")) not in saved], None
     fresh = {str(item.get("memory")) for item in proposals}
     return proposals, [item for item in imported if isinstance(item, dict) and str(item.get("memory")) in fresh]
 
@@ -4227,7 +4249,8 @@ def import_memory(
         return 0
 
     records = _memory_records(wiki_dir)
-    exclude = set(_core_load_dismissed_fingerprints(root)) | set(_core_pending_proposal_fingerprints(root))
+    dismissed = set(_core_load_dismissed_fingerprints(root))
+    exclude = dismissed | set(_core_pending_proposal_fingerprints(root))
     results: list[dict[str, object]] = []
     total_proposals = 0
     for unit in units:
@@ -4236,8 +4259,14 @@ def import_memory(
         proposals, imported = _import_unit_proposals(
             unit, source=source, records=records, exclude=exclude, project=project, root=root,
         )
+        # What an earlier import left in the inbox is not "already in Link":
+        # count it, so the report never says memory covers what is unsaved.
+        unsaved, _ = _import_unit_proposals(
+            unit, source=source, records=records, exclude=dismissed, project=project, root=root,
+        )
+        waiting = max(0, len(unsaved) - len(proposals))
         if not proposals:
-            results.append({"label": label, "origin": origin, "proposals": 0, "capture": ""})
+            results.append({"label": label, "origin": origin, "proposals": 0, "capture": "", "waiting": waiting})
             continue
         capture = _core_write_session_capture(
             root,
@@ -4252,6 +4281,7 @@ def import_memory(
         )
         total_proposals += len(proposals)
         results.append({
+            "waiting": waiting,
             "label": label, "origin": origin,
             "proposals": len(proposals), "capture": str(capture.get("path") or ""),
             "secret_warnings": capture.get("secret_warnings") or [],
@@ -4268,15 +4298,24 @@ def import_memory(
         count = int(str(item["proposals"]))
         if count:
             _print_text(f"  + {item['label']}: {count} candidate memory(ies) -> {item['capture']}")
+        elif item.get("waiting"):
+            _print_text(f"  \u00b7 {item['label']}: nothing new ({item['waiting']} from an earlier import "
+                        "still waiting in the inbox)")
         else:
-            _print_text(f"  \u00b7 {item['label']}: nothing new (all duplicates of what Link already has)")
+            _print_text(f"  \u00b7 {item['label']}: nothing new (already saved or dismissed)")
+    still_waiting = sum(int(str(item.get("waiting") or 0)) for item in results)
     if total_proposals:
         _print_text(
             f"\n{total_proposals} candidate(s) are waiting as proposals - nothing is saved yet."
             f"\nReview them: {_display_command(['lnk', 'capture-inbox', str(root)])}"
         )
+    elif still_waiting:
+        _print_text(
+            f"\nNothing new, but {still_waiting} proposal(s) from an earlier import are not saved yet."
+            f"\nReview them: {_display_command(['lnk', 'capture-inbox', str(root)])}"
+        )
     else:
-        _print_text("\nNothing new to review - your Link memory already covers these files.")
+        _print_text("\nNothing new to review - everything here is already saved or dismissed.")
     return 0
 
 

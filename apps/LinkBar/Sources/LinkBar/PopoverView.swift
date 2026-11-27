@@ -831,7 +831,7 @@ struct PopoverView: View {
                                     Text(stamp).font(.system(size: 10.5)).foregroundStyle(.tertiary)
                                 }
                             }
-                            if let first = capture.proposals?.first, let memory = first.memory {
+                            if let first = capture.waiting.first?.proposal, let memory = first.memory {
                                 (Text("Will save: ").foregroundStyle(.tertiary)
                                     + Text(memory).foregroundStyle(.secondary))
                                     .font(.caption)
@@ -884,12 +884,11 @@ struct PopoverView: View {
                                         .foregroundStyle(LinkBrand.rust)
                                 }
                             }
-                            if expandedCaptures.contains(capture.path),
-                               let proposals = capture.proposals, proposals.count > 1 {
+                            if expandedCaptures.contains(capture.path), capture.waiting.count > 1 {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(Array(proposals.enumerated()), id: \.offset) { position, proposal in
+                                    ForEach(capture.waiting, id: \.index) { number, proposal in
                                         HStack(alignment: .top, spacing: 6) {
-                                            Text("\(position + 1).")
+                                            Text("\(number).")
                                                 .font(.caption2).foregroundStyle(.tertiary)
                                                 .frame(width: 18, alignment: .trailing)
                                             Text(proposal.memory ?? proposal.title ?? "")
@@ -898,7 +897,7 @@ struct PopoverView: View {
                                                 .lineLimit(2)
                                                 .fixedSize(horizontal: false, vertical: true)
                                             Spacer(minLength: 4)
-                                            Button("Accept") { store.acceptCapture(capture, index: position + 1) }
+                                            Button("Accept") { store.acceptCapture(capture, index: number) }
                                                 .buttonStyle(.borderless)
                                                 .font(.caption)
                                                 .foregroundStyle(LinkBrand.rust)
@@ -911,7 +910,7 @@ struct PopoverView: View {
                         }
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            guard (capture.proposals?.count ?? 0) > 1 else { return }
+                            guard capture.waiting.count > 1 else { return }
                             if expandedCaptures.contains(capture.path) {
                                 expandedCaptures.remove(capture.path)
                             } else {
@@ -922,20 +921,20 @@ struct PopoverView: View {
                             Button("Reveal in Finder") { store.revealCapture(capture) }
                         }
                         Spacer(minLength: 6)
-                        if let proposals = capture.proposals, proposals.count > 1 {
+                        if capture.waiting.count > 1 {
                             Menu("Accept") {
-                                ForEach(Array(proposals.enumerated()), id: \.offset) { position, proposal in
-                                    Button(proposal.title ?? proposal.memory?.prefix(60).description ?? "Proposal \(position + 1)") {
-                                        store.acceptCapture(capture, index: position + 1)
+                                ForEach(capture.waiting, id: \.index) { number, proposal in
+                                    Button(proposal.title ?? proposal.memory?.prefix(60).description ?? "Proposal \(number)") {
+                                        store.acceptCapture(capture, index: number)
                                     }
                                 }
                             }
                             .menuStyle(.borderedButton)
                             .controlSize(.small)
                             .frame(width: 76)
-                            .help("This session proposed \(proposals.count) memories — pick one to accept")
+                            .help("\(capture.waiting.count) proposals are waiting — pick one to accept")
                         } else {
-                            Button("Accept") { store.acceptCapture(capture) }
+                            Button("Accept") { store.acceptCapture(capture, index: capture.waiting.first?.index ?? 1) }
                                 .buttonStyle(.borderedProminent)
                                 .tint(LinkBrand.rust)
                                 .controlSize(.small)

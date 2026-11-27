@@ -2259,10 +2259,31 @@ def write_memory_page(
         if str(candidate.get("name")) not in conflict_names
     ]
     if duplicate_candidates and not allow_duplicate:
+        # The same sentence with a different number or name in it is a
+        # changed fact, not a repeat. Notes skip conflict detection, so this
+        # is where a plain `remember` of a new value lands: say how to
+        # replace the old one instead of only calling it a duplicate.
+        new_values = claim_values(clean_text)
+        by_name = {str(record.get("name") or ""): record for record in record_list}
+        changed_value = ""
+        for candidate in duplicate_candidates:
+            saved = by_name.get(str(candidate.get("name") or ""))
+            saved_values = claim_values(str(saved.get("tldr") or "")) if saved else set()
+            if new_values and saved_values and new_values != saved_values:
+                changed_value = str(candidate.get("name") or "")
+                break
         return {
             "created": False,
             "duplicate": True,
-            "message": "Similar active memory already exists. Review or update the existing memory, or pass allow_duplicate if this is intentional.",
+            "changed_value": changed_value,
+            "message": (
+                f"A similar active memory holds a different value. If this replaces it, rerun with "
+                f"supersedes={changed_value} to archive the old one with lineage; pass allow_duplicate "
+                "only if both should stand."
+                if changed_value else
+                "Similar active memory already exists. Review or update the existing memory, or pass "
+                "allow_duplicate if this is intentional."
+            ),
             "title": memory_title_value,
             "memory_type": memory_type,
             "scope": scope,
